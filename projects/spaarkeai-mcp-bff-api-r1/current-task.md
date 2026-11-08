@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-07 (Phase A done except FR-04 privilege source; owner inputs pending)
+> **Last Updated**: 2026-11-08 (018 done; Phase A complete; 002 waits on owner)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,15 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013, 014, 016, 015 (with review fixes `3eccab0c81` and `42a3a35efa`). The Phase A BFF rework is complete except for the **privilege derivation (FR-04)**, which waits on the owner's ruling. **002** is in the main session, waiting on the owner. |
-| **Step** | Waiting on the owner. 020+ are gated on 003 (T0/T13), which waits on 002 (connector). |
-| **Status** | blocked on owner inputs |
-| **Next Action** | (1) **Owner ruling on FR-04 privilege source.** The recommendation is "A widened" (ontology agrees): at read time, as the caller, batched per page, read the subject communication's `sprk_privilegeclassification` plus its witness communications. Privileged or Potentially Privileged = flagged; a read fault or an unreadable record = flagged; None or null = not flagged. Once ruled, create a follow-up task (for example 018) that runs before 022, amend spec FR-04, and update 022. (2) 002: when the owner pastes the client id, verify it with `az ad app show`, then guide runbook (b). The spike is live on dev. (3) Ontology is reviewing 015. (4) The owner names a reviewer for PR #2622. (5) The owner gives the go for spike `6fbb3a7642` in uac-r2's session. (6) The owner deletes `C:\wt015z` (2 leftover zips; the safety check blocked the delete). |
+| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013, 014, 016, 015, 018 (privilege derivation, owner option A, `6aec16b753`). The Phase A BFF rework is complete. Blocked on **002**: the connector app registration does not exist yet. |
+| **Step** | Waiting on the owner for 002 step (a). The owner asked "what application id do you need?" and was told the app must still be created: either they click through the six Entra steps, or they say "yes, run it" and the main session creates it with the az CLI as the owner (single-tenant public client, no secret; `user_impersonation` on BFF `1e40baad…` plus admin consent; pre-authorize on the BFF app). |
+| **Status** | blocked on owner |
+| **Next Action** | (1) Owner answers 002 (a). If "yes, run it": run the az commands, then verify with `az ad app show`. Then guide (b), the Teams Developer Portal OAuth registration; STOP if it demands a secret. Then (c), the connector "Spaarke" pointing at `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` (the spike `6fbb3a7642` is live). Then 003 live tests; tell uac-r2 before the test window. (2) Ontology is reviewing 018 (helper for their DI-143). (3) The owner reviews PR #2622 (Compose fix, marked ready 2026-11-08). |
 
 ## Active Lanes
-- **002**: owner-driven. Runbook: `notes/drafts/connector-registration-runbook.md`.
-- **Spike on dev:** `22487c6537` is live. `6fbb3a7642` (= master `23567b2f93` + spike, CI green) is queued for the next window. Phase 0 is not done.
-- **Issues:** ISS-002 #2620 (fix PR #2622, needs a reviewer); ISS-003 #2623 (not ours); ISS-004 #2628 (closed: intended, per ontology).
+- None running. Runbook: `notes/drafts/connector-registration-runbook.md`.
+- **Spike on dev:** `6fbb3a7642` (= master `23567b2f93` + spike), live since 2026-11-08 04:00Z. Phase 0 is not done, so every uac-r2 deploy carries the spike.
+- **Issues:** #2620 (PR #2622, ready for the owner's review); #2623 (not ours); #2628 (closed).
 
 ## State
 - Wave 1:
