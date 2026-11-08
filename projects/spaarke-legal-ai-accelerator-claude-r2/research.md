@@ -298,6 +298,11 @@ New questions for the owner before `design.md`:
 2. **Which Anthropic plugin to build on:** the generalist **Legal** plugin, **Claude for Legal** `commercial-legal`, or
    both (two seeds to maintain)?
 3. **Minimum plan:** Pro and up (consumer terms, needs the training-off notice) or Team and up only?
+4. **Azure AI Foundry Word mode:** v1 or v2? Recommended v2 (it needs an admin), or a one-off test against a Spaarke
+   dev Foundry deployment (`gateway_auth_source=entra`).
+5. **Which Claude plans are available for live tests L1–L7** (§8.7)? The owner's own account has Anthropic's Legal
+   plugin and the Microsoft 365 connector (work account) connected; Team-only tests (L5's org upload, local Cowork)
+   need a Team org.
 
 ### 8.7 Live tests before the design is frozen
 
