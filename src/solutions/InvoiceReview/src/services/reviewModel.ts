@@ -8,6 +8,7 @@
 
 import type { MetricCardConfig, IPdfHighlight, IPdfNormalisedBox, StatusBadgeTone } from '@spaarke/ui-components';
 import type {
+  AddLineRequest,
   InvoiceReview,
   ReviewFinding,
   ReviewHeader,
@@ -401,6 +402,96 @@ export function reviewAccess(review: Pick<InvoiceReview, 'flags' | 'header'>, re
   }
   if (!review.flags.canDecide) return { canWrite: false, reason: 'You can view this invoice. Decisions need Write access to it.' };
   return { canWrite: true, reason: null };
+}
+
+/**
+ * Whether the toolbar offers Add line (task 164, C3): the caller can decide (`flags.canDecide`, Write on the invoice) AND the invoice is In
+ * Review. Advisory like every flag here: the route checks both again and answers 403 / 409.
+ */
+export function canAddLine(review: Pick<InvoiceReview, 'flags' | 'header'>, refusedWith403: boolean): boolean {
+  // reviewAccess is exactly that pair (canDecide, In Review), and turns false once a write was refused with 403 in this session.
+  return reviewAccess(review, refusedWith403).canWrite;
+}
+
+/** The label of the reviewer-added mark in the lines grid (C4) and what it means. */
+export const REVIEWER_ADDED_LABEL = 'Added';
+export const REVIEWER_ADDED_MEANING = 'Added by a reviewer. The firm did not bill this line.';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Add line (task 164): the form's text fields to the wire request
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What the Add line form holds; every value is text as typed. */
+export interface AddLineForm {
+  costType: 'fee' | 'expense';
+  date: string;
+  timekeeper: string;
+  hours: string;
+  rate: string;
+  amount: string;
+  taskCode: string;
+  activityCode: string;
+  expenseCode: string;
+  description: string;
+  reason: string;
+}
+
+export const EMPTY_ADD_LINE_FORM: AddLineForm = {
+  costType: 'fee',
+  date: '',
+  timekeeper: '',
+  hours: '',
+  rate: '',
+  amount: '',
+  taskCode: '',
+  activityCode: '',
+  expenseCode: '',
+  description: '',
+  reason: '',
+};
+
+const orNull = (v: string): string | null => (v.trim().length > 0 ? v.trim() : null);
+
+/**
+ * The request for a form. This only turns typed text into the wire types: blank to null, number text to a number, and the fields of the other
+ * cost type left out. A value that is not a number cannot be sent as one, so it is named here; every rule the server owns (required fields,
+ * ranges, hours times rate, the code set, the reason) is the server's answer, shown in the form.
+ */
+export function buildAddLineRequest(
+  form: AddLineForm,
+  requestId: string
+): { ok: true; request: AddLineRequest } | { ok: false; message: string } {
+  const num = (text: string, label: string): { value: number | null; error: string | null } => {
+    const t = text.trim();
+    if (t.length === 0) return { value: null, error: null };
+    // Plain decimal text only, as the server reads it (an optional sign, ".25", "5." and "2.5" all count): Number() would also accept
+    // "0x10", "1e3" and "Infinity"-like forms the reviewer did not mean as a number.
+    const n = /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t) ? Number(t) : NaN;
+    return Number.isFinite(n) ? { value: n, error: null } : { value: null, error: `${label} must be a number, for example 2.5.` };
+  };
+  const fee = form.costType === 'fee';
+  const hoursV = fee ? num(form.hours, 'Hours') : { value: null, error: null };
+  const rateV = fee ? num(form.rate, 'Rate') : { value: null, error: null };
+  const amountV = num(form.amount, 'Amount');
+  const bad = [hoursV, rateV, amountV].find(v => v.error !== null);
+  if (bad?.error) return { ok: false, message: bad.error };
+  return {
+    ok: true,
+    request: {
+      requestId,
+      costType: form.costType,
+      date: orNull(form.date),
+      timekeeper: fee ? orNull(form.timekeeper) : null,
+      hours: hoursV.value,
+      rate: rateV.value,
+      amount: amountV.value,
+      taskCode: fee ? orNull(form.taskCode) : null,
+      activityCode: fee ? orNull(form.activityCode) : null,
+      expenseCode: fee ? null : orNull(form.expenseCode),
+      description: orNull(form.description),
+      reason: orNull(form.reason),
+    },
+  };
 }
 
 export const INVOICE_STATUS: Readonly<Record<string, { label: string; tone: StatusBadgeTone }>> = {

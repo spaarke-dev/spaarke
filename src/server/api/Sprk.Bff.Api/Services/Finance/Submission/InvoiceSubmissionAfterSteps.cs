@@ -328,7 +328,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return done;
         }
 
-        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId
+            || !InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: it does not link invoice {InvoiceId}; no after-commit step ran", submissionId, invoiceId);
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, InvoiceLinkMismatchCode);

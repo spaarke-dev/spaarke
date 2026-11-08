@@ -843,7 +843,7 @@ public class InvoiceSubmissionService
     /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> (the guard records only a submission whose id derives its invoice).
     /// </summary>
     internal static bool SameCorrectionTarget(Guid? earlierResubmissionOf, Guid? requestInvoiceId) => earlierResubmissionOf is { } earlier
-        ? requestInvoiceId is { } invoice && InvoiceSubmissionPersister.InvoiceIdFor(earlier) == invoice
+        ? requestInvoiceId is { } invoice && InvoiceBlockedHold.IsOwnSubmission(invoice, earlier)
         : requestInvoiceId is null;
 
     /// <summary>
@@ -1712,17 +1712,11 @@ public class InvoiceSubmissionService
     /// The invoice's OWN submission (EB-D-179 item 1): the one whose <see cref="InvoiceColumn"/> is <paramref name="invoiceId"/> AND whose id
     /// derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>); null when there is none. One read, shared by the
     /// intake's guard and by the correction prefill (task 097e), so the two cannot find different submissions. Throws on a read fault.
+    /// Task 165c: the selection is <see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/>, the one own-submission rule (no TopCount there
+    /// either, so another row pointing at the invoice cannot crowd the own submission out).
     /// </summary>
-    internal async Task<Entity?> ReadOwnSubmissionAsync(Guid invoiceId, CancellationToken ct)
-    {
-        // No TopCount: a cap could leave the invoice's own submission out when other rows also point at the invoice.
-        var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(CorrectionSubmissionColumns) };
-        query.Criteria.AddCondition(InvoiceColumn, ConditionOperator.Equal, invoiceId);
-        var found = await _entities.RetrieveMultipleAsync(query, ct);
-        // Only the submission the invoice was created from: its id derives the invoice's (the job's InvoiceIdFor). A row that merely points
-        // at the invoice is not its submission.
-        return found.Entities.SingleOrDefault(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
-    }
+    internal Task<Entity?> ReadOwnSubmissionAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, CorrectionSubmissionColumns, ct);
 
     /// <summary>The invoice's own submission as <see cref="ReadOwnSubmissionAsync"/> read it (<see cref="Row"/> null: it has none).</summary>
     internal sealed record OwnSubmissionRead(Entity? Row);

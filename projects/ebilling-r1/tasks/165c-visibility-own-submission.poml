@@ -4,7 +4,7 @@
     <title>External invoice visibility counts a submission's invoice link only when it is the submission's own invoice</title>
     <phase>4 Review</phase>
     <gate>After 165a merges into work (165a rewrites ExternalInvoiceVisibility.cs).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Partner-readable visibility decision (auth, external-access); two adversarial passes.</rigor-reason>
     <model-tier>opus</model-tier>

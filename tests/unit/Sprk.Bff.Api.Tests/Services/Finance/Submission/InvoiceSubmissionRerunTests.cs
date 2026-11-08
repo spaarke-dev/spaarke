@@ -774,6 +774,7 @@ public sealed partial class InvoiceSubmissionRerunTests
             invoice["statecode"] = new OptionSetValue(InvoiceStatusCodes.StateActive);
             invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview);
             invoice[InvoiceReviewDetail.Column] = new OptionSetValue(InvoiceReviewDetail.WaitingForFirm);
+            invoice["createdon"] = InvoiceCreatedOn; // 095d-2b-3: Dataverse sets it on create; the supersedes lookup's narrowing (a) reads it
 
             foreach (var row in (Entity[])[submission, invoice, .. stored])
             {
@@ -863,6 +864,7 @@ public sealed partial class InvoiceSubmissionRerunTests
                     }
 
                     Locks.Acquired.Add(key);
+                    OnAcquire?.Invoke(key); // 095d-2b-3 fix round: another writer acting while this run holds the key
                     return true;
                 });
             locks.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -896,6 +898,7 @@ public sealed partial class InvoiceSubmissionRerunTests
             var rows = _rows.Values.Where(r => r.LogicalName == query.EntityName && (query.Criteria.FilterOperator == LogicalOperator.Or
                 ? query.Criteria.Conditions.Any(c => Matches(r, c))
                 : query.Criteria.Conditions.All(c => Matches(r, c))));
+            rows = Observe(query, rows); // 095d-2b-3: the predecessor lookup's record, fault and order
             return new EntityCollection(rows.Select(r => Project(r, query.ColumnSet)).ToList()) { MoreRecords = false };
         }
 
@@ -915,7 +918,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         {
             if (condition.AttributeName == $"{row.LogicalName}id")
             {
-                return condition.Values.Contains(row.Id);
+                return condition.Operator == ConditionOperator.NotEqual ? !condition.Values.Contains(row.Id) : condition.Values.Contains(row.Id);
             }
 
             if (condition.Operator == ConditionOperator.BeginsWith)
@@ -935,6 +938,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         private Task Execute(IReadOnlyList<OrganizationRequest> requests)
         {
             Attempts++;
+            BeforeCommit?.Invoke(requests); // 095d-2b-3: another writer acting between the read and the commit
             if (CommitFault is { } fault)
             {
                 return Task.FromException(fault);

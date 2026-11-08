@@ -25,6 +25,9 @@ export const MATTER_ID = 'aaaaaaaa-0000-4000-8000-0000000000a1';
 
 export const lineId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
+/** The line a mocked Add line creates (task 164). */
+export const ADDED_LINE_ID = lineId(99);
+
 export const ok = <T>(value: T): ApiResult<T> => ({ ok: true, value });
 
 /** An `ApiError` as `authenticatedFetch` throws it, with a ProblemDetails body. */
@@ -108,6 +111,7 @@ export function line(n: number, overrides: Partial<ReviewLine> = {}): ReviewLine
       Narrative: field({ box: { page: 1, x: 0.2, y: 0.3 + n * 0.03, w: 0.35, h: 0.02 } }),
     },
     lineFindings: [],
+    reviewerAdded: false,
     ...overrides,
   };
 }
@@ -181,6 +185,9 @@ export function mockApi(reviews: InvoiceReview[] | InvoiceReview): MockApi {
       ok({ correction: { id: 'c2', lineId: null, field: r.field, aiValue: null, finalValue: r.value, outcome: 'Corrected', isLabel: true, aiConfidence: null }, alreadyApplied: false })
     ),
     listCorrections: jest.fn(async () => ok([])),
+    addLine: jest.fn(async (_i: string, r: { requestId: string }) =>
+      ok({ requestId: r.requestId, lineId: ADDED_LINE_ID, decisionId: 'dd', status: 'Flagged', alreadyApplied: false, totals: null })
+    ),
     fetchFile: jest.fn(async () => ok(new ArrayBuffer(8))),
   };
 }

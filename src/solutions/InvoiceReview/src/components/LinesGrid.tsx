@@ -14,6 +14,7 @@
 
 import * as React from 'react';
 import {
+  Badge,
   Checkbox,
   DataGrid,
   DataGridBody,
@@ -47,6 +48,8 @@ import {
   isDecidable,
   lineStatusView,
   money,
+  REVIEWER_ADDED_LABEL,
+  REVIEWER_ADDED_MEANING,
   shortDate,
 } from '../services/reviewModel';
 
@@ -81,7 +84,7 @@ const useStyles = makeStyles({
   ai: { color: tokens.colorBrandForeground1, flexShrink: 0 },
   critical: { color: tokens.colorStatusDangerForeground1 },
   info: { color: tokens.colorNeutralForeground3 },
-  badge: { display: 'inline-flex', alignItems: 'center', gap: tokens.spacingHorizontalXXS },
+  badge: { display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: tokens.spacingHorizontalXXS },
   muted: { color: tokens.colorNeutralForeground3 },
   empty: { padding: tokens.spacingHorizontalL, color: tokens.colorNeutralForeground3 },
 });
@@ -148,11 +151,23 @@ const FindingsCell = React.memo(function FindingsCell({ line }: { line: ReviewLi
 });
 
 const StatusCell = React.memo(function StatusCell({ line }: { line: ReviewLine }) {
+  const s = useStyles();
   const view = lineStatusView(line);
   if (line.status === 'Pending') {
     return <Spinner size="extra-tiny" label={view.label} labelPosition="after" data-testid={`processing-${line.id}`} />;
   }
-  return <StatusBadge label={view.label} tone={view.tone} />;
+  return (
+    <span className={s.badge}>
+      <StatusBadge label={view.label} tone={view.tone} />
+      {line.reviewerAdded && (
+        <Tooltip content={REVIEWER_ADDED_MEANING} relationship="description">
+          <Badge size="small" appearance="tint" color="informative" tabIndex={0} aria-label="Added by reviewer" data-testid={`reviewer-added-${line.id}`}>
+            {REVIEWER_ADDED_LABEL}
+          </Badge>
+        </Tooltip>
+      )}
+    </span>
+  );
 });
 
 export function LinesGrid({ lines, checked, onCheck, canTick, selectedLineId, selectedField, onSelect }: LinesGridProps) {

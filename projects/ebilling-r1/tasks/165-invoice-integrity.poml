@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources</title>
     <phase>4 Review</phase>
-    <gate>165a: none. 165b: 164a integration branch (AddedLineIdFor) available.</gate>
+    <gate>165a: merged (2fac72b8a5). 165b: 164a and 165a merged into work.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Approval, hold and payment inputs; access-adjacent (uac-r2 classes a/b/c); edits approval and AP export.</rigor-reason>
@@ -49,7 +49,8 @@
         linked to this invoice), nor (ii) the subject of an `add-line` Decision Record that names THIS invoice and THIS line id and was written
         by the BFF Add line service (app-only).
       - The reviewer-added marker in `sprk_extractionconfidence` is NOT an exemption. An added line's id is
-        `AddedLineIdFor(decisionId)` (164a-2 fix round), and (ii) also requires `line.Id == AddedLineIdFor(record's decision id)`.
+        `InvoiceLineAddService.AddedLineIdFor(invoiceId, decisionId)` (164a, merged), and (ii) also requires
+        `line.Id == AddedLineIdFor(this invoice's id, record's decision id)`, reusing `IsReviewerAdded`'s rule rather than a copy.
         The service creates the row with that id, which also gives the Q3 idempotency.
       - (ii) must be unforgeable. In the notes and the PR, cite the writer-only or append-only refusal of a user-created or user-updated
         `sprk_decisionrecord` through the generic BFF paths, and the role privileges on the table that close the direct path.

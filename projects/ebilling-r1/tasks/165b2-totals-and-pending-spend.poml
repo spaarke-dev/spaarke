@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165b-2" project="ebilling-r1">
+  <metadata>
+    <title>Invoice integrity, part 165b-2: stored totals must match the lines at approval and AP export; pending spend excludes held invoices (EB-D-200)</title>
+    <phase>4 Review (165 family)</phase>
+    <gate>165b item 1 merged into work (it edits InvoiceApprovalService and ApprovalWorld).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Approval and AP export refusals (.cs); spend paths owned by ontology-r1.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two money paths plus a batched hold evaluation on the spend read, which must not become a per-invoice round trip.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceApprovalService and ApExportService (shared with 165b-3); FinanceBaseValues is ontology-r1's.</parallel-reason>
+    <deps>165b</deps>
+    <tags>bff-api, ebilling, integrity</tags>
+  </metadata>
+
+  <prompt>This is items 3 and 4 of task 165 (`tasks/165-invoice-integrity.poml`, scope "165b"). Item 1 was done in 165b. Item 2 moved to 165b-3.
+    Read first:
+    - `notes/165b-integrity-checks.md` (what 165b found, including why FetchXML cannot read the hold sources);
+    - `InvoiceTotalsCalculator`;
+    - `InvoiceBlockedHold` (the one hold rule);
+    - `FinanceBaseValues.cs` and `FinanceRollupService.cs` (the two pending-spend paths, ~:416 and ~:344 at 165a).
+    Wording in commits, notes and comments stays neutral: "decides only from server-written sources".</prompt>
+
+  <goal>Approval and AP export refuse an invoice whose stored totals differ from the totals derived from its lines. Both pending-spend paths leave out every invoice that InvoiceBlockedHold holds.</goal>
+
+  <scope>
+    <in>
+      1. Totals check (item 3).
+         - Approval (InvoiceApprovalService, inside the same lock scope as the 165b origin check) refuses with 409 `ebilling.approve.totals_mismatch`.
+         - AP export (ApExportService, per invoice at selection or claim time; an invoice that fails is left out of the batch, not the whole batch failed) refuses with 409 `ebilling.apexport.totals_mismatch`.
+         - The check applies when any stored total column that `InvoiceTotalsCalculator` produces differs from the calculator run over the invoice's current lines.
+         - Use the calculator itself; no second copy of the arithmetic. Compare with the calculator's own rounding.
+         - The log carries the reason code, the table and the row id only.
+      2. Pending spend excludes held invoices (item 4).
+         - In `FinanceBaseValues` and `FinanceRollupService`, an invoice that `InvoiceBlockedHold` holds does not count toward pending spend.
+         - The hold sources are read in a batch for the candidate invoices (one or a few queries per call, not one per invoice).
+         - A read fault fails the spend read the way the path fails today. It never silently counts the invoice.
+         - The `FinanceBaseValues` change is minimal and listed for ontology-r1's review in the notes, as hunks.
+    </in>
+    <out>
+      - Item 2 (status needs its record), which is 165b-3.
+      - Any change to how totals are computed or stored.
+      - Counted spend (D-103), which already excludes In Review.
+      - Any client change.
+    </out>
+  </scope>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">One hold rule: call InvoiceBlockedHold (or a batched entry point added to it that shares its rule). A copy of the hold logic in a Finance reader fails review.</constraint>
+    <constraint source="ontology-r1 ownership">FinanceBaseValues: the smallest change that calls the ebilling rule; no restructuring.</constraint>
+    <constraint source="EB-D-200">Refusals happen before any write.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Must-fire, each with its must-not-fire control:
+      - T1: approval refuses an invoice whose stored fee total differs from the line-derived total; nothing written. Control: matching totals approve.
+      - T2: AP export leaves out an invoice whose stored total differs; the other invoices in the batch export. Control: matching totals export.
+      - S1: pending spend in FinanceBaseValues leaves out a held invoice. Control: the same invoice released counts.
+      - S2: the same for FinanceRollupService.
+      - S3: a hold-source read fault fails the spend read and does not count the invoice.
+    </criterion>
+    <criterion>One seed per guard: drop the totals check (T1 fails) and drop the spend exclusion (S1 and S2 fail). Record both in the notes.</criterion>
+    <criterion>Dev data (read-only): count the live invoices whose stored totals differ from their lines, and the held invoices now counted in pending spend. Report the counts in the notes (ids go to the lead only). If any live invoice would be refused at approval or AP export, STOP before merging and report.</criterion>
+    <criterion>Filtered unit tests (Finance, ApExport, InvoiceApproval, Submission) and the full ArchTests pass. The BFF builds. Measure the publish delta against a fresh master build.</criterion>
+    <criterion>Notes go in `notes/165b-integrity-checks.md`, in a new 165b-2 section.</criterion>
+    <criterion>Test scope: exactly T1, T2, S1–S3 and the seeds.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the spend paths cannot read the hold sources without one query per invoice, STOP and report the query plan.</trigger>
+    <trigger>If a stored total legitimately differs from the calculator (a rounding or currency rule the calculator does not cover), STOP before refusing it.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>

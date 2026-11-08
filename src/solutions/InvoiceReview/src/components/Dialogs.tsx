@@ -1,22 +1,38 @@
 /**
- * The page's two forms (ebilling-r1 task 110, prototype Dialogs CorrectValueModal / BulkModal), both on the shared SprkModal FormModal
- * preset (ADR-050, MODAL-DECISION-CRITERIA: a light-edit form, explicit dismiss).
+ * The page's forms (ebilling-r1 task 110, prototype Dialogs CorrectValueModal / BulkModal; task 164 AddLineModal), all on the shared SprkModal
+ * FormModal preset (ADR-050, MODAL-DECISION-CRITERIA: a light-edit form, explicit dismiss).
  *
  *   - CorrectValueModal: "the reading is wrong" (task 101). One field, the value as read, the corrected value. A header correction offers
  *     the header fields 101 accepts. Never a decision.
  *   - BulkDecisionModal: one action and ONE reason for several lines (ticked rows, or a rule's suggestion), sent as one request.
+ *   - AddLineModal: a Fee or Expense line the firm did not bill, with the reviewer's reason (task 164).
  *
- * Neither validates what the server owns: a missing reason or an out-of-range value goes to the server, which refuses it with a stable
+ * None validates what the server owns: a missing reason or an out-of-range value goes to the server, which refuses it with a stable
  * code, and the refusal is shown here, in the form, so nothing is lost.
  */
 
 import * as React from 'react';
-import { Caption1, Dropdown, Field, Input, MessageBar, MessageBarBody, Option, Text, Textarea, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  Caption1,
+  Dropdown,
+  Field,
+  Input,
+  MessageBar,
+  MessageBarBody,
+  Option,
+  Radio,
+  RadioGroup,
+  Text,
+  Textarea,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { money } from '../services/reviewModel';
+import { EMPTY_ADD_LINE_FORM, money, type AddLineForm } from '../services/reviewModel';
 
 const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
+  row: { display: 'flex', gap: tokens.spacingHorizontalM, flexWrap: 'wrap', '> *': { flex: '1 1 120px', minWidth: 0 } },
   list: { margin: 0, paddingLeft: tokens.spacingHorizontalL, maxHeight: '160px', overflowY: 'auto' },
 });
 
@@ -127,6 +143,99 @@ export function CorrectValueModal({ target, busy, error, onClose, onSubmit }: Co
       </Field>
       {error && (
         <MessageBar intent="error" data-testid="correct-error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+    </FormModal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Add line (task 164)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AddLineModalProps {
+  busy: boolean;
+  /** The server's refusal of the last submit (or a value that is not a number), shown in the form. */
+  error: string | null;
+  onClose: () => void;
+  /** The form as typed. The page builds the request and owns its requestId, so a retry sends the same one. */
+  onSubmit: (form: AddLineForm) => void;
+}
+
+export function AddLineModal({ busy, error, onClose, onSubmit }: AddLineModalProps) {
+  const s = useStyles();
+  const [form, setForm] = React.useState<AddLineForm>(EMPTY_ADD_LINE_FORM);
+  const set = <K extends keyof AddLineForm>(key: K, value: AddLineForm[K]) => setForm(f => ({ ...f, [key]: value }));
+  const fee = form.costType === 'fee';
+  return (
+    <FormModal
+      open
+      title="Add a line"
+      size="md"
+      submitLabel="Add line"
+      busy={busy}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      onSubmit={() => onSubmit(form)}
+    >
+      <Text>
+        Use this for a charge the firm did not bill. The line is added for your decision, outside the firm&apos;s billed total, and the rules run again.
+        The reason is recorded with your name.
+      </Text>
+      <Field label="Type">
+        <RadioGroup layout="horizontal" value={form.costType} onChange={(_, d) => set('costType', d.value === 'expense' ? 'expense' : 'fee')}>
+          <Radio value="fee" label="Fee" />
+          <Radio value="expense" label="Expense" />
+        </RadioGroup>
+      </Field>
+      <Field label="Date" hint="yyyy-mm-dd">
+        <Input type="date" value={form.date} onChange={(_, d) => set('date', d.value)} aria-label="Date" />
+      </Field>
+      {fee ? (
+        <>
+          <Field label="Timekeeper">
+            <Input value={form.timekeeper} onChange={(_, d) => set('timekeeper', d.value)} aria-label="Timekeeper" />
+          </Field>
+          <div className={s.row}>
+            <Field label="Hours" hint="For example 2.5">
+              <Input value={form.hours} inputMode="decimal" onChange={(_, d) => set('hours', d.value)} aria-label="Hours" />
+            </Field>
+            <Field label="Rate">
+              <Input value={form.rate} inputMode="decimal" onChange={(_, d) => set('rate', d.value)} aria-label="Rate" />
+            </Field>
+            <Field label="Amount" hint="Or hours and rate">
+              <Input value={form.amount} inputMode="decimal" onChange={(_, d) => set('amount', d.value)} aria-label="Amount" />
+            </Field>
+          </div>
+          <div className={s.row}>
+            <Field label="Task code">
+              <Input value={form.taskCode} onChange={(_, d) => set('taskCode', d.value)} aria-label="Task code" />
+            </Field>
+            <Field label="Activity code">
+              <Input value={form.activityCode} onChange={(_, d) => set('activityCode', d.value)} aria-label="Activity code" />
+            </Field>
+          </div>
+        </>
+      ) : (
+        <div className={s.row}>
+          <Field label="Amount">
+            <Input value={form.amount} inputMode="decimal" onChange={(_, d) => set('amount', d.value)} aria-label="Amount" />
+          </Field>
+          <Field label="Expense code">
+            <Input value={form.expenseCode} onChange={(_, d) => set('expenseCode', d.value)} aria-label="Expense code" />
+          </Field>
+        </div>
+      )}
+      <Field label="Description">
+        <Textarea value={form.description} onChange={(_, d) => set('description', d.value)} resize="vertical" aria-label="Description" />
+      </Field>
+      <Field label="Reason" hint="Why you are adding this line">
+        <Textarea value={form.reason} onChange={(_, d) => set('reason', d.value)} resize="vertical" aria-label="Reason" />
+      </Field>
+      {error && (
+        <MessageBar intent="error" data-testid="add-line-error">
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
       )}
