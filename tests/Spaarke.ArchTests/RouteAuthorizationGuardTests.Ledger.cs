@@ -1519,6 +1519,11 @@ public partial class RouteAuthorizationGuardTests
             + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
             + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
             + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
+        new NotAuthorizationForm("RequireRateCardCreateOnARateCardProcedure",
+            "ebilling-r1 task 085 fix round 1: a table-privilege requirement (Create on sprk_ratecard and sprk_ratecardrate) on the Procedure "
+            + "version-create route, applied only when the route's Procedure is a Rate card Procedure, because copy-forward then creates cards "
+            + "(BillingAdminAuthorization.cs). It only narrows who may call; the route's record decision stays its AddFinanceAuthorizationFilter "
+            + "and it decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
