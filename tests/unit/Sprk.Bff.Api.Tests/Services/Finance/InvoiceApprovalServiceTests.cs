@@ -813,14 +813,20 @@ public sealed class InvoiceApprovalServiceTests
 
         // Another approver in between records nothing (the claimant's record is the claimant's). Task 165b-3 part B (EB-D-208): while the
         // writer-created approve record does not exist the invoice is not counted as approved, so that call is refused (Claimed), not a no-op.
+        // Fix round: the expectation is chosen from the step, never from state read after the call. Only "link" fails after the record.
+        var recordWritten = step == "link";
         var between = await w.ApproveAs(BobUser);
-        between.Outcome.Should().Be(w.ApproveRecords.Count == 0 ? ApprovalOutcome.Conflict : ApprovalOutcome.AlreadyApproved);
-        if (w.ApproveRecords.Count == 0)
+        if (recordWritten)
         {
-            between.Code.Should().Be(InvoiceApprovalCodes.Claimed);
+            between.Outcome.Should().Be(ApprovalOutcome.AlreadyApproved, between.Detail);
+            w.ApproveRecords.Should().ContainSingle();
         }
-
-        w.ApproveRecords.Count.Should().BeLessThanOrEqualTo(1);
+        else
+        {
+            between.Outcome.Should().Be(ApprovalOutcome.Conflict, between.Detail);
+            between.Code.Should().Be(InvoiceApprovalCodes.Claimed);
+            w.ApproveRecords.Should().BeEmpty();
+        }
 
         var retried = await w.ApproveAs(AliceUser);
 

@@ -25,6 +25,7 @@ using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -148,9 +149,11 @@ public static class InvoiceApprovalCodes
     /// never takes a future, absent or impossible one.</summary>
     public const string CompletionDecidedOnInvalid = "ebilling.approve.completion.decided_on_invalid";
 
-    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (165b-3 part B, uac-r2 note a): the invoice's currency does not have a
-    /// 2-decimal minor unit (or is not known), so the approved amount cannot be compared with the 2-decimal line-derived total.</summary>
-    public const string CompletionCurrencyUnsupported = "ebilling.approve.completion.currency_unsupported";
+    /// <summary>409 (165b-3 part B fix round, uac-r2 note a): the invoice's currency has more than 2 minor-unit decimals, or is text that
+    /// <c>BillingCurrency.Normalise</c> cannot read as a 3-letter code. <see cref="InvoiceTotalsCalculator"/> rounds every total to 2 decimals,
+    /// so such an invoice is refused at approve before its claim, and (the same check) at completion, where it is the log reason of
+    /// <see cref="CompletionRefused"/>. A missing currency is the R1 default, USD (D-115), and is not refused.</summary>
+    public const string CurrencyUnsupported = "ebilling.approve.currency_unsupported";
 
     /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision no
     /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
@@ -279,12 +282,12 @@ public sealed class InvoiceApprovalService
     private const string InvoiceCreatedOn = "createdon";
 
     /// <summary>
-    /// Task 165b-3 part B (uac-r2 note a): the currencies whose minor unit is 2 decimals, among those intake accepts (InvoiceExtractionToolHandler:
-    /// USD, EUR, GBP, JPY, CAD). <see cref="InvoiceTotalsCalculator"/> rounds every total to 2 decimals (USD only in R1), so the completion's amount
-    /// comparison is meaningful only for these; any other code (JPY: 0 decimals; an unknown code) is refused there. No currency is the R1 default
-    /// (USD).
+    /// Task 165b-3 part B fix round (uac-r2 note a): the ISO 4217 codes whose minor unit has MORE than 2 decimals (3 for each of these).
+    /// <see cref="InvoiceTotalsCalculator"/> rounds every total to 2 decimals, so an amount in one of these would lose a digit: approve refuses
+    /// them before its claim, and completion runs the same check (<see cref="CurrencyRefused"/>). A code with 2 decimals or fewer (USD, AUD,
+    /// JPY) is not refused: rounding to 2 decimals loses nothing there.
     /// </summary>
-    private static readonly HashSet<string> TwoDecimalCurrencies = new(StringComparer.OrdinalIgnoreCase) { "USD", "EUR", "GBP", "CAD" };
+    private static readonly HashSet<string> MoreThanTwoDecimalCurrencies = new(StringComparer.Ordinal) { "BHD", "KWD", "JOD", "OMR", "TND", "LYD", "IQD" };
 
     /// <summary>Long enough for the accept-Clean, the totals and the record; a lock that outlives a crash expires by itself.</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
@@ -718,9 +721,26 @@ public sealed class InvoiceApprovalService
                 await ReleaseClaimAsync(invoiceId, approvalId, approver.ContactId, decidedOn, ct).ConfigureAwait(false);
                 return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.TransitionRefused, transition.Reason);
             case InvoiceTransitionOutcome.AlreadyInTarget:
-                // Another approve moved it first (only possible when the lock was defeated): it records, this call does not.
+                // The status was already Approved: another approve moved it first (the lock was defeated), or the status moved outside this
+                // call. Task 165b-3 part B fix round: "already approved" only with the writer-created approve record under this approval's key;
+                // without it the answer is Incomplete at "transition", so the claimant's repeat runs completion and its checks.
+                IReadOnlyList<Guid> recorded;
+                try
+                {
+                    recorded = await WriterApproveRecordsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    return Incomplete(invoiceId, decisionId, "transition", ex.GetType().Name);
+                }
+
+                if (recorded.Count == 0)
+                {
+                    return Incomplete(invoiceId, decisionId, "transition", "already Approved, no approve record");
+                }
+
                 _logger.LogWarning("Approve of invoice {InvoiceId}: already Approved by another call; nothing recorded.", invoiceId);
-                return new ApprovalResult(ApprovalOutcome.AlreadyApproved, "ok", DecisionId: decisionId);
+                return new ApprovalResult(ApprovalOutcome.AlreadyApproved, "ok", DecisionId: decisionId, DecisionRecordId: recorded[0]);
         }
 
         return await FinishAsync(invoiceId, approvalId, decision, PortionPending, recordId: null, approver.ContactId, signals.Set, ct).ConfigureAwait(false);
@@ -1172,13 +1192,24 @@ public sealed class InvoiceApprovalService
     private sealed record Approvable(List<Entity> Lines, ApprovalResult? Refusal);
 
     /// <summary>
-    /// The checks approve runs on the invoice and its line set before any write, in this order: the FR-20 hold, the firm gate, the Procedure
-    /// hold, the corrections whose follow-through did not finish, I-2 (no line Pending or Flagged) and the line origin (165b). Returns the lines
-    /// read (under the caller's locks) when every check passes. A read fault is Unavailable (fail closed). Nothing is written.
+    /// The checks approve runs on the invoice and its line set before any write, in this order: the currency (165b-3 part B), the FR-20 hold,
+    /// the firm gate, the Procedure hold, the corrections whose follow-through did not finish, I-2 (no line Pending or Flagged) and the line
+    /// origin (165b). Returns the lines read (under the caller's locks) when every check passes. A read fault is Unavailable (fail closed).
+    /// Nothing is written. Completion calls the same method, so approve and completion never disagree.
     /// </summary>
     private async Task<Approvable> CheckApprovableAsync(Entity invoice, CancellationToken ct)
     {
         var invoiceId = invoice.Id;
+
+        // ── Task 165b-3 part B fix round (uac-r2 note a): the totals are rounded to 2 decimals, so a currency with more is refused here, before
+        //    the claim (and at completion, which runs this method). A pure check on the invoice as read: no query. ──
+        if (CurrencyRefused(invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency)))
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the currency has more than 2 decimals or is not a currency code ({ReasonCode}); nothing changed.",
+                invoiceId, InvoiceApprovalCodes.CurrencyUnsupported);
+            return new Approvable([], new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CurrencyUnsupported,
+                "This invoice's currency has more than two decimal places, which the approved total cannot hold. An administrator must review the invoice."));
+        }
 
         // ── FR-20: a blocked submission holds the invoice from approval until it is decided. ──
         // ── 101 fix round, part 3 (F-2): a correction whose follow-through did not finish holds it until repeated. A read fault refuses (fail closed). ──
@@ -1246,10 +1277,9 @@ public sealed class InvoiceApprovalService
     /// <summary>
     /// Task 165b-3: before completion writes the approve record, the approval's checks run again under the same locks (approval completion
     /// decides only from server-written sources): the portion's decision time is present, not in the future and not before the invoice's
-    /// <c>createdon</c> (F2), the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
-    /// line is undecided (approve accepts them in bulk before its claim, so a completion never has one), the invoice's currency has a 2-decimal
-    /// minor unit (part B), and the portion's approved amount equals
-    /// the approved total <see cref="InvoiceTotalsCalculator"/> derives from the lines read now. Null when all pass. A read fault is Unavailable;
+    /// <c>createdon</c> (F2), the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes (with it the currency check,
+    /// part B, the same one approve ran), no Clean line is undecided (approve accepts them in bulk before its claim, so a completion never has
+    /// one), and the portion's approved amount equals the approved total <see cref="InvoiceTotalsCalculator"/> derives from the lines read now. Null when all pass. A read fault is Unavailable;
     /// any refusal is 409 <see cref="InvoiceApprovalCodes.CompletionRefused"/>, logged with the reason code, the table and the row id only.
     /// Nothing is written either way.
     /// </summary>
@@ -1286,13 +1316,7 @@ public sealed class InvoiceApprovalService
             return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionCleanUndecided);
         }
 
-        // Part B (uac-r2 note a): the amounts are compared at 2 decimals, so a currency with another minor unit fails closed.
-        if (invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency)?.Trim() is { Length: > 0 } currency
-            && !TwoDecimalCurrencies.Contains(currency))
-        {
-            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionCurrencyUnsupported);
-        }
-
+        // Part B (uac-r2 note a): the currency is checked by CheckApprovableAsync above, the same check approve ran before its claim.
         var totals = InvoiceTotalsCalculator.Calculate(
             invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value,
             approvable.Lines.Where(InvoiceTotalsService.IsCounted).Select(InvoiceTotalsService.ToRow).ToList());
@@ -1350,10 +1374,31 @@ public sealed class InvoiceApprovalService
     }
 
     /// <summary>
+    /// Task 165b-3 part B fix round (uac-r2 note a): true when approve (and completion) must refuse the invoice's currency. The text is read
+    /// through <see cref="BillingCurrency.Normalise"/> (D-119: <c>$</c>, <c>US$</c> and <c>USD$</c> are USD). A missing currency is the R1 default,
+    /// USD (D-115), and passes. Refused: text that does not normalise to a 3-letter code (fail closed), and an ISO code with more than 2
+    /// minor-unit decimals (<see cref="MoreThanTwoDecimalCurrencies"/>).
+    /// </summary>
+    internal static bool CurrencyRefused(string? currency)
+    {
+        var code = BillingCurrency.Normalise(currency);
+        if (code is null)
+        {
+            return false;
+        }
+
+        return code.Length != 3 || !code.All(c => c is >= 'A' and <= 'Z') || MoreThanTwoDecimalCurrencies.Contains(code);
+    }
+
+    /// <summary>
     /// Task 165b-3 part B (EB-D-208): the invoices among <paramref name="invoiceIds"/> that have an approve Decision Record the writer identity
-    /// created (<see cref="WriterCreatedRecord"/>), regarding the invoice, action <c>approve-invoice</c>. Approval and AP export count an invoice as
-    /// Approved, Sent to AP or Paid only when it is in this set. ONE batched read (an <c>In</c> on the ids, paged), app-only, never one query per
-    /// invoice. Throws on a read fault, and a fault reading <paramref name="writerUserId"/> propagates: the caller fails its decision closed.
+    /// created (<see cref="WriterCreatedRecord"/>), regarding the invoice, action <c>approve-invoice</c>, whose key is the approval's own (fix
+    /// round, uac-r2 F1): <see cref="InvoiceLineOrigin.ReviewIdOf"/>(record) equals <see cref="BillingDecisionKey.IdOf"/>(<c>sprk_invoice</c>,
+    /// invoice, <see cref="DecisionIdFor"/>(a portion of that invoice)), the same match completion makes (<see cref="WriterApproveRecordsAsync"/>).
+    /// Approval and AP export count an invoice as Approved, Sent to AP or Paid only when it is in this set. An invoice with no portion does not
+    /// count (fail closed). Per chunk of <see cref="FinanceBaseValues.ParentChunkSize"/> invoices, at most TWO reads, each an <c>In</c> on the
+    /// ids, paged and app-only: the portions, then the records (skipped when no invoice of the chunk has a portion). Never one query per invoice.
+    /// Throws on a read fault, and a fault reading <paramref name="writerUserId"/> propagates: the caller fails its decision closed.
     /// </summary>
     internal static async Task<IReadOnlySet<Guid>> InvoicesWithApproveRecordAsync(
         IGenericEntityService entities, IReadOnlyCollection<Guid> invoiceIds, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct)
@@ -1368,23 +1413,62 @@ public sealed class InvoiceApprovalService
         }
 
         var writer = await writerUserId(ct).ConfigureAwait(false);
-        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+        foreach (var chunk in invoiceIds.Distinct().Chunk(FinanceBaseValues.ParentChunkSize))
         {
-            ColumnSet = new ColumnSet(ApproveRecordInvoiceLookup),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
-            NoLock = true,
-        };
-        query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.In, invoiceIds.Distinct().Cast<object>().ToArray());
-        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
-        WriterCreatedRecord.AddConditions(query.Criteria, writer);
-        query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
-
-        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
-        {
-            if (row.GetAttributeValue<EntityReference>(ApproveRecordInvoiceLookup)?.Id is { } invoiceId && invoiceIds.Contains(invoiceId))
+            // (1) The approval keys: one per portion of each invoice of the chunk.
+            var portionQuery = new QueryExpression(EligibleApproverResolver.ApprovalEntity)
             {
-                found.Add(invoiceId);
+                ColumnSet = new ColumnSet(EligibleApproverResolver.ApprovalInvoice),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+                NoLock = true,
+            };
+            portionQuery.Criteria.AddCondition(EligibleApproverResolver.ApprovalInvoice, ConditionOperator.In, chunk.Cast<object>().ToArray());
+            portionQuery.AddOrder(EligibleApproverResolver.ApprovalEntity + "id", OrderType.Ascending);
+
+            var keys = new Dictionary<Guid, HashSet<Guid>>();
+            foreach (var portion in await InvoiceReviewReadService.ReadPagedAsync(entities, portionQuery, ct).ConfigureAwait(false))
+            {
+                if (portion.Id != Guid.Empty
+                    && portion.GetAttributeValue<EntityReference>(EligibleApproverResolver.ApprovalInvoice)?.Id is { } invoiceId
+                    && chunk.Contains(invoiceId))
+                {
+                    if (!keys.TryGetValue(invoiceId, out var set))
+                    {
+                        keys[invoiceId] = set = [];
+                    }
+
+                    set.Add(BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, DecisionIdFor(portion.Id)));
+                }
+            }
+
+            if (keys.Count == 0)
+            {
+                continue;
+            }
+
+            // (2) The writer-created approve records of the invoices that have a portion, counted only under the approval's own key.
+            var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+            {
+                ColumnSet = new ColumnSet(ApproveRecordInvoiceLookup, InvoiceLineOrigin.RecordSteps),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.In, keys.Keys.Cast<object>().ToArray());
+            query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
+            WriterCreatedRecord.AddConditions(query.Criteria, writer);
+            query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+
+            foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
+            {
+                if (row.GetAttributeValue<EntityReference>(ApproveRecordInvoiceLookup)?.Id is { } invoiceId
+                    && keys.TryGetValue(invoiceId, out var approvalKeys)
+                    && InvoiceLineOrigin.ReviewIdOf(row) is { } key
+                    && approvalKeys.Contains(key))
+                {
+                    found.Add(invoiceId);
+                }
             }
         }
 

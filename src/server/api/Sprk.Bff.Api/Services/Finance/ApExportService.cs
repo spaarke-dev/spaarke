@@ -68,7 +68,8 @@ public static class ApExportCodes
     /// counted as approved. A per-invoice reason of <see cref="SelectionRefused"/>; the candidate list leaves the invoice out.</summary>
     public const string ReasonApprovalNotRecorded = "approval_not_recorded";
 
-    /// <summary>The log code of <see cref="ReasonApprovalNotRecorded"/> (logged with the table and the row id only).</summary>
+    /// <summary>The log code of <see cref="ReasonApprovalNotRecorded"/> (logged with the table and the row id only). Task 165b-3 part B fix round
+    /// (K1): also the 409 <c>errorCode</c> of Mark Paid on a Sent to AP invoice without that record (nothing is written).</summary>
     public const string ApprovalNotRecorded = "ebilling.apexport.approval_not_recorded";
 }
 
@@ -790,7 +791,6 @@ public sealed class ApExportService
         throw new InvalidOperationException($"Invoice {invoiceId} kept changing; its claim by batch {batchId} could not be released.");
     }
 
-    /// <summary>The 409 <see cref="ApExportCodes.FirmMissing"/> of step 7, worded for why the invoice needs a firm (095c-4 review K1).</summary>
     /// <summary>
     /// Task 165b-3 part B (EB-D-208): the invoices of <paramref name="rows"/> that have the approve Decision Record the writer identity created
     /// (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, one batched read). Each one without it is logged with the code, the
@@ -808,6 +808,26 @@ public sealed class ApExportService
         return recorded;
     }
 
+    /// <summary>
+    /// Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid's approval check. <c>Recorded</c> is true when the invoice has the writer-created
+    /// approve record under its approval's key (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, the export's own batched
+    /// read). Otherwise <c>Invoice</c> is the invoice's status as read now (null when the invoice does not exist), so Mark Paid can answer for an
+    /// invoice that is not Sent to AP as before without moving anything. Read app-only. Throws on a read fault (Mark Paid answers 503).
+    /// </summary>
+    public async Task<(bool Recorded, Entity? Invoice)> MarkPaidApprovalAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var recorded = await InvoiceApprovalService.InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        if (recorded.Contains(invoiceId))
+        {
+            return (true, null);
+        }
+
+        var query = new QueryExpression(InvoiceEntity) { ColumnSet = new ColumnSet("statuscode"), TopCount = 1 };
+        query.Criteria.AddCondition(InvoiceEntity + "id", ConditionOperator.Equal, invoiceId);
+        return (false, (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault());
+    }
+
+    /// <summary>The 409 <see cref="ApExportCodes.FirmMissing"/> of step 7, worded for why the invoice needs a firm (095c-4 review K1).</summary>
     private static Stopped FirmMissingStop(InvoiceFirmNeed need) => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing, need == InvoiceFirmNeed.Held
         ? "An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first."
         : "An invoice in the selection has no firm. Nothing was exported. A reviewer must add the firm first.");

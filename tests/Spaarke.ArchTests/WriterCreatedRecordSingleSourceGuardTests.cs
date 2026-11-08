@@ -15,13 +15,23 @@ namespace Spaarke.ArchTests;
 /// <list type="bullet">
 /// <item>passes <c>"createdby"</c>, <c>"createdonbehalfby"</c>, <c>CreatedByColumn</c> or <c>CreatedOnBehalfByColumn</c> (qualified or not) as the
 /// column of <c>AddCondition(...)</c> or <c>new ConditionExpression(...)</c> (QueryExpression);</item>
-/// <item>passes one as the value of <c>new XAttribute("attribute", ...)</c> (FetchXML built with XElement); or</item>
-/// <item>spells <c>attribute="createdby"</c> / <c>attribute='createdonbehalfby'</c> in a FetchXML string.</item>
+/// <item>passes one as the value of <c>new XAttribute("attribute", ...)</c> (FetchXML built with XElement);</item>
+/// <item>spells <c>attribute="createdby"</c> / <c>attribute='createdonbehalfby'</c> in a FetchXML string;</item>
+/// <item>(fix round, review K2) sets one as <c>AttributeName = ...</c> (a <c>ConditionExpression</c> initializer) or passes one as a named
+/// <c>attributeName:</c> argument;</item>
+/// <item>joins on one with <c>LinkFromAttributeName = ...</c> (a <c>LinkEntity</c> from the creator); or</item>
+/// <item>spells the Web API form <c>_createdby_value</c> / <c>_createdonbehalfby_value</c> (an OData <c>$filter</c>).</item>
 /// </list>
 /// <para>Not caught, by design of a scan: the column held in a local or a field of another name, an in-memory comparison of a read row's
-/// <c>createdby</c>, and a FetchXML string whose line holds <c>//</c> before the attribute (a URL). Ratchet baseline: the ontology's own lookups
-/// (DI-144, #2632 moves them onto the helper); a new site fails, and a site removed must lower its count here. Controls:
-/// <see cref="TheDetector_FiresOnEachForm"/> and <see cref="TheDetector_StaysQuietOnTheHelperAndOtherColumns"/>.</para>
+/// <c>createdby</c> (the seventh DI-144 site, <c>Services/Signals/GateDecisionRecordSharing.cs:521</c>, compares a read row's <c>createdby</c> in
+/// memory and is invisible to this scan; DI-144 covers it), a <c>LinkEntity</c> built with positional constructor arguments, and a FetchXML
+/// string whose line holds <c>//</c> before the attribute (a URL). Controls: <see cref="TheDetector_FiresOnEachForm"/>,
+/// <see cref="TheDetector_FiresOnTheK2Forms"/> and <see cref="TheDetector_StaysQuietOnTheHelperAndOtherColumns"/>.</para>
+/// <para><b>Maintenance.</b> If this fails on your code: build the condition with <c>WriterCreatedRecord.AddConditions</c> (a query's or a link's
+/// criteria) or <c>WriterCreatedRecord.FetchXmlFilter</c>, never by hand. The <see cref="Baseline"/> is a ratchet for the ontology's existing
+/// lookups (DI-144, #2632 moves them onto the helper): a new site fails; a site removed must lower its count here (<see cref="TheBaseline_IsTight"/>);
+/// an entry is added only with its own reason and ADR citation, and only for code this project does not own. An ebilling site is never
+/// baselined: it moves onto the helper.</para>
 /// </remarks>
 public class WriterCreatedRecordSingleSourceGuardTests
 {
@@ -29,13 +39,26 @@ public class WriterCreatedRecordSingleSourceGuardTests
 
     private static readonly string[] ScannedFolders = ["Services/Finance/", "Services/Signals/"];
 
-    /// <summary>DI-144 (ontology-r1, #2632): the ontology's existing writer-identity lookups, by file and count. Work it down; never up.</summary>
-    internal static readonly IReadOnlyDictionary<string, int> Baseline = new Dictionary<string, int>(StringComparer.Ordinal)
+    /// <summary>One baselined file: how many sites it may hold, why, and the decisions that allow it until it is worked down.</summary>
+    internal sealed record BaselineEntry(int Count, string Reason, string Citation);
+
+    /// <summary>The cite every entry shares: ArchTests are a KEEP path (ADR-038 A1), this guard enforces EB-D-208's one definition of
+    /// "writer-created", and each site is ontology-r1's, tracked onto the helper by DI-144 (#2632).</summary>
+    private const string Cite = "ADR-038 A1; EB-D-208; DI-144 (#2632, ontology-r1 owns the file)";
+
+    /// <summary>DI-144 (ontology-r1, #2632): the ontology's existing writer-identity lookups, by file, count and reason. Work it down; never up.
+    /// Re-checked in the 165b-3 part B fix round with the K2 forms added: no new site in either folder, so no entry grew.</summary>
+    internal static readonly IReadOnlyDictionary<string, BaselineEntry> Baseline = new Dictionary<string, BaselineEntry>(StringComparer.Ordinal)
     {
-        ["Services/Signals/DecisionCommitService.cs"] = 1,
-        ["Services/Signals/DecisionRecordWriter.cs"] = 3,
-        ["Services/Signals/SignalReadService.cs"] = 1,
-        ["Services/Signals/SignalReevaluationJob.cs"] = 1,
+        ["Services/Signals/DecisionCommitService.cs"] = new(1,
+            "FindRecordAsync (:1868): the commit's 'already recorded' lookup filters createdby = the writer without createdonbehalfby.", Cite),
+        ["Services/Signals/DecisionRecordWriter.cs"] = new(3,
+            "FindGateRecordAsync (:733), FindConditionClearedRecordAsync (:1017) and AddBillingWriterFilterAsync (:1673): the writer's own " +
+            "'already recorded' lookups filter createdby = the writer without createdonbehalfby (completion's K3 guard covers the billing one).", Cite),
+        ["Services/Signals/SignalReadService.cs"] = new(1,
+            "ReadDecisionRecordsAsync (:1193): the FetchXML read of a Signal's Decision Records filters createdby = the writer without createdonbehalfby.", Cite),
+        ["Services/Signals/SignalReevaluationJob.cs"] = new(1,
+            "RetriesReplacingAPriorLinkAsync (:955): the re-evaluation reads only the writer's prior records by createdby, without createdonbehalfby.", Cite),
     };
 
     private const string Column =
@@ -49,6 +72,14 @@ public class WriterCreatedRecordSingleSourceGuardTests
         new(@"\bXAttribute\s*\(\s*""attribute""\s*,\s*" + Column, RegexOptions.Compiled),
         // FetchXML in a string: attribute="createdby", attribute='createdonbehalfby', attribute=\"createdby\".
         new(@"\battribute\s*=\s*\\?[""']created(?:by|onbehalfby)\\?[""']", RegexOptions.Compiled),
+        // Fix round (review K2): new ConditionExpression { AttributeName = column, ... }.
+        new(@"\bAttributeName\s*=\s*" + Column, RegexOptions.Compiled),
+        // A named argument: AddCondition(attributeName: column, ...), new ConditionExpression(attributeName: column, ...).
+        new(@"\battributeName\s*:\s*" + Column, RegexOptions.Compiled),
+        // A join from the creator: new LinkEntity { LinkFromAttributeName = column, ... }.
+        new(@"\bLinkFromAttributeName\s*=\s*" + Column, RegexOptions.Compiled),
+        // The Web API form: $filter=_createdby_value eq ..., _createdonbehalfby_value eq null.
+        new(@"\b_created(?:by|onbehalfby)_value\b", RegexOptions.Compiled),
     ];
 
     /// <summary>The 1-based lines of <paramref name="code"/> that build a <c>createdby</c> or <c>createdonbehalfby</c> condition (line comments
@@ -76,8 +107,8 @@ public class WriterCreatedRecordSingleSourceGuardTests
     public void NoWriterCondition_IsBuiltOutsideTheHelper()
     {
         var over = Sites()
-            .Where(s => s.Value.Count > Baseline.GetValueOrDefault(s.Key))
-            .Select(s => $"{s.Key}:{string.Join(",", s.Value)} ({s.Value.Count}, baseline {Baseline.GetValueOrDefault(s.Key)})")
+            .Where(s => s.Value.Count > (Baseline.GetValueOrDefault(s.Key)?.Count ?? 0))
+            .Select(s => $"{s.Key}:{string.Join(",", s.Value)} ({s.Value.Count}, baseline {Baseline.GetValueOrDefault(s.Key)?.Count ?? 0})")
             .ToList();
 
         Assert.True(over.Count == 0,
@@ -90,8 +121,8 @@ public class WriterCreatedRecordSingleSourceGuardTests
     {
         var sites = Sites();
         var loose = Baseline
-            .Where(b => sites.GetValueOrDefault(b.Key)?.Count is not { } count || count < b.Value)
-            .Select(b => $"{b.Key}: baseline {b.Value}, found {sites.GetValueOrDefault(b.Key)?.Count ?? 0}")
+            .Where(b => sites.GetValueOrDefault(b.Key)?.Count is not { } count || count < b.Value.Count)
+            .Select(b => $"{b.Key}: baseline {b.Value.Count}, found {sites.GetValueOrDefault(b.Key)?.Count ?? 0}")
             .ToList();
 
         Assert.True(loose.Count == 0, "lower the baseline to what is found: " + string.Join("; ", loose));
@@ -103,6 +134,17 @@ public class WriterCreatedRecordSingleSourceGuardTests
         var path = Path.Combine(BffRoot, HelperFile);
         Assert.True(File.Exists(path), HelperFile);
         Assert.NotEmpty(ConditionLines(File.ReadAllText(path)));
+    }
+
+    [Fact(DisplayName = "165b-3 control: every baseline entry carries its own reason and an ADR citation (tests/CLAUDE.md)")]
+    public void EveryBaselineEntry_HasAReasonAndACitation()
+    {
+        Assert.All(Baseline, b =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(b.Value.Reason), b.Key);
+            Assert.Contains("ADR-", b.Value.Citation, StringComparison.Ordinal);
+        });
+        Assert.Equal(Baseline.Count, Baseline.Values.Select(b => b.Reason).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact(DisplayName = "165b-3 control (must fire): AddCondition, ConditionExpression, XAttribute and a FetchXML string, each column spelling, across a line break")]
@@ -125,12 +167,28 @@ public class WriterCreatedRecordSingleSourceGuardTests
         Assert.Equal(new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, ConditionLines(code));
     }
 
+    [Theory(DisplayName = "165b-3 fix round control (must fire, review K2): an AttributeName initializer, a named attributeName: argument, a LinkFromAttributeName join and the Web API _created*_value form")]
+    [InlineData("var c = new ConditionExpression { AttributeName = \"createdby\", Operator = ConditionOperator.Equal };")]
+    [InlineData("var c = new ConditionExpression { AttributeName = \"createdonbehalfby\", Operator = ConditionOperator.Null };")]
+    [InlineData("var c = new ConditionExpression { AttributeName = DecisionRecordWriter.CreatedByColumn };")]
+    [InlineData("query.Criteria.AddCondition(attributeName: \"createdby\", conditionOperator: ConditionOperator.Equal, values: writer);")]
+    [InlineData("var c = new ConditionExpression(attributeName: WriterCreatedRecord.CreatedOnBehalfByColumn, conditionOperator: ConditionOperator.Null);")]
+    [InlineData("var link = new LinkEntity { LinkFromEntityName = \"sprk_decisionrecord\", LinkFromAttributeName = \"createdby\", LinkToEntityName = \"systemuser\" };")]
+    [InlineData("var link = new LinkEntity { LinkFromAttributeName = \"createdonbehalfby\" };")]
+    [InlineData("var filter = $\"_createdby_value eq {writer}\";")]
+    [InlineData("var filter = \"sprk_decisionrecords?$filter=_createdonbehalfby_value eq null\";")]
+    public void TheDetector_FiresOnTheK2Forms(string line)
+    {
+        Assert.Equal(new[] { 1 }, ConditionLines(line));
+    }
+
     [Fact(DisplayName = "165b-3 control (must not fire): the helper's calls, a column set, an in-memory read, other created-by columns, a comment")]
     public void TheDetector_StaysQuietOnTheHelperAndOtherColumns()
     {
         const string code = """
             WriterCreatedRecord.AddConditions(query.Criteria, writer);
-            link.LinkCriteria.Add(WriterCreatedRecord.FetchXmlFilter(writer));
+            WriterCreatedRecord.AddConditions(link, writer);
+            linkElement.Add(WriterCreatedRecord.FetchXmlFilter(writer));
             var columns = new ColumnSet(DecisionRecordWriter.CreatedByColumn, "createdby");
             var mine = row.GetAttributeValue<EntityReference>(DecisionRecordWriter.CreatedByColumn)?.Id == writerUserId;
             query.Criteria.AddCondition("sprk_createdbyperson", ConditionOperator.Equal, caller);
@@ -138,6 +196,10 @@ public class WriterCreatedRecordSingleSourceGuardTests
             new XAttribute("attribute", "sprk_createdbycontact");
             // query.Criteria.AddCondition("createdby", ConditionOperator.Equal, writer);
             var fetch = "<attribute name='createdby' />";
+            var byPerson = new ConditionExpression { AttributeName = "sprk_createdbyperson", Operator = ConditionOperator.Equal };
+            query.Criteria.AddCondition(attributeName: "sprk_createdbyperson", conditionOperator: ConditionOperator.Equal, values: caller);
+            var personLink = new LinkEntity { LinkFromAttributeName = "sprk_createdbyperson", LinkToEntityName = "contact" };
+            var select = "$select=_sprk_createdbyperson_value";
             """;
 
         Assert.Empty(ConditionLines(code));

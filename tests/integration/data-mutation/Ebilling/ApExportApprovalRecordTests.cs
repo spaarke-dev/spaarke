@@ -55,6 +55,7 @@ public sealed class ApExportApprovalRecordTests
 
         (await CandidateIds(world)).Should().Contain([invoice.Id, other.Id]);
         world.Dataverse.Log.Count(l => l == "query sprk_decisionrecord").Should().Be(1, "one batched read for the whole candidate list");
+        world.Dataverse.Log.Count(l => l == "query sprk_invoiceapproval").Should().Be(1, "the approval keys: one batched portion read, never one per invoice");
 
         world.Dataverse.Log.Clear();
         var result = await world.ExportAsync(invoice, other);
@@ -111,6 +112,84 @@ public sealed class ApExportApprovalRecordTests
                 world.Dataverse.BeforeConditionalUpdate = null;
                 world.Dataverse.Touch("sprk_decisionrecord", record.Id,
                     new Dictionary<string, object> { ["createdonbehalfby"] = new EntityReference("systemuser", Guid.NewGuid()) });
+            }
+        };
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(ApExportCodes.InvoiceConflict);
+        world.Lifecycle.Sent.Should().BeEmpty();
+        world.StoredFiles().Should().BeEmpty();
+        world.InvoicesClaimedByANonCompletedBatch().Should().BeEmpty("the claim is released");
+        world.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    // ── Fix round (uac-r2 F1): the record counts only under the approval's own key, as completion matches it ──
+
+    [Theory(DisplayName = "165b-3 fix round (uac-r2 F1) must fire: a writer-created approve record regarding the invoice under another key does not count - left out of the candidates, refused by the export (approval_not_recorded), nothing claimed")]
+    [InlineData("another-invoice's-key")]
+    [InlineData("an-unrelated-key")]
+    [InlineData("no-key")]
+    public async Task KeyMismatch_ARecordUnderAnotherKey_DoesNotCount(string kind)
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-OTHER-KEY", approveRecord: false);
+        var other = world.AddInvoice("INV-KEY-OWNER", approveRecord: false);
+        var record = world.AddApproveRecord(invoice, reviewId: kind == "another-invoice's-key" ? world.ApprovalKeyOf(other) : Guid.NewGuid());
+        if (kind == "no-key")
+        {
+            world.Dataverse.Touch("sprk_decisionrecord", record.Id, new Dictionary<string, object> { ["sprk_steps"] = "{}" });
+        }
+
+        world.GrantEverything();
+        var writes = world.Dataverse.Writes;
+
+        (await CandidateIds(world)).Should().NotContain(invoice.Id);
+        AssertRefusedNothingClaimed(world, await world.ExportAsync(invoice), invoice, writes);
+    }
+
+    [Fact(DisplayName = "165b-3 fix round (uac-r2 F1) control: the writer-created record under the approval's own key counts - a candidate, and it exports")]
+    public async Task KeyMismatch_Control_TheApprovalsOwnKey_Counts()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-OWN-KEY", approveRecord: false);
+        world.AddApproveRecord(invoice, reviewId: world.ApprovalKeyOf(invoice));
+        world.GrantEverything();
+
+        (await CandidateIds(world)).Should().Contain(invoice.Id);
+        (await world.ExportAsync(invoice)).Outcome.Should().Be(ApExportOutcome.Created);
+        world.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.SentToAp);
+    }
+
+    [Fact(DisplayName = "165b-3 fix round (uac-r2 F1) must fire: an Approved invoice with the writer's record but no approval portion does not count (fail closed) - left out and refused")]
+    public async Task KeyMismatch_NoPortion_DoesNotCount()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-NO-PORTION");
+        var portion = world.Dataverse.RowsOf("sprk_invoiceapproval").Single(r => r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id);
+        await world.Dataverse.Service.DeleteAsync("sprk_invoiceapproval", portion.Id, CancellationToken.None);
+        world.GrantEverything();
+        var writes = world.Dataverse.Writes;
+
+        (await CandidateIds(world)).Should().NotContain(invoice.Id);
+        AssertRefusedNothingClaimed(world, await world.ExportAsync(invoice), invoice, writes);
+    }
+
+    [Fact(DisplayName = "165b-3 fix round (uac-r2 F1) must fire: the re-check after the claim refuses a record whose key no longer matches (409 invoice_conflict) before any file or Sent to AP write")]
+    public async Task KeyMismatch_ReCheck_IsRefusedBeforeAnyFile()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-RECHECK-KEY", approveRecord: false);
+        var record = world.AddApproveRecord(invoice);
+        world.GrantEverything();
+        world.Dataverse.BeforeConditionalUpdate = (table, _) =>
+        {
+            if (table == "sprk_invoice")
+            {
+                world.Dataverse.BeforeConditionalUpdate = null;
+                world.Dataverse.Touch("sprk_decisionrecord", record.Id,
+                    new Dictionary<string, object> { ["sprk_steps"] = $"{{\"reviewId\":\"{Guid.NewGuid():D}\"}}" });
             }
         };
 

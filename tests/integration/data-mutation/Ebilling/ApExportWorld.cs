@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.Services.Finance;
 using Sprk.Bff.Api.Tests.Services.Signals;
@@ -201,14 +202,17 @@ internal sealed class ApExportWorld
     }
 
     /// <summary>Task 165b-3 part B: an approve Decision Record regarding <paramref name="invoice"/>, as Dataverse stores it: <c>createdby</c> is
-    /// <paramref name="createdBy"/> (default the writer identity) and <c>createdonbehalfby</c> is <paramref name="onBehalfBy"/> (default empty).</summary>
-    public Entity AddApproveRecord(Entity invoice, Guid? createdBy = null, Guid? onBehalfBy = null)
+    /// <paramref name="createdBy"/> (default the writer identity) and <c>createdonbehalfby</c> is <paramref name="onBehalfBy"/> (default empty).
+    /// Fix round (uac-r2 F1): its <c>sprk_steps</c> carries the key the writer gives the approval of the invoice's portion
+    /// (<see cref="ApprovalKeyOf"/>), or <paramref name="reviewId"/> when given.</summary>
+    public Entity AddApproveRecord(Entity invoice, Guid? createdBy = null, Guid? onBehalfBy = null, Guid? reviewId = null)
     {
         var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
         {
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice.Id),
             ["sprk_actioncode"] = "approve-invoice",
             ["createdby"] = new EntityReference("systemuser", createdBy ?? DecisionRecordWriterTests.WriterUser),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{reviewId ?? ApprovalKeyOf(invoice):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
         };
         if (onBehalfBy is { } behalf)
         {
@@ -217,6 +221,14 @@ internal sealed class ApExportWorld
 
         Dataverse.Put(record);
         return record;
+    }
+
+    /// <summary>The approve record's key for <paramref name="invoice"/>'s one portion: <see cref="BillingDecisionKey.IdOf"/>(<c>sprk_invoice</c>, invoice,
+    /// <see cref="InvoiceApprovalService.DecisionIdFor"/>(portion)), as the Decision Record writer stores it.</summary>
+    public Guid ApprovalKeyOf(Entity invoice)
+    {
+        var portion = Dataverse.RowsOf("sprk_invoiceapproval").Single(r => r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id);
+        return BillingDecisionKey.IdOf("sprk_invoice", invoice.Id, InvoiceApprovalService.DecisionIdFor(portion.Id));
     }
 
     /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>

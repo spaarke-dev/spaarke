@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Services.Finance.ApprovalWorld;
@@ -493,25 +494,153 @@ public sealed class InvoiceApprovalCompletionTests
         w.ApproveRecords.Should().ContainSingle();
     }
 
-    [Fact(DisplayName = "165b-3 part B (uac-r2 a) must fire: a currency without a 2-decimal minor unit (JPY) fails the amount comparison closed (currency_unsupported); nothing is written")]
-    public async Task Currency_NotTwoDecimals_IsRefused()
+    // ── Fix round (uac-r2 note a): the currency, one check at approve (before the claim) and at completion ──
+
+    [Theory(DisplayName = "165b-3 fix round currency control: a currency with 2 decimals or fewer, a bare $ (D-119) and a missing currency (USD, D-115) approve")]
+    [InlineData("$")]
+    [InlineData("AUD")]
+    [InlineData("JPY")]
+    [InlineData("usd")]
+    [InlineData(null)]
+    public async Task Currency_Control_Approves(string? currency)
     {
         var w = World();
-        AsIfTransitioned(w, Alice, 1000m);
-        w.Invoice["sprk_currency"] = "JPY";
-
-        AssertRefused(w, await w.ApproveAs(AliceUser), InvoiceApprovalCodes.CompletionCurrencyUnsupported, writesBefore: 0);
-    }
-
-    [Fact(DisplayName = "165b-3 part B (uac-r2 a) control: a 2-decimal currency (GBP) completes")]
-    public async Task Currency_Control_TwoDecimals_Completes()
-    {
-        var w = World();
-        AsIfTransitioned(w, Alice, 1000m);
-        w.Invoice["sprk_currency"] = "GBP";
+        if (currency is not null)
+        {
+            w.Invoice["sprk_currency"] = currency;
+        }
 
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
         w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "165b-3 fix round currency control: completion of an interrupted approve completes for $, AUD, JPY and a missing currency")]
+    [InlineData("$")]
+    [InlineData("AUD")]
+    [InlineData("JPY")]
+    [InlineData(null)]
+    public async Task Currency_Control_Completes(string? currency)
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        if (currency is not null)
+        {
+            w.Invoice["sprk_currency"] = currency;
+        }
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "165b-3 fix round currency must fire: a currency with more than 2 decimals (KWD, BHD) or text that is not a currency code is refused at approve (409 currency_unsupported) before the claim; nothing is written")]
+    [InlineData("KWD")]
+    [InlineData("bhd")]
+    [InlineData("CA$")]
+    [InlineData("EURO")]
+    public async Task Currency_MoreThanTwoDecimals_IsRefusedAtApprove_NothingClaimed(string currency)
+    {
+        var w = World();
+        w.Invoice["sprk_currency"] = currency;
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(InvoiceApprovalCodes.CurrencyUnsupported);
+        w.Writes.Should().Be(0, "nothing is claimed or written");
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby").Should().BeNull("the claim is never written");
+        w.Transitions.Should().Be(0);
+        w.ApproveRecords.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "165b-3 fix round currency must fire: completion runs the same check - KWD is refused (completion_refused, currency_unsupported); nothing is written")]
+    public async Task Currency_MoreThanTwoDecimals_IsRefusedAtCompletion()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Invoice["sprk_currency"] = "KWD";
+
+        AssertRefused(w, await w.ApproveAs(AliceUser), InvoiceApprovalCodes.CurrencyUnsupported, writesBefore: 0);
+    }
+
+    // ── Fix round (uac-r2 F1): the state counts the record only under the approval's own key ──
+
+    [Theory(DisplayName = "165b-3 fix round (uac-r2 F1): the approval state counts a writer-created approve record only under the approval's own key - another key shows Unknown (must fire), the own key Approved (control)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task KeyMismatch_TheState(bool anotherKey)
+    {
+        var w = World();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        var record = w.ApproveRecords.Single();
+        var key = BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceApprovalService.DecisionIdFor(w.ApprovalId)).ToString("D");
+        var steps = record.GetAttributeValue<string>("sprk_steps");
+        steps.Should().Contain(key, "the writer stores the approval's key");
+        if (anotherKey)
+        {
+            record["sprk_steps"] = steps.Replace(key, Guid.NewGuid().ToString("D"), StringComparison.Ordinal);
+        }
+
+        var state = await w.GetAs(AliceUser);
+
+        if (anotherKey)
+        {
+            state!.Status.Should().Be("Unknown");
+            state.ApprovedAmount.Should().BeNull();
+        }
+        else
+        {
+            state!.Status.Should().Be("Approved");
+        }
+    }
+
+    // ── Fix round (review F1, low): the transition answers "already in target" ──
+
+    [Fact(DisplayName = "165b-3 fix round must fire: the status moved to Approved outside this call and no approve record exists - the transition's 'already in target' is Incomplete at transition, and the claimant's repeat completes with one record")]
+    public async Task AlreadyInTarget_NoRecord_IsIncomplete()
+    {
+        var w = World();
+        w.BeforeClaim = () =>
+        {
+            w.BeforeClaim = null;
+            w.Invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Approved);
+            return Task.CompletedTask;
+        };
+
+        var first = await w.ApproveAs(AliceUser);
+
+        first.Outcome.Should().Be(ApprovalOutcome.Incomplete, first.Detail);
+        first.FailedStep.Should().Be("transition");
+        w.ApproveRecords.Should().BeEmpty();
+
+        var repeat = await w.ApproveAs(AliceUser);
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "165b-3 fix round control: the transition's 'already in target' with the writer-created approve record under the approval's key is already approved, naming that record")]
+    public async Task AlreadyInTarget_WithTheRecord_IsAlreadyApproved()
+    {
+        var w = World();
+        var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+            ["sprk_actioncode"] = "approve-invoice",
+            ["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", w.InvoiceId, InvoiceApprovalService.DecisionIdFor(w.ApprovalId)):D}\"}}",
+        };
+        w.BeforeClaim = () =>
+        {
+            w.BeforeClaim = null;
+            w.Invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Approved);
+            w.H.Seeded.Add(record);
+            return Task.CompletedTask;
+        };
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.AlreadyApproved, result.Detail);
+        result.DecisionRecordId.Should().Be(record.Id);
     }
 
     [Fact(DisplayName = "165b-3 part B writer-id fault: the writer identity cannot be read - completion answers Unavailable with nothing written, and the state read fails (never 'not approved')")]

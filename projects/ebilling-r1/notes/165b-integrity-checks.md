@@ -353,19 +353,18 @@ record created by the writer identity, with `createdonbehalfby` empty. No approv
 
 **Known limits (part B).**
 
-- K: Paid has no record of its own in R1. It counts on the approve record, and Mark Paid moves only a Sent to AP invoice, which the export now
-  reaches only with the record. D-103 counts Paid as Approved.
+- K: Paid has no record of its own in R1. It counts on the approve record. Mark Paid moves only a Sent to AP invoice, and (6.3, item 6) only one
+  that has the writer-created approve record under its approval's key. D-103 counts Paid as Approved.
 - K: a portion that says Approved on an In Review invoice with no writer-created record makes every approve answer 409 until an administrator
   acts. This fails closed and nothing is approved. Whoever can edit the portion's columns can therefore hold an approval. It is kept on purpose, so
   an edited portion reaches an administrator. The portion columns are part of the field-security owner question on the dev-deploy checklist.
-- K: the lock-defeated branch of approve (the transition answers "already in target") still answers `alreadyApproved` without reading the record.
-  It happens only when the per-invoice lock was defeated, and the other call writes the record.
+- K (closed in 6.3, item 3): the "already in target" branch of approve answered `alreadyApproved` without reading the record. The branch is
+  reached when the per-invoice lock was defeated OR when the status moved outside this call.
 - K: the spend paths (`FinanceBaseValues`, `FinanceRollupService`, `FinancialCalculationToolHandler`) are 165b-4's and are not changed here. They
   will use `WriterCreatedRecord.FetchXmlFilter` / `AddConditions`.
 - K: other readers of the counted statuses are not approval preconditions and are unchanged: `InvoiceContextService.StandingInvoiceStatuses` (the
   firm's disallow history) and the correction refusal in `InvoiceSubmissionPersister` (it refuses, so it fails closed).
-- K: the approve route itself (not completion) does not check currency precision. The calculator rounds every currency to 2 decimals (USD only
-  in R1).
+- K (closed in 6.3, item 2): the approve route itself did not check the currency; approve and completion now run one check.
 - K: the AP export client shows `approval_not_recorded` through its generic fallback ("Refused (approval_not_recorded).").
 - K: a writer-identity rotation (part A K8) now also hides earlier approvals from AP export and the approval state, until a plan for the earlier
   identity's records exists.
@@ -378,3 +377,92 @@ for it, because the code is not in `INCOMPLETE_CODES` and there is no `failedSte
 message (`components/decision/InvoiceDecisionWizard.tsx:159-165`). No finding.
 
 **Gates.** See the task report: filtered unit tests, full ArchTests, BFF build and publish delta.
+
+## 6.3 Part B fix round
+
+Branch `task/ebilling-165b3` from `b81098c4b6`. Wording stays neutral: approval and AP export decide only from server-written sources.
+
+**1. The batched record read matches the decision key (uac-r2 F1).**
+
+- Before: `InvoiceApprovalService.InvoicesWithApproveRecordAsync` (the approval state, the AP export candidates, the selection and the re-check
+  after the claim) counted any writer-created `approve-invoice` row regarding the invoice. Completion (`WriterApproveRecordsAsync`) also required
+  the key.
+- After: a row counts for invoice X only when `InvoiceLineOrigin.ReviewIdOf(row)` equals `BillingDecisionKey.IdOf(sprk_invoice, X,
+  DecisionIdFor(portion of X))`, the same match completion makes, with the same helpers. The portion ids come from one batched read of
+  `sprk_invoiceapproval` (`sprk_invoice` In the ids); the record read now also selects `sprk_steps`. Two reads per chunk, however many invoices,
+  and the record read is skipped when no invoice of the chunk has a portion. Both reads are chunked at 200 (`FinanceBaseValues.ParentChunkSize`,
+  item 7). An invoice with no portion does not count (fail closed). An invoice with more than one portion counts when the record matches the key
+  of any of its portions (approve itself refuses such an invoice before it writes anything).
+- Tests (must fire, a writer-created `approve-invoice` row regarding the invoice under another key): the state shows Unknown; the AP candidate
+  list leaves it out and the selection gives 400 with `approval_not_recorded` (another invoice's key, an unrelated key, no key); the re-check after
+  the claim gives 409 `invoice_conflict`; Mark Paid gives 409 (item 6). Also must fire: an invoice with the writer's record but no portion.
+  Controls: the approval's own key counts (state Approved, candidate, exports).
+- Query count: the R1 control still sees one `sprk_decisionrecord` read for the candidate list and two for an export (selection and re-check),
+  plus one `sprk_invoiceapproval` read for the candidate list.
+
+**2. Currency (review F1).**
+
+- Before: completion refused any currency outside {USD, EUR, GBP, CAD} (so JPY, AUD and `$` were refused there), and approve did not check the
+  currency at all.
+- After: one check, `InvoiceApprovalService.CurrencyRefused`, in `CheckApprovableAsync`, which approve runs before its claim and completion runs
+  again, so the two never disagree. The text is read through `BillingCurrency.Normalise` (D-119: `$`, `US$`, `USD$` are USD). A missing currency
+  is the R1 default, USD (D-115), and passes. Refused: text that does not normalise to a 3-letter code (fail closed), and the ISO codes with more
+  than 2 minor-unit decimals, one named set: BHD, KWD, JOD, OMR, TND, LYD, IQD (`InvoiceTotalsCalculator` rounds to 2 decimals). The refusal is
+  409 `ebilling.approve.currency_unsupported` at approve; at completion it is 409 `completion_refused` with that code as the log reason. The code
+  replaces `ebilling.approve.completion.currency_unsupported`.
+- Tests: `$`, `AUD`, `JPY`, `usd` and a missing currency approve; `$`, `AUD`, `JPY` and a missing currency complete an interrupted approve.
+  Must fire: `KWD`, `bhd`, `CA$` and `EURO` are refused at approve with nothing claimed or written; `KWD` is refused at completion.
+
+**3. The "already in target" branch (review F1, low).**
+
+- Before: when the transition answered "already in target", approve answered `alreadyApproved` without reading the record.
+- After: it reads `WriterApproveRecordsAsync(invoiceId, decisionId)`. With the record it answers `alreadyApproved` naming the record; without it,
+  `Incomplete` at step `transition`, so the claimant's repeat runs completion and its checks. The branch is reached when the per-invoice lock was
+  defeated OR when the status moved outside this call. A read fault there is also `Incomplete` at `transition`.
+- Tests: must fire, the status moved to Approved before the transition with no record: Incomplete, no record; the claimant's repeat completes
+  with one record. Control: with the writer's record under the key, `alreadyApproved` names it.
+
+**4. The guard's baseline (review F3).** Each entry of `WriterCreatedRecordSingleSourceGuardTests.Baseline` now carries its own reason (the method
+and line of each site) and the citation `ADR-038 A1; EB-D-208; DI-144 (#2632)`. A1 is the amendment that makes ArchTests a KEEP path; the rule
+that each allowlist entry carries a reason and an ADR citation is `tests/CLAUDE.md`'s. A new control checks every entry has a distinct reason and an
+ADR citation. The remarks say the seventh DI-144 site (`GateDecisionRecordSharing.cs:521`, an in-memory comparison) is invisible to the scan, and
+hold the maintenance procedure.
+
+**5. The guard's patterns (review K2).** Added, each with a must-fire fixture: `AttributeName = <column>` (a `ConditionExpression` initializer), a
+named `attributeName: <column>` argument, `LinkFromAttributeName = <column>`, and the Web API `_createdby_value` / `_createdonbehalfby_value`. The
+must-not-fire fixture's line that did not compile (`LinkCriteria.Add(FetchXmlFilter(...))`, an `XElement` into a `FilterExpression`) now reads
+`WriterCreatedRecord.AddConditions(link, writer)` and `linkElement.Add(WriterCreatedRecord.FetchXmlFilter(writer))`, and the fixture gains the
+four new forms on `sprk_createdbyperson`. Re-check: the new patterns find no site in `Services/Finance/**` or `Services/Signals/**`, so the baseline
+is unchanged (6 sites in 4 files).
+
+**6. Mark Paid (review K1).**
+
+- Before: `POST .../mark-paid` moved Sent to AP to Paid without the record.
+- After: it first runs the export's batched check (`ApExportService.MarkPaidApprovalAsync`, item 1's read, with the key). Without the record the
+  lifecycle is not called and nothing is written: a Sent to AP invoice is 409 `ebilling.apexport.approval_not_recorded`, logged as
+  `Mark Paid refusal ebilling.apexport.approval_not_recorded on sprk_invoice {id}`; an invoice in any other status keeps the answer FR-42 gives it
+  (409 `invoice.transition_not_allowed` with `currentStatus`, `invoice.status_unknown`, or the uniform 404 when it does not exist). A read fault is
+  503 `ebilling.invoice.payment_unavailable`.
+- Tests: must fire (no record, another key, another identity): 409, the lifecycle not read, nothing written. Control: the record under the key,
+  200 and Paid. The 151a FR-42 tests pass unchanged.
+
+**7. Small items.** The FR-30 test chooses its expectation from `step` (only `link` fails after the record), not from state read after the call.
+The misplaced `<summary>` in `ApExportService.cs` is back on `FirmMissingStop`. The new `In` reads are chunked at 200.
+
+**Seeds** (each file restored byte-identical, compared with `cmp`):
+
+- The key match dropped from the batched read: 6 must-fire fail (AP key mismatch x3, the re-check, the state, Mark Paid another-key); the controls
+  pass.
+- The approve-time currency check removed: `KWD` reaches the claim; 5 fail (approve x4, completion x1).
+- The record read removed from "already in target": its must-fire fails, the control passes.
+- The Mark Paid check removed: its 3 must-fire fail; the FR-42 tests pass.
+
+**Dev data (read-only, 2026-11-08).** Both counted invoices (Sent to AP: INV-2025-05166 USD, INV #2025023029 GBP) still count: each has one portion,
+and its approve record (created by the writer identity, `createdonbehalfby` empty) carries exactly the key derived from that portion. Currency over
+all 6 live invoices, normalised: USD 5, GBP 1. None is refused.
+
+**Known limits (this round).**
+
+- K: the approval state's `canApprove` does not reflect the currency check (approve refuses with 409 `currency_unsupported`).
+- K: Mark Paid's status read on the refusal path mirrors the lifecycle's answers for a status other than Sent to AP; the lifecycle stays the only
+  status writer.
