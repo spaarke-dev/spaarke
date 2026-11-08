@@ -29,11 +29,13 @@
 - mcp-bff-api: Phase 0 waits on the owner's connector registration; A10, B-4, 021 later. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
+- **fm 060 messaging-privacy question** (confirmed on dev 11-08; two owner rulings conflict; options and detail in the private message to fm and in the owner report, not here). Awaiting the owner's pick; then tell fm.
 - **#2635** (BFF identity gets Decision Record read via a SpaarkeMaster role in env setup; ontology says the live test is enough, I recommend the grant) — linked to: prod-named SysAdmin app users on dev (BFF identities read Decision Records only via SysAdmin).
 - Report card `sprk_assigned*` registry (FR-24); G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row.
 - Older: column auditing on writer-only lookups, AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
 ## Private items (never in issues/PRs/commits)
+- fm 060 messaging-privacy finding (detail only in messages and the owner report).
 - ebilling: submission link columns + sprk_document user-writable (165e/165f), portion claim columns (165b F1; F1 portion-edit lever kept fail-closed), hold column (165a), Decision Record editable by Ontology Admin/SysAdmin (known limit), BFF identities' SysAdmin role detail. The line: identifiers are fine in public; "X can still write Y today" for an open gap is not.
 
 ## My own backlog
