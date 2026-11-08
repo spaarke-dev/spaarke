@@ -21,6 +21,7 @@
 - fm 032b round 1: approved with C1 (core pinned in the job payload; ebilling accepted) and C2 (settle U3 first). U1/U2/U4/U5 approved.
 - ebilling (private detail only in messages): 165d APPROVED, merged into work 66b7c31315. 165e APPROVED; 165f APPROVED (165e K1 closed); 165e+165f ship in the same batch; gate watches `own_submission_missing` + `document_link_not_own` (dev baseline 0). 165b-3 part A + fix APPROVED; part B APPROVED after F1 (keyed batched read) fixed at 4ba88a6de1; Mark Paid also keyed. 082d APPROVED. 165b-4 spend: (b) keyed rows, K2 ok, parent scope ok (attribution known limit), live privilege check + #2635.
 - ebilling 164c Q6 → (b): their billing-event ribbon import may replace exactly 8 SecureChild ids (merged into work 931fe905b0). Conditions: source removal (billingevent out of SecureChild `$Tables` + RibbonDiff) on master BEFORE their dev -Apply; I must NOT run Deploy-SecureChildNewCommands from a pre-merge master; read-backs to me: all 11 hides stored + SecureChild -Verify for the other 8 tables.
+- ebilling 085 (11-08, at 417889cce0): card publish asks Write on the card's Procedure APPROVED (fail closed; checked version = published version, else 409; legacy unversioned Draft count due with pass 2; must-fire tests). K4 rates panel on core Read ACCEPTED as designed (resolver-chosen versions only, no Procedure ids; pin with a test). Re-check the pass 2 fix diff.
 - Gate query uses a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
 ## Reviews queue
