@@ -486,6 +486,41 @@ public class SpendServerWrittenSourcesTests
         calls.Should().Be(2);
     }
 
+    [Fact]
+    public async Task S4_TheCallersOwnCancellation_OnTheWriterId_Propagates_UnloggedAndNeverZero()
+    {
+        // 165b-4 re-check K2: a cancelled caller is not a fault: it is rethrown, logs no Warning, and never becomes 0 or "counted".
+        using var cts = new CancellationTokenSource();
+        Task<Guid> Cancelled(CancellationToken ct)
+        {
+            cts.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(DecisionRecordWriterTests.WriterUser);
+        }
+
+        var world = new SpendWorld();
+        world.Approved(Matter, MatterId, 300m);
+        var logger = new CapturingLogger();
+        await FluentActions.Awaiting(() => FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, false, Cancelled, cts.Token, logger))
+            .Should().ThrowAsync<OperationCanceledException>();
+        logger.Warnings.Should().BeEmpty("the caller's own cancellation is not a misconfiguration");
+    }
+
+    [Fact]
+    public async Task S4_TheTool_RethrowsTheCallersOwnCancellation_InsteadOfReportingAFailure()
+    {
+        // 165b-4 re-check K1: the financial tool's catch-all no longer turns the caller's cancellation into an error result.
+        var world = new SpendWorld();
+        world.Approved(Matter, MatterId, 300m);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        world.FaultOn = _ => new OperationCanceledException(cts.Token);   // the SDK honours the cancelled token on the first read
+        var tool =new FinancialCalculationToolHandler(world.Service().Object, Recorder(), new Mock<FinanceTelemetry>().Object,
+            NullLogger<FinancialCalculationToolHandler>.Instance);
+        await FluentActions.Awaiting(() => tool.ExecuteAsync(new ToolParameters(new Dictionary<string, object> { ["matterId"] = MatterId }), cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+    }
+
     // ── O6: parity across the three readers ──
 
     [Fact]

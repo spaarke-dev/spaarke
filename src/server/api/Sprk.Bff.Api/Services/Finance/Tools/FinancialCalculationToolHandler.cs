@@ -117,8 +117,9 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
             return PlaybookToolResult.CreateSuccess(resultJson);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // The caller's own cancellation propagates; it is not a calculation failure (165b-4 re-check K1).
             stopwatch.Stop();
             _logger.LogError(ex, "Financial calculation failed");
             return PlaybookToolResult.CreateError($"Financial calculation failed: {ex.Message}");
