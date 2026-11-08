@@ -970,7 +970,20 @@ internal static class OwnedChildWrite
                 : value;
         }
 
-        return await MergeExtraAsync(user, table, WithoutColumns(item, plan.Columns.Keys), extra, ct).ConfigureAwait(false);
+        var merged = await MergeExtraAsync(user, table, WithoutColumns(item, plan.Columns.Keys), extra, ct).ConfigureAwait(false);
+        if (merged.Refusal is not null)
+            return merged;
+
+        // A display column the planner clears is text, never a lookup: it is written as a null, but not listed as a cleared
+        // column, which the re-file core reads as a candidate parent clear (RefileAsync) — so clearing the display never turns
+        // an ordinary update into a re-file. A display clear the caller sent itself is kept as the caller's mapper listed it.
+        return (merged.Item with
+        {
+            ClearedColumns = merged.Item.ClearedColumns
+                .Where(c => !PairDisplayColumns.Contains(c, StringComparer.OrdinalIgnoreCase)
+                            || item.ClearedColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+                .ToArray(),
+        }, null);
     }
 
     /// <summary>

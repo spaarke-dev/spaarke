@@ -567,6 +567,37 @@ public sealed class RegardingPairUpdatePlannerTests
         entities.Invocations.Should().BeEmpty();
     }
 
+    // ── The caller wrapper (KeepRegardingPairWholeAsync) ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CallerPath_ADisplayClearThePlannerAdds_IsWrittenAsNull_ButIsNoClearedColumn()
+    {
+        // An untyped pair moved: no type to re-derive the display from, so Q7 clears it. The clears are written, but the re-file
+        // core reads ClearedColumns as candidate parent clears (RefileAsync), so the planner's text clears are not listed there.
+        var user = new Mock<IDataverseUserClient>(MockBehavior.Strict);
+        user.Setup(u => u.GetAsync($"sprk_events({Row:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, System.Text.Json.JsonSerializer.SerializeToElement(
+                new Dictionary<string, object?> { ["sprk_regardingrecordid"] = MatterA.ToString("D") })));
+        user.Setup(u => u.GetAsync(It.Is<string>(p => p.Contains("ManyToOneRelationships")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, System.Text.Json.JsonSerializer.SerializeToElement(
+                new { LogicalName = "sprk_event", ManyToOneRelationships = Array.Empty<object>() })));
+        var item = new DataverseWriteItemMapper.MappedItem(
+            $$"""{"sprk_regardingrecordid":"{{MatterB:D}}","sprk_regardingrecordnumber":null}""",
+            ["sprk_regardingrecordid", "sprk_regardingrecordnumber"])
+        {
+            ClearedColumns = ["sprk_regardingrecordnumber"], // the caller's own display clear
+        };
+
+        var (prepared, refusal) = await KeepRegardingPairWholeAsync(user.Object, "sprk_event", "sprk_events", Row, item, null, default);
+
+        refusal.Should().BeNull();
+        using var body = System.Text.Json.JsonDocument.Parse(prepared.JsonBody);
+        body.RootElement.GetProperty("sprk_regardingrecordname").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+        body.RootElement.GetProperty("sprk_regardingrecordurl").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+        prepared.ClearedColumns.Should().BeEquivalentTo(["sprk_regardingrecordnumber"],
+            "only the caller's own clear is listed; the planner's display clears are not candidate parent clears");
+    }
+
     private sealed class PlanLog : ILogger
     {
         public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = new();
