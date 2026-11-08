@@ -2,11 +2,14 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Xunit;
+using ProcedureKit = Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit;
 using Kit = Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit;
 using W = Sprk.Bff.Api.Tests.Services.Finance.CorrectionWorld;
 
@@ -72,6 +75,54 @@ internal static class ProcedureSnapshotPatchKit
             ["applied"] = new JsonObject { ["invoice"] = true, ["lines"] = new JsonArray() },
         }),
     };
+
+    /// <summary>
+    /// What the submission step would have evaluated for the world's stored invoice (header from the provenance, the two lines from their rows and
+    /// extraction JSON), built independently of <c>RequestBasis</c> so a difference in how a rebuild reads the facts shows up. The one fact the world
+    /// does not store is the submission-time timekeeper resolution: the roster is empty, so it is NotOnRoster here, and the rebuild reads None (no
+    /// correction row has stored a reason).
+    /// </summary>
+    internal static BillingEvaluationRequest SubmissionTimeRequest()
+    {
+        Dictionary<string, decimal> LineConfidence() => new()
+        {
+            ["Hours"] = 0.55m, ["Rate"] = 0.88m, ["Amount"] = 0.93m, ["Narrative"] = 0.79m,
+            [BillingFieldNames.TaskCode] = 0.77m, [BillingFieldNames.ActivityCode] = 0.77m, [BillingFieldNames.ExpenseCode] = 0.77m,
+        };
+
+        return new BillingEvaluationRequest
+        {
+            SubmissionId = W.SubmissionId,
+            FirmId = W.Firm,
+            CoreRecord = new CoreRecordReference(CoreRecordKind.Project, W.Core),
+            TrackingNumber = "INV-1001.1",
+            FirmInvoiceNumber = "INV-1001",
+            ReceivedOn = new DateOnly(2026, 10, 1),
+            BillingPeriodStart = new DateOnly(2026, 9, 1),
+            BillingPeriodEnd = new DateOnly(2026, 9, 30),
+            Currency = "USD",
+            HeaderConfidence = new Dictionary<string, decimal>
+            {
+                ["FirmInvoiceNumber"] = 0.9m, ["BillingPeriodStart"] = 0.8m, ["BillingPeriodEnd"] = 0.8m, ["Currency"] = 0.99m, ["TotalDue"] = 0.65m,
+            },
+            Lines =
+            [
+                new BillingLineFacts
+                {
+                    Index = 2, LineType = InvoiceLineType.Fee, Date = new DateOnly(2026, 9, 12), TimekeeperName = "A. Lee",
+                    Timekeeper = new TimekeeperResolution { Reason = TimekeeperUnmatchedReason.NotOnRoster },
+                    ApprovedRate = new RateResolution { Status = RateResolutionStatus.NotFound, Reason = RateNotFoundReason.TimekeeperUnmatched },
+                    Hours = 25m, BilledRate = 100m, Amount = 2500m, Narrative = W.Narrative, TaskCode = "L110", ActivityCode = "A101", BilledTaskCode = "L100",
+                    FieldConfidence = LineConfidence(),
+                },
+                new BillingLineFacts
+                {
+                    Index = 3, LineType = InvoiceLineType.Expense, Amount = 40m, Narrative = "Court filing fee", TaskCode = "L110", ExpenseCode = "E101",
+                    ApprovedRate = new RateResolution { Status = RateResolutionStatus.NotApplicable }, FieldConfidence = LineConfidence(),
+                },
+            ],
+        };
+    }
 
     internal static IReadOnlyList<Guid>? AppliedOf(JsonObject root) => ProcedureSnapshot.Read(root)?.AppliedPolicyVersionIds;
 
@@ -289,5 +340,41 @@ public sealed class ProcedureSnapshotPatchTests
         result.Code.Should().Be(CorrectionCodes.FindingsTooLarge).And.Be("ebilling.correction.findings_too_large");
         world.ValueWrites.Should().NotContain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"));
         world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
+    }
+
+    // ── 082d follow-up K1: the round trip with the REAL evaluator on both sides ──
+
+    [Fact(DisplayName = "082d follow-up K1 correction round trip: a snapshot the REAL evaluator built at submission survives a normal correction of an undecided line (preserved, equals Build(after), not null)")]
+    public async Task ACorrection_OfAnUndecidedLine_WithARealSubmissionSnapshot_PreservesTheSnapshot()
+    {
+        var procedures = new ProcedureKit().Procedure("Round trip", assigned: true);
+        procedures.Rule("Round trip", "RT-CAP", RuleType.DailyHoursCap);
+        procedures.Rule("Round trip", "RT-INC", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":1}""");
+        var loaded = procedures.Loaded();
+        var evaluator = Kit.Evaluator();
+
+        // The stored snapshot: the real evaluator over the submission-time facts, the way the persister stores it.
+        var submissionResult = evaluator.Evaluate(ProcedureSnapshotPatchKit.SubmissionTimeRequest(), loaded);
+        var snapshot = ProcedureSnapshot.Build(submissionResult);
+        snapshot.Should().NotBeNull();
+        snapshot!["applications"]!.AsArray().Should().NotBeEmpty("control: the Procedure's rules applied, so the snapshot is not the trivial empty one");
+        var world = WorldWith(snapshot);
+
+        // The correction re-runs the REAL evaluator over the rebuilt facts, before and after (recorded, not shaped).
+        var results = new List<BillingEvaluationResult>();
+        var reevaluation = new InvoiceCorrectionReevaluation(
+            world.Entities.Object, (_, _) => Task.FromResult(loaded), (request, facts) => { var r = evaluator.Evaluate(request, facts); results.Add(r); return r; },
+            world.WriteSignalAsync, world.CloseSignalAsync, NullLogger<InvoiceCorrectionReevaluation>.Instance);
+        world.Seam = reevaluation.ApplyAsync;
+
+        var result = await world.Service().CorrectAsync(Hours("2"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        results.Should().HaveCount(2, "control: one before and one after evaluation");
+        JsonNode.DeepEquals(ProcedureSnapshot.Build(results[0]), snapshot).Should().BeTrue("control: the rebuilt before side reads the same Procedure basis the submission stored");
+        var stored = Stored(world);
+        stored[ProcedureSnapshot.Member].Should().NotBeNull("normal use keeps the snapshot");
+        JsonNode.DeepEquals(stored[ProcedureSnapshot.Member], ProcedureSnapshot.Build(results[1])).Should().BeTrue("the member is the real Build(after)");
+        ProcedureSnapshot.Read(stored).Should().NotBeNull();
     }
 }

@@ -165,6 +165,7 @@ public sealed partial class InvoiceLineAddServiceTests
 
         result.Status.Should().Be(AddLineStatus.TooLarge);
         result.Code.Should().Be(AddLineCodes.TooLarge).And.Be("ebilling.line_add.too_large");
+        result.Detail.Should().Contain("Nothing was changed.").And.EndWith("Contact support.", "082d follow-up K3: the refusal names a next step, as the correction's findings_too_large does");
         add.Transactions.Should().BeEmpty();
         add.World.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
     }
@@ -186,5 +187,33 @@ public sealed partial class InvoiceLineAddServiceTests
         add.Transactions.Should().BeEmpty();
         add.World.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
         add.Findings()[ProcedureSnapshot.Member]!.ToJsonString().Should().Be(member);
+    }
+
+    [Fact(DisplayName = "082d follow-up K1 add line round trip: a snapshot the REAL evaluator built at submission survives a normal add (preserved, equals Build(after), not null)")]
+    public async Task AddLine_WithARealSubmissionSnapshot_PreservesTheSnapshot()
+    {
+        var procedures = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Round trip", assigned: true);
+        procedures.Rule("Round trip", "RT-CAP", RuleType.DailyHoursCap);
+        procedures.Rule("Round trip", "RT-INC", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":1}""");
+        var loaded = procedures.Loaded();
+        var evaluator = Kit.Evaluator();
+        var snapshot = ProcedureSnapshot.Build(evaluator.Evaluate(ProcedureSnapshotPatchKit.SubmissionTimeRequest(), loaded));
+        snapshot.Should().NotBeNull();
+        snapshot!["applications"]!.AsArray().Should().NotBeEmpty("control: the Procedure's rules applied, so the snapshot is not the trivial empty one");
+
+        // The real evaluator on both sides of the re-run (no Shape); the results are recorded to build the expectation.
+        var add = new AddLineWorld();
+        StoreMember(add, snapshot);
+        var results = new List<BillingEvaluationResult>();
+        add.Shape = (_, result) => { results.Add(result); return result; };
+
+        var result = await add.Service(loaded).AddAsync(Expense(), CancellationToken.None);
+
+        result.Status.Should().Be(AddLineStatus.Applied, result.Detail);
+        results.Should().HaveCount(2, "control: one before and one after evaluation");
+        JsonNode.DeepEquals(ProcedureSnapshot.Build(results[0]), snapshot).Should().BeTrue("control: the rebuilt before side reads the same Procedure basis the submission stored");
+        var stored = add.Findings();
+        stored[ProcedureSnapshot.Member].Should().NotBeNull("normal use keeps the snapshot");
+        JsonNode.DeepEquals(stored[ProcedureSnapshot.Member], ProcedureSnapshot.Build(results[1])).Should().BeTrue("the member is the real Build(after)");
     }
 }

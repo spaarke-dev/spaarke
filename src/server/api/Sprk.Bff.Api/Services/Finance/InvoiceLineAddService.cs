@@ -68,9 +68,6 @@ public enum AddLineStatus
     IdReused,
     Busy,
 
-    /// <summary>082d fix round 2: the patched findings would exceed <c>sprk_findingsjson</c>'s column even without the Procedure snapshot. 409, nothing written.</summary>
-    TooLarge,
-
     /// <summary>The submission, the invoice or a stored line changed between the read and the commit. 409, nothing written.</summary>
     Changed,
     OwnerUnresolved,
@@ -81,6 +78,10 @@ public enum AddLineStatus
     /// <summary>The line was committed but a later step (totals, record or Signals) did not finish: 503 with <see cref="AddLineResult.FailedStep"/>.
     /// A repeat of the same request completes it (one line, one record).</summary>
     Incomplete,
+
+    /// <summary>082d fix round 2: the patched findings would exceed <c>sprk_findingsjson</c>'s column even without the Procedure snapshot. 409, nothing written.
+    /// Last in the enum so every earlier member keeps its numeric value.</summary>
+    TooLarge,
 }
 
 /// <summary>Stable ProblemDetails codes of Add line (ADR-019). New codes are <c>ebilling.line_add.*</c>; the rest reuse the line decision codes.</summary>
@@ -767,7 +768,7 @@ public sealed class InvoiceLineAddService
         {
             _logger.LogWarning("Add line on invoice {InvoiceId}: the patched findings are over the column even without the Procedure snapshot; nothing changed.", command.InvoiceId);
             return new AddLineResult(
-                AddLineStatus.TooLarge, AddLineCodes.TooLarge, "This invoice's stored findings are too large to add a line. Nothing was changed.");
+                AddLineStatus.TooLarge, AddLineCodes.TooLarge, "This invoice's stored findings are too large to add a line. Nothing was changed. Contact support.");
         }
 
         if (snapshotDropped)
