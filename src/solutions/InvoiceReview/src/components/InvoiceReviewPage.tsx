@@ -419,9 +419,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   React.useEffect(() => {
     if (launchLineHandled.current || !review) return;
     launchLineHandled.current = true;
-    if (initialLineId && review.lines.some(l => l.id.toLowerCase() === initialLineId)) {
-      scrollToLineId.current = initialLineId;
-      onSelect(initialLineId, null);
+    // Select by the server's own id, so the grid row and pane match whatever casing the read model uses.
+    const match = initialLineId ? review.lines.find(l => l.id.toLowerCase() === initialLineId) : undefined;
+    if (match) {
+      scrollToLineId.current = match.id;
+      onSelect(match.id, null);
     }
   }, [review, initialLineId, onSelect]);
   const gridRef = React.useRef<HTMLDivElement>(null);
