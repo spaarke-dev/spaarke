@@ -95,3 +95,79 @@ Where each part is read (all app-only, through `IGenericEntityService`):
 - ArchTests (full, once at the end): 2181 total, 2180 passed, 1 failed: `Task 098: every external invoice-family surface reaches THE (a') predicate (or is listed)` names `FirmFindingsProjection` (a `NamedExternalTypes` and `FamilyReaderTypes` entry placed there for task 130 before the class existed). Its fix is the ledger entry or the predicate on the routes, which is 130b's. At tip `13a8c63292` the suite was 2181/0. Two other failures the first run showed were mine and are fixed: `ADR-038 B12` (a serializer-literal assertion, removed) and `166 K4 C1` (the projection named the field-secured totals; the header read now lives in `InvoiceReviewReadService.ReadHeaderFactsAsync`, a reviewed reader, so no new type names them).
 - Publish size: `dotnet publish -c Release` of this branch tip against the same tree with the three changed files reverted to `13a8c63292` (built in this worktree; machine under load): 137,913,793 bytes against 137,858,881 bytes, a delta of +54,912 bytes (+54 KB, all of it `Sprk.Bff.Api.dll`: 25,888,256 against 25,842,176). No package changed. The figure is the publish folder's raw size with symbols, not the compressed artifact the architecture thresholds may use; `scripts/Capture-BffBaseline.ps1` is an HTTP latency probe, not a size tool, and was not used.
 - Vulnerable-package check: not re-run; no package reference changed.
+
+## 130b: routes, firm-scope authorization, writer-created reasons
+
+Branch `task/ebilling-130b` (from `task/ebilling-130a` head `60a2b64dc0`).
+
+### What was built
+
+- `Api/ExternalAccess/FirmOutcomeEndpoints.cs` (new): `MapFirmOutcomeEndpoints`, mounted in `ExternalAccessEndpoints.cs` on the external collaboration group (one line, after the invoice-submission mount). Two GET routes:
+  - `/api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome`
+  - `/api/v1/external/ebilling/submissions/{submissionId:guid}/outcome`
+  - Each chain: `AddFirmOutcomeAuthorizationFilter(subject)`, then `RequireWorkforceCeiling(ReadInvoiceSubmissions)`, then `RequireEbillingEnabled()` (the flag never replaces the authorization decision, so it runs after it).
+- `Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs` (new): the decision. The handlers read the projection only for the id the filter admitted (stored in the request's items); a handler reached without that decision answers 403.
+- `Services/Finance/FirmFindingsProjection.cs`: the writer-created hardening (below). `Infrastructure/DI/FinanceModule.cs`: the registration became a factory that passes `BillingDecisionRecorder.WriterUserIdAsync`.
+
+### Status codes (closed set)
+
+| Case | Status | Body |
+|---|---|---|
+| Unauthenticated | 401 | the host's challenge |
+| Group filter cannot resolve the caller | 403 | the resolver's |
+| Internal systemuser, no principal, caller with no active firm | 403 | `ebilling.firm-outcome.forbidden` |
+| Firm read faults, is unreadable, or returns null | 403 (logged as a system failure) | same |
+| Item's firm is not one of the caller's active firms (a shared matter changes nothing); no Read on the item's core record; hidden by the (a') predicate; no (a') predicate registered | 403 | same |
+| Item does not exist | 403 | same body as another firm's |
+| Invoice/submission read faults, or the visibility decision cannot be made | 503 | `ebilling.firm-outcome.unavailable` |
+| eBilling flag off, caller authorized | 503 | `ebilling.disabled` |
+| Projection `Degraded` or `Kind == Unavailable` | 503 | `ebilling.firm-outcome.unavailable` |
+| Otherwise | 200, `Cache-Control: no-store`, the `FirmOutcome` JSON (the kind is a string) | |
+
+A multi-firm caller sees the items of each of its firms.
+
+Why a missing id is 403 and not 404: the rule is "404 only if the firm check could pass". A missing item has no firm, so the check can never pass for it, and the answer is 403 for a missing and a foreign item alike. This is deliberate: a 404 for a missing id would let any caller probe which ids exist.
+
+### Writer-created reasons (the 130a open question 3, closed)
+
+The Decision Record query now carries `WriterCreatedRecord.AddConditions` (created by the BFF writer, not on behalf of anyone), so a reason can come only from a record the writer created. The rule has one source (the existing `WriterCreatedRecordSingleSourceGuardTests` ArchTest forbids hand-built conditions). The writer id is a `Func<CancellationToken, Task<Guid>>`, called lazily and only when there are decided lines (no decided lines, no call). A non-writer record's line stays, with a null reason. If the id cannot be obtained (a fault or an empty id) the outcome is `Degraded` with the status only, never "no record". `BillingDecisionKey` matching was not added: reduce and disallow lines store no decision id.
+
+### ArchTests
+
+- `AuthenticationSchemeCensusTests`: both routes in `PinnedExternalCollaborationRoutes`.
+- `RouteAuthorizationGuardTests.Ledger.cs`: a `GovernedFile` entry (GroupGated) for `FirmOutcomeEndpoints.cs` citing the filter attachment at `:26`, `:37` and the kill switch at `:28`, `:39`; a `CreditedForm` for `AddFirmOutcomeAuthorizationFilter` (a credited form must exist for a GroupGated attachment to be classified), citing the filter's decision lines; `ExpectedEndpointFileCount` 151 to 152 with a history line.
+- `ExternalInvoiceVisibilityGuardTests` ("Task 098: every external invoice-family surface reaches THE (a') predicate (or is listed)"): resolved by **reviewed `NotInvoiceSurfaces` entries, not by calling the predicate in the handlers.** Why: the filter is the single place that asks the predicate for the one item, and it precedes every handler on the route; asking again in the handler would repeat the same reads for the same answer. The two handlers and the 12 `FirmFindingsProjection` members the scan flags (the projection is the reader behind the handlers, and was already a `NamedExternalTypes` entry) are listed, each with a reason. The filter itself is seen reaching the predicate.
+- `InvoiceMoneyColumnsAppOnlyWriteGuardTests` ("166 K4 C1"): the filter reads `sprk_vendororg` (one of the seven field-secured columns) to compare the invoice's firm with the caller's firms, so it is added to `Readers`. This file was not named in the brief; the guard fails without it.
+
+### Decisions taken inside the brief (for review)
+
+1. The filter does every check, including the (a') decision, and the handlers do none. The alternative (the handler re-asking the predicate) doubles the reads.
+2. A submission whose invoice exists is projected by the submission route only for an Accepted submission; the submission seam (`VisibleSubmissionsAsync`) decides the submission's own invoice as well.
+3. The refusal body of every 403 is identical and carries no item data (asserted in the tests), so the status says nothing about why.
+4. The same `ReadCallerFirmsAsync` / `IsSystemUser` helpers of the invoice-submission filter are reused, not copied.
+
+### Component justification (CLAUDE.md section 11)
+
+`FirmOutcomeEndpoints` (two routes), `FirmOutcomeAuthorizationFilter`, and the mount line in `ExternalAccessEndpoints.cs`:
+
+1. Existing: `ExternalInvoiceSubmissionEndpoints` / `ExternalInvoiceSubmissionAuthorizationFilter` (submit, read and list a submission; they return the submission, not the decided lines), and the 130a projection (no routes). No existing route returns the firm's outcome view.
+2. Extension: the submission filter's rules differ (a read is a uniform 404, a submit needs Create); the outcome needs the firm check on the invoice (not only the submission), the (a') decision for an invoice, and a 403 that hides existence. It reuses the submission filter's firm read and systemuser test, and the same (a') seams, unchanged. The routes could not be added to `ExternalInvoiceSubmissionEndpoints` without mixing two authorization shapes in one chain table.
+3. Cost of doing nothing: FR-38 fails (a firm cannot see why a line was reduced, and the notice 131, PDF 133 and SPA 134 have no route to read), and any later route would re-derive who may see an outcome.
+
+The `FirmFindingsProjection` DI factory registration: Existing: `BillingDecisionRecorder.WriterUserIdAsync` is reused; no new abstraction. Cost of doing nothing: the writer filter cannot be applied.
+
+### BFF hygiene (section 10)
+
+- Placement: BFF, `Api/ExternalAccess` beside the invoice-submission routes (B1 caller identity from the principal, B4 live request).
+- No package added, no HIGH CVE introduced (no package reference changed; `dotnet list package --vulnerable` not re-run).
+- Publish-size delta: see "Results (130b)".
+
+### Results (130b)
+
+- Integration auth tests `FirmOutcomeScopeTests` (33, in `tests/integration/auth/Finance`, compiled into the unit project): 33 passed.
+- Unit: `FirmFindingsProjectionTests` 45 passed (6 new writer-filter tests: a non-writer reason is never shown, a record created on the writer's behalf is not shown, a writer reason is shown, a writer-id fault is Degraded, an empty id is Degraded, no decided lines means no writer-id call).
+- Broader unit run (`Finance`, `ExternalAccess`, `Module`, `DependencyInjection` name filters): 12235 total, 12231 passed, 0 failed, 4 skipped.
+- Seeding proof 1 (firm scope): the `firms.Contains(...)` term removed from both firm checks in the filter. 6 of 33 failed: the another-firm invoice and submission tests (both marked "SEEDING PROOF"), the own-firm-versus-other test, the multi-firm test, the "kill switch runs after authorization" test and the "missing is the same 403 as another firm's" test. The file was restored from a copy; its SHA-256 matched the original (`317a772a...e8879`).
+- Seeding proof 2 (writer-created filter): the `WriterCreatedRecord.AddConditions` call replaced by `_ = writer;`. 3 of 78 failed: the unit must-fire test (a record the writer did not create is never projected), the empty-id Degraded test, and the route-level forged-reason test. Restored from a copy; SHA-256 matched (`4a1c7aec...40240`).
+- ArchTests (full, once): 2181 total; the first full run had 2180 passed and 1 failed (`166 K4 C1`, the filter naming `sprk_vendororg`, fixed by listing it as a reader). The four affected classes were re-run after the fix (121 passed). At the 130a tip the suite was 2180 of 2181 (the 098 test, which this task resolves).
+- Publish size: `dotnet publish -c Release` of this branch tip against the same tree with the 130b source changes reverted to `60a2b64dc0`: 137,934,313 bytes against 137,913,813 bytes, a delta of +20,500 bytes (+20 KB; `Sprk.Bff.Api.dll` 25,905,664 against 25,888,256, +17 KB). No package changed. Raw publish folder size with symbols, not the compressed artifact. Against master the 130a delta (+54 KB) adds to this one.
