@@ -40,4 +40,4 @@
   - Every deploy needs the owner's per-SHA go in uac-r2's session.
   - Our master PR merges after their pair.
 - D-207 order and the replay guard are unchanged. The MCP commit goes only through `DecisionCommitService`.
-- Standing directives: project `CLAUDE.md` §3. Decisions: `notes/decisions.md`. Peers: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `spaarke-wt-spaarke-legal-ai-accelerator-80`, `spaarke-wt-unified-access-control-r2-20`.
+- Standing directives: project `CLAUDE.md` §3. Decisions: `notes/decisions.md`. Peers: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `spaarke-wt-spaarke-legal-ai-accelerator-80`, `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
