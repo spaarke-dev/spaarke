@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `adfb7aeec8`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head = origin/work/ebilling-r1 (+ the in-progress 165b-2 merge). Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -14,14 +14,16 @@
 
 ## Agents / branches in flight
 
+> **IN PROGRESS AT CHECKPOINT (2026-11-08):** `git merge --no-ff --no-commit origin/task/ebilling-165b2-fix1` (tip `c492bc3e55`) into work. **Only conflict: `projects/ebilling-r1/notes/165b-integrity-checks.md`.** Resolve: keep BOTH sides; work's §7 (165b-4 design, §7.1–7.13) stays; 165b-2's "## 7 …" section and its "7.1 Fix round 1" become **"## 9 …" / "9.1"**. Then commit "merge(ebilling-r1): 165b-2 - approval and AP export refuse stored totals that differ from the lines (one pass, 2 F4 + K2 fixed)", run tip verify (build, full ArchTests, filtered unit `Finance|ApExport|Approval|MarkPaid|Submission`), push, TASK-INDEX 165b-2 ✅, remove wt agent-aa58085b0e9f8cee1 + agent-a7ea040de26bdb496. Machine is heavily loaded: git commands can take minutes, so run long ones with `run_in_background`.
+
 | Item | Branch / worktree | State → next action |
 |---|---|---|
-| **165b-3** | ✅ merged `5ae5590b66`, tip verified (2174/0, 11236/0), wt removed | Re-check K1-K4 in notes 6.4. |
-| **165b-4** | `task/ebilling-165b4` (Opus, from `fd628e75c5`) | Design approved: uac-r2 §7.12 (b); ontology-r1 §7.13 (b) + conditions (null-only coalesce, read-1 snapshot K1, dev before/after per parent before deleting `ReadSpendPartsAsync`, parity + 1-vs-50 count tests, writer id injected only when spend is read, live Global-depth dev test, rollup calls `ReadPendingSpendAsync` + unlinked count log). Precondition: null-findings linked own submissions == 0, else STOP → ontology-r1. Running. Next: one adversarial pass → ontology-r1 reviews FinanceBaseValues/Signals hunks → merge. Edits `InvoiceApprovalService.InvoicesWithApproveRecordAsync` body only (165b-2 is in `CheckApprovableAsync`). |
-| **165e + 165f** | ✅ merged; guard follow-up merged `6ab63efbf7` (ArchTests 2181/0, unit 4976/0) | **Ship together; send uac-r2 the dev-batch sha** when the batch is cut. |
-| **165b-2** | `task/ebilling-165b2` @ `a89c635f93`; fix `task/ebilling-165b2-fix1` (Sonnet, running) | Pass: 2 F4 (refusal text must name the remedy: repeat the last line/adjustment decision; CSV fixture with distinct adjustment totals) + K2 (export the re-checked totals) in the fix. Next: merge fix1 → verify tip (renumber its notes §7 → §9). |
-| **083** | fix1 `task/ebilling-083-fix1` @ `9a4835f157`; fix2 `task/ebilling-083-fix2` (Sonnet, running) | Pass 1: 3 F fixed (POML labels, own-submission test order, ListLogger). Pass 2: code/tests clean; 2 F4 in POMLs (130:126 flag-off asks for a label that ForFirm never returns; 135 step 1 still calls GetFirmClauseAsync + old scope selection) + K1 (Warning gets invoiceId/policyVersionId, no exception) + K3 (last-linked reader test). Next: merge fix2 (no 3rd pass; POML + log text + tests only) → verify tip → TASK-INDEX → **130**. |
-| **085** | `task/ebilling-085` @ `417889cce0` (Sonnet; on `ecc8a73639`) | Done: build clean, ArchTests 2159/0, unit 8669/0, +4.3 KB; ledger entry; `RateProcedureWorld.cs`; no-Procedures test. Trailer says Sonnet 5.5 (accurate, left as is). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → tell ontology-r1 `approvedRate.scope` → `approvedRate.rank`. |
+| **165b-2** | `task/ebilling-165b2-fix1` @ `c492bc3e55` (on `a89c635f93`) | Pass: 2 F4 + K2 fixed (refusal texts name "repeat the last line or adjustment decision"; CSV fixture 1000/60/40/900; export re-checks all 6 stored totals vs pre-claim row; step-7 text too). ApExport 306/0, InvoiceApproval+ApExport 511/0. **Merging (see above).** |
+| **083** | fix1 `task/ebilling-083-fix1` @ `9a4835f157`; **fix2 `task/ebilling-083-fix2` (Sonnet, running)** | Pass 1 (3 F) fixed; pass 2: code/tests clean, 2 F4 in POMLs (130:126 flag-off label; 135 step 1 still calls GetFirmClauseAsync) + K1 Warning gets invoiceId/policyVersionId (no exception) + K3 last-linked test. Next: merge fix2 (no 3rd pass) → verify → TASK-INDEX 083 ✅ → launch **130** (Sonnet/Opus per POML; partner-readable → 2 passes). Remove wts agent-abce3e9bf2270020c, agent-a7ba828dad62a6665 + fix2's. |
+| **085** | `task/ebilling-085` @ `417889cce0` (on `ecc8a73639`) | Done (ArchTests 2159/0, unit 8669/0, +4.3 KB; new filter `RequireWriteOnTheVersionsProcedure` + ledger; `RateProcedureWorld.cs`). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → tell ontology-r1 `approvedRate.scope` → `approvedRate.rank`. wt agent-aab0af68fc90e3222. |
+| **165b-4** | `task/ebilling-165b4` (Opus, from `fd628e75c5`, running) | Design approved (notes §7.12 uac-r2, §7.13 ontology-r1). Precondition null-findings count must be 0 else STOP. Next: one adversarial pass → ontology-r1 reviews FinanceBaseValues/Signals hunks → merge. |
+| **165e + 165f** | ✅ merged; guard follow-up `6ab63efbf7` | Ship together; send uac-r2 the dev-batch sha when the batch is cut. |
+| **fm-032b** | fm's | Round 2 `9083f5df93` confirmed by us + uac-r2 (inline, U3 (c), E7). fm implements 032b-2/3 from the CURRENT work tip and sends us diffs before merge into work. |
 
 ## Queued
 

@@ -153,6 +153,7 @@ public sealed class InvoiceApprovalCompletionTests
         adjustment["sprk_adjustmentmethod"] = new OptionSetValue((int)InvoiceAdjustmentMethod.Percent);
         adjustment["sprk_adjustmentvalue"] = 10m;
         adjustment["statecode"] = new OptionSetValue(0); // Active: the line read keeps an Adjustment line only when its statecode is Active
+        w.StoreTotalsFromLines(); // Task 165b-2: the adjustment service recalculates after it writes the line
 
         w.FaultsOnce["identity"] = new InvalidOperationException("dataverse down"); // the recorder's contact read: no record written
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);

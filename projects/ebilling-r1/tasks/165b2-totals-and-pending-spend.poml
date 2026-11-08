@@ -4,7 +4,7 @@
     <title>Invoice integrity, part 165b-2: stored totals must match the lines at approval and AP export; pending spend excludes held invoices (EB-D-200)</title>
     <phase>4 Review (165 family)</phase>
     <gate>165b-3 merged into work (both edit InvoiceApprovalService).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Approval and AP export refusals (.cs); spend paths owned by ontology-r1.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -73,4 +73,12 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Item 3 done (item 4 is 165b-4). Approval: the stored totals are compared with InvoiceTotalsCalculator over the lines in CheckApprovableAsync, last,
+    before any write; completion runs the same method. AP export: left out of the candidates, refused per invoice in an explicit request, and re-checked
+    after the claim. Comparison, tests, seeds, dev counts (0 live invoices refused; 0 held invoices in pending spend) and known limits:
+    notes/165b-integrity-checks.md section 7.
+    rework: none task 165b-2
+  </notes>
 </task>

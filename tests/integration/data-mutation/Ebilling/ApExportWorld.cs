@@ -150,10 +150,9 @@ internal sealed class ApExportWorld
             ["sprk_billingperiodstart"] = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_billingperiodend"] = new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_currency"] = "USD",
-            ["sprk_totalamount"] = new Money(1000m),
-            ["sprk_lineadjustmentstotal"] = new Money(60m),
-            ["sprk_invoiceadjustmentstotal"] = new Money(40m),
-            ["sprk_approvedtotal"] = new Money(approved),
+            // Task 165b-2: the billed total is the requested approved total (no line is decided, so the calculator derives approved = billed); the five
+            // derived totals are stored from the lines below (StoreTotalsFromLines), as the totals service stores them.
+            ["sprk_totalamount"] = new Money(approved),
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             ["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
             ["sprk_regardingrecordnumber"] = "M-1001",
@@ -181,6 +180,7 @@ internal sealed class ApExportWorld
             });
         }
 
+        StoreTotalsFromLines(id);
         Dataverse.Put(new Entity("sprk_invoiceapproval", Guid.NewGuid())
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", id),
@@ -264,8 +264,43 @@ internal sealed class ApExportWorld
             line["sprk_extractionconfidence"] = extraction;
         }
 
+        if (costType == (int)InvoiceLineCostType.Adjustment)
+        {
+            // Task 165b-2: an Adjustment line as the adjustment service writes it: a Fixed adjustment whose value is its computed amount, so the
+            // calculator accepts it (a line with no method or value is refused) and the stored totals derive from the lines.
+            line["sprk_adjustmentmethod"] = new OptionSetValue((int)InvoiceAdjustmentMethod.Fixed);
+            line["sprk_adjustmentvalue"] = amount;
+        }
+
         Dataverse.Put(line);
+        StoreTotalsFromLines(invoice.Id);
         return line;
+    }
+
+    /// <summary>
+    /// Task 165b-2: stores the invoice's five derived totals as the totals service does after every line change: <see cref="InvoiceTotalsCalculator"/>
+    /// over the invoice's counted lines with its stored billed total. A refused calculation stores nothing (as the service). A test that sets a stored total
+    /// afterwards (<see cref="ExportDataverse.Touch"/>) makes it differ from the lines.
+    /// </summary>
+    public void StoreTotalsFromLines(Guid invoiceId)
+    {
+        var lines = Dataverse.RowsOf("sprk_billingevent")
+            .Where(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoiceId && InvoiceTotalsService.IsCounted(l))
+            .Select(InvoiceTotalsService.ToRow).ToList();
+        var calculation = InvoiceTotalsCalculator.Calculate(Invoice(invoiceId).GetAttributeValue<Money>("sprk_totalamount")?.Value, lines);
+        if (calculation.IsRefused)
+        {
+            return;
+        }
+
+        Dataverse.Touch("sprk_invoice", invoiceId, new Dictionary<string, object>
+        {
+            ["sprk_feestotal"] = new Money(calculation.FeesTotal),
+            ["sprk_expensestotal"] = new Money(calculation.ExpensesTotal),
+            ["sprk_lineadjustmentstotal"] = new Money(calculation.LineAdjustmentsTotal),
+            ["sprk_invoiceadjustmentstotal"] = new Money(calculation.InvoiceAdjustmentsTotal),
+            ["sprk_approvedtotal"] = new Money(calculation.ApprovedTotal),
+        });
     }
 
     private static InvoiceLifecycleStatus StatusOf(int statuscode) =>
