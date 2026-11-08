@@ -11,6 +11,7 @@ export { MetricCardRow } from '../../../../client/shared/Spaarke.UI.Components/s
 export type { MetricCardConfig } from '../../../../client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types';
 export { PanelSplitter } from '../../../../client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter';
 export { useTwoPanelLayout } from '../../../../client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout';
+export { parseDataParams } from '../../../../client/shared/Spaarke.UI.Components/src/utils/parseDataParams';
 export { StatusBadge } from '../../../../client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge';
 export type { StatusBadgeTone } from '../../../../client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge';
 export { StatusBar } from '../../../../client/shared/Spaarke.UI.Components/src/components/ConsoleKit/StatusBar';

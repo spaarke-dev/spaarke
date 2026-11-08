@@ -419,7 +419,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   React.useEffect(() => {
     if (launchLineHandled.current || !review) return;
     launchLineHandled.current = true;
-    if (initialLineId && review.lines.some(l => l.id === initialLineId)) {
+    if (initialLineId && review.lines.some(l => l.id.toLowerCase() === initialLineId)) {
       scrollToLineId.current = initialLineId;
       onSelect(initialLineId, null);
     }

@@ -73,6 +73,36 @@ describe('InvoiceReviewPage: launch line (EB-D-194)', () => {
       Element.prototype.scrollIntoView = original;
     }
   });
+
+  it('applies the launch line once: a later re-read of the review never moves the reviewer back to it', async () => {
+    jest.useFakeTimers();
+    try {
+      const reread = review([line(1), flagged(2), line(3), flagged(4)]);
+      const api = mockApi([normal(), reread]);
+      renderPage(api, { initialLineId: lineId(4), pollIntervalMs: 1000 });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(await screen.findByTestId(`pane-line-${lineId(4)}`)).toBeInTheDocument();
+      expect(row(4)).toHaveAttribute('aria-selected', 'true');
+
+      fireEvent.click(row(2));
+      expect(await screen.findByTestId(`pane-line-${lineId(2)}`)).toBeInTheDocument();
+      expect(row(2)).toHaveAttribute('aria-selected', 'true');
+
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByTestId(`processing-${lineId(3)}`)).not.toBeInTheDocument());
+
+      expect(row(2)).toHaveAttribute('aria-selected', 'true');
+      expect(row(4)).toHaveAttribute('aria-selected', 'false');
+      expect(screen.queryByTestId(`pane-line-${lineId(4)}`)).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('InvoiceReviewPage: layout and states', () => {

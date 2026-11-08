@@ -1,7 +1,7 @@
 import { createInvoiceReviewApi, isIncomplete, loadFailureMessage, routes, toFailure, writeFailureMessage } from '../services/invoiceReviewApi';
 import { parseLaunch } from '../services/launch';
-// The real decoder from its source file (the jest seam for the library barrel does not carry it).
-import { parseDataParams } from '../../../../client/shared/Spaarke.UI.Components/src/utils/parseDataParams';
+// The real decoder, through the jest seam for the library barrel.
+import { parseDataParams } from '@spaarke/ui-components';
 import { AuthError, INVOICE_ID, PDF_ID, lineId, problem, review } from './testKit';
 
 const BASE = 'https://bff.example.test/';
