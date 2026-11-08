@@ -14,15 +14,37 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 
 /// <summary>
 /// What the two patch paths (a correction, an added line) write into the <c>procedureSnapshot</c> member of the stored findings (ebilling-r1 082d
-/// fix round F4). The findings are re-judged by a re-run on both paths; the member must describe the re-run's basis, or be JSON null (no snapshot,
-/// readers fail closed) when a decided line keeps findings the re-run would change. The evaluator's result is shaped so each side carries a basis
-/// with a recognisable policy version.
+/// fix rounds 1 and 2, F4). A re-run evaluates "before" and "after" under ONE rule load, so both sides carry the same versions and differ only in
+/// subjects. The re-run's snapshot (<c>Build(after)</c>) is written only when the stored member is what the "before" side builds now, is not null,
+/// and no decided line differs; else JSON null; an absent member stays absent.
 /// </summary>
 internal static class ProcedureSnapshotPatchKit
 {
     internal static readonly Guid SeededVersion = Guid.Parse("082d0000-0000-4000-8000-00000000f401");
-    internal static readonly Guid BeforeVersion = Guid.Parse("082d0000-0000-4000-8000-00000000f402");
-    internal static readonly Guid AfterVersion = Guid.Parse("082d0000-0000-4000-8000-00000000f403");
+
+    /// <summary>The rule version both sides of a re-run carry (one rule load).</summary>
+    internal static readonly Guid RuleVersion = Guid.Parse("082d0000-0000-4000-8000-00000000f404");
+
+    /// <summary>A rule version the stored snapshot was judged with that the current rule load no longer carries (a Procedure changed since submission).</summary>
+    internal static readonly Guid VersionSinceChanged = Guid.Parse("082d0000-0000-4000-8000-00000000f405");
+
+    /// <summary>A result that carries <paramref name="basis"/> (the rest of the evaluation is not read by the snapshot).</summary>
+    internal static BillingEvaluationResult ResultOf(BillingProcedureBasis basis) =>
+        Kit.Evaluator().Evaluate(Kit.Request(), Kit.Loaded()) with { ProcedureBasis = basis };
+
+    /// <summary>The snapshot the persister (or an earlier patch) would store for <paramref name="basis"/>.</summary>
+    internal static JsonObject SnapshotOf(BillingProcedureBasis basis) => ProcedureSnapshot.Build(ResultOf(basis))!;
+
+    /// <summary><paramref name="basis"/> plus <paramref name="count"/> more applications (a snapshot big enough to push the findings over the column).</summary>
+    internal static BillingProcedureBasis Padded(BillingProcedureBasis basis, int count) =>
+        basis with
+        {
+            Applications = [.. basis.Applications, .. Enumerable.Range(0, count).Select(_ =>
+                new BillingRuleApplication(Guid.NewGuid(), BillingRuleSource.Procedure, [BillingSubject.ForInvoice()], [], []))],
+        };
+
+    /// <summary>Enough padded applications that the findings JSON is over <see cref="InvoiceSubmissionPersister.FindingsJsonMaxLength"/> (about 115 characters each).</summary>
+    internal const int OverTheColumn = 12_000;
 
     /// <summary>A basis with one Procedure rule version applied to the named lines (and, when <paramref name="invoice"/>, to the invoice).</summary>
     internal static BillingProcedureBasis BasisOf(Guid version, bool invoice = false, params int[] lines)
@@ -52,6 +74,9 @@ internal static class ProcedureSnapshotPatchKit
     };
 
     internal static IReadOnlyList<Guid>? AppliedOf(JsonObject root) => ProcedureSnapshot.Read(root)?.AppliedPolicyVersionIds;
+
+    /// <summary>True when the stored member is structurally the snapshot of <paramref name="basis"/>.</summary>
+    internal static bool Is(JsonObject root, BillingProcedureBasis basis) => JsonNode.DeepEquals(root[ProcedureSnapshot.Member], SnapshotOf(basis));
 }
 
 public sealed class ProcedureSnapshotPatchTests
@@ -75,23 +100,33 @@ public sealed class ProcedureSnapshotPatchTests
         return world.Service();
     }
 
-    private static BillingEvaluationResult Basis(BillingEvaluationResult result, bool isBefore) =>
-        result with
-        {
-            ProcedureBasis = isBefore
-                ? ProcedureSnapshotPatchKit.BasisOf(ProcedureSnapshotPatchKit.BeforeVersion, false, FeeIndex)
-                : ProcedureSnapshotPatchKit.BasisOf(ProcedureSnapshotPatchKit.AfterVersion, false, FeeIndex),
-        };
+    /// <summary>The re-run's two sides under ONE rule load: the same rule version on both, differing only in the subjects it is applied to (the invoice joins on the "after" side).</summary>
+    private static BillingProcedureBasis BeforeBasis => ProcedureSnapshotPatchKit.BasisOf(ProcedureSnapshotPatchKit.RuleVersion, false, FeeIndex);
 
-    private static CorrectionWorld WorldWithSnapshot()
+    private static BillingProcedureBasis AfterBasis => ProcedureSnapshotPatchKit.BasisOf(ProcedureSnapshotPatchKit.RuleVersion, true, FeeIndex);
+
+    private static BillingEvaluationResult Basis(BillingEvaluationResult result, bool isBefore, BillingProcedureBasis? after = null) =>
+        result with { ProcedureBasis = isBefore ? BeforeBasis : after ?? AfterBasis };
+
+    private static CorrectionWorld WorldWithSnapshot() => WorldWith(ProcedureSnapshotPatchKit.Seeded());
+
+    /// <summary>A stored submission whose <c>procedureSnapshot</c> is <paramref name="member"/>; a C# null is an ABSENT member (a row stored before 082d), and
+    /// <see cref="JsonNull"/> is a stored JSON null.</summary>
+    private static CorrectionWorld WorldWith(JsonNode? member)
     {
         var world = new CorrectionWorld();
         InvoiceCorrectionReevaluationTests.Store(world);
         var root = Stored(world);
-        root[ProcedureSnapshot.Member] = ProcedureSnapshotPatchKit.Seeded();
+        if (member is not null)
+        {
+            root[ProcedureSnapshot.Member] = ReferenceEquals(member, JsonNull) ? null : member;
+        }
+
         world.Submission!["sprk_findingsjson"] = root.ToJsonString();
         return world;
     }
+
+    private static readonly JsonNode JsonNull = JsonValue.Create(0)!;
 
     private static JsonObject Stored(CorrectionWorld world) => JsonNode.Parse(world.Submission!.GetAttributeValue<string>("sprk_findingsjson"))!.AsObject();
 
@@ -108,22 +143,62 @@ public sealed class ProcedureSnapshotPatchTests
         return id;
     }
 
-    [Fact(DisplayName = "082d fix round F4 correction must-fire: after a correction the stored procedureSnapshot is the re-run's basis, not the one the submission was stored with")]
-    public async Task ACorrection_WritesTheReRunsBasis()
+    [Fact(DisplayName = "082d fix round 2 F4 correction must-fire: the stored snapshot equals what the re-run's before side builds, so the after-snapshot is written")]
+    public async Task ACorrection_WhoseStoredSnapshotIsTheBeforeBasis_WritesTheAfterSnapshot()
     {
-        var world = WorldWithSnapshot();
-        ProcedureSnapshotPatchKit.AppliedOf(Stored(world)).Should().Equal(ProcedureSnapshotPatchKit.SeededVersion);
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(BeforeBasis));
+        ProcedureSnapshotPatchKit.Is(Stored(world), BeforeBasis).Should().BeTrue("control: the stored member is Build(before)");
 
         var result = await Service(world, (r, isBefore) => Basis(r, isBefore), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
 
         result.IsApplied.Should().BeTrue();
-        ProcedureSnapshotPatchKit.AppliedOf(Stored(world)).Should().Equal(ProcedureSnapshotPatchKit.AfterVersion);
+        ProcedureSnapshotPatchKit.Is(Stored(world), AfterBasis).Should().BeTrue("the member is Build(after)");
+        ProcedureSnapshotPatchKit.Is(Stored(world), BeforeBasis).Should().BeFalse("and it changed");
+    }
+
+    [Fact(DisplayName = "082d fix round 2 F4 correction must-null: a stored snapshot that differs from the before side (a Procedure changed since submission) is replaced by JSON null, never by the re-run's snapshot")]
+    public async Task ACorrection_WhoseStoredSnapshotDiffersFromTheBeforeBasis_WritesNull()
+    {
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(ProcedureSnapshotPatchKit.BasisOf(ProcedureSnapshotPatchKit.VersionSinceChanged, false, FeeIndex)));
+
+        var result = await Service(world, (r, isBefore) => Basis(r, isBefore), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        var stored = Stored(world);
+        stored.ContainsKey(ProcedureSnapshot.Member).Should().BeTrue();
+        stored[ProcedureSnapshot.Member].Should().BeNull("JSON null: the untouched stored entries keep the old basis, so no snapshot describes them");
+        ProcedureSnapshot.Read(stored).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082d fix round 2 F4 correction: a stored JSON null stays null even when the before side would have matched (null is sticky)")]
+    public async Task ACorrection_WithAStoredNull_KeepsNull()
+    {
+        var world = WorldWith(JsonNull);
+        Stored(world).ContainsKey(ProcedureSnapshot.Member).Should().BeTrue("control");
+
+        var result = await Service(world, (r, isBefore) => Basis(r, isBefore), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        Stored(world).ContainsKey(ProcedureSnapshot.Member).Should().BeTrue();
+        Stored(world)[ProcedureSnapshot.Member].Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082d fix round 2 F4 correction: an absent member (a row stored before 082d) stays absent; the key is not added")]
+    public async Task ACorrection_WithAnAbsentMember_StaysAbsent()
+    {
+        var world = WorldWith(null);
+        Stored(world).ContainsKey(ProcedureSnapshot.Member).Should().BeFalse("control");
+
+        var result = await Service(world, (r, isBefore) => Basis(r, isBefore), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        Stored(world).ContainsKey(ProcedureSnapshot.Member).Should().BeFalse();
     }
 
     [Fact(DisplayName = "082d fix round F4 correction: a decided line that keeps findings the re-run would change makes the member JSON null (no snapshot, fail closed)")]
     public async Task ACorrection_WithADecidedLineKeepingOldFindings_WritesNull()
     {
-        var world = WorldWithSnapshot();
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(BeforeBasis)); // (b) holds: only the decided line (c) can make the member null
         AddDecidedLine(world);
         var root = Stored(world);
         root["findings"] = new JsonArray(new JsonObject
@@ -148,13 +223,13 @@ public sealed class ProcedureSnapshotPatchTests
     [Fact(DisplayName = "082d fix round F4 correction control: a decided line whose findings the re-run leaves alone does not stop the re-run's basis from being written")]
     public async Task ACorrection_WithAnUnaffectedDecidedLine_StillWritesTheReRunsBasis()
     {
-        var world = WorldWithSnapshot();
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(BeforeBasis));
         AddDecidedLine(world); // five hours: whole hours, no finding from the increment rule on either side
 
         var result = await Service(world, (r, isBefore) => Basis(r, isBefore), WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
 
         result.IsApplied.Should().BeTrue();
-        ProcedureSnapshotPatchKit.AppliedOf(Stored(world)).Should().Equal(ProcedureSnapshotPatchKit.AfterVersion);
+        ProcedureSnapshotPatchKit.Is(Stored(world), AfterBasis).Should().BeTrue();
     }
 
     [Fact(DisplayName = "082d fix round F4 correction must-not-fire: a correction refused into a Procedure gap writes nothing, so the stored member is byte-identical")]
@@ -178,5 +253,41 @@ public sealed class ProcedureSnapshotPatchTests
         world.ValueWrites.Should().NotContain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"));
         world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
         Stored(world)[ProcedureSnapshot.Member]!.ToJsonString().Should().Be(member);
+    }
+
+    // ── 082d fix round 2 (K): the size cap ──
+
+    [Fact(DisplayName = "082d fix round 2 K correction: a snapshot that pushes the patched findings over the column is dropped (JSON null) and the write succeeds within the cap")]
+    public async Task ACorrection_WithAnOverSizeSnapshot_DropsTheSnapshotAndWrites()
+    {
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(BeforeBasis));
+        var padded = ProcedureSnapshotPatchKit.Padded(AfterBasis, ProcedureSnapshotPatchKit.OverTheColumn);
+        ProcedureSnapshot.Build(ProcedureSnapshotPatchKit.ResultOf(padded))!.ToJsonString().Length.Should().BeGreaterThan(InvoiceSubmissionPersister.FindingsJsonMaxLength, "control: the snapshot alone is over the column");
+
+        var result = await Service(world, (r, isBefore) => Basis(r, isBefore, padded), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        var text = world.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+        text.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.FindingsJsonMaxLength);
+        Stored(world).ContainsKey(ProcedureSnapshot.Member).Should().BeTrue();
+        Stored(world)[ProcedureSnapshot.Member].Should().BeNull();
+        world.ValueWrites.Should().Contain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"), "control: the findings were patched");
+    }
+
+    [Fact(DisplayName = "082d fix round 2 K correction: findings still over the column without the snapshot are refused (409 findings_too_large) and nothing is written to them")]
+    public async Task ACorrection_WithFindingsOverTheColumnAlone_IsRefused_AndWritesNothing()
+    {
+        var world = WorldWith(ProcedureSnapshotPatchKit.SnapshotOf(BeforeBasis));
+        var root = Stored(world);
+        root["padding"] = new string('p', InvoiceSubmissionPersister.FindingsJsonMaxLength);
+        world.Submission!["sprk_findingsjson"] = root.ToJsonString();
+        var stored = world.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+
+        var result = await Service(world, (r, isBefore) => Basis(r, isBefore), Cap, WholeHours).CorrectAsync(Hours("2.5"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.TooLarge);
+        result.Code.Should().Be(CorrectionCodes.FindingsTooLarge).And.Be("ebilling.correction.findings_too_large");
+        world.ValueWrites.Should().NotContain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"));
+        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
     }
 }

@@ -237,25 +237,22 @@ public sealed class ProcedureSnapshotTests
 
         decision.Should().NotBeNull("control: the fixture is an automatic rejection");
         var summary = decision!.Facts[ProcedureSnapshot.DecisionRecordFact].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
-        summary.Keys.Should().BeEquivalentTo(
-            ["version", "submissionId", "member", "procedures", "appliedRules", "displacedRules", "gaps"]);
+        summary.Keys.Should().BeEquivalentTo(["version", "submissionId", "member", "gaps"], "the pointer and the gap count only: a count of the chain's outcome tells a reader nothing they may know");
         summary["submissionId"].Should().Be(submissionId.ToString("D"));
         summary["member"].Should().Be(ProcedureSnapshot.Member);
-        summary.Where(s => s.Value is int).ToDictionary(s => s.Key, s => (int)s.Value!).Should().BeEquivalentTo(new Dictionary<string, int>
-        {
-            ["version"] = 1, ["procedures"] = 1, ["appliedRules"] = 2, ["displacedRules"] = 1, ["gaps"] = 0,
-        }, "PROC-INC and BILL-AGE applied, CD-INC displaced");
+        summary["version"].Should().Be(1);
+        summary["gaps"].Should().Be(0);
         var text = JsonSerializer.Serialize(decision.Facts);
         text.Length.Should().BeLessThan(100_000);
-        JsonSerializer.Serialize(summary).Length.Should().BeLessThan(400, "bounded: a fixed set of counts");
+        JsonSerializer.Serialize(summary).Length.Should().BeLessThan(200, "bounded: a pointer and one count");
         foreach (var secret in ProcedureSnapshotFixture.Secrets())
         {
             text.Should().NotContainEquivalentOf(secret);
         }
     }
 
-    [Fact(DisplayName = "082d fix round K1 must-fire: the Decision Record summary carries no count of Exclude rows (a reader who cannot read a Secure parent learns nothing of the chain from it)")]
-    public async Task DecisionRecordSummary_CarriesNoExcludeCount()
+    [Fact(DisplayName = "082d fix rounds K1 and 2 must-fire: the Decision Record summary is exactly the pointer and the gap count; no count of Procedures, rules applied, displaced or excluded (a reader who cannot read the chain learns nothing of it)")]
+    public async Task DecisionRecordSummary_CarriesOnlyThePointerAndGaps()
     {
         var (outcome, _) = await ProcedureSnapshotFixture.OutcomeAsync(InvoiceSubmissionProcessorTests.InvoiceAgeReject());
         var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, ProcedureSnapshotFixture.InvoiceId);
@@ -263,10 +260,12 @@ public sealed class ProcedureSnapshotTests
         stored.Should().NotBeNull("control: the fixture stores two Exclude rows (a Procedure and a rule) on the parent");
         JsonNode.Parse(json)![ProcedureSnapshot.Member]!["resolutions"]!.AsArray().Select(r => r!["excludedRules"]!.AsArray().Count + r["excludedProcedures"]!.AsArray().Count)
             .Sum().Should().BeGreaterThan(0, "control: the internal member does hold the exclusions");
+        (stored!.ProcedureCount, stored.AppliedPolicyVersionIds.Count, stored.DisplacedPolicyVersionIds.Count).Should().NotBe((0, 0, 0), "control: the counts exist, the summary leaves them out");
 
-        var summary = ProcedureSnapshot.DecisionRecordSummary(stored!, Guid.NewGuid());
+        var summary = ProcedureSnapshot.DecisionRecordSummary(stored, Guid.NewGuid());
 
-        summary.Keys.Should().NotContain(k => k.Contains("exclu", StringComparison.OrdinalIgnoreCase));
+        summary.Keys.Should().BeEquivalentTo(["version", "submissionId", "member", "gaps"]);
+        summary.Keys.Should().NotContain(k => k.Contains("exclu", StringComparison.OrdinalIgnoreCase) || k.Contains("procedures") || k.Contains("Rules"));
         JsonSerializer.Serialize(summary).Should().NotContainEquivalentOf("exclu").And.NotContainEquivalentOf("override");
     }
 

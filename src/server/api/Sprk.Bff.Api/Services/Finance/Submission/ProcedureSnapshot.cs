@@ -130,15 +130,66 @@ internal static class ProcedureSnapshot
     }
 
     /// <summary>
-    /// 082d fix round F4: the snapshot a PATCHED findings JSON (a correction, an added line) should store: the re-run's own basis
-    /// (<paramref name="after"/>), because the patch rewrote the findings the stored basis judged. A whole-invoice snapshot describes the stored
-    /// findings only while every decided line's entries are the ones the re-run would produce; the patch leaves a decided line's old entries as stored,
-    /// so when the findings of a decided line, or the rules applied to / displaced on it, differ between <paramref name="before"/> and
-    /// <paramref name="after"/>, the stored findings mix two bases and the answer is null ("no snapshot": 083 and 113 fail closed, never a wrong
-    /// basis). Also null when <paramref name="after"/> carries no basis.
+    /// 082d fix rounds 1 and 2 (F4): the snapshot a PATCHED findings JSON (a correction, an added line) should store, as the member to write, or null
+    /// ("no snapshot": 083 and 113 fail closed, never a wrong basis). <paramref name="root"/> is the stored findings, not yet given the member's new value.
+    /// <para>Both paths evaluate <paramref name="before"/> and <paramref name="after"/> under the CURRENT rules, and
+    /// <see cref="InvoiceFindingsDiff"/> patches only the before to after difference: an untouched stored entry keeps the basis it was judged under.
+    /// So the re-run's <c>Build(after)</c> describes the patched findings only when ALL three hold: (a) the stored member reads (<see cref="Read(JsonObject)"/>
+    /// is not null: a stored null stays null, null is sticky); (b) the stored member deep-equals <c>Build(before)</c> (what the stored findings were judged with
+    /// is what the re-run's "before" side judges with now; a Procedure changed since submission breaks this); (c) no decided line differs between the sides
+    /// (<see cref="DecidedLinesDiffer"/>: the patch keeps a decided line's old entries). Otherwise null.</para>
     /// </summary>
-    internal static JsonObject? ForPatchedFindings(BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided) =>
-        DecidedLinesDiffer(before, after, decided) ? null : Build(after);
+    internal static JsonObject? ForPatchedFindings(JsonObject root, BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided)
+    {
+        if (Read(root) is null || root[Member] is not JsonObject stored)
+        {
+            return null;
+        }
+
+        var storedBasis = Build(before);
+        return storedBasis is not null && JsonNode.DeepEquals(stored, storedBasis) && !DecidedLinesDiffer(before, after, decided)
+            ? Build(after)
+            : null;
+    }
+
+    /// <summary>
+    /// Sets the member of the patched <paramref name="root"/> to <see cref="ForPatchedFindings"/>'s answer. <b>An absent member stays absent</b> (a row
+    /// stored before 082d: the key is not added, so "never had a snapshot" stays distinguishable from "had one and lost it" = JSON null); a stored null stays null.
+    /// </summary>
+    internal static void SetForPatchedFindings(JsonObject root, BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided)
+    {
+        if (!root.ContainsKey(Member))
+        {
+            return;
+        }
+
+        root[Member] = ForPatchedFindings(root, before, after, decided);
+    }
+
+    /// <summary>
+    /// The text of <paramref name="root"/> if it fits <paramref name="maxLength"/> (<c>sprk_findingsjson</c>'s cap), else the text with the snapshot member
+    /// set to JSON null (the snapshot is the one member that is allowed to go: "no snapshot" is a defined state), else null: the findings alone are over the
+    /// cap and the caller refuses. <paramref name="snapshotDropped"/> is true when the member was nulled to fit; <paramref name="root"/> is left as written.
+    /// </summary>
+    internal static string? SerializeWithinCap(JsonObject root, int maxLength, out bool snapshotDropped)
+    {
+        snapshotDropped = false;
+        var text = root.ToJsonString();
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        if (root[Member] is null)
+        {
+            return null;
+        }
+
+        root[Member] = null;
+        snapshotDropped = true;
+        text = root.ToJsonString();
+        return text.Length <= maxLength ? text : null;
+    }
 
     private static bool DecidedLinesDiffer(BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided)
     {
@@ -249,8 +300,10 @@ internal static class ProcedureSnapshot
     // ── Reading it back ──
 
     /// <summary>
-    /// The stored snapshot of <paramref name="root"/> (the parsed <c>sprk_findingsjson</c>), or null: no member (a row stored before 082d), an
-    /// unknown <c>version</c>, or a damaged member. Null always means "no snapshot", never "nothing applied". Never throws.
+    /// The stored snapshot of <paramref name="root"/> (the parsed <c>sprk_findingsjson</c>), or null: no member (a row stored before 082d), a member that
+    /// is JSON null (a snapshot a patch or the size cap dropped), an unknown <c>version</c>, or a damaged member. Null always means "no snapshot", never
+    /// "nothing applied". <b>It does not tell an absent member from a stored null</b>: a caller that must (the patch paths do) asks
+    /// <c>root.ContainsKey(Member)</c> itself. Never throws.
     /// </summary>
     internal static StoredProcedureSnapshot? Read(JsonObject root)
     {
@@ -323,20 +376,17 @@ internal static class ProcedureSnapshot
 
     /// <summary>
     /// Model 7.4 (ontology O2): the bounded summary a Decision Record written by evaluation carries instead of the basis (<c>sprk_factsnapshot</c>
-    /// is capped at 100,000 characters): the pointer to the submission's member and a fixed set of counts. No id but the submission's (already a
-    /// fact of the record), no name, no reason. <b>No count of excluded rules or excluded Procedures (082d fix round K1):</b> an Exclude row sits on
-    /// a core record of the chain, possibly a Secure parent, and a Decision Record reader who cannot read that parent must learn nothing about the
-    /// chain from the record. The counts that stay describe the outcome (Procedures, rules applied, rules displaced by precedence) and the gaps (a
-    /// gap is also a reader-facing finding via <see cref="ProcedureGap.ForReaders"/>), never an override or Exclude row.
+    /// is capped at 100,000 characters): the pointer to the submission's member (version, submission id, member name) and the gap count. <b>No count of
+    /// Procedures, rules applied, rules displaced, excluded rules or excluded Procedures (082d fix rounds K1 and 2):</b> a count of the chain's outcome
+    /// tells a Decision Record reader who cannot read the chain's records about the chain (an Exclude row sits on a core record of the chain, possibly a
+    /// Secure parent; how many Procedures or rules applied reflects it too). Only <c>gaps</c> stays: a gap is also a reader-facing finding via
+    /// <see cref="ProcedureGap.ForReaders"/>. No id but the submission's (already a fact of the record), no name, no reason.
     /// </summary>
     internal static Dictionary<string, object?> DecisionRecordSummary(StoredProcedureSnapshot snapshot, Guid submissionId) => new(StringComparer.Ordinal)
     {
         ["version"] = snapshot.Version,
         ["submissionId"] = submissionId.ToString("D"),
         ["member"] = Member,
-        ["procedures"] = snapshot.ProcedureCount,
-        ["appliedRules"] = snapshot.AppliedPolicyVersionIds.Count,
-        ["displacedRules"] = snapshot.DisplacedPolicyVersionIds.Count,
         ["gaps"] = snapshot.GapCount,
     };
 
@@ -353,8 +403,8 @@ internal static class ProcedureSnapshot
 /// <summary>
 /// The parts of a stored <see cref="ProcedureSnapshot"/> its readers need today. <see cref="AppliedPolicyVersionIds"/>: the versions that judged at
 /// least one subject (task 083: a clause is shown only for these); <see cref="DisplacedPolicyVersionIds"/>: those applied on no subject and displaced
-/// on at least one. The counts feed the Decision Record summary (never a count of Exclude rows: see <see cref="ProcedureSnapshot.DecisionRecordSummary"/>).
-/// Internal: it carries policy version ids.
+/// on at least one. Only <see cref="GapCount"/> feeds the Decision Record summary (no other count does: see <see cref="ProcedureSnapshot.DecisionRecordSummary"/>);
+/// <see cref="ProcedureCount"/> is for 113. Internal: it carries policy version ids.
 /// </summary>
 internal sealed record StoredProcedureSnapshot(
     int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount, int GapCount)

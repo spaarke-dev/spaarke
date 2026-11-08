@@ -628,6 +628,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         var findingsJson = BuildFindingsJson(outcome, invoiceId, out var planRefusals);
+        if (findingsJson.Length > FindingsJsonMaxLength && outcome.Evaluation?.ProcedureBasis is not null)
+        {
+            // 082d fix round 2 (K): the Procedure snapshot is the one member allowed to go ("no snapshot" is a defined state: 083 and 113 fail closed).
+            // Left out (JSON null) and the length re-checked below before anything is refused.
+            _logger.LogWarning("Invoice submission {SubmissionId}: findings JSON is {Length} characters, over the column; the Procedure snapshot is left out (null)",
+                submissionId, findingsJson.Length);
+            findingsJson = BuildFindingsJson(outcome, invoiceId, out planRefusals, includeProcedureSnapshot: false);
+        }
+
         if (planRefusals.Count > 0)
         {
             // 049 F1-3: the writer would refuse these on every attempt; they are left out of the plan and recorded (codes only, ADR-015).
@@ -2144,7 +2153,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
     /// <inheritdoc cref="BuildFindingsJson(SubmissionEvaluationOutcome, Guid)"/>
     /// <param name="planRefusals">The plan entries left out because the writer would refuse them (<see cref="SignalPlanJson(SubmissionEvaluationOutcome, Guid, out IReadOnlyList{SignalPlanRefusal})"/>).</param>
-    internal static string BuildFindingsJson(SubmissionEvaluationOutcome outcome, Guid invoiceId, out IReadOnlyList<SignalPlanRefusal> planRefusals)
+    /// <param name="includeProcedureSnapshot">False writes the <see cref="ProcedureSnapshot.Member"/> as JSON null (082d fix round 2: the persister's size cap).</param>
+    internal static string BuildFindingsJson(
+        SubmissionEvaluationOutcome outcome, Guid invoiceId, out IReadOnlyList<SignalPlanRefusal> planRefusals, bool includeProcedureSnapshot = true)
     {
         var findings = outcome.Evaluation?.Findings ?? [];
         var decisions = (outcome.Decision?.Findings ?? []).ToDictionary(d => d.Index);
@@ -2260,7 +2271,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
             // 082d (model 7.4): the Procedure basis, INTERNAL (ids and override reasons; no reader projection emits it; ProcedureSnapshot). Always
             // written, null when nothing was evaluated, so a re-run that ends without an evaluation replaces an older snapshot instead of keeping it.
-            [ProcedureSnapshot.Member] = ProcedureSnapshot.Build(outcome.Evaluation),
+            [ProcedureSnapshot.Member] = includeProcedureSnapshot ? ProcedureSnapshot.Build(outcome.Evaluation) : null,
         };
         if (planRefusals.Count > 0)
         {

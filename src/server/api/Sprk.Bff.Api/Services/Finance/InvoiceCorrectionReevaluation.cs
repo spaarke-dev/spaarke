@@ -45,6 +45,12 @@ internal sealed class CorrectionFirmMissingException()
 internal sealed class CorrectionProcedureGapException()
     : Exception("The corrected invoice has a Procedure gap its stored findings do not; the findings are not patched.");
 
+/// <summary>082d fix round 2 (K): the patched findings are over <c>sprk_findingsjson</c>'s cap even without the Procedure snapshot. The correction service
+/// answers 409 <see cref="CorrectionCodes.FindingsTooLarge"/> (the value is saved, the findings are not patched; the correction stays unapplied and holds
+/// approval), not the 503 Incomplete whose advice (repeat) can never clear it. Carries no message to show.</summary>
+internal sealed class CorrectionFindingsTooLargeException()
+    : Exception("The patched findings are over the findings column; nothing is written.");
+
 /// <summary>
 /// The follow-through of a saved correction (ebilling-r1 task 101 part B2b-1; FR-25, FR-31, D-126): re-runs 072's billing rules in memory on the
 /// invoice before and after the correction, patches the stored findings (<c>sprk_invoicesubmission.sprk_findingsjson</c>) with the difference, and
@@ -270,7 +276,7 @@ public sealed class InvoiceCorrectionReevaluation
             {
                 patched = await PatchFindingsAsync(applied, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is CorrectionFirmMissingException or CorrectionProcedureGapException)
+            catch (Exception ex) when (ex is CorrectionFirmMissingException or CorrectionProcedureGapException or CorrectionFindingsTooLargeException)
             {
                 throw; // a refusal, not a failed step (409, not 503)
             }
@@ -565,13 +571,27 @@ public sealed class InvoiceCorrectionReevaluation
 
         if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
-            // 082d fix round F4: the Procedure basis the patched findings were judged with is the re-run's (afterResult), written in this same
-            // conditional write; null ("no snapshot", readers fail closed) when a decided line keeps findings the re-run would change.
-            root[ProcedureSnapshot.Member] = ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided);
+            // 082d fix rounds 1 and 2 (F4): the stored Procedure snapshot is replaced by the re-run's only when it still describes what the stored findings
+            // were judged with (see ProcedureSnapshot.ForPatchedFindings); else JSON null; an absent member (a row stored before 082d) stays absent.
+            ProcedureSnapshot.SetForPatchedFindings(root, beforeResult, afterResult, decided);
+            var findingsText = ProcedureSnapshot.SerializeWithinCap(root, InvoiceSubmissionPersister.FindingsJsonMaxLength, out var snapshotDropped);
+            if (findingsText is null)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the patched findings are over the column even without the Procedure snapshot; nothing written.",
+                    applied.Field, applied.InvoiceId);
+                throw new CorrectionFindingsTooLargeException();
+            }
+
+            if (snapshotDropped)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the patched findings are over the column; the Procedure snapshot is left out (null).",
+                    applied.Field, applied.InvoiceId);
+            }
+
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
             {
                 RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture),
-                [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
+                [InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsText,
             };
             SetAdminAttention(update, submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention), root);
             await _entities.ExecuteTransactionAsync(

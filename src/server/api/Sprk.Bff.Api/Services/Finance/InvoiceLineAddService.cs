@@ -68,6 +68,9 @@ public enum AddLineStatus
     IdReused,
     Busy,
 
+    /// <summary>082d fix round 2: the patched findings would exceed <c>sprk_findingsjson</c>'s column even without the Procedure snapshot. 409, nothing written.</summary>
+    TooLarge,
+
     /// <summary>The submission, the invoice or a stored line changed between the read and the commit. 409, nothing written.</summary>
     Changed,
     OwnerUnresolved,
@@ -91,6 +94,7 @@ public static class AddLineCodes
     public const string IdReused = "ebilling.line_add.id_reused";
     public const string Changed = "ebilling.line_add.changed";
     public const string FirmMissing = "ebilling.line_add.firm_missing";
+    public const string TooLarge = "ebilling.line_add.too_large";
 
     public const string ReasonRequired = LineDecisionCodes.ReasonRequired;
     public const string ReasonTooLong = LineDecisionCodes.ReasonTooLong;
@@ -748,15 +752,28 @@ public sealed class InvoiceLineAddService
         PatchPlan(root, beforeResult, afterResult, storedFindings, SubjectsOf(command.InvoiceId, root, basis.LinesAfter), decided, touched);
         AddLineFindings(root, index, afterResult);
 
-        // 082d fix round F4: the Procedure basis the patched findings were judged with is the re-run's (afterResult), written in the same
-        // conditional write as the findings; null ("no snapshot", readers fail closed) when a decided line keeps findings the re-run would change.
-        root[ProcedureSnapshot.Member] = ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided);
+        // 082d fix rounds 1 and 2 (F4): the stored Procedure snapshot is replaced by the re-run's only when it still describes what the stored findings
+        // were judged with (see ProcedureSnapshot.ForPatchedFindings); else JSON null; an absent member (a row stored before 082d) stays absent.
+        ProcedureSnapshot.SetForPatchedFindings(root, beforeResult, afterResult, decided);
         root[AddLineMember] = new JsonObject
         {
             ["decisionId"] = decisionId.ToString("D"),
             ["lineId"] = lineId.ToString("D"),
             ["state"] = StateCommitted,
         };
+
+        var findingsText = ProcedureSnapshot.SerializeWithinCap(root, InvoiceSubmissionPersister.FindingsJsonMaxLength, out var snapshotDropped);
+        if (findingsText is null)
+        {
+            _logger.LogWarning("Add line on invoice {InvoiceId}: the patched findings are over the column even without the Procedure snapshot; nothing changed.", command.InvoiceId);
+            return new AddLineResult(
+                AddLineStatus.TooLarge, AddLineCodes.TooLarge, "This invoice's stored findings are too large to add a line. Nothing was changed.");
+        }
+
+        if (snapshotDropped)
+        {
+            _logger.LogWarning("Add line on invoice {InvoiceId}: the patched findings are over the column; the Procedure snapshot is left out (null).", command.InvoiceId);
+        }
 
         // The status step: every stored, undecided line the patch touched takes the persister's rule over the patched findings. The added line is
         // created Flagged (R10) and is skipped; a stored line with no extraction keeps its status (as the correction's status step does).
@@ -813,7 +830,7 @@ public sealed class InvoiceLineAddService
 
         // ── Step 6: ONE transaction. From here the request's cancellation no longer applies. ──
         var submissionUpdate = VersionedTarget(InvoiceReviewReadService.SubmissionEntity, reads.Submission.Id, reads.SubmissionVersion);
-        submissionUpdate[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        submissionUpdate[InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsText;
         InvoiceCorrectionReevaluation.SetAdminAttention(submissionUpdate, reads.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention), root);
         var requests = new List<OrganizationRequest>
         {
