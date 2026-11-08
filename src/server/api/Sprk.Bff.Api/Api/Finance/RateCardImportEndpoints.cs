@@ -1,9 +1,15 @@
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -14,12 +20,14 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Admin-only, by Dataverse table privilege (D-76).</b> The "billing admin" is whoever holds the table privileges for what the
 /// route does, asked of Dataverse AS THE CALLER (<see cref="FinanceAuthorizationCheck.CallerPrivilege"/>, fail closed): the template needs
 /// Create on <c>sprk_ratecard</c>; the import (which the app then writes on the caller's behalf, owner decision G5) needs Create on the
-/// card, its rates and the timekeeper, and Read on the core record when one is named; the publish needs Write on the card and on the
-/// timekeeper. No role-name check, no app role. Each route carries its OWN authorization filter, then the eBilling flag filter
+/// card, its rates and the timekeeper, and the caller's own Write on the Procedure the version belongs to (<see cref="RequireWriteOnTheVersionsProcedure"/>);
+/// the publish needs Write on the card and on the timekeeper. No role-name check, no app role. Each route carries its OWN authorization filter, then the eBilling flag filter
 /// (<c>RequireEbillingEnabled</c>, ADR-018): the flag never replaces authorization.</para>
-/// <para><b>Import inputs.</b> The workbook is the multipart <c>file</c> part. The firm, card name and optional core record are QUERY
-/// parameters (<c>firmId</c>, <c>name</c>, at most one of <c>matterId</c> / <c>projectId</c> / <c>workAssignmentId</c>), so the
-/// authorization filter and the handler read the same source (the Finance doctrine, task 130 defect C8).</para>
+/// <para><b>Import inputs (085, EB-D-148).</b> The workbook is the multipart <c>file</c> part. The card name and the Procedure Version are QUERY
+/// parameters (<c>name</c>, <c>procedureVersionId</c>), so the authorization filter and the handler read the same source (the Finance doctrine,
+/// task 130 defect C8). The card is created under that version, which must be a Draft of a Rate card Procedure; the firm comes from the Procedure
+/// (<c>firmId</c> is optional and, when given, must be that firm). <c>matterId</c> / <c>projectId</c> / <c>workAssignmentId</c> are no longer
+/// accepted: a card belongs to a Procedure Version, not to a core record (D-120).</para>
 /// </remarks>
 public static class RateCardImportEndpoints
 {
@@ -35,9 +43,8 @@ public static class RateCardImportEndpoints
     internal const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     internal const string CodeFileTooLarge = "ratecard.file_too_large";
 
-    private const string SetMatters = "sprk_matters";
-    private const string SetProjects = "sprk_projects";
-    private const string SetWorkAssignments = "sprk_workassignments";
+    /// <summary>The query keys of the retired core-record scope; a request that still names one is refused, not ignored.</summary>
+    private static readonly string[] RetiredCoreKeys = ["matterId", "projectId", "workAssignmentId"];
 
     public static IEndpointRouteBuilder MapRateCardImportEndpoints(this IEndpointRouteBuilder app)
     {
@@ -61,6 +68,7 @@ public static class RateCardImportEndpoints
         group.MapPost("/import", ImportRateCard)
             .AddFinanceAuthorizationFilter(ResolveImportTargets)
             .RequireEbillingEnabled()
+            .RequireWriteOnTheVersionsProcedure() // 085 (I-P5): and Write on the Procedure the version belongs to
             .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's table privileges, not a form token
             .Accepts<IFormFile>("multipart/form-data")
             .WithName("ImportRateCard")
@@ -105,36 +113,78 @@ public static class RateCardImportEndpoints
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// The table privileges the import needs, then Read on each core record id the query names. Lenient on purpose: a malformed value adds
-    /// no check (the handler returns the 400), so a caller without the privileges is always answered 403 first and never learns what is valid.
+    /// The table privileges the import needs. The caller's Write on the Procedure is asked next, by <see cref="RequireWriteOnTheVersionsProcedure"/>
+    /// (the Procedure is the version's, read server-side). A malformed value adds no check (the handler returns the 400), so a caller without the
+    /// privileges is always answered 403 first and never learns what is valid.
     /// </summary>
-    internal static FinanceAuthorizationTargets ResolveImportTargets(EndpointFilterInvocationContext context)
-    {
-        var query = context.HttpContext.Request.Query;
-        var checks = new List<FinanceAuthorizationCheck>
-        {
+    internal static FinanceAuthorizationTargets ResolveImportTargets(EndpointFilterInvocationContext context) =>
+        FinanceAuthorizationTargets.Authorize(
             Privilege(CreateRateCardPrivilege, "sprk_ratecards"),
             Privilege(CreateRatePrivilege, "sprk_ratecardrates"),
-            Privilege(CreateTimekeeperPrivilege, "sprk_timekeepers"),
-        };
+            Privilege(CreateTimekeeperPrivilege, "sprk_timekeepers"));
 
-        foreach (var (key, set) in new[] { ("matterId", SetMatters), ("projectId", SetProjects), ("workAssignmentId", SetWorkAssignments) })
+    /// <summary>
+    /// 085 (I-P5): the import also needs the caller's own Write on the Procedure the named version belongs to: the Record-path "write" check on
+    /// <c>sprk_procedures</c> the Procedure routes declare, asked of Dataverse as the caller (<see cref="CallerReadCheck"/>, which keeps "denied" apart
+    /// from "no answer"). The Procedure is read server-side from the stored version. Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
+    /// (step 0 and the table privileges run first). An unreadable or unknown version is passed on: the service answers 400
+    /// <c>ratecard.procedure_version_invalid</c>. A fault reading the version is a 403 <c>system_failure</c> (fail closed).
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — <c>BillingAdminAuthorization.RequireWriteOnTheRuleSetsProcedure</c> asks this question from a rule set's id.
+    /// <i>Extension</i> — it is keyed to the <c>ruleSetId</c> route value and the rule set service; this route carries a version id in the query, so
+    /// the same body is repeated here for that source (no new service). <i>Cost of doing nothing</i> — a rate card admin without Write on a Procedure
+    /// could attach a card to it, which sets the rate its firm's invoices are judged against.</remarks>
+    internal static TBuilder RequireWriteOnTheVersionsProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
         {
-            if (Guid.TryParse(query[key].ToString(), out var id) && id != Guid.Empty)
+            var http = context.HttpContext;
+            var services = http.RequestServices;
+            if (!Guid.TryParse(http.Request.Query["procedureVersionId"].ToString(), out var versionId) || versionId == Guid.Empty)
             {
-                checks.Add(new FinanceAuthorizationCheck
-                {
-                    Path = FinanceCheckPath.Record,
-                    EntitySetName = set,
-                    RecordId = id,
-                    Operation = "finance.read",
-                    Source = "query." + key,
-                });
+                return await next(context); // the handler answers the 400
             }
-        }
 
-        return FinanceAuthorizationTargets.Authorize(checks.ToArray());
-    }
+            Guid? procedureId;
+            try
+            {
+                var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.VersionEntity)
+                {
+                    ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn),
+                    Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.VersionEntity + "id", ConditionOperator.Equal, versionId) } },
+                    TopCount = 1,
+                }, http.RequestAborted);
+                procedureId = rows.Entities.FirstOrDefault()?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id;
+            }
+            catch (Exception ex)
+            {
+                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                    "Procedure Version {VersionId}: its Procedure could not be read for the Procedure write check; denying (fail closed)", versionId);
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            if (procedureId is not { } id || id == Guid.Empty)
+            {
+                return await next(context);
+            }
+
+            var caller = new InvoiceContextService.InvoiceCaller(
+                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+            var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
+            var outcome = await CallerReadCheck.CheckAsync(
+                services.GetRequiredService<AuthorizationService>(), caller, BillingAdminAuthorization.ProcedureEntitySet, "write", id, logger,
+                $"Rate card import: caller write on the Procedure of version {versionId}", http.RequestAborted);
+            if (outcome == CallerReadOutcome.Readable)
+            {
+                return await next(context);
+            }
+
+            return outcome == CallerReadOutcome.Refused
+                ? ProblemDetailsHelper.Forbidden(
+                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                    detail: "You need Write on this Procedure.",
+                    traceId: http.TraceIdentifier)
+                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        });
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Handlers
@@ -153,9 +203,24 @@ public static class RateCardImportEndpoints
         var query = request.Query;
 
         var problems = new List<RateCardImportError>();
-        if (!Guid.TryParse(query["firmId"].ToString(), out var firmId) || firmId == Guid.Empty)
+        if (!Guid.TryParse(query["procedureVersionId"].ToString(), out var procedureVersionId) || procedureVersionId == Guid.Empty)
         {
-            problems.Add(new RateCardImportError(null, null, "firmId", "firmId is required and must be a GUID."));
+            problems.Add(new RateCardImportError(null, null, "procedureVersionId", "procedureVersionId is required and must be a GUID."));
+        }
+
+        // firmId is optional (the Procedure names the firm); a value that is present must be a GUID, and the service refuses a different firm.
+        Guid? firmId = null;
+        var rawFirm = query["firmId"].ToString();
+        if (rawFirm.Length > 0)
+        {
+            if (Guid.TryParse(rawFirm, out var parsedFirm) && parsedFirm != Guid.Empty)
+            {
+                firmId = parsedFirm;
+            }
+            else
+            {
+                problems.Add(new RateCardImportError(null, null, "firmId", "firmId must be a GUID."));
+            }
         }
 
         var name = query["name"].ToString().Trim();
@@ -164,28 +229,12 @@ public static class RateCardImportEndpoints
             problems.Add(new RateCardImportError(null, null, "name", "name is required and may be at most 200 characters."));
         }
 
-        var core = new List<RateCardCoreRecord>();
-        foreach (var (key, entity) in new[] { ("matterId", "sprk_matter"), ("projectId", "sprk_project"), ("workAssignmentId", "sprk_workassignment") })
+        foreach (var key in RetiredCoreKeys)
         {
-            var raw = query[key].ToString();
-            if (raw.Length == 0)
+            if (query[key].ToString().Length > 0)
             {
-                continue;
+                problems.Add(new RateCardImportError(null, null, key, $"{key} is no longer accepted: a rate card belongs to a Procedure Version (procedureVersionId)."));
             }
-
-            if (Guid.TryParse(raw, out var id) && id != Guid.Empty)
-            {
-                core.Add(new RateCardCoreRecord(entity, id));
-            }
-            else
-            {
-                problems.Add(new RateCardImportError(null, null, key, $"{key} must be a GUID."));
-            }
-        }
-
-        if (core.Count > 1)
-        {
-            problems.Add(new RateCardImportError(null, null, "coreRecord", "Name at most one of matterId, projectId and workAssignmentId."));
         }
 
         if (problems.Count > 0)
@@ -235,7 +284,7 @@ public static class RateCardImportEndpoints
         Guid? callerOid = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
 
         var outcome = await service.ImportAsync(
-            new RateCardImportRequest(firmId, name, core.Count == 1 ? core[0] : null, callerOid), bytes, ct);
+            new RateCardImportRequest(firmId, name, procedureVersionId, callerOid), bytes, ct);
 
         return outcome.Kind switch
         {

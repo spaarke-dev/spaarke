@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
@@ -38,11 +40,13 @@ public sealed class RateCardImportEndpointsTests
     internal const string Import = "/api/finance/ratecards/import";
     internal static readonly Guid FirmId = Guid.NewGuid();
     private static readonly Guid CardId = Guid.NewGuid();
+    internal static readonly Guid VersionId = Guid.NewGuid();
+    private static readonly Guid ProcedureId = Guid.NewGuid();
 
     public static TheoryData<string, string> AllRoutes => new()
     {
         { "GET", Template },
-        { "POST", $"{Import}?firmId={FirmId}&name=Card" },
+        { "POST", $"{Import}?procedureVersionId={VersionId}&name=Card" },
         { "POST", $"/api/finance/ratecards/{CardId}/publish" },
     };
 
@@ -52,6 +56,9 @@ public sealed class RateCardImportEndpointsTests
         public StatedCaller StepZero { get; private set; } = null!;
 
         public readonly Mock<RateCardImportService> Service;
+
+        /// <summary>The Dataverse seam the Procedure-write filter reads the version's Procedure through (085).</summary>
+        public readonly Mock<IGenericEntityService> Entities = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
         private WebApplication _app = null!;
@@ -95,6 +102,9 @@ public sealed class RateCardImportEndpointsTests
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
             builder.Services.AddSingleton(host.Service.Object);
+            host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection());
+            builder.Services.AddSingleton(host.Entities.Object);
             if (admin)
             {
                 host.GrantAdmin();
@@ -110,6 +120,16 @@ public sealed class RateCardImportEndpointsTests
             host.Client = host._app.GetTestClient();
             return host;
         }
+
+        /// <summary>The stored version <paramref name="versionId"/> belongs to the Procedure <paramref name="procedureId"/>.</summary>
+        public void VersionBelongsTo(Guid versionId, Guid procedureId) =>
+            Entities.Setup(e => e.RetrieveMultipleAsync(
+                    It.Is<QueryExpression>(q => q.EntityName == "sprk_procedureversion" && q.Criteria.Conditions.Any(c => c.Values.Contains(versionId))),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection(new List<Entity>
+                {
+                    new("sprk_procedureversion", versionId) { ["sprk_procedure"] = new EntityReference("sprk_procedure", procedureId) },
+                }));
 
         public void GrantAdmin()
         {
@@ -216,9 +236,9 @@ public sealed class RateCardImportEndpointsTests
     }
 
     [Theory]
-    [InlineData(Import + "?firmId=00000000-0000-0000-0000-0000000000f1&name=Card", RateCardImportEndpoints.CreateRateCardPrivilege)]
-    [InlineData(Import + "?firmId=00000000-0000-0000-0000-0000000000f1&name=Card", RateCardImportEndpoints.CreateRatePrivilege)]
-    [InlineData(Import + "?firmId=00000000-0000-0000-0000-0000000000f1&name=Card", RateCardImportEndpoints.CreateTimekeeperPrivilege)]
+    [InlineData(Import + "?procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card", RateCardImportEndpoints.CreateRateCardPrivilege)]
+    [InlineData(Import + "?procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card", RateCardImportEndpoints.CreateRatePrivilege)]
+    [InlineData(Import + "?procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card", RateCardImportEndpoints.CreateTimekeeperPrivilege)]
     public async Task Import_NeedsEveryPrivilegeOfTheThreeTablesItWrites(string url, string missing)
     {
         await using var host = await Host.StartAsync();
@@ -292,11 +312,11 @@ public sealed class RateCardImportEndpointsTests
     // ═══════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task Import_HandsTheWorkbookFirmNameCoreRecordAndCallerToTheService_AndReturns201()
+    public async Task Import_HandsTheWorkbookVersionNameAndCallerToTheService_AndReturns201()
     {
         await using var host = await Host.StartAsync();
-        var matterId = Guid.NewGuid();
-        host.Access.Grant("sprk_matters", matterId, AccessRights.Read);
+        host.VersionBelongsTo(VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read | AccessRights.Write);
         var bytes = new byte[] { 9, 8, 7, 6 };
         RateCardImportRequest? seen = null;
         byte[]? seenBytes = null;
@@ -305,31 +325,94 @@ public sealed class RateCardImportEndpointsTests
             .Callback((RateCardImportRequest r, byte[] b, CancellationToken _) => { seen = r; seenBytes = b; })
             .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Done(result));
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=%202026%20rates%20&matterId={matterId}", content: Upload(bytes)));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=%202026%20rates%20", content: Upload(bytes)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         response.Headers.Location!.ToString().Should().EndWith($"/api/finance/ratecards/{CardId}");
         var body = await Json(response);
         body["rateCardId"]!.GetValue<Guid>().Should().Be(CardId);
         body["status"]!.GetValue<string>().Should().Be("Draft");
-        seen!.FirmId.Should().Be(FirmId);
+        seen!.ProcedureVersionId.Should().Be(VersionId);
+        seen.FirmId.Should().BeNull("the firm comes from the Procedure");
         seen.Name.Should().Be("2026 rates");
-        seen.Core.Should().Be(new RateCardCoreRecord("sprk_matter", matterId));
         seen.CallerObjectId.Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId));
         seenBytes.Should().Equal(bytes);
+        host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId && c.HasToken,
+            "the Procedure's rights are asked of Dataverse as the caller");
     }
 
     [Fact]
-    public async Task Import_ANamedCoreRecordTheCallerCannotRead_Returns403_AndNeverReachesTheService()
+    public async Task Import_ANamedFirm_IsHandedToTheService_ToCompareWithTheProceduresFirm()
     {
         await using var host = await Host.StartAsync();
-        var matterId = Guid.NewGuid(); // no Read granted
+        RateCardImportRequest? seen = null;
+        host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .Callback((RateCardImportRequest r, byte[] _, CancellationToken _) => seen = r)
+            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Done(new RateCardImportResult(CardId, Guid.NewGuid(), "Draft", 1, 0, 0)));
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card&matterId={matterId}", content: Upload(new byte[] { 1 })));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&firmId={FirmId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        seen!.FirmId.Should().Be(FirmId);
+    }
+
+    [Fact(DisplayName = "085 must-fire: a caller without Write on the version's Procedure gets 403 insufficient_rights and never reaches the service")]
+    public async Task Import_WithoutWriteOnTheVersionsProcedure_Returns403_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        host.VersionBelongsTo(VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read); // Read only
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.Access.Calls.Should().Contain(c => c.Set == "sprk_matters" && c.Id == matterId);
+        var problem = await Json(response);
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be("You need Write on this Procedure.");
+        host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId);
         host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "085: an UNKNOWN rights answer on the Procedure is system_failure, not insufficient_rights")]
+    public async Task Import_WhenTheProceduresRightsAreUnknown_IsSystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.VersionBelongsTo(VersionId, ProcedureId);
+        host.Access.Fault("sprk_procedures", ProcedureId);
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "085: a fault reading the version's Procedure denies (fail closed) and never reaches the service")]
+    public async Task Import_WhenTheVersionsProcedureCannotBeRead_Returns403_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated read fault"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "085: an unknown version asks no Procedure check; the service answers 400 ratecard.procedure_version_invalid")]
+    public async Task Import_OnAnUnknownVersion_AsksNoProcedureCheck_AndTheServiceRefuses400()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Refused(400, RateCardImportService.CodeProcedureVersionInvalid, "not usable"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.procedure_version_invalid");
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
     }
 
     [Fact]
@@ -345,7 +428,7 @@ public sealed class RateCardImportEndpointsTests
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Invalid(errors));
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: Upload(new byte[] { 1 })));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
@@ -367,7 +450,7 @@ public sealed class RateCardImportEndpointsTests
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RateCardOutcome<RateCardImportResult>.OwnerRefused(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team")));
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: Upload(new byte[] { 1 })));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(RecordOwnerRefusal.NoOwnerSource);
@@ -380,23 +463,23 @@ public sealed class RateCardImportEndpointsTests
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Refused(503, RateCardImportService.CodeContainerNotConfigured, "not configured"));
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: Upload(new byte[] { 1 })));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.container_not_configured");
     }
 
     [Theory]
-    [InlineData("name=Card", "firmId")]                                                    // no firm
-    [InlineData("firmId=not-a-guid&name=Card", "firmId")]
-    [InlineData("firmId=00000000-0000-0000-0000-0000000000f1", "name")]                    // no name
-    [InlineData("firmId=00000000-0000-0000-0000-0000000000f1&name=Card&matterId=nope", "matterId")]
-    [InlineData("firmId=00000000-0000-0000-0000-0000000000f1&name=Card&matterId=00000000-0000-0000-0000-000000000001&projectId=00000000-0000-0000-0000-000000000002", "coreRecord")]
+    [InlineData("name=Card", "procedureVersionId")]                                                       // no version
+    [InlineData("procedureVersionId=not-a-guid&name=Card", "procedureVersionId")]
+    [InlineData("procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card&firmId=not-a-guid", "firmId")]
+    [InlineData("procedureVersionId=00000000-0000-0000-0000-0000000000a1", "name")]                       // no name
+    [InlineData("procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card&matterId=00000000-0000-0000-0000-000000000001", "matterId")]
+    [InlineData("procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card&projectId=00000000-0000-0000-0000-000000000002", "projectId")]
+    [InlineData("procedureVersionId=00000000-0000-0000-0000-0000000000a1&name=Card&workAssignmentId=00000000-0000-0000-0000-000000000003", "workAssignmentId")]
     public async Task Import_BadQuery_Returns400_AndNeverReachesTheService(string query, string column)
     {
         await using var host = await Host.StartAsync();
-        host.Access.Grant("sprk_matters", Guid.Parse("00000000-0000-0000-0000-000000000001"), AccessRights.Read);
-        host.Access.Grant("sprk_projects", Guid.Parse("00000000-0000-0000-0000-000000000002"), AccessRights.Read);
 
         var response = await host.Client.SendAsync(Req("POST", $"{Import}?{query}", content: Upload(new byte[] { 1 })));
 
@@ -412,7 +495,7 @@ public sealed class RateCardImportEndpointsTests
     {
         await using var host = await Host.StartAsync(maxMb: 1);
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: Upload(new byte[(2 * 1024 * 1024)])));
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[(2 * 1024 * 1024)])));
 
         response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.file_too_large");
@@ -424,10 +507,10 @@ public sealed class RateCardImportEndpointsTests
     {
         await using var host = await Host.StartAsync();
 
-        var notMultipart = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: new StringContent("x")));
-        var noFile = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card",
+        var notMultipart = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: new StringContent("x")));
+        var noFile = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card",
             content: new MultipartFormDataContent { { new StringContent("x"), "other" } }));
-        var empty = await host.Client.SendAsync(Req("POST", $"{Import}?firmId={FirmId}&name=Card", content: Upload(Array.Empty<byte>())));
+        var empty = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(Array.Empty<byte>())));
 
         notMultipart.StatusCode.Should().Be(HttpStatusCode.UnsupportedMediaType);
         noFile.StatusCode.Should().Be(HttpStatusCode.BadRequest);

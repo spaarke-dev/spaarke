@@ -83,6 +83,10 @@ internal sealed class CorrectionWorld
     public readonly List<Entity> Roster = [];
     public readonly List<Entity> Rates = [];
 
+    /// <summary>085: the Procedure world the rate resolution reads (one all-records Procedure with one version in force); a rate row points at <see cref="RateProcedureWorld.VersionId"/>. Clear both for a core record with no Procedures.</summary>
+    public readonly List<Entity> Procedures = RateProcedureWorld.Standard().Procedures;
+    public readonly List<Entity> ProcedureVersions = RateProcedureWorld.Standard().Versions;
+
     /// <summary>B2c: every one-line input the correction service gave the (real) resolution service, and a fault for it (null = none).</summary>
     public readonly List<InvoiceResolutionInput> ResolveInputs = [];
     public Exception? ResolveFault;
@@ -191,6 +195,12 @@ internal sealed class CorrectionWorld
 
                 lock (Lines)
                 {
+                    // 085: the Procedure resolver's reads are answered from the Procedure world, not filtered by the minimal evaluator below.
+                    if (RateProcedureWorld.AnswerResolverRead(query, Procedures, ProcedureVersions) is { } resolverRows)
+                    {
+                        return Task.FromResult(new EntityCollection(resolverRows.Select(Copy).ToList()));
+                    }
+
                     IEnumerable<Entity> source = query.EntityName switch
                     {
                         "sprk_invoice" => [Invoice],
@@ -403,6 +413,7 @@ internal sealed class CorrectionWorld
             ["card.sprk_firm"] = new AliasedValue("sprk_ratecard", "sprk_firm", new EntityReference("sprk_organization", Firm)),
             ["card.statuscode"] = new AliasedValue("sprk_ratecard", "statuscode", new OptionSetValue(PublishedCard)),
             ["card.statecode"] = new AliasedValue("sprk_ratecard", "statecode", new OptionSetValue(0)),
+            ["card.sprk_procedureversion"] = RateProcedureWorld.CardVersion(RateProcedureWorld.VersionId),
         };
         Rates.Add(row);
         return row;

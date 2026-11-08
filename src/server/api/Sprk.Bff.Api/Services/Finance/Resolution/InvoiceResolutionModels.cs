@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Resolution;
 
@@ -249,15 +250,6 @@ public enum RateNotFoundReason
     NoRateInForce,
 }
 
-public enum RateCardScope
-{
-    /// <summary>A card with no core record scope.</summary>
-    Firm,
-
-    /// <summary>A card scoped to the submission's core record.</summary>
-    CoreRecord,
-}
-
 public enum RateBasis
 {
     /// <summary>The rate row names this timekeeper.</summary>
@@ -282,7 +274,11 @@ public sealed record RateResolution
 
     public Guid? RateId { get; init; }
 
-    public RateCardScope? Scope { get; init; }
+    /// <summary>
+    /// The rank (model 6.5, 7.3) of the Procedure whose rate card decided: <c>(Level, -Distance, FirmSpecific)</c>. Level and Distance are
+    /// reader-safe (082b K1); the rank names no Procedure, record or id.
+    /// </summary>
+    public ProcedureRank? Rank { get; init; }
 
     public RateBasis? Basis { get; init; }
 }
@@ -353,4 +349,18 @@ public sealed record InvoiceResolutionResult
 
     /// <summary>One entry per unmatched fee line.</summary>
     public required IReadOnlyList<ApprovedTimekeeperFindingInput> ApprovedTimekeeperFindingInputs { get; init; }
+}
+
+/// <summary>
+/// The text a rate's rank is shown as (a finding's <c>approvedRate.rank</c> reference, the review panel's approved-rate <c>scope</c>): built only
+/// from Level, Distance and FirmSpecific with the invariant culture, e.g. <c>ManualOwn/d0</c>, <c>ManualParent/d1/firmSpecific</c>,
+/// <c>Firm/d0/firmSpecific</c>, <c>AllRecords/d0</c>. It carries no id, Procedure name or parent record (082b K1: Level and Distance are
+/// reader-safe).
+/// </summary>
+public static class RateRankLabel
+{
+    public static string Of(ProcedureRank rank) =>
+        string.Concat(
+            rank.Level.ToString(), "/d", rank.Distance.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            rank.FirmSpecific ? "/firmSpecific" : string.Empty);
 }

@@ -2,21 +2,24 @@ using System.Globalization;
 using System.Net.Mail;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
-/// <summary>Which core record a rate card is scoped to (FR-08: at most one; none = the whole firm).</summary>
-public sealed record RateCardCoreRecord(string EntityLogicalName, Guid RecordId);
-
-/// <summary>What the caller asked to import. Server-derived fields (<see cref="CallerObjectId"/>) never come from the request body.</summary>
+/// <summary>
+/// What the caller asked to import (ebilling-r1 085, model 7.2): the card is created under <see cref="ProcedureVersionId"/> (a Draft version of a
+/// Rate card Procedure) and takes its firm from that Procedure. <see cref="FirmId"/> is optional; when given it must be that firm. Server-derived
+/// fields (<see cref="CallerObjectId"/>) never come from the request body.
+/// </summary>
 public sealed record RateCardImportRequest(
-    Guid FirmId, string Name, RateCardCoreRecord? Core, Guid? CallerObjectId);
+    Guid? FirmId, string Name, Guid ProcedureVersionId, Guid? CallerObjectId);
 
 /// <summary>A successful import: the Draft card and what was written.</summary>
 public sealed record RateCardImportResult(
@@ -75,13 +78,17 @@ public sealed class RateCardOutcome<T> where T : class
 /// overlap rule against the rows as they are now; publish is the one place that sets <c>Published</c>. Nothing is in force before it.</para>
 /// <para><b>Source workbook.</b> Stored only through <see cref="SpeFileStore"/> in the Procedure Library container
 /// (<c>Finance:ProcedureLibraryContainerId</c>, D-55, internal only) and linked as the card's source document. Its <c>sprk_document</c> row
-/// is created UNLINKED: no matter, project or work assignment lookup (DEF-015, owner 2026-10-15). The card itself carries the scope.</para>
+/// is created UNLINKED: no matter, project or work assignment lookup (DEF-015, owner 2026-10-15).</para>
+/// <para><b>Keyed to a Procedure Version (085, EB-D-148, D-120).</b> A card belongs to a Procedure Version, not to a core record: the import
+/// takes <c>procedureVersionId</c>, requires that version to be a Draft of a Rate card Procedure (400
+/// <c>ratecard.procedure_version_invalid</c>), and sets <c>sprk_procedureversion</c> and <c>sprk_firm</c> from it. The card has no core-record
+/// lookup and no scope column. <see cref="PlanCopyForwardAsync"/> starts the next version's card as a copy of the previous one.</para>
 /// <para><b>All or nothing.</b> Every row is validated before the first write. The writes are sequential (the shared Dataverse client has
 /// no transactional create), so a failure part-way deletes what this call created, in reverse order, and the original failure is rethrown.
 /// A crash between a create and its compensation can leave Draft rows; none is in force.</para>
 /// <para><b>Ownership.</b> Rows are created by the application, so each is assigned to the owner team resolved through
-/// <see cref="IRecordOwnershipResolver"/> (the core record's team, else the caller's business-unit team); an unresolved owner refuses
-/// before anything is written.</para>
+/// <see cref="IRecordOwnershipResolver"/> with NO parents (a card is reusable, not a core record's child: the caller's business-unit team);
+/// an unresolved owner refuses before anything is written.</para>
 /// </remarks>
 public class RateCardImportService
 {
@@ -103,6 +110,7 @@ public class RateCardImportService
     internal const string CodeNotDraft = "ratecard.not_draft";
     internal const string CodeOverlap = "ratecard.publish_invalid";
     internal const string CodeImportFailed = "ratecard.import_failed";
+    internal const string CodeProcedureVersionInvalid = "ratecard.procedure_version_invalid";
     internal const string CodeResultTruncated = "ratecard.result_truncated";
 
     private const decimal MaxRate = 1_000_000_000m;
@@ -164,15 +172,18 @@ public class RateCardImportService
         }
 
         // Reads only from here to the ownership resolution: nothing is written until every row is valid.
-        var header = new List<RateCardImportError>();
-        if (!await ExistsAsync(FirmEntity, "sprk_organizationid", request.FirmId, ct))
+        // The Procedure Version decides the card's home and its firm (I-P3: a Rate card Procedure always names its firm).
+        var target = await ReadTargetAsync(request.ProcedureVersionId, ct);
+        if (target.Refusal is { } refusal)
         {
-            header.Add(new RateCardImportError(null, null, "firmId", "The firm was not found."));
+            return RateCardOutcome<RateCardImportResult>.Refused(StatusCodes.Status400BadRequest, CodeProcedureVersionInvalid, refusal);
         }
 
-        if (request.Core is { } core && !await ExistsAsync(core.EntityLogicalName, core.EntityLogicalName + "id", core.RecordId, ct))
+        var firmId = target.FirmId!.Value;
+        var header = new List<RateCardImportError>();
+        if (request.FirmId is { } requestedFirm && requestedFirm != firmId)
         {
-            header.Add(new RateCardImportError(null, null, "coreRecord", "The core record was not found."));
+            header.Add(new RateCardImportError(null, null, "firmId", "firmId is not the firm of the Procedure; omit it or name that firm."));
         }
 
         var read = RateCardWorkbook.Read(new MemoryStream(workbook, writable: false));
@@ -181,7 +192,7 @@ public class RateCardImportService
             return RateCardOutcome<RateCardImportResult>.Invalid(header.Concat(read.Errors).ToList());
         }
 
-        var (lookups, rosterTruncated) = await LoadLookupsAsync(request.FirmId, read, ct);
+        var (lookups, rosterTruncated) = await LoadLookupsAsync(firmId, read, ct);
         if (rosterTruncated)
         {
             // The roster read does not page; a partial roster would let the import create duplicates of timekeepers it did not see.
@@ -197,28 +208,20 @@ public class RateCardImportService
             return RateCardOutcome<RateCardImportResult>.Invalid(errors);
         }
 
-        // UAC 194b R3b-2: the card's question through the one builder — its table and the core lookup it will hold (the column named after
-        // the core table, as WriteAsync writes it). The source document it also names is created by this import with this same owner, so it
-        // cannot change the answer; the timekeepers and rates hold no ownership parent and take the card's owner.
-        var cardParents = request.Core is { } c
-            ? new[] { KeyValuePair.Create(c.EntityLogicalName, (RecordOwnershipParent?)new RecordOwnershipParent(c.EntityLogicalName, c.RecordId)) }
-            : Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
-        var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForRow(RateCardEntity, cardParents, callerObjectId: request.CallerObjectId) with
-            {
-                RequestedBy = RecordRequester.Of(objectId: request.CallerObjectId),
-            },
-            ct);
+        // UAC 194b R3b-2: the card's question through the one builder. A card is reusable, not a core record's child, so it is asked with NO
+        // parents (085; model 5.2 lists no rate-card lineage edge). The source document it also names is created by this import with this same
+        // owner, so it cannot change the answer; the timekeepers and rates hold no ownership parent and take the card's owner.
+        var owner = await _ownership.ResolveOwnerAsync(CardOwnerContext(request.CallerObjectId), ct);
         if (!owner.IsOwned)
         {
             return RateCardOutcome<RateCardImportResult>.OwnerRefused(owner);
         }
 
-        return await WriteAsync(request, workbook, driveId, validated, lookups, owner, ct);
+        return await WriteAsync(request, firmId, workbook, driveId, validated, lookups, owner, ct);
     }
 
     private async Task<RateCardOutcome<RateCardImportResult>> WriteAsync(
-        RateCardImportRequest request, byte[] workbook, string driveId, ValidatedWorkbook validated,
+        RateCardImportRequest request, Guid firmId, byte[] workbook, string driveId, ValidatedWorkbook validated,
         ImportLookups lookups, RecordOwnerResolution owner, CancellationToken ct)
     {
         var created = new List<(string Entity, Guid Id)>();
@@ -271,7 +274,7 @@ public class RateCardImportService
                 var row = new Entity(TimekeeperEntity)
                 {
                     ["sprk_name"] = tk.Name,
-                    ["sprk_firm"] = new EntityReference(FirmEntity, request.FirmId),
+                    ["sprk_firm"] = new EntityReference(FirmEntity, firmId),
                     ["sprk_classification"] = new OptionSetValue(tk.Classification),
                     ["sprk_effectivefrom"] = ToDate(tk.From),
                     ["statecode"] = new OptionSetValue(0),
@@ -298,7 +301,8 @@ public class RateCardImportService
             var card = new Entity(RateCardEntity)
             {
                 ["sprk_name"] = request.Name,
-                ["sprk_firm"] = new EntityReference(FirmEntity, request.FirmId),
+                ["sprk_firm"] = new EntityReference(FirmEntity, firmId),
+                ["sprk_procedureversion"] = new EntityReference(ProcedureEntity.VersionEntity, request.ProcedureVersionId),
                 ["sprk_sourcedocument"] = new EntityReference(DocumentEntity, documentId),
                 ["sprk_effectivefrom"] = ToDate(validated.Rates.Min(r => r.From)),
                 ["statecode"] = new OptionSetValue(0),
@@ -307,11 +311,6 @@ public class RateCardImportService
             if (validated.Rates.All(r => r.To is not null))
             {
                 card["sprk_effectiveto"] = ToDate(validated.Rates.Max(r => r.To!.Value));
-            }
-
-            if (request.Core is { } core)
-            {
-                card[core.EntityLogicalName] = new EntityReference(core.EntityLogicalName, core.RecordId);
             }
 
             owner.ApplyTo(card);
@@ -399,6 +398,163 @@ public class RateCardImportService
             {
                 _logger.LogError(ex, "Rate card import cleanup could not delete the uploaded workbook {ItemId}", itemId);
             }
+        }
+    }
+
+    /// <summary>The owner question for a rate card (and the cards copied forward): no parents (085), the caller's business-unit team.</summary>
+    internal static RecordOwnershipContext CardOwnerContext(Guid? callerObjectId) =>
+        RecordOwnershipContext.ForRow(RateCardEntity, Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), callerObjectId: callerObjectId) with
+        {
+            RequestedBy = RecordRequester.Of(objectId: callerObjectId),
+        };
+
+    private sealed record ImportTarget(Guid? FirmId, string? Refusal);
+
+    /// <summary>
+    /// The Procedure Version the card goes under: it must exist and be a Draft, its Procedure must be of Type Rate card and name a firm.
+    /// Every refusal is one text that does not say which part failed beyond what the caller already supplied.
+    /// </summary>
+    private async Task<ImportTarget> ReadTargetAsync(Guid procedureVersionId, CancellationToken ct)
+    {
+        const string NotUsable = "The Procedure Version must be a Draft version of a Rate card Procedure.";
+        if (procedureVersionId == Guid.Empty)
+        {
+            return new ImportTarget(null, NotUsable);
+        }
+
+        var version = (await _entities.RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.VersionEntity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionStatusColumn),
+            Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.VersionEntity + "id", ConditionOperator.Equal, procedureVersionId) } },
+            TopCount = 1,
+        }, ct)).Entities.FirstOrDefault();
+        if (version is null
+            || version.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft
+            || version.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id is not { } procedureId)
+        {
+            return new ImportTarget(null, NotUsable);
+        }
+
+        var procedure = (await _entities.RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.Entity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.TypeColumn, ProcedureEntity.FirmColumn),
+            Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.Entity + "id", ConditionOperator.Equal, procedureId) } },
+            TopCount = 1,
+        }, ct)).Entities.FirstOrDefault();
+        if (procedure is null
+            || procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value != (int)ProcedureType.RateCard
+            || procedure.GetAttributeValue<EntityReference>(ProcedureEntity.FirmColumn)?.Id is not { } firmId)
+        {
+            return new ImportTarget(null, NotUsable);
+        }
+
+        return new ImportTarget(firmId, null);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Copy-forward (085, model 7.2): the next version's card starts as a copy of the previous one's
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The writes that copy a Procedure Version's Published cards forward, for the caller's transaction (<see cref="Truncated"/>: too many to copy in one pass).</summary>
+    public sealed record CopyForwardPlan(IReadOnlyList<OrganizationRequest> Creates, int CardsCopied, int RatesCopied, bool Truncated);
+
+    /// <summary>
+    /// Plans the copy of every Published, active card of <paramref name="previousVersionId"/> (and its active rates) as a Draft card under
+    /// <paramref name="newVersionId"/> (081's version creation sends the plan in its own transaction, so a version and its cards are all or
+    /// nothing; ProcedureService calls it when the Procedure's Type is Rate card). Nothing is written here. The previous card is not touched. The
+    /// copy keeps the firm, name, dates, rates and timekeepers and no source document (the new workbook, if any, is not this one); it is a Draft
+    /// that is in force nowhere until published, and its dates are edited before publishing.
+    /// </summary>
+    /// <param name="owner">The card's owner (<see cref="CardOwnerContext"/>), resolved by the caller; applied to the card and its rates.</param>
+    public static async Task<CopyForwardPlan> PlanCopyForwardAsync(
+        IGenericEntityService entities, Guid previousVersionId, Guid newVersionId, RecordOwnerResolution owner, int maxRequests, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(owner);
+
+        var cards = await entities.RetrieveMultipleAsync(new QueryExpression(RateCardEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_firm", "sprk_effectivefrom", "sprk_effectiveto"),
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_procedureversion", ConditionOperator.Equal, previousVersionId),
+                    new ConditionExpression("statecode", ConditionOperator.Equal, 0),
+                    new ConditionExpression("statuscode", ConditionOperator.Equal, CardPublished),
+                },
+            },
+        }, ct);
+        if (cards.MoreRecords)
+        {
+            return new CopyForwardPlan([], 0, 0, Truncated: true);
+        }
+
+        var creates = new List<OrganizationRequest>();
+        var rateCount = 0;
+        foreach (var card in cards.Entities.OrderBy(c => c.Id))
+        {
+            var rates = await entities.RetrieveMultipleAsync(new QueryExpression(RateEntity)
+            {
+                ColumnSet = new ColumnSet(
+                    "sprk_name", "sprk_timekeeper", "sprk_classification", "sprk_approvedrate", "sprk_rackrate", "transactioncurrencyid",
+                    "sprk_effectivefrom", "sprk_effectiveto"),
+                Criteria =
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("sprk_ratecard", ConditionOperator.Equal, card.Id),
+                        new ConditionExpression("statecode", ConditionOperator.Equal, 0),
+                    },
+                },
+            }, ct);
+            if (rates.MoreRecords || creates.Count + 1 + rates.Entities.Count > maxRequests)
+            {
+                return new CopyForwardPlan([], 0, 0, Truncated: true);
+            }
+
+            var copy = new Entity(RateCardEntity, Guid.NewGuid())
+            {
+                ["sprk_name"] = card.GetAttributeValue<string>("sprk_name"),
+                ["sprk_procedureversion"] = new EntityReference(ProcedureEntity.VersionEntity, newVersionId),
+                ["statecode"] = new OptionSetValue(0),
+                ["statuscode"] = new OptionSetValue(CardDraft),
+            };
+            CopyIfPresent(card, copy, "sprk_firm");
+            CopyIfPresent(card, copy, "sprk_effectivefrom");
+            CopyIfPresent(card, copy, "sprk_effectiveto");
+            owner.ApplyTo(copy);
+            creates.Add(new CreateRequest { Target = copy });
+
+            foreach (var rate in rates.Entities.OrderBy(r => r.Id))
+            {
+                var rateCopy = new Entity(RateEntity, Guid.NewGuid())
+                {
+                    ["sprk_ratecard"] = new EntityReference(RateCardEntity, copy.Id),
+                };
+                foreach (var column in new[]
+                {
+                    "sprk_name", "sprk_timekeeper", "sprk_classification", "sprk_approvedrate", "sprk_rackrate", "transactioncurrencyid",
+                    "sprk_effectivefrom", "sprk_effectiveto",
+                })
+                {
+                    CopyIfPresent(rate, rateCopy, column);
+                }
+
+                owner.ApplyTo(rateCopy);
+                creates.Add(new CreateRequest { Target = rateCopy });
+                rateCount++;
+            }
+        }
+
+        return new CopyForwardPlan(creates, cards.Entities.Count, rateCount, Truncated: false);
+    }
+
+    private static void CopyIfPresent(Entity from, Entity to, string column)
+    {
+        if (from.Contains(column) && from[column] is { } value)
+        {
+            to[column] = value;
         }
     }
 

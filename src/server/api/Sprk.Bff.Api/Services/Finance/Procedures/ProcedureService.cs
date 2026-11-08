@@ -549,6 +549,28 @@ public class ProcedureService
 
                 requests.AddRange(plan.Creates);
                 copied = plan.Copied;
+
+                // 085 (model 7.2): a Rate card Procedure's next version starts with a copy of the previous version's Published card and its
+                // active rates, as a Draft, in the same transaction. The card is reusable, not a core record's child: its own owner question,
+                // with no parents.
+                if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard)
+                {
+                    var cardOwner = await _ownership.ResolveOwnerAsync(RateCardImportService.CardOwnerContext(callerObjectId), ct);
+                    if (!cardOwner.IsOwned)
+                    {
+                        return RuleSetOutcome<ProcedureVersionCreated>.OwnerRefused(cardOwner);
+                    }
+
+                    var cards = await RateCardImportService.PlanCopyForwardAsync(
+                        _entities, previous.Id, versionId, cardOwner, MaxPerTransaction - requests.Count - 1, ct);
+                    if (cards.Truncated)
+                    {
+                        return Refused<ProcedureVersionCreated>(StatusCodes.Status422UnprocessableEntity, CodeTooManyRules,
+                            "The Procedure's rate card has more rates than can be copied in one pass.");
+                    }
+
+                    requests.AddRange(cards.Creates);
+                }
             }
 
             if (Touch(procedure) is not { } touch)

@@ -1220,6 +1220,10 @@ public partial class RouteAuthorizationGuardTests
             "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
             + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
             + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+        new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:150) and asks the caller's own Write "
+            + "on sprk_procedures via CallerReadCheck.CheckAsync (:173); a read fault or an unanswered question is 403 system_failure "
+            + "(:162, :186), denied is 403 insufficient_rights (:182) (ebilling-r1 085, I-P5)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
             "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
             + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
