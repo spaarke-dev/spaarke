@@ -23,7 +23,7 @@
 - Gate query must use a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
 ## Reviews queue
-- fm: #2629 (in progress); 045A design; 052b; 032 round 2 waits on the owner.
+- fm: #2629 (in progress); 045A design; 052b (incl. coming contact-only owner rule → customer main-BU team, after owner picks the team); 032 round 2 waits on the owner; **032b design note** (invoice Matter→Invoice mapping + assigned-access grant in ebilling's post-commit after-step; grant sign-off mine + re-file revoke/keep, joint with ebilling). 021 timing: closed on dev (20/20 lost to #2158; NFR-02 verdict moved to UAT by owner); Debug setting removed 05:19:20Z, 226 settings.
 - ebilling: 165d diff (after option A), 165e, 165f, 165b + 165b-3, 2b-2, the batch checklist + commit.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
