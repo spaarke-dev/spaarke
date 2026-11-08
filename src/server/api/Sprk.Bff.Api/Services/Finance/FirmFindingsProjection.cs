@@ -119,7 +119,8 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// item exists only because a line was decided, added or adjusted by a reviewer.</para>
 /// <para><b>Where each part comes from (all read app-only).</b> The line and its status: the invoice's lines
 /// (<see cref="InvoiceReviewReadService.LineQuery"/>). The reason: the <c>reduce-line</c>, <c>disallow-line</c> or <c>add-line</c> Decision Record
-/// that carries the LINE's link (and, if it names an invoice, this one); a record with neither link of this invoice is never projected. The
+/// that carries the LINE's link (and, if it names an invoice, this one); a record with neither link of this invoice is never projected, and neither
+/// is a record the BFF writer identity did not create (<see cref="WriterCreatedRecord"/>, EB-D-208: its line stays, with no reason). The
 /// rules: the Signals that record resolved (<c>sprk_signal.sprk_decisionrecord</c>), their policy version and <c>sprk_firmreason</c>. An invoice
 /// adjustment writes no Decision Record: its reason is <c>sprk_adjustmentreason</c> on the line and its rule is <c>sprk_adjustmentrule</c>.
 /// The clause: <see cref="FirmClauseReader"/> once per distinct policy version per invoice. Reviewer identity, internal notes, confidence
@@ -160,12 +161,19 @@ public sealed class FirmFindingsProjection
 
     private readonly IGenericEntityService _entities;
     private readonly FirmClauseReader _clauses;
+    private readonly Func<CancellationToken, Task<Guid>> _writerUserId;
     private readonly ILogger<FirmFindingsProjection> _logger;
 
-    public FirmFindingsProjection(IGenericEntityService entities, FirmClauseReader clauses, ILogger<FirmFindingsProjection> logger)
+    /// <param name="writerUserId">The <c>systemuserid</c> of the identity that creates every Decision Record (<c>BillingDecisionRecorder.WriterUserIdAsync</c>).
+    /// Asked at most once per projection, and only when the invoice has decided lines to give a reason to; a fault, or an empty id, degrades the
+    /// outcome to the status only (EB-D-208, 130a open question 3).</param>
+    public FirmFindingsProjection(
+        IGenericEntityService entities, FirmClauseReader clauses, Func<CancellationToken, Task<Guid>> writerUserId,
+        ILogger<FirmFindingsProjection> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _clauses = clauses ?? throw new ArgumentNullException(nameof(clauses));
+        _writerUserId = writerUserId ?? throw new ArgumentNullException(nameof(writerUserId));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -478,10 +486,15 @@ public sealed class FirmFindingsProjection
     /// <summary>
     /// The line decision records of the candidates, one per line (the newest of the line's records with the action code its status needs).
     /// A record counts only when it carries THIS invoice's line's link and, if it names an invoice, this invoice; a record with neither link
-    /// of this invoice is never returned, whatever the query gave back (EB-D-202). Keyed by line id.
+    /// of this invoice is never returned, whatever the query gave back (EB-D-202). <b>And only when the BFF writer identity created it</b>
+    /// (<see cref="WriterCreatedRecord"/>, EB-D-208, the rule 165b applies): a user can create a Decision Record with these action codes and a
+    /// line link, so the link alone does not make a record the server's decision. A record the writer did not create is never projected: its
+    /// line stays, with a null reason. The writer id is asked here, once, because only here is a reason wanted; a fault propagates and the
+    /// caller degrades to the status only. Keyed by line id.
     /// </summary>
     private async Task<Dictionary<Guid, Entity>> ReadDecisionRecordsAsync(Guid invoiceId, IReadOnlyList<Candidate> candidates, CancellationToken ct)
     {
+        var writer = await _writerUserId(ct).ConfigureAwait(false);
         var lineIds = candidates.Select(c => c.Row.Id).ToHashSet();
         var codeOf = candidates.ToDictionary(c => c.Row.Id, c => c.ActionCode);
         var found = new List<Entity>();
@@ -496,6 +509,7 @@ public sealed class FirmFindingsProjection
             };
             query.Criteria.AddCondition("sprk_regardinginvoiceline", ConditionOperator.In, chunk.Cast<object>().ToArray());
             query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, ReduceActionCode, DisallowActionCode, InvoiceLineAddService.ActionCode);
+            WriterCreatedRecord.AddConditions(query.Criteria, writer); // throws for an empty id: the caller degrades, it is never read as "no record"
             query.AddOrder($"{RecordEntity}id", OrderType.Ascending);
             found.AddRange(await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false));
         }

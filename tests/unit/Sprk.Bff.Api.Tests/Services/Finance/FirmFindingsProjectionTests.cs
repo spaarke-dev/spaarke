@@ -81,7 +81,7 @@ public sealed class FirmFindingsProjectionTests
                     {
                         "sprk_invoice" => Invoices,
                         "sprk_billingevent" => Lines,
-                        "sprk_decisionrecord" => Records,
+                        "sprk_decisionrecord" => Records.Where(r => SatisfiesWriterConditions(r, query.Criteria)).ToList(),
                         "sprk_signal" => Signals,
                         "sprk_policyversion" => Versions,
                         "sprk_policy" => Policies,
@@ -94,6 +94,18 @@ public sealed class FirmFindingsProjectionTests
 
         public int Reads(string entity) => Queries.Count(q => q.EntityName == entity);
 
+        /// <summary>EB-D-208: the BFF writer identity every Decision Record is created by (<c>createdby</c>); a record from anyone else is a user's.</summary>
+        public Guid WriterId = Guid.Parse("20000000-0000-4000-8000-0000000000c1");
+
+        /// <summary>Every time the projection asked for the writer id.</summary>
+        public int WriterCalls;
+
+        /// <summary>Non-null: asking for the writer id throws this (the writer connection is down).</summary>
+        public Exception? WriterFault;
+
+        /// <summary>When set, the writer id the projection is told (default <see cref="WriterId"/>); <see cref="Guid.Empty"/> is an unknown writer.</summary>
+        public Guid? WriterIdAnswered;
+
         public FirmFindingsProjection Projection() => new(
             Entities.Object,
             (version, invoice, ct) =>
@@ -102,7 +114,37 @@ public sealed class FirmFindingsProjectionTests
                 invoice.Should().Be(InvoiceId);
                 return ClauseFault ? Task.FromException<FirmClauseText>(new InvalidOperationException("clause down")) : Task.FromResult(Clause(version));
             },
+            ct =>
+            {
+                WriterCalls++;
+                return WriterFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(WriterIdAnswered ?? WriterId);
+            },
             NullLogger<FirmFindingsProjection>.Instance);
+
+        /// <summary>
+        /// The store applies the query's writer rule (<see cref="WriterCreatedRecord"/>: <c>createdby</c> equal to the writer, <c>createdonbehalfby</c>
+        /// null) to the stored row, as Dataverse does. Every OTHER condition is left alone (the double never evaluated them), so a projection that
+        /// drops the writer rule from its query returns the user's record and shows.
+        /// </summary>
+        private static bool SatisfiesWriterConditions(Entity row, FilterExpression criteria)
+        {
+            foreach (var condition in criteria.Conditions)
+            {
+                if (condition.AttributeName == "createdby" && condition.Operator == ConditionOperator.Equal
+                    && row.GetAttributeValue<EntityReference>("createdby")?.Id != (Guid)condition.Values[0])
+                {
+                    return false;
+                }
+
+                if (condition.AttributeName == "createdonbehalfby" && condition.Operator == ConditionOperator.Null
+                    && row.GetAttributeValue<EntityReference>("createdonbehalfby") is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         private static Entity Requested(Entity row, ColumnSet columns)
         {
@@ -180,14 +222,21 @@ public sealed class FirmFindingsProjectionTests
         }
 
         public Entity AddRecord(
-            string code, Guid? line, string? reason, Guid? invoice = null, DateTime? decidedOn = null, Guid? id = null)
+            string code, Guid? line, string? reason, Guid? invoice = null, DateTime? decidedOn = null, Guid? id = null,
+            Guid? createdBy = null, Guid? onBehalfOf = null)
         {
             var record = new Entity("sprk_decisionrecord", id ?? Guid.NewGuid())
             {
                 ["sprk_actioncode"] = code,
                 ["sprk_reason"] = reason,
                 ["sprk_decidedon"] = decidedOn ?? new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+                ["createdby"] = new EntityReference("systemuser", createdBy ?? WriterId),
             };
+            if (onBehalfOf is not null)
+            {
+                record["createdonbehalfby"] = new EntityReference("systemuser", onBehalfOf.Value);
+            }
+
             if (line is not null)
             {
                 record["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", line.Value);
@@ -607,6 +656,98 @@ public sealed class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
         outcome!.Items.Select(i => i.Reason).Should().Equal(null, null, null, "Linked reason.");
+    }
+
+    // ── Decision Record authenticity: only the writer's records (EB-D-208, the rule 165b applies; 130b) ──
+
+    [Fact(DisplayName = "130b must-fire: a linked record the writer did NOT create (a user's, or one created on the writer's behalf) is never projected; its line stays with no reason")]
+    public async Task ALinkedRecordTheWriterDidNotCreate_IsNeverProjected_AndItsLineStaysWithNoReason()
+    {
+        var world = new World();
+        var byUser = world.AddLine(1, InvoiceLineStatus.Reduced, 100m, 60m);
+        var onBehalf = world.AddLine(2, InvoiceLineStatus.Disallowed, 100m, 0m);
+        var byWriter = world.AddLine(3, InvoiceLineStatus.Reduced, 100m, 60m);
+        var userCreator = Guid.Parse("20000000-0000-4000-8000-0000000000c9");
+        world.AddRecord("reduce-line", byUser.Id, "A user forged this.", InvoiceId, createdBy: userCreator);
+        world.AddRecord("disallow-line", onBehalf.Id, "Created for the writer by someone else.", InvoiceId, onBehalfOf: userCreator);
+        world.AddRecord("reduce-line", byWriter.Id, "The server decided this.", InvoiceId);
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Select(i => (i.LineId, i.Reason)).Should().Equal(
+            (byUser.Id, (string?)null), (onBehalf.Id, (string?)null), (byWriter.Id, "The server decided this."));
+        outcome.Degraded.Should().BeFalse();
+        System.Text.Json.JsonSerializer.Serialize(outcome).Should().NotContain("forged").And.NotContain("someone else");
+    }
+
+    [Fact(DisplayName = "130b must-not-fire: a record the writer created projects its reason, whatever its action code (add, reduce, disallow)")]
+    public async Task ARecordTheWriterCreated_ProjectsItsReason()
+    {
+        var world = new World();
+        var reduced = world.AddLine(1, InvoiceLineStatus.Reduced, 100m, 60m);
+        var disallowed = world.AddLine(2, InvoiceLineStatus.Disallowed, 100m, 0m);
+        var decisionId = Guid.NewGuid();
+        var added = world.AddReviewerLine(decisionId);
+        world.AddRecord("reduce-line", reduced.Id, "Reduce reason.", InvoiceId);
+        world.AddRecord("disallow-line", disallowed.Id, "Disallow reason.", InvoiceId);
+        world.AddRecord("add-line", added.Id, "Add reason.", InvoiceId);
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Select(i => i.Reason).Should().BeEquivalentTo("Reduce reason.", "Disallow reason.", "Add reason.");
+        world.WriterCalls.Should().Be(1, "the writer id is asked once per projection, however many lines there are");
+    }
+
+    [Theory(DisplayName = "130b: a writer id that cannot be obtained (a fault, or an empty id) gives the status only, Degraded; no record is read")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AWriterIdThatCannotBeObtained_GivesTheStatusOnly_Degraded(bool emptyId)
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+        if (emptyId)
+        {
+            world.WriterIdAnswered = Guid.Empty;
+        }
+        else
+        {
+            world.WriterFault = new InvalidOperationException("The writer connection is down.");
+        }
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true));
+        world.Reads("sprk_decisionrecord").Should().Be(0, "without a writer identity no record can be told from a user's, so none is read");
+    }
+
+    [Fact(DisplayName = "130b: with no decided or added lines the writer id is never asked (Accepted, Pending and Flagged lines only)")]
+    public async Task WithNoDecidedLines_TheWriterIdIsNeverAsked()
+    {
+        var world = new World();
+        world.AddLine(1, InvoiceLineStatus.Accepted);
+        world.AddLine(2, InvoiceLineStatus.Pending);
+        world.AddLine(3, InvoiceLineStatus.Flagged);
+        world.WriterFault = new InvalidOperationException("Must not be asked.");
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Should().BeEmpty();
+        outcome.Degraded.Should().BeFalse();
+        world.WriterCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130b: an invoice with only an invoice-level adjustment (its reason is on the line, not in a record) never asks for the writer id")]
+    public async Task AnAdjustmentOnly_NeverAsksForTheWriterId()
+    {
+        var world = new World(InvoiceStatusCodes.Approved);
+        world.AddAdjustment(1, "Rate cap applied.", VersionA);
+        world.WriterFault = new InvalidOperationException("Must not be asked.");
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Single().Reason.Should().Be("Rate cap applied.");
+        outcome.Degraded.Should().BeFalse();
+        world.WriterCalls.Should().Be(0);
     }
 
     [Fact]

@@ -73,6 +73,7 @@ public sealed class InvoiceMoneyColumnsAppOnlyWriteGuardTests
         typeof(Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceIndexDocument),
         typeof(Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader),
         typeof(RuleSetService), // task 083: GetFirmClauseAsync reads the invoice's firm (sprk_vendororg) app-only; writes nothing
+        typeof(Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter), // task 130b: reads the route invoice's firm (sprk_vendororg) app-only to compare it with the caller's firms; writes nothing
     ];
 
     /// <summary>Types that hold the names in a registration: the allow-list, the generic-writer refusal and the mapping protection.</summary>

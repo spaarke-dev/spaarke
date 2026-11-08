@@ -585,6 +585,14 @@ public partial class RouteAuthorizationGuardTests
             + "most 500 examined, with partial and truncated flags; a systemuser is refused), a systemuser refusal on a submit before any "
             + "write, and the firm-to-record link a submit requires. The filter's link check is an early copy: the owner is "
             + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes."),
+        new GovernedFile("Api/ExternalAccess/FirmOutcomeEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome "
+            + "(ebilling-r1 task 130b, FR-38, NFR-10) on the COLLABORATION group, each chain attaching AddFirmOutcomeAuthorizationFilter "
+            + "(FirmOutcomeEndpoints.cs:26, :37) BEFORE RequireEbillingEnabled (:28, :39). The filter requires a non-systemuser caller, "
+            + "the item's firm among the caller's active firms, Read on the item's core record and that the (a') predicate does not hide the "
+            + "item; every refusal and a missing item are the same 403, a firm or visibility read that cannot be completed is 403/503, "
+            + "never a pass. The handlers read the FirmFindingsProjection only for the id the filter admitted (a handler that finds no "
+            + "admitted subject answers 403, :53-71); a Degraded or Unavailable outcome is a 503."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -1171,7 +1179,12 @@ public partial class RouteAuthorizationGuardTests
     // GovernedFiles (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter twice per route as the caller: the record's
     // ebilling.record.override, then Read on the Procedure or rule plus the billing-admin privilege); .RequireEbillingEnabled is already in
     // NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 151;
+    //
+    // 151 -> 152 (2026-11-08, ebilling-r1 task 130b, FR-38). Net +1: Api/ExternalAccess/FirmOutcomeEndpoints.cs ADDED -- GET
+    // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
+    // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 152;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1321,6 +1334,12 @@ public partial class RouteAuthorizationGuardTests
             + "(principal.RightsOn, ExternalInvoiceSubmissionAuthorizationFilter.cs:153) and a firm among the caller contact's conferring "
             + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
             + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
+        new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
+            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:125); the invoice's (or submission's) firm "
+            + "must be among the caller contact's ACTIVE firms (:204, :278; an unreadable or faulting firm read is 403, never 'no firm', "
+            + ":166-168) AND the caller holds Read on its core record from the evaluator's post-veto rights (principal.RightsOn, :214, "
+            + ":284), AND the item is not hidden by the (a') predicate (:225-248, :295-305); every refusal, a missing item included, is "
+            + "the same 403 (:195), and a missing principal denies (:117-120)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "

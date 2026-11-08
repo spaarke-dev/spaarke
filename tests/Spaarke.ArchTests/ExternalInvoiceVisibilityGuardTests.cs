@@ -112,6 +112,43 @@ public class ExternalInvoiceVisibilityGuardTests
             "Creates the caller's own submission and returns its receipt (tracking number); a new submission has no invoice yet.",
         [$"{typeof(ExternalUserContextEndpoint).FullName}::HandleAsync"] =
             "Reads the caller's active firm NAMES for the SPA header; no family row.",
+        // ── the firm outcome (ebilling-r1 task 130b, FR-38): the predicate is applied by the route's filter, once, before the handler ──
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetInvoiceOutcomeAsync"] =
+            "Reviewed 130b. Reads the projection only for the invoice id FirmOutcomeAuthorizationFilter admitted (stored in the request's items; "
+            + "a handler without that decision answers 403). The filter, which precedes every handler on the route, applies THE (a') predicate "
+            + "(ExternalInvoiceHiding) to this one invoice and fails closed: asking it again here would double the reads for the same answer.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetSubmissionOutcomeAsync"] =
+            "Reviewed 130b. As GetInvoiceOutcomeAsync, for the submission id the filter admitted after ExternalInvoiceSubmissionEndpoints."
+            + "VisibleSubmissionsAsync (the submission seam, which also decides the submission's own invoice).",
+        // The projection is the reader BEHIND those two handlers. It takes an id and returns what a firm may see (ADR-008: it makes no
+        // caller decision); its only external caller is FirmOutcomeEndpoints, and no other route may use it without the same filter
+        // (the ratchet: a method here that starts reaching the predicate, or stops being a surface, is removed).
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::.cctor"] =
+            "Reviewed 130b. Static column lists naming the family tables; reads nothing.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForInvoiceAsync"] =
+            "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetInvoiceOutcomeAsync: the invoice id was admitted by the route's filter, "
+            + "which applied the (a') predicate to it. Fails closed (a fault is a status-only Degraded outcome).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForSubmissionAsync"] =
+            "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetSubmissionOutcomeAsync: the submission id was admitted by the route's filter "
+            + "(the submission seam). It reads the submission's own invoice only when the submission is Accepted; the seam decided that invoice too.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSubmissionAsync"] =
+            "Reviewed 130b. Reads the status of the submission GetForSubmissionAsync was given (already admitted); returns its processing status and tracking number only.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildItemsAsync"] =
+            "Reviewed 130b. Builds the firm view of the admitted invoice's lines; it takes only the admitted invoice's id.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadDecisionRecordsAsync"] =
+            "Reviewed 130b. Reads Decision Records linked to the admitted invoice's lines, only those the BFF writer created (WriterCreatedRecord).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSignalsAsync"] =
+            "Reviewed 130b. Reads the Signals of the admitted invoice's Decision Records for their policy version and firm-facing reason; nothing internal is projected.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRulesAsync"] =
+            "Reviewed 130b. Reads the rule names a citation shows; the clause text is released only by the clause reader's own gate.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Candidate"] =
+            "Reviewed 130b. A private record (the join of a line and its Decision Record); no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Cite"] =
+            "Reviewed 130b. A private helper shaping a citation from rows already read; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Excerpt"] =
+            "Reviewed 130b. A private helper trimming a clause excerpt; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::RuleRead"] =
+            "Reviewed 130b. A private record of a rule's name and number; no read.",
     };
 
     /// <summary>
