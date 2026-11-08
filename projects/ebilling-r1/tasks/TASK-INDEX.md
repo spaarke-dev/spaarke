@@ -184,7 +184,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 161 | 🟡 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
 | 162 | 🔲 [open] | Accuracy and performance evaluation; tuning | STANDARD | opus / high | none | 005, 160, 161 |
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
-| 164 | 🔄 [164a merged (eeac33b1c2, 682dc4a661); 164b client done 9fa56c32a2, adversarial review running; 164c ribbon unblocked (096b merged)] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |
+| 164 | 🔄 [164a, 164b merged; 164c merged 931fe905b0 (11 hides; uac-r2 Q6 (b): replaces exactly the SecureChild footprint); live -Apply waits for master, uac-r2 read-backs and the owner go] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |
 | 165 | 🔄 [165a merged (2fac72b8a5); 165b item 1 merged (b49465d972); items 3-4 → 165b-2, item 2 + completion fix → 165b-3] | Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources | FULL | opus / high | none | 164a |
 | 165c | ✅ [merged into work 1aff454e34] | External invoice visibility counts a submission's invoice link only when it is its own invoice | FULL | opus / high | none | 165a |
 | 165e | ✅ [merged into work 7061729544; two passes, no F; uac-r2 approved; ships in the same batch as 165f] | External invoice visibility decides only from the invoice's own submission, failing closed | FULL | opus / high | none | 165c |
