@@ -153,6 +153,16 @@ After converting, the placeholder OAuth ID must be replaced with a real Entra ap
 - **Shared source.** `src/accelerators/` is owned by r1 until PR #2528 merges. Until then, r2 proposes changes to
   shared parts (skills, engines, playbooks, gates) to the r1 session rather than editing them. Claude-only packaging
   (a new build target, Claude manifests, Claude trial runs) can live in r2.
+- **Sessions (2026-11-08):** r1 is owned by the Claude Desktop session `acclerator-r1`; send r1 proposals there.
+  r1 has taken on Python 3.11 compatibility and the no-top-level-`bin/` zip rule (its `current-task.md`).
+- **r1 shared-code changes to build against** (on `work/spaarke-legal-ai-accelerator-r1`, reported 2026-11-08):
+  - `playbook_parse.py`: optional "If missing" field; `parse(..., require_side=False)` for non-contract document types;
+  - `playbook_import.py`: `split_instructions` returns three values (preferred, escalate, if_missing);
+  - `render_word_playbook.py`: Instructions carry "If missing" and "Acceptable fallback (accept without redlining)"
+    lines;
+  - the Legal Knowledge library is organised by document type (r1 design §5.9): `<Type>/` holds the playbook to
+    attach, plus `Playbook master/`, `Policies/`, `Precedents/`, `Templates/` and `Archive/`. The Claude edition's
+    profile and positions seeds (§8.4, §8.5) should follow this layout.
 - **Naming.** Skill and plugin names stay identical on both platforms, following the convention agreed with
   mcp-bff-api-r1 (pending owner OD-20 / OD-42 in r1).
 - **Terminology.** "Playbook" is one concept in several formats (ontology §3, D-209). Name the format where it matters.
