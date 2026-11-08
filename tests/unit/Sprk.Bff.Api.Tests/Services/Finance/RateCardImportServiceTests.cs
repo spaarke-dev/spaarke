@@ -1072,6 +1072,60 @@ public sealed class RateCardImportServiceTests
         h.BulkUpdated.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Publish must-fire: a card that names another version than the one the Procedure check named is refused 409 ratecard.version_changed and nothing is written")]
+    public async Task Publish_WhenTheCardNowNamesAnotherVersion_IsRefusedWith409_AndWritesNothing()
+    {
+        var h = new Harness();
+        var cardId = Guid.NewGuid();
+        var jane = Guid.NewGuid();
+        var checkedVersion = Guid.NewGuid();
+        var card = Card(cardId);
+        card["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", Guid.NewGuid()); // moved since the check
+        h.Seed(card, Tkp(jane, RateCardImportService.TimekeeperPending),
+            StoredRate(cardId, "Jane", jane, null, new DateTime(2026, 1, 1), null));
+
+        var outcome = await h.Service().PublishAsync(cardId, checkedVersion, default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be(RateCardImportService.CodeVersionChanged);
+        h.Updated.Should().BeEmpty();
+        h.BulkUpdated.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: a card that now names no version is refused 409 ratecard.version_changed and nothing is written")]
+    public async Task Publish_WhenTheCardNowNamesNoVersion_IsRefusedWith409_AndWritesNothing()
+    {
+        var h = new Harness();
+        var cardId = Guid.NewGuid();
+        h.Seed(Card(cardId));
+
+        var outcome = await h.Service().PublishAsync(cardId, Guid.NewGuid(), default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be(RateCardImportService.CodeVersionChanged);
+        h.Updated.Should().BeEmpty();
+        h.BulkUpdated.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Publish must-not-fire: the card still names the version the Procedure check named, so it is published")]
+    public async Task Publish_WhenTheCardStillNamesTheCheckedVersion_IsPublished()
+    {
+        var h = new Harness();
+        var cardId = Guid.NewGuid();
+        var jane = Guid.NewGuid();
+        var checkedVersion = Guid.NewGuid();
+        var card = Card(cardId);
+        card["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", checkedVersion);
+        h.Seed(card, Tkp(jane, RateCardImportService.TimekeeperPending),
+            StoredRate(cardId, "Jane", jane, null, new DateTime(2026, 1, 1), null));
+
+        var outcome = await h.Service().PublishAsync(cardId, checkedVersion, default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
+        h.Updated.Should().ContainSingle().Which.Id.Should().Be(cardId);
+    }
+
     [Fact]
     public async Task EndToEnd_ImportThenPublish_NothingIsInForceUntilPublish()
     {

@@ -84,6 +84,7 @@ public static class ProcedureEndpoints
         group.MapPost("/{procedureId:guid}/versions", CreateVersion)
             .AddFinanceAuthorizationFilter(BillingAdminAuthorization.CreateProcedureVersion)
             .RequireEbillingEnabled()
+            .RequireRateCardCreateOnARateCardProcedure() // a Rate card Procedure's copy-forward also creates cards
             .WithName("CreateProcedureVersion")
             .WithSummary("Create the next version as a Draft, copying the rules of the version before it")
             .Produces<ProcedureVersionCreated>(StatusCodes.Status201Created)

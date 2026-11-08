@@ -108,6 +108,7 @@ public class RateCardImportService
     internal const string CodeContainerNotConfigured = "ratecard.container_not_configured";
     internal const string CodeNotFound = "ratecard.not_found";
     internal const string CodeNotDraft = "ratecard.not_draft";
+    internal const string CodeVersionChanged = "ratecard.version_changed";
     internal const string CodeOverlap = "ratecard.publish_invalid";
     internal const string CodeImportFailed = "ratecard.import_failed";
     internal const string CodeProcedureVersionInvalid = "ratecard.procedure_version_invalid";
@@ -566,11 +567,20 @@ public class RateCardImportService
     /// Draft to Published. Re-checks the overlap rule on the card's rates as they are NOW (a form edit after import can break it), approves
     /// the card firm's Pending timekeepers the rates name, then sets the card Published last, so a retry after a partial failure completes.
     /// </summary>
-    public virtual async Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, CancellationToken ct)
+    public Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, CancellationToken ct) =>
+        PublishAsync(rateCardId, expectedVersionId: null, ct);
+
+    /// <summary>
+    /// <see cref="PublishAsync(Guid, CancellationToken)"/> for a caller that has already checked the card's Procedure (the publish route's
+    /// <c>RequireWriteOnTheCardsProcedure</c>): <paramref name="expectedVersionId"/> is the Procedure Version that check named. The card is read
+    /// again here, before any write, and a card that now names another version (or none) is refused 409 <c>ratecard.version_changed</c>, so the
+    /// Procedure checked is the Procedure published to. Null skips the comparison.
+    /// </summary>
+    public virtual async Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, Guid? expectedVersionId, CancellationToken ct)
     {
         var cards = await _entities.RetrieveMultipleAsync(new QueryExpression(RateCardEntity)
         {
-            ColumnSet = new ColumnSet("statuscode", "sprk_firm"),
+            ColumnSet = new ColumnSet("statuscode", "sprk_firm", "sprk_procedureversion"),
             Criteria = { Conditions = { new ConditionExpression("sprk_ratecardid", ConditionOperator.Equal, rateCardId) } },
             TopCount = 1,
         }, ct);
@@ -579,6 +589,12 @@ public class RateCardImportService
         if (card is null)
         {
             return RateCardOutcome<RateCardPublishResult>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rate card was not found.");
+        }
+
+        if (expectedVersionId is { } expected && card.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id != expected)
+        {
+            return RateCardOutcome<RateCardPublishResult>.Refused(
+                StatusCodes.Status409Conflict, CodeVersionChanged, "The rate card now belongs to a different Procedure Version; nothing was published.");
         }
 
         if (card.GetAttributeValue<OptionSetValue>("statuscode")?.Value != CardDraft)

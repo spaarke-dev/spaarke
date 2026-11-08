@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
@@ -86,6 +88,8 @@ public sealed class ProcedureEndpointsTests
             Mock.Of<IRecordOwnershipResolver>(),
             NullLogger<ProcedureService>.Instance);
 
+        /// <summary>The Dataverse seam the rate card privilege filter reads the Procedure's type through (085 fix round 1); by default it finds no Procedure.</summary>
+        public readonly Mock<IGenericEntityService> Entities = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
         private WebApplication _app = null!;
@@ -111,6 +115,9 @@ public sealed class ProcedureEndpointsTests
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
             builder.Services.AddSingleton(host.Service.Object);
+            host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection());
+            builder.Services.AddSingleton(host.Entities.Object);
             if (admin)
             {
                 host.GrantAdmin();
@@ -126,6 +133,16 @@ public sealed class ProcedureEndpointsTests
             host.Client = host._app.GetTestClient();
             return host;
         }
+
+        /// <summary>The stored Procedure <see cref="ProcedureId"/> is of <paramref name="type"/>.</summary>
+        public void ProcedureIs(ProcedureType type) =>
+            Entities.Setup(e => e.RetrieveMultipleAsync(
+                    It.Is<QueryExpression>(q => q.EntityName == "sprk_procedure" && q.Criteria.Conditions.Any(c => c.Values.Contains(ProcedureId))),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection(new List<Entity>
+                {
+                    new("sprk_procedure", ProcedureId) { ["sprk_proceduretype"] = new OptionSetValue((int)type) },
+                }));
 
         /// <summary>A billing admin with Read and Write on the Procedure.</summary>
         public void GrantAdmin()
@@ -341,6 +358,92 @@ public sealed class ProcedureEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         response.Headers.Location!.ToString().Should().EndWith($"{Base}/{ProcedureId}");
         caller.Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId));
+    }
+
+    // ── 085 fix round 1 (F1-c): a Rate card Procedure's new version also creates cards, so it also needs Create on the card tables ──
+
+    private static ProcedureVersionCreated Created() =>
+        new(new ProcedureVersionView(VersionId, 2, "Draft", null, null, null), null, 0);
+
+    private static Task<HttpResponseMessage> CreateVersion(Host host) =>
+        host.Client.SendAsync(Req("POST", $"{Base}/{ProcedureId}/versions", content: JsonContent.Create(new { })));
+
+    [Theory(DisplayName = "085 must-fire (F1-c): a new version of a RATE CARD Procedure without Create on the card or the rates is 403 insufficient_privilege and nothing is written")]
+    [InlineData(RateCardImportEndpoints.CreateRateCardPrivilege)]
+    [InlineData(RateCardImportEndpoints.CreateRatePrivilege)]
+    public async Task CreateVersion_OfARateCardProcedure_WithoutCreateOnTheCardTables_Returns403_AndWritesNothing(string missing)
+    {
+        await using var host = await Host.StartAsync();
+        host.ProcedureIs(ProcedureType.RateCard);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRateCardPrivilege);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRatePrivilege);
+        host.Probe.Release(missing);
+
+        var response = await CreateVersion(host);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode);
+        host.Probe.Calls.Should().Contain(c => c.Privilege == missing, "the card privilege was asked of Dataverse as the caller");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "085 must-not-fire (F1-c): the same caller creating a version of a GUIDELINE Procedure is allowed: no card is copied")]
+    public async Task CreateVersion_OfAGuideline_WithoutCreateOnTheCardTables_IsAllowed()
+    {
+        await using var host = await Host.StartAsync();
+        host.ProcedureIs(ProcedureType.Guideline); // GrantAdmin holds no card privilege
+        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionCreated>.Done(Created()));
+
+        var response = await CreateVersion(host);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Probe.Calls.Should().NotContain(c => c.Privilege == RateCardImportEndpoints.CreateRateCardPrivilege || c.Privilege == RateCardImportEndpoints.CreateRatePrivilege);
+    }
+
+    [Fact(DisplayName = "085 must-not-fire (F1-c): a caller with Create on both card tables creates a version of a Rate card Procedure")]
+    public async Task CreateVersion_OfARateCardProcedure_WithTheCardPrivileges_IsAllowed()
+    {
+        await using var host = await Host.StartAsync();
+        host.ProcedureIs(ProcedureType.RateCard);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRateCardPrivilege);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRatePrivilege);
+        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionCreated>.Done(Created()));
+
+        var response = await CreateVersion(host);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact(DisplayName = "085 (F1-c, fail closed): a fault reading the Procedure's type is 403 system_failure and nothing is written")]
+    public async Task CreateVersion_WhenTheProceduresTypeCannotBeRead_Returns403SystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated read fault"));
+
+        var response = await CreateVersion(host);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "085 (F1-c, fail closed): an unanswered privilege question on a Rate card Procedure is 403 system_failure, not insufficient_privilege")]
+    public async Task CreateVersion_OfARateCardProcedure_WhenThePrivilegeQuestionIsUnanswered_Returns403SystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.ProcedureIs(ProcedureType.RateCard);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRateCardPrivilege);
+        host.Probe.Hold(RateCardImportEndpoints.CreateRatePrivilege);
+        host.Probe.FaultFor.Add(RateCardImportEndpoints.CreateRatePrivilege);
+
+        var response = await CreateVersion(host);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
     }
 
     [Fact]

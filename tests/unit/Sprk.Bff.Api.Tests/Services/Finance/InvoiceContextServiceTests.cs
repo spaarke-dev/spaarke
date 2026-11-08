@@ -1220,6 +1220,38 @@ public class InvoiceContextServiceTests
         withDate.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Should().NotBeEmpty();
     }
 
+    // ── Design decision (uac-r2 approved, 2026-11-08): the panel shows the rates resolution applies to the invoice's work dates to any reviewer
+    // with core Read. It takes only the invoice id, chooses no Procedure or card from the client, and prints only the rank label. ──
+
+    [Fact(DisplayName = "085 design decision pin: the context response carries no Procedure identifier (id or name) and no version or card id; only the rank label")]
+    public async Task TheContext_CarriesNoProcedureIdentifier_OnlyTheRankLabel()
+    {
+        var h = FullFixture();
+        foreach (var procedure in h.Procedures)
+        {
+            procedure["sprk_name"] = "SECRET-PROCEDURE-NAME";
+        }
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Should().NotBeEmpty("the rates are shown");
+        var json = JsonSerializer.Serialize(context);
+        json.Should().NotContain("SECRET-PROCEDURE-NAME");
+        foreach (var id in new[] { AllProcedure, FirmProcedure, AllVersion, FirmVersion })
+        {
+            json.Should().NotContainEquivalentOf(id.ToString(), $"no Procedure or version id reaches the reviewer ({id})");
+        }
+
+        context.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Select(r => r.Scope)
+            .Should().OnlyContain(label => label.StartsWith("AllRecords/d0") || label.StartsWith("Firm/d0"), "the rank label is all that names the Procedure's place");
+    }
+
+    // The other two properties of the decision are pinned by existing tests: only versions the resolver chose appear
+    // (EveryCrossInvoiceQuery_IsScopedToTheInvoicesFirmAndCoreRecord_AndExcludesTheCurrentInvoice, which asserts the rate query names exactly
+    // the chosen versions, and TheApprovedRates_AreJudgedOnTheLineDates_AndOnTheInvoiceDateWhenNoLineHasOne, where no chosen version reads no
+    // rate); a core Read failure gives Unavailable (ACoreRecordTheCallerCannotRead_GivesNoDetailsNoBudgetAndNoCoreScopedRates and
+    // AFailedCoreRecordAccessCheck_MakesTheCoreSectionsUnavailable_NeverTheData).
+
     [Fact]
     public async Task QueryCount_DoesNotDependOnTheInvoicesLineCount()
     {

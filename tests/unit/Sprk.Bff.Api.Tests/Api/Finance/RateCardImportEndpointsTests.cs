@@ -131,6 +131,28 @@ public sealed class RateCardImportEndpointsTests
                     new("sprk_procedureversion", versionId) { ["sprk_procedure"] = new EntityReference("sprk_procedure", procedureId) },
                 }));
 
+        /// <summary>The stored card <paramref name="cardId"/> names the Procedure Version <paramref name="versionId"/> (none: a card with no version).</summary>
+        public void CardBelongsTo(Guid cardId, Guid? versionId)
+        {
+            var card = new Entity("sprk_ratecard", cardId);
+            if (versionId is { } v)
+            {
+                card["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", v);
+            }
+
+            Entities.Setup(e => e.RetrieveMultipleAsync(
+                    It.Is<QueryExpression>(q => q.EntityName == "sprk_ratecard" && q.Criteria.Conditions.Any(c => c.Values.Contains(cardId))),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection(new List<Entity> { card }));
+        }
+
+        /// <summary>The whole chain a publish is checked through: card, its version, the version's Procedure.</summary>
+        public void CardOfProcedure(Guid cardId, Guid versionId, Guid procedureId)
+        {
+            CardBelongsTo(cardId, versionId);
+            VersionBelongsTo(versionId, procedureId);
+        }
+
         public void GrantAdmin()
         {
             foreach (var p in new[]
@@ -522,11 +544,13 @@ public sealed class RateCardImportEndpointsTests
     // Publish
     // ═══════════════════════════════════════════════════════════════════════════
 
-    [Fact]
+    [Fact(DisplayName = "Publish: with the table privileges and Write on the card's Procedure the card is published (must-not-fire control)")]
     public async Task Publish_Returns200WithThePublishedCard()
     {
         await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.PublishAsync(CardId, It.IsAny<CancellationToken>()))
+        host.CardOfProcedure(CardId, VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read | AccessRights.Write);
+        host.Service.Setup(s => s.PublishAsync(CardId, VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RateCardOutcome<RateCardPublishResult>.Done(new RateCardPublishResult(CardId, "Published", 2)));
 
         var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
@@ -535,6 +559,124 @@ public sealed class RateCardImportEndpointsTests
         var body = await Json(response);
         body["status"]!.GetValue<string>().Should().Be("Published");
         body["timekeepersApproved"]!.GetValue<int>().Should().Be(2);
+        host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId && c.HasToken,
+            "the Procedure's rights are asked of Dataverse as the caller");
+        host.Service.Verify(s => s.PublishAsync(CardId, VersionId, It.IsAny<CancellationToken>()), Times.Once, "the version the check named is the one handed on");
+    }
+
+    [Fact(DisplayName = "Publish must-fire: table privileges but no Write on the card's Procedure gives 403 insufficient_rights and nothing is published")]
+    public async Task Publish_WithoutWriteOnTheCardsProcedure_Returns403_AndNothingIsPublished()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardOfProcedure(CardId, VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read); // Read only
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await Json(response);
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be("You need Write on this Procedure.");
+        host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish: an UNKNOWN rights answer on the card's Procedure is system_failure, not insufficient_rights")]
+    public async Task Publish_WhenTheProceduresRightsAreUnknown_IsSystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardOfProcedure(CardId, VersionId, ProcedureId);
+        host.Access.Fault("sprk_procedures", ProcedureId);
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish: a fault reading the card or its version denies (fail closed) with 403 system_failure and publishes nothing")]
+    public async Task Publish_WhenTheCardsProcedureCannotBeRead_Returns403SystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated read fault"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish: a fault reading the version's Procedure (the card is found) denies with 403 system_failure")]
+    public async Task Publish_WhenTheVersionCannotBeRead_Returns403SystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardBelongsTo(CardId, VersionId);
+        host.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_procedureversion"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated read fault"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: an unknown card is 403 (not 404), so the answer does not say whether a card exists")]
+    public async Task Publish_OnAnUnknownCard_Returns403_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync(); // the default read finds nothing
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: a card with no Procedure Version is 403 and never reaches the service")]
+    public async Task Publish_OnACardWithNoVersion_Returns403_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardBelongsTo(CardId, versionId: null);
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: a version with no Procedure is 403 and never reaches the service")]
+    public async Task Publish_OnAVersionWithNoProcedure_Returns403_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardBelongsTo(CardId, VersionId); // the version itself is unknown to the default read
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: the service refusing 409 ratecard.version_changed (the card moved to another version after the check) is 409 and publishes nothing")]
+    public async Task Publish_WhenTheCardMovedToAnotherVersion_Returns409VersionChanged()
+    {
+        await using var host = await Host.StartAsync();
+        host.CardOfProcedure(CardId, VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read | AccessRights.Write);
+        host.Service.Setup(s => s.PublishAsync(CardId, VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(
+            RateCardOutcome<RateCardPublishResult>.Refused(409, RateCardImportService.CodeVersionChanged, "moved"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.version_changed");
     }
 
     [Fact]
@@ -542,13 +684,20 @@ public sealed class RateCardImportEndpointsTests
     {
         await using var host = await Host.StartAsync();
         var overlap = Guid.NewGuid();
-        var missing = Guid.NewGuid();
+        var missing = Guid.NewGuid(); // found by the check, then gone when the service reads it (a race)
         var published = Guid.NewGuid();
-        host.Service.Setup(s => s.PublishAsync(overlap, It.IsAny<CancellationToken>())).ReturnsAsync(
+        host.VersionBelongsTo(VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read | AccessRights.Write);
+        foreach (var id in new[] { overlap, missing, published })
+        {
+            host.CardBelongsTo(id, VersionId);
+        }
+
+        host.Service.Setup(s => s.PublishAsync(overlap, VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(
             RateCardOutcome<RateCardPublishResult>.Invalid(new[] { new RateCardImportError("Rates", null, "Effective From", "Rate 'B' overlaps rate 'A' for the same timekeeper.") }));
-        host.Service.Setup(s => s.PublishAsync(missing, It.IsAny<CancellationToken>())).ReturnsAsync(
+        host.Service.Setup(s => s.PublishAsync(missing, VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(
             RateCardOutcome<RateCardPublishResult>.Refused(404, RateCardImportService.CodeNotFound, "The rate card was not found."));
-        host.Service.Setup(s => s.PublishAsync(published, It.IsAny<CancellationToken>())).ReturnsAsync(
+        host.Service.Setup(s => s.PublishAsync(published, VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(
             RateCardOutcome<RateCardPublishResult>.Refused(409, RateCardImportService.CodeNotDraft, "Only a Draft rate card can be published."));
 
         var r400 = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{overlap}/publish"));

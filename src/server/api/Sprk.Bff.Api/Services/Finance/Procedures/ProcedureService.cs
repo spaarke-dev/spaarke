@@ -1094,8 +1094,9 @@ public class ProcedureService
 
     /// <summary>
     /// I-P4: whether a version has been in force, which locks Applies to and Firm. Active and Superseded versions were; a Retired one was when
-    /// it put a rule in force (its publish marked policy versions under it Published), and a Draft retired without publishing never was.
-    /// Known limit: a version published with no rule and then retired does not lock (it governed nothing, so nothing depends on its scope).
+    /// it put a rule in force (its publish marked policy versions under it Published) or a rate card (085: a Published, active card keyed to
+    /// it, one more query for all the Retired versions), and a Draft retired without publishing never was.
+    /// Known limit: a version published with no rule and no card and then retired does not lock (it governed nothing, so nothing depends on its scope).
     /// </summary>
     private async Task<bool> ScopeLockedAsync(IReadOnlyList<VersionRow> versions, CancellationToken ct)
     {
@@ -1113,8 +1114,18 @@ public class ProcedureService
         var query = new QueryExpression(RuleSetService.VersionEntity) { ColumnSet = new ColumnSet(RuleSetService.ProcedureVersionColumn), TopCount = 1 };
         query.Criteria.AddCondition(RuleSetService.ProcedureVersionColumn, ConditionOperator.In, retired);
         query.Criteria.AddCondition(RuleSetService.PublishStateColumn, ConditionOperator.Equal, RuleSetService.PublishStatePublished);
-        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
-            r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id));
+        if ((await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
+                r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id)))
+        {
+            return true;
+        }
+
+        var cards = new QueryExpression(RateCardImportService.RateCardEntity) { ColumnSet = new ColumnSet("sprk_procedureversion"), TopCount = 1 };
+        cards.Criteria.AddCondition("sprk_procedureversion", ConditionOperator.In, retired);
+        cards.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        cards.Criteria.AddCondition("statuscode", ConditionOperator.Equal, RateCardImportService.CardPublished);
+        return (await _entities.RetrieveMultipleAsync(cards, ct)).Entities.Any(r =>
+            r.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id is { } id && retired.Contains(id));
     }
 
     private async Task<bool> VersionNumberTakenAsync(Guid procedureId, int number, CancellationToken ct)

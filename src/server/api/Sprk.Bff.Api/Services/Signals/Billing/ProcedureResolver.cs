@@ -421,8 +421,10 @@ public sealed class ProcedureResolution
         _versionsByPolicy = rows.PolicyVersions.ToLookup(v => v.PolicyId);
         _versionsById = rows.PolicyVersions.ToDictionary(v => v.PolicyVersionId);
         // Every policy version in the rows is Published (the read loads nothing else), so a Procedure Version named here has a Published
-        // policy version under it: the same test as ProcedureService.ScopeLockedAsync, made over the rows already read (no new read).
-        _versionsWithPublishedRules = rows.PolicyVersions.Where(v => v.ProcedureVersionId is not null).Select(v => v.ProcedureVersionId!.Value).ToHashSet();
+        // policy version under it: the same test as ProcedureService.ScopeLockedAsync, made over the rows already read (no new read). A
+        // Retired version with a Published rate card (085, model 7.1) opened its window the same way: ReadRowsAsync names those versions.
+        _versionsWithPublishedRules = rows.PolicyVersions.Where(v => v.ProcedureVersionId is not null).Select(v => v.ProcedureVersionId!.Value)
+            .Concat(rows.VersionsWithPublishedCards ?? Enumerable.Empty<Guid>()).ToHashSet();
         (_candidates, _excludedProcedures) = Applicability(rows);
     }
 
@@ -906,7 +908,35 @@ public static class ProcedureResolver
             .ToList();
         var policies = await ReadPoliciesAsync(entities, sets.Select(s => s.Id).ToList(), ct).ConfigureAwait(false);
         var policyVersions = await ReadPolicyVersionsAsync(entities, policies, ct).ConfigureAwait(false);
-        return new ProcedureRows(firmId, chain, overrides, procedures, versions, sets, policies, policyVersions);
+        var cardVersions = await ReadRetiredVersionsWithPublishedCardsAsync(entities, versions, ct).ConfigureAwait(false);
+        return new ProcedureRows(firmId, chain, overrides, procedures, versions, sets, policies, policyVersions, cardVersions);
+    }
+
+    /// <summary>
+    /// 085 (model 7.1): the Retired versions among <paramref name="versions"/> that have a Published, active rate card. Only a Retired version
+    /// is asked about (an Active or Superseded one opens its window without a card), in chunks, so the reads do not grow with the versions.
+    /// </summary>
+    private static async Task<IReadOnlySet<Guid>> ReadRetiredVersionsWithPublishedCardsAsync(
+        IGenericEntityService entities, IReadOnlyList<ProcedureVersionRow> versions, CancellationToken ct)
+    {
+        var found = new HashSet<Guid>();
+        var retired = versions.Where(v => v.Status == ProcedureEntity.VersionStatusRetired && v.From is not null).Select(v => v.Id).Distinct().Order().ToList();
+        foreach (var chunk in retired.Chunk(BillingFactLoader.MaxInValues))
+        {
+            var query = new QueryExpression(RateCardImportService.RateCardEntity) { ColumnSet = new ColumnSet("sprk_procedureversion"), NoLock = true };
+            query.Criteria.AddCondition("sprk_procedureversion", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, StateActive);
+            query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, RateCardImportService.CardPublished);
+            foreach (var row in await AllAsync(entities, query, ct).ConfigureAwait(false))
+            {
+                if (row.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id is { } id && chunk.Contains(id))
+                {
+                    found.Add(id);
+                }
+            }
+        }
+
+        return found;
     }
 
     // ── Override rows on the chain ─────────────────────────────────────────────────────────────────────────────
@@ -1323,7 +1353,8 @@ internal sealed record ProcedureRows(
     IReadOnlyList<ProcedureVersionRow> Versions,
     IReadOnlyList<RuleSetRow> Sets,
     IReadOnlyList<PolicyRow> Policies,
-    IReadOnlyList<ResolvedPolicyVersion> PolicyVersions);
+    IReadOnlyList<ResolvedPolicyVersion> PolicyVersions,
+    IReadOnlySet<Guid>? VersionsWithPublishedCards = null);
 
 internal sealed record ProcedureRow(Guid Id, string Name, ProcedureAppliesTo AppliesTo, Guid? FirmId);
 
@@ -1334,7 +1365,7 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
 
     /// <summary>
     /// The version opened a window at its effective-from (ontology-r1 D-203 (5a), (9)): it is Active or Superseded with an effective-from,
-    /// or Retired with an effective-from and at least one Published policy version under it. A Retired version is never in force, but a
+    /// or Retired with an effective-from and at least one Published policy version or Published rate card under it. A Retired version is never in force, but a
     /// window it had is not "before the first version" either: work in it is a gap. A Draft never opened one, and neither did a Draft that
     /// was retired unpublished (<paramref name="versionsWithPublishedRules"/> does not name it): publish refuses a Draft whose dates overlap,
     /// so a discarded Draft dated early must not hold work as a gap.
@@ -1342,10 +1373,12 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
     /// <remarks>
     /// Publish marks the version's Accepted rules Published in the same transaction that makes it Active (<c>ProcedureService.PublishVersionAsync</c>,
     /// the only path to Active), so an Active version that had rules has a Published policy version. Two known limits keep the other answer:
-    /// a version published with NO Accepted rule (an empty rule set, or every rule rejected) and then retired is read as never opened, as
-    /// <c>ProcedureService.ScopeLockedAsync</c> reads it (it governed nothing); and a version that opened a window by a published RATE CARD
-    /// alone also counts per model 7.1, but the resolver reads no rate card keyed to a Procedure Version today. Task 085 must extend this
-    /// method (and <c>ScopeLockedAsync</c>) with a published-card test when it keys the card to the Procedure Version.
+    /// a version published with NO Accepted rule (an empty rule set, or every rule rejected) and no card and then retired is read as never
+    /// opened, as <c>ProcedureService.ScopeLockedAsync</c> reads it (it governed nothing); and a card that was Published and is no longer
+    /// (made inactive) is not seen, so a version whose only withdrawal evidence was that card is read as never opened.
+    /// <para>085: a version that opened a window by a Published RATE CARD alone counts per model 7.1. The set passed in names those versions as
+    /// well as the ones with a Published policy version (<c>ProcedureResolver.ReadRowsAsync</c> reads the cards of the Retired versions in
+    /// one chunked query); <c>ProcedureService.ScopeLockedAsync</c> reads them the same way.</para>
     /// </remarks>
     public bool OpenedAWindow(IReadOnlySet<Guid> versionsWithPublishedRules) =>
         From is not null

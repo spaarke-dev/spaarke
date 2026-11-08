@@ -615,6 +615,38 @@ public sealed class ProcedureServiceTests
         w.H.Transactions.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "085 must-fire (F1-b): a Rate card Procedure whose only version is Retired with a Published card has a locked scope")]
+    public async Task Update_ScopeChange_AfterARetiredVersionPublishedARateCard_Is409ScopeLocked_AndWritesNothing()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusRetired, Jan1);
+        CardOf(w, v1, statuscode: 659490000, "2027 rates"); // a Published card, no rule
+
+        var outcome = await w.Service().UpdateAsync(p, Update(firm: OtherFirmId), default);
+
+        outcome.ErrorCode.Should().Be("procedure.scope_locked");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Row("sprk_procedure", p).GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
+    }
+
+    [Theory(DisplayName = "085 must-not-fire (F1-b): a Retired version whose card is a Draft, or is inactive, never governed anything: the scope is not locked")]
+    [InlineData(1, 0)]
+    [InlineData(659490000, 1)]
+    public async Task Update_ScopeChange_AfterARetiredVersionWithOnlyADraftOrInactiveCard_Succeeds(int cardStatus, int cardState)
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusRetired, Jan1);
+        CardOf(w, v1, cardStatus, "never in force", cardState);
+
+        var outcome = await w.Service().UpdateAsync(p, Update(firm: OtherFirmId), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Versions and copy-forward (model 7.2)
     // ═══════════════════════════════════════════════════════════════════════════

@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// route does, asked of Dataverse AS THE CALLER (<see cref="FinanceAuthorizationCheck.CallerPrivilege"/>, fail closed): the template needs
 /// Create on <c>sprk_ratecard</c>; the import (which the app then writes on the caller's behalf, owner decision G5) needs Create on the
 /// card, its rates and the timekeeper, and the caller's own Write on the Procedure the version belongs to (<see cref="RequireWriteOnTheVersionsProcedure"/>);
-/// the publish needs Write on the card and on the timekeeper. No role-name check, no app role. Each route carries its OWN authorization filter, then the eBilling flag filter
+/// the publish needs Write on the card and on the timekeeper, and the caller's own Write on the card's Procedure (<see cref="RequireWriteOnTheCardsProcedure"/>). No role-name check, no app role. Each route carries its OWN authorization filter, then the eBilling flag filter
 /// (<c>RequireEbillingEnabled</c>, ADR-018): the flag never replaces authorization.</para>
 /// <para><b>Import inputs (085, EB-D-148).</b> The workbook is the multipart <c>file</c> part. The card name and the Procedure Version are QUERY
 /// parameters (<c>name</c>, <c>procedureVersionId</c>), so the authorization filter and the handler read the same source (the Finance doctrine,
@@ -90,10 +90,12 @@ public static class RateCardImportEndpoints
                 Privilege(WriteRateCardPrivilege, "sprk_ratecards"),
                 Privilege(WriteTimekeeperPrivilege, "sprk_timekeepers")))
             .RequireEbillingEnabled()
+            .RequireWriteOnTheCardsProcedure() // publish also asks Write on the card's Procedure
             .WithName("PublishRateCard")
             .WithSummary("Publish a Draft rate card")
             .WithDescription(
-                "Re-checks that no effective-date ranges overlap, approves the card's Pending timekeepers and moves the card to Published.")
+                "Re-checks that no effective-date ranges overlap, approves the card's Pending timekeepers and moves the card to Published. " +
+                "Also asks the caller's Write on the Procedure the card's version belongs to.")
             .Produces<RateCardPublishResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -138,53 +140,145 @@ public static class RateCardImportEndpoints
         builder.AddEndpointFilter(async (context, next) =>
         {
             var http = context.HttpContext;
-            var services = http.RequestServices;
             if (!Guid.TryParse(http.Request.Query["procedureVersionId"].ToString(), out var versionId) || versionId == Guid.Empty)
             {
                 return await next(context); // the handler answers the 400
             }
 
-            Guid? procedureId;
-            try
+            var read = await ReadVersionsProcedureAsync(http, versionId);
+            if (read.Faulted)
             {
-                var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.VersionEntity)
-                {
-                    ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn),
-                    Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.VersionEntity + "id", ConditionOperator.Equal, versionId) } },
-                    TopCount = 1,
-                }, http.RequestAborted);
-                procedureId = rows.Entities.FirstOrDefault()?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id;
-            }
-            catch (Exception ex)
-            {
-                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
-                    "Procedure Version {VersionId}: its Procedure could not be read for the Procedure write check; denying (fail closed)", versionId);
                 return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
             }
 
-            if (procedureId is not { } id || id == Guid.Empty)
+            if (read.ProcedureId is not { } id || id == Guid.Empty)
             {
                 return await next(context);
             }
 
-            var caller = new InvoiceContextService.InvoiceCaller(
-                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
-            var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
-            var outcome = await CallerReadCheck.CheckAsync(
-                services.GetRequiredService<AuthorizationService>(), caller, BillingAdminAuthorization.ProcedureEntitySet, "write", id, logger,
-                $"Rate card import: caller write on the Procedure of version {versionId}", http.RequestAborted);
-            if (outcome == CallerReadOutcome.Readable)
-            {
-                return await next(context);
-            }
-
-            return outcome == CallerReadOutcome.Refused
-                ? ProblemDetailsHelper.Forbidden(
-                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
-                    detail: "You need Write on this Procedure.",
-                    traceId: http.TraceIdentifier)
-                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return await CheckCallerWriteOnProcedureAsync(http, id, $"Rate card import: caller write on the Procedure of version {versionId}")
+                ?? await next(context);
         });
+
+    /// <summary>The <see cref="HttpContext.Items"/> key under which <see cref="RequireWriteOnTheCardsProcedure"/> leaves the version id it checked.</summary>
+    internal const string CheckedVersionItem = "ratecard.checkedProcedureVersionId";
+
+    /// <summary>
+    /// The publish also asks the caller's own Write on the Procedure the card's version belongs to (the same question as
+    /// <see cref="RequireWriteOnTheVersionsProcedure"/>, through the same <see cref="CheckCallerWriteOnProcedureAsync"/>). The card, its version and
+    /// the Procedure are read app-only. A fault, an unknown card, a card with no version and a version with no Procedure all end in a 403, so the
+    /// answer does not say whether a card exists. The version id checked is left in <see cref="HttpContext.Items"/>; the publish passes it to the
+    /// service, which refuses 409 <c>ratecard.version_changed</c> if the card then names a different version. Added AFTER the route's
+    /// <c>AddFinanceAuthorizationFilter</c> and <c>RequireEbillingEnabled</c>, like the import's.
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — the import's <see cref="RequireWriteOnTheVersionsProcedure"/>. <i>Extension</i> — it is keyed to a query value
+    /// and passes an unknown version on; here the key is the card (a route value), the version must be found, and the version checked is carried
+    /// to the write, so the body is shared and only the lookup differs. <i>Cost of doing nothing</i> — a caller with the table privileges but not
+    /// Write on the Procedure could publish a card, which puts its rates in force for the firm's invoices.</remarks>
+    internal static TBuilder RequireWriteOnTheCardsProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var denied = ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure.", traceId: http.TraceIdentifier);
+            var failed = ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+
+            if (!Guid.TryParse(http.Request.RouteValues["rateCardId"]?.ToString(), out var cardId) || cardId == Guid.Empty)
+            {
+                return denied;
+            }
+
+            Guid? versionId;
+            try
+            {
+                var cards = await http.RequestServices.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(RateCardImportService.RateCardEntity)
+                {
+                    ColumnSet = new ColumnSet("sprk_procedureversion"),
+                    Criteria = { Conditions = { new ConditionExpression(RateCardImportService.RateCardEntity + "id", ConditionOperator.Equal, cardId) } },
+                    TopCount = 1,
+                }, http.RequestAborted);
+                versionId = cards.Entities.FirstOrDefault()?.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id;
+            }
+            catch (Exception ex)
+            {
+                http.RequestServices.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                    "Rate card {RateCardId}: its Procedure Version could not be read for the Procedure write check; denying (fail closed)", cardId);
+                return failed;
+            }
+
+            if (versionId is not { } checkedVersion || checkedVersion == Guid.Empty)
+            {
+                return denied; // unknown card, or a card with no version
+            }
+
+            var read = await ReadVersionsProcedureAsync(http, checkedVersion);
+            if (read.Faulted)
+            {
+                return failed;
+            }
+
+            if (read.ProcedureId is not { } procedureId || procedureId == Guid.Empty)
+            {
+                return denied; // an unknown version, or a version with no Procedure
+            }
+
+            var refusal = await CheckCallerWriteOnProcedureAsync(http, procedureId, $"Rate card publish: caller write on the Procedure of card {cardId}");
+            if (refusal is not null)
+            {
+                return refusal;
+            }
+
+            http.Items[CheckedVersionItem] = checkedVersion;
+            return await next(context);
+        });
+
+    /// <summary>Reads a Procedure Version's Procedure app-only. <c>Faulted</c> is true when the read threw (logged; the caller fails closed).</summary>
+    private static async Task<(Guid? ProcedureId, bool Faulted)> ReadVersionsProcedureAsync(HttpContext http, Guid versionId)
+    {
+        var services = http.RequestServices;
+        try
+        {
+            var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.VersionEntity)
+            {
+                ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn),
+                Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.VersionEntity + "id", ConditionOperator.Equal, versionId) } },
+                TopCount = 1,
+            }, http.RequestAborted);
+            return (rows.Entities.FirstOrDefault()?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id, false);
+        }
+        catch (Exception ex)
+        {
+            services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                "Procedure Version {VersionId}: its Procedure could not be read for the Procedure write check; denying (fail closed)", versionId);
+            return (null, true);
+        }
+    }
+
+    /// <summary>
+    /// Asks the caller's own Write on a Procedure (<see cref="CallerReadCheck.CheckAsync"/>). Null when the caller holds it; otherwise the 403:
+    /// <c>insufficient_rights</c> when Dataverse said no, <c>system_failure</c> when there was no answer.
+    /// </summary>
+    private static async Task<IResult?> CheckCallerWriteOnProcedureAsync(HttpContext http, Guid procedureId, string logContext)
+    {
+        var services = http.RequestServices;
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
+        var outcome = await CallerReadCheck.CheckAsync(
+            services.GetRequiredService<AuthorizationService>(), caller, BillingAdminAuthorization.ProcedureEntitySet, "write", procedureId, logger,
+            logContext, http.RequestAborted);
+        if (outcome == CallerReadOutcome.Readable)
+        {
+            return null;
+        }
+
+        return outcome == CallerReadOutcome.Refused
+            ? ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                detail: "You need Write on this Procedure.",
+                traceId: http.TraceIdentifier)
+            : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Handlers
@@ -295,9 +389,15 @@ public static class RateCardImportEndpoints
         };
     }
 
-    private static async Task<IResult> PublishRateCard(Guid rateCardId, RateCardImportService service, CancellationToken ct)
+    private static async Task<IResult> PublishRateCard(Guid rateCardId, HttpContext http, RateCardImportService service, CancellationToken ct)
     {
-        var outcome = await service.PublishAsync(rateCardId, ct);
+        // The version the filter checked; the service refuses 409 if the card names a different one now. No record of the check is a fault.
+        if (!http.Items.TryGetValue(CheckedVersionItem, out var checkedItem) || checkedItem is not Guid checkedVersion)
+        {
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        var outcome = await service.PublishAsync(rateCardId, checkedVersion, ct);
         return outcome.Kind switch
         {
             RateCardOutcomeKind.Done => Results.Ok(outcome.Value),

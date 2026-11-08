@@ -1,10 +1,14 @@
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -122,6 +126,83 @@ public static class BillingAdminAuthorization
     /// <summary>Create a version: as <see cref="WriteProcedure"/>, plus Create on <c>sprk_policyversion</c> (the copy-forward creates them).</summary>
     public static FinanceAuthorizationTargets CreateProcedureVersion(EndpointFilterInvocationContext context) =>
         OnProcedure(context, Check(CreatePolicyVersionPrivilege, "sprk_policyversions"));
+
+    /// <summary>
+    /// A new version of a RATE CARD Procedure also copies the previous version's card and rates forward (085, as the application), so the caller
+    /// must hold Create on <c>sprk_ratecard</c> and <c>sprk_ratecardrate</c> as well. Only a Rate card Procedure needs them: a Guideline
+    /// Procedure's copy-forward creates no card. <see cref="CreateProcedureVersion"/> is a synchronous declaration and cannot read the
+    /// Procedure's type, so this filter reads it (app-only) and asks the same table-privilege question as the declaration does
+    /// (<see cref="CallerRecordAccessProbe.CallerPrivilegeAnswerAsync"/>, as the caller). Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
+    /// and <c>RequireEbillingEnabled</c>; refuses before the service writes anything. Missing privilege is 403
+    /// <c>insufficient_privilege</c>; a fault, an unanswered question or an unreadable Procedure is 403 <c>system_failure</c> (fail closed). An
+    /// unknown Procedure is passed on (the route's Record check has already answered, and the service answers 404).
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — <see cref="CreateProcedureVersion"/>. <i>Extension</i> — the privilege-check shape cannot be conditional
+    /// on the Procedure's type, which is a stored value; the question asked is the same one. <i>Cost of doing nothing</i> — a billing admin
+    /// without Create on the rate card tables would create cards through the version copy.</remarks>
+    public static TBuilder RequireRateCardCreateOnARateCardProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var services = http.RequestServices;
+            if (!http.Request.RouteValues.TryGetValue(ProcedureRouteKey, out var raw) || !Guid.TryParse(raw?.ToString(), out var procedureId))
+            {
+                return await next(context); // the route constraint guarantees a guid
+            }
+
+            bool isRateCard;
+            try
+            {
+                var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.Entity)
+                {
+                    ColumnSet = new ColumnSet(ProcedureEntity.TypeColumn),
+                    Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.Entity + "id", ConditionOperator.Equal, procedureId) } },
+                    TopCount = 1,
+                }, http.RequestAborted);
+                isRateCard = rows.Entities.FirstOrDefault()?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard;
+            }
+            catch (Exception ex)
+            {
+                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                    "Procedure {ProcedureId}: its type could not be read for the rate card privilege check; denying (fail closed)", procedureId);
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            if (!isRateCard)
+            {
+                return await next(context);
+            }
+
+            var probe = services.GetService<CallerRecordAccessProbe>();
+            var token = TokenHelper.ExtractBearerTokenOrNull(http);
+            foreach (var privilege in new[] { RateCardImportEndpoints.CreateRateCardPrivilege, RateCardImportEndpoints.CreateRatePrivilege })
+            {
+                CallerPrivilegeAnswer answer;
+                try
+                {
+                    answer = probe is null ? CallerPrivilegeAnswer.Faulted : await probe.CallerPrivilegeAnswerAsync(token, privilege, http.RequestAborted);
+                }
+                catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
+                {
+                    services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                        "Procedure {ProcedureId}: the rate card privilege {Privilege} could not be checked; denying (fail closed)", procedureId, privilege);
+                    answer = CallerPrivilegeAnswer.Faulted;
+                }
+
+                if (answer == CallerPrivilegeAnswer.Held)
+                {
+                    continue;
+                }
+
+                return ProblemDetailsHelper.Forbidden(
+                    answer == CallerPrivilegeAnswer.NotHeld
+                        ? FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode
+                        : FinanceAuthorizationFilter.SystemFailureReasonCode,
+                    traceId: http.TraceIdentifier);
+            }
+
+            return await next(context);
+        });
 
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
     public static FinanceAuthorizationTargets PublishProcedureVersion(EndpointFilterInvocationContext context) =>
