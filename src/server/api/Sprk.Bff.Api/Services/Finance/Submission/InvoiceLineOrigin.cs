@@ -41,7 +41,6 @@ public static class InvoiceLineOrigin
     private const string RecordActionCode = "sprk_actioncode";
     internal const string RecordSteps = "sprk_steps";
     private const string RecordFacts = "sprk_factsnapshot";
-    private const string CreatedOnBehalfByColumn = "createdonbehalfby";
 
     /// <summary>
     /// True when <paramref name="line"/> is line <c>sequence</c> of the submission <paramref name="submissionId"/>'s intake: its id is
@@ -63,8 +62,8 @@ public static class InvoiceLineOrigin
     /// The Fee and Expense lines among <paramref name="lines"/> (the invoice's lines, read with <c>sprk_linesequence</c>,
     /// <c>sprk_extractionconfidence</c> and <c>sprk_invoice</c>) whose origin is not known, in the order given, each flagged when it is an added line
     /// without its record. Reads the <c>add-line</c> records
-    /// app-only through <paramref name="entities"/>, only when a line passes the Add line id rule; a record counts only when
-    /// <c>createdby</c> is <paramref name="writerUserId"/> and <c>createdonbehalfby</c> is empty. Throws on a read fault (callers refuse).
+    /// app-only through <paramref name="entities"/>, only when a line passes the Add line id rule; a record counts only when the writer identity
+    /// created it (<see cref="WriterCreatedRecord"/>). Throws on a read fault (callers refuse).
     /// </summary>
     public static async Task<IReadOnlyList<UnknownLine>> UnknownOriginLinesAsync(
         IGenericEntityService entities, Guid invoiceId, Guid? ownSubmissionId, IReadOnlyList<Entity> lines, Func<CancellationToken, Task<Guid>> writerUserId,
@@ -118,7 +117,7 @@ public static class InvoiceLineOrigin
         };
         query.Criteria.AddCondition(RecordLineLookup, ConditionOperator.In, added.Keys.Cast<object>().ToArray());
         query.Criteria.AddCondition(RecordActionCode, ConditionOperator.Equal, InvoiceLineAddService.ActionCode);
-        AddWriterCreatedConditions(query.Criteria, writerUserId);
+        WriterCreatedRecord.AddConditions(query.Criteria, writerUserId);
         query.AddOrder(DecisionRecordEntity + "id", OrderType.Ascending);
 
         var found = new HashSet<Guid>();
@@ -135,18 +134,6 @@ public static class InvoiceLineOrigin
         }
 
         return found;
-    }
-
-    /// <summary>
-    /// The one rule for "a Decision Record the writer identity created" (task 165b; 165b-3 reuses it for the approve record): <c>createdby</c> is
-    /// <paramref name="writerUserId"/> and <c>createdonbehalfby</c> is empty, so a row created on the writer's behalf by another identity does not
-    /// count (K4). Adds both conditions to <paramref name="criteria"/>.
-    /// </summary>
-    internal static void AddWriterCreatedConditions(FilterExpression criteria, Guid writerUserId)
-    {
-        ArgumentNullException.ThrowIfNull(criteria);
-        criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId);
-        criteria.AddCondition(CreatedOnBehalfByColumn, ConditionOperator.Null);
     }
 
     /// <summary>The record's key (<c>sprk_steps.reviewId</c>); null when unreadable.</summary>

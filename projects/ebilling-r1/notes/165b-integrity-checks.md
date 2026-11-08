@@ -236,3 +236,145 @@ cases fail. Without the K3 refusal, the K3 case fails. Each file was restored by
 - DI-144 (ontology-r1): `DecisionRecordWriter`'s own "already recorded" lookups filter `createdby` without `createdonbehalfby`. Part A does not change
   that file; the K3 guard covers the completion path. For the lead to pass to ontology-r1.
 - K: the portion's record link in the approval state is the stored column as is (not checked against the writer's record).
+
+## 6.2 165b-3 part B
+
+Branch `task/ebilling-165b3` from `6e25f9194d` (part A and its fix round). Rigor FULL. Wording stays neutral: approval and AP export decide only
+from server-written sources.
+
+**Rule (EB-D-208).** Approval and AP export count an invoice as Approved, Sent to AP or Paid only when an approve Decision Record the writer identity
+created exists for it: `sprk_actioncode` = `approve-invoice`, regarding the invoice, `createdby` = the BFF writer identity and `createdonbehalfby`
+empty. Never `ownerid`, never a column a user can write. The writer identity is read app-only from `OntologyWriterDataverseClient.GetWriterUserIdAsync`
+(cached WhoAmI), reached through `BillingDecisionRecorder.WriterUserIdAsync`. A fault reading it fails the caller's decision closed (503, or the read
+throws); `Guid.Empty` is refused by the helper and never becomes a filter that reads as "no records".
+
+**B0, the rule moved (ontology-r1 O2).** `InvoiceLineOrigin.AddWriterCreatedConditions` is removed. The rule now lives in one helper,
+`Services/Signals/WriterCreatedRecord.cs`, next to `DecisionRecordWriter.CreatedByColumn`:
+
+- `AddConditions(FilterExpression criteria, Guid writerUserId)`: the QueryExpression form, on a query's criteria.
+- `AddConditions(LinkEntity link, Guid writerUserId)`: the same rule on a link's own criteria.
+- `FetchXmlFilter(Guid writerUserId)`: the FetchXML form, a `<filter type="and">` for an `entity` or a `link-entity` element. It is the form 165b-4
+  uses for the spend `exists` link.
+- `CreatedOnBehalfByColumn`.
+
+The allow-list holds one id today, the BFF writer identity, which callers pass in (O1: a `Guid writerUserId` parameter, no injected provider). Every
+ebilling caller uses the helper: the 165b add-line lookup (`InvoiceLineOrigin`), the completion's approve-record lookup
+(`InvoiceApprovalService.WriterApproveRecordsAsync`) and the new batched read below. No copy remains in `Services/Finance/**`.
+
+**Services/Signals hunks for ontology-r1's review.** One new file, `Services/Signals/WriterCreatedRecord.cs` (pure, static, no DI registration).
+No existing file under `Services/Signals/**` changed.
+
+**Guard.** `tests/Spaarke.ArchTests/WriterCreatedRecordSingleSourceGuardTests.cs` is a source scan of `Services/Finance/**` and
+`Services/Signals/**`. Outside the helper file it refuses a `createdby` or `createdonbehalfby` condition in three forms: built with
+`AddCondition` / `new ConditionExpression`, built with `new XAttribute("attribute", ...)`, or spelled in a FetchXML string. It has must-fire and
+must-not-fire controls, a check that the helper file exists, and a ratchet baseline for ontology's existing sites (DI-144, #2632):
+`DecisionCommitService.cs` 1, `DecisionRecordWriter.cs` 3, `SignalReadService.cs` 1, `SignalReevaluationJob.cs` 1. A new site fails, and a count
+that shrinks must be lowered. With part A's `InvoiceLineOrigin` restored, the guard fails on `InvoiceLineOrigin.cs:148,149`. The scan does not catch a
+column name held in a differently named local, or an in-memory comparison of a row's `createdby` (`GateDecisionRecordSharing`, `RuleSetService`).
+
+**B1, approval.**
+
+- **The batched read.** `InvoiceApprovalService.InvoicesWithApproveRecordAsync(entities, invoiceIds, writerUserId, ct)` returns the invoices that have
+  the record. It is ONE paged read (`sprk_regardinginvoice` In the ids, the action code, the helper's conditions) and is shared by approval and AP
+  export.
+- **The approval state** (`GET .../approval`) reports Approved, with its amount, decider and time, only when the portion says Approved, the invoice
+  is Approved, Sent to AP or Paid, AND the record exists. Otherwise the status shows as Unknown. The read is made only when the portion and the
+  invoice both say Approved. A fault throws, as every read there does.
+- **Completion.** When an Approved invoice has no writer-created approve record, only its claimant's completion continues (part A's re-checks).
+  Anyone else is refused and nothing is written. If another person's claim is open, the answer is 409 `ebilling.approval.claimed`, an existing code.
+  If there is no claim, the answer is 409 `completion_refused` with the log reason `status_without_record`, part A's code. Before this, such a call
+  answered 200 `alreadyApproved` and aligned the portion's status. That alignment now runs only when the record exists.
+- **The decision time's lower bound (uac-r2).** At completion, a portion `sprk_decidedon` earlier than the invoice's own server-written `createdon`
+  is refused (`decided_on_invalid`, part A's code). An invoice whose `createdon` cannot be read is refused too. `createdon` is read with the invoice,
+  so no query is added. No line-decision record is read on the completion path, so the invoice's `createdon` is the bound.
+- **Currency (uac-r2 note a).** `InvoiceTotalsCalculator` rounds every total to 2 decimals (USD only in R1); nothing handled currency precision. At
+  completion, the amount comparison now refuses a currency outside {USD, EUR, GBP, CAD}, the 2-decimal codes among those intake accepts. JPY and any
+  unknown code get 409 `completion_refused` with the log reason `ebilling.approve.completion.currency_unsupported`. No currency is the R1 default
+  (USD).
+
+**B2, AP export (lead, 2026-11-08: option 1).**
+
+- **Candidate list.** An Approved invoice without the record is left out of the list.
+- **Explicit request.** Requesting it in a batch gives the existing 400 `selection_refused`, with the per-invoice reason `approval_not_recorded`.
+  Nothing is claimed. The request-level refusal stays as it is: one refused invoice refuses the whole request, as for every other reason, and there is
+  never a silent partial export. A selection refused only for this reason gets its own sentence.
+- **Re-check after the claim (step 7).** An invoice whose record no longer counts gives 409 `invoice_conflict` before any file or Sent to AP write,
+  and the claims are released.
+- **Log line.** Each invoice left out is logged as `AP export refusal ebilling.apexport.approval_not_recorded on sprk_invoice {id}`: the code, the
+  table and the row id only.
+- **Query count.** One batched read per check: one for the candidate list, and two per batch (the selection and the re-check), however many invoices.
+- **Interrupted approve.** An invoice whose approve stopped after its status moved and before its record was written cannot reach Sent to AP. This
+  closes the part A re-check's open item.
+- **Writer identity.** `ApExportService` takes `BillingDecisionRecorder`, for the writer identity only; it writes no Decision Record.
+
+**Tests.**
+
+- **AP export** (`tests/integration/data-mutation/Ebilling/ApExportApprovalRecordTests.cs`, 7 cases):
+  - R1 must fire: left out of the candidates, refused per invoice, nothing claimed, the log line.
+  - R1 control: the writer's record exports, with one batched read per check.
+  - R3 must fire (2 cases): created by another identity; created on the writer's behalf by one.
+  - R3 control: the writer's own record counts.
+  - The step-7 re-check.
+  - The writer-id fault: 503 with nothing created or claimed, and the candidate list throws.
+- **Approval** (`InvoiceApprovalCompletionTests`, 14 new cases):
+  - B1 must fire, the state (2 cases): Approved, and Sent to AP.
+  - B1 control, the state.
+  - B1 must fire, another approver while a claim is open: 409 claimed, nothing written.
+  - B1 must fire, no claim: status_without_record.
+  - B1 control: another approver after a real approval gets a no-op.
+  - R3 must fire on the state (2 cases), and its control.
+  - F2 lower bound, must fire and control.
+  - Currency (JPY) must fire, and its control (GBP).
+  - The writer-id fault: completion Unavailable with nothing written, and the state read throws.
+- **Changed test.** `InvoiceApprovalServiceTests` FR-30: another approver's call between the interruption and the claimant's repeat now expects
+  409 claimed (not `alreadyApproved`) while no record exists.
+- **Fixtures.** `ApprovalWorld` invoices carry `createdon`. `ApExportWorld` gives each invoice in a counted status the writer's approve record by
+  default (`approveRecord: false` leaves it out), adds `AddApproveRecord`, and captures the export's log.
+
+**Seeds** (each file restored byte-identical, compared with `cmp`):
+
+- **The record requirement dropped at AP export** (`ApproveRecordedAsync` answers every invoice as recorded). R1 must-fire, both R3 must-fire cases
+  and the re-check fail (4); the 3 others pass.
+- **The record requirement dropped at approval** (the state's record test forced true; the non-claimant refusal removed). 9 fail: both B1 state
+  cases, B1 claimed, B1 no-claim, both R3 state cases, and the 3 FR-30 cases. The controls pass.
+- **Also checked.** With the lower bound and the currency check removed, those two must-fire cases fail. With part A's `InvoiceLineOrigin`
+  restored, the guard fails.
+
+**Dev data (read-only, 2026-11-08).** Approved, Sent to AP or Paid invoices: 2, both Sent to AP, one USD and one GBP. Each has exactly one approve
+record created by the writer identity, with `createdonbehalfby` empty. No approve record on dev has `createdonbehalfby` set. Each portion's
+`sprk_decidedon` is later than its invoice's `createdon`. Invoice currencies on dev are USD (5) and GBP (1). No live invoice is refused by part B.
+
+**Escalation triggers.** Not fired:
+
+- An approval in progress: the claimant's own completion still runs, and writes the record.
+- Override: decides a held submission and never approves.
+- Multi-portion: approve refuses an invoice with more than one portion.
+- The allow-list needs only the BFF writer identity.
+
+**Known limits (part B).**
+
+- K: Paid has no record of its own in R1. It counts on the approve record, and Mark Paid moves only a Sent to AP invoice, which the export now
+  reaches only with the record. D-103 counts Paid as Approved.
+- K: a portion that says Approved on an In Review invoice with no writer-created record makes every approve answer 409 until an administrator
+  acts. This fails closed and nothing is approved. Whoever can edit the portion's columns can therefore hold an approval. It is kept on purpose, so
+  an edited portion reaches an administrator. The portion columns are part of the field-security owner question on the dev-deploy checklist.
+- K: the lock-defeated branch of approve (the transition answers "already in target") still answers `alreadyApproved` without reading the record.
+  It happens only when the per-invoice lock was defeated, and the other call writes the record.
+- K: the spend paths (`FinanceBaseValues`, `FinanceRollupService`, `FinancialCalculationToolHandler`) are 165b-4's and are not changed here. They
+  will use `WriterCreatedRecord.FetchXmlFilter` / `AddConditions`.
+- K: other readers of the counted statuses are not approval preconditions and are unchanged: `InvoiceContextService.StandingInvoiceStatuses` (the
+  firm's disallow history) and the correction refusal in `InvoiceSubmissionPersister` (it refuses, so it fails closed).
+- K: the approve route itself (not completion) does not check currency precision. The calculator rounds every currency to 2 decimals (USD only
+  in R1).
+- K: the AP export client shows `approval_not_recorded` through its generic fallback ("Refused (approval_not_recorded).").
+- K: a writer-identity rotation (part A K8) now also hides earlier approvals from AP export and the approval state, until a plan for the earlier
+  identity's records exists.
+
+**uac-r2 note b (check only).** A 503 on approve is shown as "try again" in the InvoiceReview client. The route answers `Unavailable` as 503
+`ebilling.approval.unavailable`, with the detail "The approval could not be completed; nothing was changed. Try again." and no `failedStep`
+(`Api/Finance/InvoiceApprovalEndpoints.cs:252`, through `InvoiceLineReviewEndpoints.Refused`). `decisionFailureMessage`
+(`src/solutions/InvoiceReview/src/services/decisionApi.ts:344-356`) shows that detail with its code. `isDecisionIncomplete` (`:336-337`) is false
+for it, because the code is not in `INCOMPLETE_CODES` and there is no `failedStep`, so no "saved in part" text is added. The wizard throws that
+message (`components/decision/InvoiceDecisionWizard.tsx:159-165`). No finding.
+
+**Gates.** See the task report: filtered unit tests, full ArchTests, BFF build and publish delta.

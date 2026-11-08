@@ -358,4 +358,176 @@ public sealed class InvoiceApprovalCompletionTests
         w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(first.DecisionRecordId!.Value);
         w.Transitions.Should().Be(1);
     }
+    // ── Part B (EB-D-208): an invoice counts as Approved, Sent to AP or Paid only with the writer-created approve record ──
+
+    /// <summary>A real approval whose approve record is then replaced by the same row created by another identity, or on the writer's behalf by
+    /// one (every other column equal). The invoice is Approved and the portion says Approved and links that row.</summary>
+    private static async Task<ApprovalWorld> ApprovedWithForeignRecord(bool onBehalfOfTheWriter)
+    {
+        var w = World();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        var record = w.ApproveRecords.Single();
+        w.H.Created.Remove(record);
+        record["createdby"] = new EntityReference("systemuser", onBehalfOfTheWriter ? DecisionRecordWriterTests.WriterUser : BobUser);
+        if (onBehalfOfTheWriter)
+        {
+            record["createdonbehalfby"] = new EntityReference("systemuser", BobUser);
+        }
+
+        w.H.Seeded.Add(record);
+        return w;
+    }
+
+    [Theory(DisplayName = "165b-3 B1 must fire: the approval state does not report Approved for an Approved or Sent to AP invoice with no writer-created approve record")]
+    [InlineData(InvoiceStatusCodes.Approved)]
+    [InlineData(InvoiceStatusCodes.SentToAp)]
+    public async Task B1_TheState_NeedsTheWritersRecord(int invoiceStatus)
+    {
+        var w = World();
+        w.Invoice["statuscode"] = new OptionSetValue(invoiceStatus);
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionApproved);
+        w.Portion["sprk_approvedamount"] = new Money(1000m);
+        w.Portion["sprk_decidedby"] = new EntityReference("contact", Alice);
+
+        var state = await w.GetAs(AliceUser);
+
+        state!.Status.Should().NotBe("Approved");
+        state.ApprovedAmount.Should().BeNull();
+        state.DecidedBy.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "165b-3 B1 control: after a real approval the state reports Approved, and still does once the invoice is Sent to AP")]
+    public async Task B1_Control_TheState_WithTheWritersRecord_IsApproved()
+    {
+        var w = World();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        (await w.GetAs(AliceUser))!.Status.Should().Be("Approved");
+
+        w.Invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.SentToAp);
+        var state = await w.GetAs(AliceUser);
+        state!.Status.Should().Be("Approved");
+        state.ApprovedAmount.Should().Be(1000m);
+    }
+
+    [Fact(DisplayName = "165b-3 B1 must fire: another approver's approve on an Approved invoice with no writer-created approve record is refused (409 claimed), never answered as already approved; nothing is written")]
+    public async Task B1_AnotherApprover_NoRecord_IsRefused()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+
+        var result = await w.ApproveAs(BobUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(InvoiceApprovalCodes.Claimed);
+        w.Writes.Should().Be(0, "nothing is written, not even the portion's status");
+        w.ApproveRecords.Should().BeEmpty();
+        w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(InvoiceApprovalService.PortionPending);
+    }
+
+    [Fact(DisplayName = "165b-3 B1 must fire: an Approved invoice with no claim and no writer-created approve record is refused (completion_refused, status_without_record); nothing is written")]
+    public async Task B1_NoClaim_NoRecord_IsRefused()
+    {
+        var w = World();
+        w.Invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Approved);
+
+        AssertRefused(w, await w.ApproveAs(BobUser), InvoiceApprovalCodes.CompletionStatusWithoutRecord, writesBefore: 0);
+    }
+
+    [Fact(DisplayName = "165b-3 B1 control: another approver's approve after a real approval is a no-op (already approved)")]
+    public async Task B1_Control_AnotherApprover_WithTheWritersRecord_IsANoOp()
+    {
+        var w = World();
+        var approved = await w.ApproveAs(AliceUser);
+        var writes = w.Writes;
+
+        var result = await w.ApproveAs(BobUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.AlreadyApproved);
+        result.DecisionRecordId.Should().Be(approved.DecisionRecordId);
+        w.Writes.Should().Be(writes);
+    }
+
+    [Theory(DisplayName = "165b-3 R3 (approval) must fire: an approve record created by another identity, or on the writer's behalf by one, does not make the state Approved")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R3_TheState_ARecordNotCreatedByTheWriter_DoesNotCount(bool onBehalfOfTheWriter)
+    {
+        var w = await ApprovedWithForeignRecord(onBehalfOfTheWriter);
+
+        var state = await w.GetAs(AliceUser);
+
+        state!.Status.Should().NotBe("Approved");
+        state.ApprovedAmount.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "165b-3 R3 (approval) control: the writer's own approve record makes the state Approved")]
+    public async Task R3_Control_TheState_TheWritersRecord_Counts()
+    {
+        var w = World();
+        // The harness stores the writer's rows as Dataverse does: createdby the writer identity, createdonbehalfby empty.
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+
+        (await w.GetAs(AliceUser))!.Status.Should().Be("Approved");
+    }
+
+    [Fact(DisplayName = "165b-3 part B F2 lower bound must fire: a decision time earlier than the invoice's createdon is refused (decided_on_invalid); nothing is written")]
+    public async Task F2_ADecidedOnBeforeTheInvoiceWasCreated_IsRefused()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Portion["sprk_decidedon"] = w.Invoice.GetAttributeValue<DateTime>("createdon").AddMinutes(-1);
+
+        AssertRefused(w, await w.ApproveAs(AliceUser), InvoiceApprovalCodes.CompletionDecidedOnInvalid, writesBefore: 0);
+    }
+
+    [Fact(DisplayName = "165b-3 part B F2 lower bound control: a decision time after the invoice's createdon completes")]
+    public async Task F2_Control_ADecidedOnAfterTheInvoiceWasCreated_Completes()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Portion["sprk_decidedon"] = w.Invoice.GetAttributeValue<DateTime>("createdon").AddMinutes(1);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved, result.Detail);
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "165b-3 part B (uac-r2 a) must fire: a currency without a 2-decimal minor unit (JPY) fails the amount comparison closed (currency_unsupported); nothing is written")]
+    public async Task Currency_NotTwoDecimals_IsRefused()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Invoice["sprk_currency"] = "JPY";
+
+        AssertRefused(w, await w.ApproveAs(AliceUser), InvoiceApprovalCodes.CompletionCurrencyUnsupported, writesBefore: 0);
+    }
+
+    [Fact(DisplayName = "165b-3 part B (uac-r2 a) control: a 2-decimal currency (GBP) completes")]
+    public async Task Currency_Control_TwoDecimals_Completes()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Invoice["sprk_currency"] = "GBP";
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "165b-3 part B writer-id fault: the writer identity cannot be read - completion answers Unavailable with nothing written, and the state read fails (never 'not approved')")]
+    public async Task WriterIdFault_FailsClosed()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionApproved);
+        w.H.WhoAmIFault = new TimeoutException("whoami");
+
+        var repeat = await w.ApproveAs(AliceUser);
+        repeat.Outcome.Should().Be(ApprovalOutcome.Unavailable, repeat.Detail);
+        w.Writes.Should().Be(0);
+        w.ApproveRecords.Should().BeEmpty();
+
+        var state = () => w.GetAs(AliceUser);
+        await state.Should().ThrowAsync<TimeoutException>();
+    }
 }

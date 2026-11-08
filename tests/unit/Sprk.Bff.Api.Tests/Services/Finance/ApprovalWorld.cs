@@ -126,6 +126,8 @@ internal sealed class ApprovalWorld
         Put(new Entity("sprk_invoice", InvoiceId)
         {
             ["statuscode"] = new OptionSetValue(invoiceStatus),
+            // Task 165b-3 part B: Dataverse stamps every row's createdon; completion bounds the decision time by it.
+            ["createdon"] = Now.UtcDateTime.AddDays(-7),
             ["sprk_totalamount"] = new Money(1000m),
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId),

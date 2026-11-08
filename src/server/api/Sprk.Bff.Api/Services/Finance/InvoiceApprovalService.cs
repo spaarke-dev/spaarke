@@ -143,9 +143,14 @@ public static class InvoiceApprovalCodes
     /// not Approved and no writer-created approve record exists. Nothing is written.</summary>
     public const string CompletionStatusWithoutRecord = "ebilling.approve.completion.status_without_record";
 
-    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (F2): the portion's decision time is missing or later than the server's
-    /// clock allows. The time is a user-writable column, so completion never takes a future or absent one.</summary>
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (F2): the portion's decision time is missing, later than the server's
+    /// clock allows, or (part B) earlier than the invoice's own server-written <c>createdon</c>. The time is a user-writable column, so completion
+    /// never takes a future, absent or impossible one.</summary>
     public const string CompletionDecidedOnInvalid = "ebilling.approve.completion.decided_on_invalid";
+
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (165b-3 part B, uac-r2 note a): the invoice's currency does not have a
+    /// 2-decimal minor unit (or is not known), so the approved amount cannot be compared with the 2-decimal line-derived total.</summary>
+    public const string CompletionCurrencyUnsupported = "ebilling.approve.completion.currency_unsupported";
 
     /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision no
     /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
@@ -270,12 +275,25 @@ public sealed class InvoiceApprovalService
     /// <summary>The line-decision codes whose record proves a line's decision is recorded (F2).</summary>
     private static readonly string[] LineActionCodes = ["accept-line", "reduce-line", "disallow-line"];
 
+    /// <summary>Task 165b-3 part B: the invoice's server-written creation time, the lower bound of the portion's decision time at completion.</summary>
+    private const string InvoiceCreatedOn = "createdon";
+
+    /// <summary>
+    /// Task 165b-3 part B (uac-r2 note a): the currencies whose minor unit is 2 decimals, among those intake accepts (InvoiceExtractionToolHandler:
+    /// USD, EUR, GBP, JPY, CAD). <see cref="InvoiceTotalsCalculator"/> rounds every total to 2 decimals (USD only in R1), so the completion's amount
+    /// comparison is meaningful only for these; any other code (JPY: 0 decimals; an unknown code) is refused there. No currency is the R1 default
+    /// (USD).
+    /// </summary>
+    private static readonly HashSet<string> TwoDecimalCurrencies = new(StringComparer.OrdinalIgnoreCase) { "USD", "EUR", "GBP", "CAD" };
+
     /// <summary>Long enough for the accept-Clean, the totals and the record; a lock that outlives a crash expires by itself.</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
 
     private static readonly string[] InvoiceColumns =
     [
         "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg,
+        // Task 165b-3 part B: the completion's bounds, read with the invoice (no extra query): server-written createdon, and the currency.
+        InvoiceCreatedOn, InvoiceSubmissionPersister.InvoiceCurrency,
         .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
@@ -442,7 +460,13 @@ public sealed class InvoiceApprovalService
             }
         }
 
-        return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded);
+        // Task 165b-3 part B (EB-D-208): the state counts the invoice as Approved, Sent to AP or Paid only with the writer-created approve record.
+        // Read only when the portion and the invoice both say so; a fault (the read or the writer identity) throws, as every read here does.
+        var approveRecorded = portion is not null && StatusOf(portion) == PortionApproved && IsCountedStatus(InvoiceStatus(invoice))
+            && (await InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false)).Contains(invoiceId);
+
+        return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded,
+            approveRecorded);
     }
 
     // ── POST approve ──
@@ -749,6 +773,17 @@ public sealed class InvoiceApprovalService
 
             callerContactId = callerContact.ContactId;
             claimant = callerContactId == decidedBy.Id;
+        }
+
+        // Task 165b-3 part B (EB-D-208): an Approved invoice with no writer-created approve record is not an approved one, so only its claimant's
+        // completion (below) may go on. Anyone else is refused, never answered "already approved": another person's claim is theirs to complete;
+        // with no claim at all, the status has no record. Nothing is written either way.
+        if (recorded.Count == 0 && !claimant)
+        {
+            return decidedBy is not null && decidedBy.Id != Guid.Empty
+                ? new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.Claimed,
+                    "Another approver's approval of this invoice has not finished. They complete it by approving again.")
+                : CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionStatusWithoutRecord);
         }
 
         if (complete || !claimant || InvoiceStatus(invoice) != InvoiceStatusCodes.Approved)
@@ -1210,8 +1245,10 @@ public sealed class InvoiceApprovalService
 
     /// <summary>
     /// Task 165b-3: before completion writes the approve record, the approval's checks run again under the same locks (approval completion
-    /// decides only from server-written sources): the portion's decision time is present and not in the future (F2), the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
-    /// line is undecided (approve accepts them in bulk before its claim, so a completion never has one), and the portion's approved amount equals
+    /// decides only from server-written sources): the portion's decision time is present, not in the future and not before the invoice's
+    /// <c>createdon</c> (F2), the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
+    /// line is undecided (approve accepts them in bulk before its claim, so a completion never has one), the invoice's currency has a 2-decimal
+    /// minor unit (part B), and the portion's approved amount equals
     /// the approved total <see cref="InvoiceTotalsCalculator"/> derives from the lines read now. Null when all pass. A read fault is Unavailable;
     /// any refusal is 409 <see cref="InvoiceApprovalCodes.CompletionRefused"/>, logged with the reason code, the table and the row id only.
     /// Nothing is written either way.
@@ -1222,9 +1259,12 @@ public sealed class InvoiceApprovalService
         var invoiceId = invoice.Id;
 
         // F2: the decision time is the portion's user-writable column; the record takes it, so it must be present and not in the future
-        // (the tolerance is the lock duration, which covers clock skew between nodes).
+        // (the tolerance is the lock duration, which covers clock skew between nodes). Part B (uac-r2): nor earlier than the invoice's own
+        // server-written createdon (an invoice with no readable createdon is refused too).
         if (portion.GetAttributeValue<DateTime?>(PortionDecidedOn) is not { } decidedOn
-            || new DateTimeOffset(DateTime.SpecifyKind(decidedOn, DateTimeKind.Utc)) > _time.GetUtcNow() + LockDuration)
+            || new DateTimeOffset(DateTime.SpecifyKind(decidedOn, DateTimeKind.Utc)) > _time.GetUtcNow() + LockDuration
+            || invoice.GetAttributeValue<DateTime?>(InvoiceCreatedOn) is not { } createdOn
+            || DateTime.SpecifyKind(decidedOn, DateTimeKind.Utc) < DateTime.SpecifyKind(createdOn, DateTimeKind.Utc))
         {
             return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionDecidedOnInvalid);
         }
@@ -1244,6 +1284,13 @@ public sealed class InvoiceApprovalService
         if (CleanCount(approvable.Lines) > 0)
         {
             return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionCleanUndecided);
+        }
+
+        // Part B (uac-r2 note a): the amounts are compared at 2 decimals, so a currency with another minor unit fails closed.
+        if (invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency)?.Trim() is { Length: > 0 } currency
+            && !TwoDecimalCurrencies.Contains(currency))
+        {
+            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionCurrencyUnsupported);
         }
 
         var totals = InvoiceTotalsCalculator.Calculate(
@@ -1276,7 +1323,7 @@ public sealed class InvoiceApprovalService
 
     /// <summary>
     /// Task 165b-3: the ids of the approve Decision Records for <paramref name="decisionId"/> on the invoice that the writer identity created
-    /// (<see cref="InvoiceLineOrigin.AddWriterCreatedConditions"/>: <c>createdby</c> the writer, <c>createdonbehalfby</c> empty), matched on the
+    /// (<see cref="WriterCreatedRecord"/>: <c>createdby</c> the writer, <c>createdonbehalfby</c> empty), matched on the
     /// record's key (<see cref="BillingDecisionKey.IdOf"/>). Read app-only. Whether an approval is complete is decided from these, never from
     /// the portion's columns. Throws on a read fault (the caller answers Unavailable).
     /// </summary>
@@ -1292,7 +1339,7 @@ public sealed class InvoiceApprovalService
         };
         query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.Equal, invoiceId);
         query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
-        InvoiceLineOrigin.AddWriterCreatedConditions(query.Criteria, writer);
+        WriterCreatedRecord.AddConditions(query.Criteria, writer);
         query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
 
         var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
@@ -1300,6 +1347,48 @@ public sealed class InvoiceApprovalService
             .Where(row => row.Id != Guid.Empty && InvoiceLineOrigin.ReviewIdOf(row) == key)
             .Select(row => row.Id)
             .ToList();
+    }
+
+    /// <summary>
+    /// Task 165b-3 part B (EB-D-208): the invoices among <paramref name="invoiceIds"/> that have an approve Decision Record the writer identity
+    /// created (<see cref="WriterCreatedRecord"/>), regarding the invoice, action <c>approve-invoice</c>. Approval and AP export count an invoice as
+    /// Approved, Sent to AP or Paid only when it is in this set. ONE batched read (an <c>In</c> on the ids, paged), app-only, never one query per
+    /// invoice. Throws on a read fault, and a fault reading <paramref name="writerUserId"/> propagates: the caller fails its decision closed.
+    /// </summary>
+    internal static async Task<IReadOnlySet<Guid>> InvoicesWithApproveRecordAsync(
+        IGenericEntityService entities, IReadOnlyCollection<Guid> invoiceIds, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(writerUserId);
+        var found = new HashSet<Guid>();
+        if (invoiceIds.Count == 0)
+        {
+            return found;
+        }
+
+        var writer = await writerUserId(ct).ConfigureAwait(false);
+        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+        {
+            ColumnSet = new ColumnSet(ApproveRecordInvoiceLookup),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.In, invoiceIds.Distinct().Cast<object>().ToArray());
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
+        WriterCreatedRecord.AddConditions(query.Criteria, writer);
+        query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+
+        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
+        {
+            if (row.GetAttributeValue<EntityReference>(ApproveRecordInvoiceLookup)?.Id is { } invoiceId && invoiceIds.Contains(invoiceId))
+            {
+                found.Add(invoiceId);
+            }
+        }
+
+        return found;
     }
 
     // ── F2: an earlier attempt's bulk accept ──
@@ -1438,13 +1527,14 @@ public sealed class InvoiceApprovalService
 
     private static InvoiceApprovalStateDto State(
         Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, bool correctionsPending, EligibleApproverSet? set, bool eligibilityUnavailable,
-        bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded)
+        bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded, bool approveRecorded)
     {
         var portionStatus = portion is null ? null : StatusOf(portion);
 
         // Task 165b-3 fix round (F1): the portion's status is a user-writable column, so the state never reports Approved from it alone.
-        // Approved needs the invoice itself to be Approved or past it; otherwise the portion's claim is shown as Unknown (and no decided facts).
-        if (portionStatus == PortionApproved && InvoiceStatus(invoice) is not (InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid))
+        // Approved needs the invoice itself to be Approved or past it AND (part B, EB-D-208) the writer-created approve record; otherwise the
+        // portion's claim is shown as Unknown (and no decided facts).
+        if (portionStatus == PortionApproved && !(IsCountedStatus(InvoiceStatus(invoice)) && approveRecorded))
         {
             portionStatus = null;
         }
@@ -1507,6 +1597,9 @@ public sealed class InvoiceApprovalService
     private static int? StatusOf(Entity portion) => portion.GetAttributeValue<OptionSetValue>(EligibleApproverResolver.ApprovalStatus)?.Value;
 
     private static int? InvoiceStatus(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+
+    /// <summary>Approved, Sent to AP or Paid: the statuses that count an invoice as approved (EB-D-208 needs the approve record for each).</summary>
+    private static bool IsCountedStatus(int? status) => status is InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid;
 
     // ── Results ──
 
