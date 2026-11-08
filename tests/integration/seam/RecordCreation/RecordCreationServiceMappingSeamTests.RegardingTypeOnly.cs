@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -294,25 +295,6 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _creates.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "045a: a catalog read that fails upstream leaves the row as sent; step 5 answers as before")]
-    public async Task CreateAsync_ATypeOnlyPairWhoseCatalogReadFailsUpstream_IsLeftAsSent_ForStep5()
-    {
-        TheRecordTypes();
-        _user.FailOn = path => path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal)
-            ? DataverseUserResponse.Fail(503, "ServiceUnavailable", "0x80072321 The service is busy.")
-            : null;
-
-        var outcome = await Service().CreateAsync(
-            TypeOnlyEvent(PairType(MatterType), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
-            AsCaller(), CancellationToken.None);
-
-        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied,
-            "step 5's AppendTo on the type's row cannot be answered either: the uniform 404, as before");
-        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status404NotFound);
-        outcome.MappingWarnings.Should().BeEmpty("an unanswered read never clears the caller's type");
-        _creates.Should().BeEmpty();
-    }
-
     [Fact(DisplayName = "045a: a whole pair, no pair and an id-only pair are not touched (must not fire)")]
     public async Task CreateAsync_AWholeEmptyOrIdOnlyPair_IsUntouched_WithNoExtraReadAndNoWarning()
     {
@@ -347,6 +329,92 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _creates[1].Fields.Keys.Should().NotContain(k => k.StartsWith("sprk_regardingrecord", StringComparison.OrdinalIgnoreCase));
         StringOf(_creates[2].Fields, SecureRootInheritance.PairIdColumn).Should().Be(OrdinaryMatter.ToString("D"));
         _creates[2].Fields.Should().NotContainKey(TypeBind, "nothing is added to an id-only pair");
+    }
+
+    // =====================================================================================
+    // Fix round 1
+    // =====================================================================================
+
+    [Fact(DisplayName = "045a fix round 1 (F2): a catalog read that fails upstream ONCE (step 4½'s) is refused, never stored type-only")]
+    public async Task CreateAsync_ATypeOnlyPairWhoseFirstCatalogReadFailsUpstream_IsRefused_AndNothingIsWritten()
+    {
+        TheRecordTypes();
+        var failed = 0;
+        _user.FailOn = path => path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal) && failed++ == 0
+            ? DataverseUserResponse.Fail(503, "ServiceUnavailable", "0x80072321 The service is busy.")
+            : null;
+
+        var outcome = await Service().CreateAsync(
+            TypeOnlyEvent(PairType(MatterType), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Upstream, "the caller's own read did not answer");
+        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.MappingWarnings.Should().BeEmpty();
+        _creates.Should().BeEmpty("a type-only pair is never written past a read that did not answer");
+    }
+
+    public static TheoryData<string> ClearedTypes => new() { "no-candidate", "names-no-table" };
+
+    [Theory(DisplayName = "045a fix round 1 (F4): a type cleared by step 4½ still costs AppendTo on its catalog row — a caller without it gets step 5's uniform 404, not a create")]
+    [MemberData(nameof(ClearedTypes))]
+    public async Task CreateAsync_ATypeOnlyPairThatWouldBeCleared_WithoutAppendToOnTheType_IsTheUniform404_AsBefore(string shape)
+    {
+        TheRecordTypes();
+        var type = shape == "no-candidate" ? ProjectType : TableLessType;
+        _scripted.Held.Remove("prvAppendTosprk_recordtype_ref");
+
+        var denied = await Service().CreateAsync(
+            TypeOnlyEvent(PairType(type), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
+            AsCaller(), CancellationToken.None);
+        _scripted.Held.Add("prvAppendTosprk_recordtype_ref");
+        _scripted.InvisibleRows.Add(MatterType); // a type row that does not exist: step 5 answers it today
+        var missing = await Service().CreateAsync(
+            TypeOnlyEvent(PairType(MatterType), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
+            AsCaller(), CancellationToken.None);
+
+        denied.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        Problem(denied, "sprk_event").Status.Should().Be(StatusCodes.Status404NotFound);
+        JsonSerializer.Serialize(Problem(denied, "sprk_event")).Should().Be(JsonSerializer.Serialize(Problem(missing, "sprk_event")),
+            "a type row the caller may not append to and one that does not exist answer alike");
+        denied.MappingWarnings.Should().BeEmpty();
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "045a fix round 1 (K2): the system principal's type-only pair is cleared without a read, with the one warning; its whole pair is untouched")]
+    public async Task CreateAsync_ASystemPrincipalsTypeOnlyPair_IsCleared_WithoutARead()
+    {
+        async Task<RecordCreationRequest> SystemEvent(bool withId)
+        {
+            var body = new Dictionary<string, object?>
+            {
+                ["sprk_eventname"] = "Hearing",
+                ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = OrdinaryMatter },
+                ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = MatterType },
+                ["sprk_regardingrecordname"] = "Acme v Widget",
+            };
+            if (withId)
+                body[SecureRootInheritance.PairIdColumn] = OrdinaryMatter.ToString("D");
+            var mapped = await DataverseWriteItemMapper.MapAsync(
+                _scripted, "sprk_event", JsonSerializer.SerializeToElement(body), CancellationToken.None);
+            mapped.Item.Should().NotBeNull(mapped.ValidationError);
+            return new RecordCreationRequest("sprk_event", new RecordCreationPayload.Mapped(mapped.Item!)) { CorrelationId = FixedCorrelation };
+        }
+
+        var system = RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid));
+        var typeOnly = await Service().CreateAsync(await SystemEvent(withId: false), system, CancellationToken.None);
+        var whole = await Service().CreateAsync(await SystemEvent(withId: true), system, CancellationToken.None);
+
+        typeOnly.Succeeded.Should().BeTrue(typeOnly.Refusal?.Detail);
+        whole.Succeeded.Should().BeTrue(whole.Refusal?.Detail);
+        _creates.Should().HaveCount(2);
+        ThePairWasNotWritten(_creates[0].Fields);
+        StringOf(_creates[0].Fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+        TheOneClearWarning(typeOnly, MatterType, OrdinaryMatter);
+        StringOf(_creates[1].Fields, SecureRootInheritance.PairIdColumn).Should().Be(OrdinaryMatter.ToString("D"));
+        _creates[1].Fields.Should().ContainKey(TypeBind);
+        whole.MappingWarnings.Should().BeEmpty();
+        _user.Paths.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal), "no caller to read as");
     }
 
     /// <summary>An event the caller files under (an intermediate), itself filed under the ordinary matter.</summary>

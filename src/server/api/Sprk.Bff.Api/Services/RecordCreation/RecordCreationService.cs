@@ -656,6 +656,17 @@ internal sealed partial class RecordCreationService
         trace.Begin(RecordCreationStep.CallerChecks);
         if (user is null)
         {
+            // Step 4½ for the system principal (task 045a fix round 1, K2): there is no caller to read the catalog as, so a
+            // type-only pair is never filled — it is cleared, with the same warning, and never written half.
+            if (IsTypeOnlyRegardingPair(item))
+            {
+                item = WithoutRegardingPair(item);
+                mappingWarnings.Add(new RecordCreationWarning(
+                    RecordCreationWarning.RegardingTypeClearedCode, SecureRootInheritance.PairTypeColumn, RegardingTypeCleared(noun)));
+                _logger.LogInformation(
+                    "[RECORD-CREATE] step 4½: a {Table}'s regarding pair named a type only (system principal); type cleared", table);
+            }
+
             trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped, "system principal (FR-07)");
         }
         else
@@ -664,7 +675,7 @@ internal sealed partial class RecordCreationService
             // below (step 5's AppendTo on the pair, 5½, 6, 6½, 7) sees the pair exactly as it is written. Both items: step 5
             // checks the caller's own values (callerItem) as well as the merged row, and may rebuild the row from them. ───────
             var typeOnly = await CompleteTypeOnlyRegardingPairAsync(
-                table, user, callerItem, item, mappedValues, noun, mappingWarnings, ct).ConfigureAwait(false);
+                table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, noun, mappingWarnings, ct).ConfigureAwait(false);
             if (typeOnly.Refusal is { } typeOnlyRefusal)
                 return Decision.Refuse(typeOnlyRefusal);
             callerItem = typeOnly.CallerItem!;
@@ -1662,21 +1673,23 @@ internal sealed partial class RecordCreationService
     /// <item>exactly one record of that table named by the item's agreement lookups
     /// (<see cref="RegardingPairFillRecords"/>) → the id is FILLED with it (lower-case "D"), silently;</item>
     /// <item>none, or more than one, or a type naming no table → the type is CLEARED (with the id and the display columns
-    /// the item sent), with one <see cref="RecordCreationWarning.RegardingTypeClearedCode"/> warning;</item>
-    /// <item>a catalog read that fails (403, 404 or any other status) → the items are left as sent: step 5 then asks AppendTo
-    /// on the type's own catalog row and answers exactly as before (NFR-07). A thrown fault propagates (fail closed).</item>
+    /// the item sent), with one <see cref="RecordCreationWarning.RegardingTypeClearedCode"/> warning — but first AppendTo is
+    /// asked on the type's catalog row, as step 5 would have, and a refusal is step 5's own (fix round 1, F4);</item>
+    /// <item>a catalog read answered 403 or 404 → the items are left as sent: step 5 then asks AppendTo on the type's own
+    /// catalog row and answers exactly as before (NFR-07). Any other failed answer is the caller's upstream refusal (fix
+    /// round 1, F2); a thrown fault propagates (fail closed).</item>
     /// </list>
     /// A whole pair, an empty pair and an id with no type are untouched (nothing is read). The step runs before step 5, so the
-    /// caller's AppendTo is asked on the pair as it is written. Caller principal only: the system principal has no caller to
-    /// read the catalog as, and no production system creator exists (DI-007).
+    /// caller's AppendTo is asked on the pair as it is written. The system principal has no caller to read the catalog as: its
+    /// type-only pair is cleared without a read (<see cref="WithoutRegardingPair"/>, fix round 1, K2).
     /// </summary>
     private async Task<TypeOnlyPairStep> CompleteTypeOnlyRegardingPairAsync(
-        string table, IDataverseUserClient user, DataverseWriteItemMapper.MappedItem callerItem,
+        string table, IDataverseUserClient user, Guid callerSystemUserId, DataverseWriteItemMapper.MappedItem callerItem,
         DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, JsonElement> mappedValues, string noun,
         List<RecordCreationWarning> warnings, CancellationToken ct)
     {
         var pair = OwnedChildWrite.PairOf(item);
-        if (pair.TypeId is not { } type || pair.InvalidId || !string.IsNullOrWhiteSpace(pair.IdText)
+        if (!IsTypeOnlyRegardingPair(item) || pair.TypeId is not { } type
             || mappedValues.Keys.Contains(SecureRootInheritance.PairTypeColumn, StringComparer.OrdinalIgnoreCase))
         {
             return new TypeOnlyPairStep(callerItem, item, null);
@@ -1688,12 +1701,31 @@ internal sealed partial class RecordCreationService
         {
             _logger.LogInformation(
                 "[RECORD-CREATE] step 4½: a {Table}'s regarding pair names a type only, and its record type could not be read as " +
-                "the caller (status {Status}); left as sent for step 5", table, typeRow.StatusCode);
-            return new TypeOnlyPairStep(callerItem, item, null);
+                "the caller (status {Status})", table, typeRow.StatusCode);
+
+            // 403/404: left as sent — step 5 asks AppendTo on the type's own catalog row and gives its uniform 404 (a missing
+            // row and an unappendable one alike). Any other status (a 429, a 503, no answer) is the caller's own failure, as
+            // in PairTargetAsync: refused, so a type-only pair is never written past a read that did not answer.
+            return typeRow.StatusCode is 403 or 404
+                ? new TypeOnlyPairStep(callerItem, item, null)
+                : new TypeOnlyPairStep(null, null, Upstream(typeRow, noun));
         }
 
         var records = pairTable is null ? [] : RegardingPairFillRecords(table, item, pairTable, mappedValues);
         Guid? fill = records.Count == 1 ? records[0] : null;
+
+        // A clear removes the type before step 5, so step 5 would no longer ask AppendTo on its catalog row: asked here, with
+        // step 5's own question and answer (NFR-07: a caller who may not append to the type, or whose type row is missing,
+        // still gets the uniform 404, never a create with a warning).
+        if (fill is null)
+        {
+            var typeLookups = item.Lookups
+                .Where(l => string.Equals(l.Column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase));
+            var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, callerSystemUserId, typeLookups, ct)
+                .ConfigureAwait(false);
+            if (!appendTo.Succeeded)
+                return new TypeOnlyPairStep(null, null, CallerCheckRefused(appendTo, noun));
+        }
 
         // One memo for both rewrites: the table's relationships and the related entity sets are read once (schema only).
         var memo = new CallerMetadataReadMemo(user);
@@ -1775,6 +1807,47 @@ internal sealed partial class RecordCreationService
             { ClientFailure: { } failure } => (null, Upstream(failure, noun)),
             _ => (null, new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode,
                 mapped.ValidationError ?? $"The {noun} could not be mapped.")),
+        };
+    }
+
+    /// <summary>Whether <paramref name="item"/>'s regarding pair names a type and no id (absent, null, empty or whitespace).</summary>
+    private static bool IsTypeOnlyRegardingPair(DataverseWriteItemMapper.MappedItem item)
+    {
+        var pair = OwnedChildWrite.PairOf(item);
+        return pair.TypeId is not null && !pair.InvalidId && string.IsNullOrWhiteSpace(pair.IdText);
+    }
+
+    /// <summary>The pair's columns, in a body key's form (a column or <c>{nav}@odata.bind</c>), any case.</summary>
+    private static bool IsRegardingPairKey(string key)
+    {
+        var name = key.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase) ? key[..^"@odata.bind".Length] : key;
+        return string.Equals(name, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase)
+               || RegardingPairDisplayColumns.Contains(name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The system principal's clear (no metadata read): <paramref name="item"/> without the pair's type, id and display
+    /// columns — its body keys, columns, lookups and clears, as <see cref="RecordTableRules.WithoutSearchIndex(DataverseWriteItemMapper.MappedItem, string, ICollection{RecordTableRules.DroppedSearchIndexValue})"/> removes a column.
+    /// </summary>
+    private static DataverseWriteItemMapper.MappedItem WithoutRegardingPair(DataverseWriteItemMapper.MappedItem item)
+    {
+        using var body = JsonDocument.Parse(item.JsonBody);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in body.RootElement.EnumerateObject().Where(p => !IsRegardingPairKey(p.Name)))
+                property.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return item with
+        {
+            JsonBody = System.Text.Encoding.UTF8.GetString(stream.ToArray()),
+            Columns = item.Columns.Where(c => !IsRegardingPairKey(c)).ToList(),
+            Lookups = item.Lookups.Where(l => !IsRegardingPairKey(l.Column)).ToList(),
+            ClearedColumns = item.ClearedColumns.Where(c => !IsRegardingPairKey(c)).ToList(),
         };
     }
 
