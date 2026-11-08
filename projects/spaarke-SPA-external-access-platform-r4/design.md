@@ -1,6 +1,6 @@
 # Design — Spaarke External Access Platform R4: record modal UI/UX (DRAFT for owner review)
 
-> **Status**: 🟡 DRAFT. Owner review first; then a new R4 session runs `/design-to-spec` → `/project-pipeline`.
+> **Status**: 🟢 Owner review done 2026-11-08 (§9.0). Next: `/design-to-spec` → `/project-pipeline`.
 > **Created**: 2026-10-21, drafted in the R3 session for context continuity (owner direction 2026-10-20).
 > **Predecessor**: `spaarke-SPA-external-access-platform-r3`. Dev SPA `3531ed65e`, dev BFF `4f5f22694`, UAC 036 flag ON.
 > **Inputs**:
@@ -203,7 +203,7 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 
 ### 7.1 Carried from the R3 hand-off (R3 `README.md` "Hand-off: open issues", checked 2026-11-04)
 
-R3 sends these open issues to "R4 backlog". None was in this design before. Each still needs an owner call: in R4 scope or deferred again. The ones marked † are outside the record-modal theme.
+R3 sends these open issues to "R4 backlog". None was in this design before. **Owner call 2026-11-08:** each is reviewed against current master first (§7.2); only confirmed, still-relevant issues enter the spec. The ones marked † are outside the record-modal theme.
 
 | Issue | R3 id | What | Note |
 |---|---|---|---|
@@ -229,6 +229,43 @@ R3 sends these open issues to "R4 backlog". None was in this design before. Each
 | #2578 | **Dev fault, every 5 min since at least 2026-11-03:** the secured-column readability proof fails (WhoAmI 403 `0x80072560` "not a member of the organization", `ContactIdentityStore.ReadProofAsync` via `WebApiColumnReadPermissionSource`), and the proof fails closed. Filed by ontology to R3; routed to R4 on 2026-11-05. Unverified lead from uac-r2's d763 gate: it comes from the link reconciliation's pass over the registered `acme` environment (its registry row, or a missing application user there), not the BFF's own environment, and it predates R3. Ties in with #2270. **Evidence (uac-r2's gate on `20669df6a9`, 2026-11-06):** 6 faults in 30 min, the same rate as before, so the scan reorder made no difference. Each fault pairs one-to-one with an `[ID-LINK-RECON] https://spaarke-acme.crm.dynamics.com: binding column Failed … environment aborted before any decision` line. So it is the acme pass, and **the link reconciliation for acme aborts on every pass.** Likely fix: an application user for the BFF identity in spaarke-acme, or a correct or removed acme registry row. Confirm with read-only checks first. Live reads need the owner to see the commands first; a setting change needs owner approval and a rollback. |
 | #2278 | Backfill the owner of contacts that already exist (`scripts/Backfill-RecordOwnership.ps1` doesn't cover `contact`). Pairs with #1673. |
 
+### 7.2 Review of the R3 carry-over against master (2026-11-08)
+
+> **Owner decision (2026-11-08):** the split below is approved, with one change: #2271's delete-route 409 is folded into R4's BFF task, not deferred. #2270 and #2278 move to unified-access-control-r2. The R4 scope from this list is #2269, #2275, #2499, #2578 and #2271. The fixed six and #2163 (a duplicate of #2578) are closed on GitHub with the evidence.
+
+Owner direction (2026-11-08): confirm each issue is still real on current master before it enters the spec. Each one was checked against `origin/master` `57748ebf6d` (code and git history only, no live reads). All 16 are still **open on GitHub**, but 6 are already fixed in code and a 7th (#2271) is half fixed.
+
+**Fixed on master. Proposed: close each, with a comment citing the fix.**
+
+| Issue | Evidence on master |
+|---|---|
+| #1650 SPE orphan on internal delete | `DocumentCheckoutService.cs:765`: internal `DeleteAsync` → `DeleteCoreAsync(..., VerifiedFileFirstKeepRowOnFailure)`. The row is kept when the file delete fails, with 503/409. `BestEffort` has no production caller. |
+| #1839 SR documents indexed with no parent | `663fb2e8fb` (R3, 2026-10-22): `DocumentIndexParentResolver` follows the request's regarding matter, project or work assignment, fail closed, with tests. **Not checked:** whether documents indexed before the fix were re-indexed (the issue named a backfill). Confirm this before closing; if it didn't run, it is a small ops follow-up, not R4 work. |
+| #1636 `sanitizeEmailHtml` positioning and remote images | `cd2466bc02`, `d400a108f9`, `02d00604cf`: `style` is filtered per declaration; `<img src>` is dropped unless `allowRemoteImages`, which no caller passes; `class` and `id` are forbidden. R4 constraint: `RecordMessages` and the threads (#2453) keep the shared sanitizer and never pass `allowRemoteImages`. |
+| #1623 Copilot audience merge once per process | `db54b00e64`: per-options-instance `ConditionalWeakTable` (`AuthorizationModule.cs:31-41, :122`). |
+| #1930 WorkforceHome tests order-dependent | `4b55a30c15`, `82dfbcf308`: the IdentityModel static logger is pinned (`AuthorizationModuleWorkforceHomeTests.cs:354`). Not re-run. |
+| #1673 Binder contacts have no BU-team owner | **Own environment fixed** in `881d134e24` and `d162da1282`: owner team from `ExternalAccess:CustomerBusinessUnitId`, fail-closed 500 `owner_unconfigured`. The residuals are #2270 (foreign environment) and #2278 (existing rows). Close with a pointer to those two. |
+
+**Still present, and they fit R4. Proposed: in scope.**
+
+| Issue | What and why R4 | Size, and review needed |
+|---|---|---|
+| #2269 Retryable binder faults answer 403 | `CallerPrincipalResolver.cs:790-794`: the default case returns `Forbidden` for `contact_lookup/create/bind_failed`. A transient Dataverse fault shows a denial. It fails closed, so this is UX and ops noise, not a hole. Fix: return a 503 with the same `reasonCode`, and have the SPA retry on 503 (`me-client.ts`). | S. UAC review (auth resolver). **The 403 → 503 contract change needs the owner's OK** (CLAUDE.md §6). |
+| #2275 `no-mock-identity.test.tsx` cold-start timeout | Still `timeout: 60000` with no warm-up; R4 edits this SPA and will hit it. Fix: warm the module graph in `beforeAll`. | S. No review. |
+| #2499 Contact store test double and log labels | The in-memory store returns `ExternalTenantId`, which the real store doesn't (`InMemoryContactIdentityStore.cs:1229`); the gate passes `RawExternalTenantId` (`AssignTaskRecipientGate.cs:496`). **The only real exposure:** `FindSystemUsersByGuestObjectIdAsync` and `FindHomeContactsAsync` (`ContactIdentityStore.cs:1825, :1856`) have no fixed `logLabel`, so a failed read logs the home tenant and oid. | S. Ontology agrees on the gate file. |
+| #2578 acme readability-proof 403 every 5 minutes on dev | The registry is the `sprk_dataverseenvironment` table (`DataverseEnvironmentService.cs:172`, `sprk_isactive` and the Ready/null setup status). The reconciler probes acme with the BFF credential, WhoAmI 403s, and the environment aborts (`IdentityLinkReconciliationJob.cs:378-387`). **No impact on the BFF's own environment:** the proof cache is per URL. Users registered into acme get no automatic link, and every 5 minutes App Insights gets error noise. It duplicates **#2163** (2026-10-20); the T186 Ready filter evidently doesn't exclude the row. Fix: (a) data, with the owner's approval and a rollback: add the BFF's application user in acme, or deactivate the acme row or set it not Ready; (b) code (S): log a foreign-environment membership 403 at Warning, or skip it with a cooldown. | Read-only checks first, shown to the owner before they run. Close #2163 as a duplicate. |
+
+**Still present, but not R4's. Proposed: move or defer.**
+
+| Issue | Status | Proposed home |
+|---|---|---|
+| #2270 Foreign-environment contacts have no owner | A documented, guarded known-limit (`ContactCreateOwner.NoneForForeignEnvironment`, `ContactIdentityBinder.cs:2672-2688`). Low traffic: dev's only foreign environment is acme, which is broken anyway (#2578). Not a leak. | **unified-access-control-r2** (the binder owner), after the owner's decision on the source: (a) a customer-BU column on `sprk_dataverseenvironment`, or (b) the default team of the systemuser's BU. Or defer until a real second customer environment exists. |
+| #2278 Backfill existing contacts' owner | Not built. On dev, 15 of 17 bound contacts are in the root BU, so it matters only for child-BU customers. | With #2270, at **uac-r2**. Each environment's apply is a live change with owner approval. |
+| #2271 Lock 409 has no ProblemDetails `title`/`status` | **Partly fixed.** The checkout 409 carries `status = 409, title = "Document Locked"` (`361b8d2cc6`, compose-r8 FR-S09; `DocumentOperationsEndpoints.cs:157-174`). The **delete** route's 409 (`CheckedOutDeleteResult`, about `:494-498`) still returns the raw `DocumentLockedError`, so the internal viewer loses "checked out by X" on delete. Low severity; the external SPA doesn't use this route. | **Owner: fold into R4's BFF task** as an S add-on, with a test: give the delete 409 the same additive `status` and `title`. |
+| #1840 Unused `sprk_communication_send` web resource | Still in `SpaarkeMaster` (`Solution.xml:397`); no ribbon or form uses it. | Solution hygiene, outside the record-modal theme. Defer. |
+| #2534 Auth architecture doc to ADR-028 A9 | Still stale. `spaarke-auth-system-of-record-r1` has had no commit since 2026-10-10. | That project, unless the owner says it is dead (then R4, with auth review). |
+| #1737 Policy Question incident alerting | Blocked: #1562 is now `customer-provisioning-orchestration-r1` T263 (shared mailbox; code built, not live, waiting on PRQ-E-16). | Defer until T263 is live. |
+
 **Inherited state, not issues** (confirmed with R3, 2026-11-04):
 - `85fbba3f64` (registration shows "not set up" for operator-only 500s) is on master but **not deployed** to the dev SPA. It ships with R4's first SPA deploy.
 - **Check in R4's first E2E:** R3's last change has no live proof on dev, because there was no invite traffic in the gate window. The change: inviting a WorkforceHome contact answers 409 `sdap.access.invite.workforce_home_contact` and writes no collision flag.
@@ -246,6 +283,22 @@ R3 sends these open issues to "R4 backlog". None was in this design before. Each
 - **ADR tensions:** none known. The icon standard is new guidance, not a conflict.
 
 ## 9. Open questions for the owner
+
+### 9.0 Owner decisions (2026-11-08)
+
+| Q | Decision |
+|---|---|
+| 1 Prototype decisions | **Accept all four**: title = type + number; hide, don't disable; tabs off by default; "Your access" in the header. |
+| 2 Owner's change list | **No changes.** The design stands as written in §3 and §6. |
+| 3 Information fields | **Internal people's names may be shown to partners, with UAC review per column** (responsible attorney, project lead via `sprk_assignedattorney1` / `sprk_assignedparalegal1`, work-assignment `sprk_assignedto`). Every added column still goes through the `ReadableColumns` allow-list with UAC's review recorded. The spec settles the exact field list per type from §5, using live metadata for the "not found / verify" rows. |
+| 4 Document and Service Request | **All six types on the template.** The R3 stacked modal is retired. |
+| 5 Record toolbar | **Shared `RecordCommandBar`** in `@spaarke/ui-components`. The spec gives its CLAUDE.md §11 answers (existing: `DocumentToolbar`, `HeaderToolbar`; extension, and why not; cost of doing nothing) and follows the shared-library promotion rules. |
+| 6 Icon map | **Adopt, and propose it as a repo standard.** The standards edit needs owner approval when it is drafted. |
+| 7 Submit invoice | **Yes**, on Matter, Project and Work Assignment, opening ebilling's wizard. |
+| 8 Grid columns | Closed by R3 (owner's columns shipped 2026-10-31); only §5's new fields remain, and they are covered by Q3. |
+| §7.1 R3 carry-over | **Candidates, pending a close review** (owner, 2026-11-08): confirm each is still an issue on current master and understand its implications before it enters the spec; some may no longer be relevant. Candidates: the record-modal items (#1650, #1839, #1636, #2271), #2578 with #2270 / #2278 / #1673, #2269, and the † hygiene items (#1623, #1840, #1930, #2499, #2275, #2534); #1737 stays blocked on #1562. Review results: §7.2. **Owner split (2026-11-08):** close the 6 fixed (#1650, #1636, #1623, #1930, #1839, #1673) and #2163 as a duplicate of #2578. **R4 takes** #2269, #2275, #2499, #2578, and #2271's delete-route 409 (folded into the BFF task). **#2270 and #2278 move to unified-access-control-r2.** Defer #1840 and #1737. #2534 stays with spaarke-auth-system-of-record-r1. |
+
+### 9.1 The questions as asked
 
 1. **Prototype decisions (prototype session):**
    - Title = type + number.
@@ -294,4 +347,4 @@ No new service, package or DI registration is planned. Publish-size delta and th
 
 ---
 
-*Next step: owner review of §9. Then a new R4 session runs `/design-to-spec` on this file.*
+*Next step: `/design-to-spec` on this file (owner review of §9 done 2026-11-08).*
