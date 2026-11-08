@@ -252,11 +252,11 @@ public class SecureChildNewCommandAgreementTests
 
     /// <summary>
     /// ebilling-r1 task 096b (EB-D-201): the Invoice wizard ("New Invoice", a submission) is the one "New" of an invoice subgrid on every
-    /// host, and the platform subgrid "+ New" is closed on every host. Both rules receive the table, the script closes the tables in
+    /// core-record host (<c>ROOTS</c>: matter, project, work assignment), and the platform subgrid "+ New" is closed on every host. Both rules receive the table, the script closes the tables in
     /// <c>NATIVE_NEW_CLOSED</c> before it reads any host flag, and the template and the invoice ribbon pass it.
     /// </summary>
     [Fact]
-    public void TheInvoiceWizardCommand_IsAvailableOnEveryHost_AndThePlatformSubgridNew_IsClosedOnEveryHost()
+    public void TheInvoiceWizardCommand_IsAvailableOnEveryCoreRecordHost_AndThePlatformSubgridNew_IsClosedOnEveryHost()
     {
         var script = File.ReadAllText(ScriptFile);
         Assert.Equal(new[] { "sprk_invoice" }, ScriptMapKeys("NATIVE_NEW_CLOSED"));
@@ -267,10 +267,18 @@ public class SecureChildNewCommandAgreementTests
         Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.nativeNewAllowed\s*=\s*function[^{]*").Value);
         Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.newChildAvailable\s*=\s*function[^{]*").Value);
         // The closed table is answered before the flag is read: no host (secure, not secure, unreadable, a party) re-opens it.
-        Assert.True(Body("nativeNewAllowed").IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal)
-            < Body("nativeNewAllowed").IndexOf("hostSecureFlag", StringComparison.Ordinal));
-        Assert.True(Body("newChildAvailable").IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal)
-            < Body("newChildAvailable").IndexOf("hostSecureFlag", StringComparison.Ordinal));
+        // Both indexes are asserted present first: IndexOf is -1 when a guard is absent, and -1 < n would pass vacuously.
+        foreach (var function in new[] { "nativeNewAllowed", "newChildAvailable" })
+        {
+            var body = Body(function);
+            var guard = body.IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal);
+            var flagRead = body.IndexOf("hostSecureFlag", StringComparison.Ordinal);
+            Assert.True(guard >= 0, $"{function} does not consult NATIVE_NEW_CLOSED.");
+            Assert.True(flagRead >= 0, $"{function} does not read the host flag.");
+            Assert.True(guard < flagRead, $"{function} reads the host flag before it answers for a NATIVE_NEW_CLOSED table.");
+        }
+        // The wizard is offered only on a core-record host (the records the submission route accepts), never on any saved host.
+        Assert.Contains("ns.ROOTS[host.entity]", Body("newChildAvailable"));
 
         // The table reaches both rules: the template for every entity ({{entity}}), the invoice ribbon for sprk_invoice.
         foreach (var (file, value) in new[] { (TemplateFile, "{{entity}}"), (InvoiceRibbonFile, "sprk_invoice") })

@@ -34,7 +34,10 @@
       - Form "New" / "Save & New" on a child's own form: creates an UNFILED record (no parent prefilled), owned per the
         unfiled rule by the reconcile pass - not a secure-parent create. Not replaced.
 
-    WHAT -Apply DOES, in order (every step a live write - a manual gate, run by the main session):
+    WHAT -Apply DOES, in order (every step a live write - a manual gate, run by the main session). The ORDER IS BINDING:
+    the web resource (step 1) is written and published BEFORE the ribbon (steps 2-3) is imported, so no ribbon rule ever
+    names a function the live script does not carry yet (a rule whose custom function is missing evaluates false and hides
+    the command).
       1. Web resource sprk_/scripts/secure_child_ribbon.js <- src/client/webresources/js/sprk_secure_child_ribbon.js
          (created or updated) and published. Its two helper libraries (sprk_/scripts/bff_auth.js,
          sprk_/scripts/assignedaccess_postsave.js) must already exist (task 142) - checked, never written here.
@@ -55,6 +58,10 @@
       - IsQuickCreateEnabled;
       and whether the three web resources exist (and whether the deployed script matches the repository file).
       With -ExportDir it also runs the merge into a scratch copy and prints the before / after command lists.
+    -Verify additionally checks, for each table in the script's NATIVE_NEW_CLOSED (today sprk_invoice), that the live ribbon's
+      sprk.SecureChild.<table>.NativeNewAllowed.EnableRule and ...NewAvailable.EnableRule each pass that table as their
+      StringParameter: a rule without it is FAIL (exit 1), because the script would not close the table. A ribbon that cannot
+      be read is UNVERIFIED (exit 2).
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -102,6 +109,14 @@ $Template = Join-Path $RepoRoot 'infrastructure/dataverse/ribbon/SecureChildRibb
 $Merger = Join-Path $RepoRoot 'infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1'
 $ScriptFile = Join-Path $RepoRoot 'src/client/webresources/js/sprk_secure_child_ribbon.js'
 $ScriptName = 'sprk_/scripts/secure_child_ribbon.js'
+# The tables whose platform "+ New" the script closes on every host: read from the script's own NATIVE_NEW_CLOSED map, so
+# -Verify never drifts from it (ebilling-r1 096b). A script whose map cannot be read stops the run: nothing would be checked.
+$NativeNewClosed = @()
+if (Test-Path -LiteralPath $ScriptFile) {
+    $closedMap = [regex]::Match([System.IO.File]::ReadAllText($ScriptFile), 'ns\.NATIVE_NEW_CLOSED\s*=\s*\{(?<map>[^}]*)\}')
+    if ($closedMap.Success) { $NativeNewClosed = @([regex]::Matches($closedMap.Groups['map'].Value, '(\w+)\s*:\s*true') | ForEach-Object { $_.Groups[1].Value }) }
+}
+if ($NativeNewClosed.Count -eq 0) { throw "NATIVE_NEW_CLOSED could not be read from $ScriptFile." }
 $HelperNames = @('sprk_/scripts/bff_auth.js', 'sprk_/scripts/assignedaccess_postsave.js')
 $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 
@@ -278,6 +293,19 @@ foreach ($table in $Tables) {
     if ($Verify) {
         if ($ruleLive) { Ok 'the platform + New carries the secure rule' } else { Fail "the platform + New on $table does not carry the secure rule" }
         if ($buttonLive) { Ok 'the New command is live' } else { Fail "sprk.SecureChild.$table.SubGrid.New is not live" }
+        # A table the script closes (NATIVE_NEW_CLOSED) is closed only when both rules pass the table: without the string
+        # parameter the script's closed-table guard never fires and the host-flag logic applies instead (ebilling-r1 096b re-check).
+        if ($NativeNewClosed -contains $table) {
+            if (-not $ribbon) { Unverified "$table : the live ribbon could not be read, so the rules' table parameter is unchecked" }
+            else {
+                foreach ($ruleName in @('NativeNewAllowed', 'NewAvailable')) {
+                    $ruleId = "sprk.SecureChild.$table.$ruleName.EnableRule"
+                    $values = @($ribbon.SelectNodes("//EnableRule[@Id='$ruleId']//StringParameter/@Value") | ForEach-Object { $_.Value })
+                    if ($values -contains $table) { Ok "$ruleId passes the table ($table)" }
+                    else { Fail "$ruleId does not pass the table '$table' as its StringParameter (found: $($values -join ',')) - the closed-table guard cannot fire" }
+                }
+            }
+        }
     } else {
         Info "secure rule live: $ruleLive; New command live: $buttonLive"
     }
@@ -302,6 +330,8 @@ if ($Failures.Count -gt 0 -and $Apply) {
 }
 
 # ── -Apply: web resource, pack, import, publish ────────────────────────────────────────────────────────────────
+# ORDER (binding): the web resource is written first, the ribbon import follows. The ribbon's custom rules call functions in the
+# script; imported first, a rule would name a function the live script lacks and the command would hide.
 if ($Apply) {
     Write-Host 'Applying'
     $body = @{ name = $ScriptName; displayname = 'Secure-record child New commands'; webresourcetype = 3; content = $repoContent } | ConvertTo-Json

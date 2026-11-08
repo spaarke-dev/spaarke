@@ -204,7 +204,7 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
     expect(h.reads).toEqual([]);
   });
 
-  // ebilling-r1 task 096b (EB-D-201): the invoice's platform "+ New" is closed on EVERY host; the Invoice wizard is the one "New".
+  // ebilling-r1 task 096b (EB-D-201): the invoice's platform "+ New" is closed on EVERY host; the Invoice wizard is the one "New" on a core-record host.
   it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
     'a %s read as NOT secure offers NO platform "+ New" for an invoice and shows the Invoice wizard command (must fire); a to-do keeps the platform one (must not fire)',
     async root => {
@@ -218,12 +218,25 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
     }
   );
 
+  it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
+    'the Invoice wizard shows on a %s host whether the flag reads secure, not secure or unreadable (must fire)',
+    async root => {
+      for (const flag of [true, false, 'throw'] as const) {
+        const h = harness({ flag });
+        expect(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_invoice')).toBe(false);
+        expect(h.ribbon.newChildAvailable(formOf(root), 'sprk_invoice')).toBe(true);
+        expect(h.reads).toEqual([]);
+      }
+    }
+  );
+
   it.each(['sprk_event', 'contact', 'sprk_organization', 'account'])(
-    'an invoice subgrid on a %s host: no platform "+ New", the Invoice wizard command shows',
+    'an invoice subgrid on a %s host (not a core record the submission route accepts): no platform "+ New" and NO Invoice wizard command (must not fire)',
     async host => {
       const h = harness({ flag: 'throw' });
       expect(h.ribbon.nativeNewAllowed(formOf(host), 'sprk_invoice')).toBe(false);
-      expect(h.ribbon.newChildAvailable(formOf(host), 'sprk_invoice')).toBe(true);
+      expect(h.ribbon.newChildAvailable(formOf(host), 'sprk_invoice')).toBe(false);
+      expect(h.reads).toEqual([]);
     }
   );
 
