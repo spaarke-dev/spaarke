@@ -861,3 +861,7 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
 - Filtered unit tests (Finance | Signals | ApExport | Approval | MarkPaid | Rollup): 11201 total, 11193 passed, 8 skipped, 0 failed.
 - `dotnet test tests/Spaarke.ArchTests/`: 2189 passed, 0 failed (the D-130 tool guard now also requires the shared counted reader).
 - No package added or changed.
+- Publish size (BFF hygiene §10 + NFR-01): `dotnet publish -c Release -r linux-x64 --self-contained false`, framework-dependent linux-x64,
+  Release, `Compress-Archive -CompressionLevel Optimal` over the publish folder, PDBs included, each side from a fresh `git archive` export at
+  a short path, 191 files on every side. `origin/master` (57748ebf6d) 39.26 MB; the parent commit (fd628e75c5) 39.56 MB; this task 39.56 MB.
+  This task's own delta is -337 bytes (0.00 MB); the +0.30 MB against master is the unmerged ebilling-r1 work already on the branch.
