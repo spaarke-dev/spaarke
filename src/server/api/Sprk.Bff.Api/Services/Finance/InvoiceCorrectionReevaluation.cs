@@ -565,6 +565,9 @@ public sealed class InvoiceCorrectionReevaluation
 
         if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
+            // 082d fix round F4: the Procedure basis the patched findings were judged with is the re-run's (afterResult), written in this same
+            // conditional write; null ("no snapshot", readers fail closed) when a decided line keeps findings the re-run would change.
+            root[ProcedureSnapshot.Member] = ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided);
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
             {
                 RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture),

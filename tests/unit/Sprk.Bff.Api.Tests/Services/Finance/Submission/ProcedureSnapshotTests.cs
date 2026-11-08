@@ -197,7 +197,7 @@ public sealed class ProcedureSnapshotTests
         stored!.AppliedPolicyVersionIds.Should().Equal(ProcedureSnapshotFixture.PolicyVersionId("PROC-INC"));
         stored.DisplacedPolicyVersionIds.Should().Equal(ProcedureSnapshotFixture.Legacy().PolicyVersionId);
         stored.AppliedPolicyVersionIds.Should().NotContain(ProcedureSnapshotFixture.PolicyVersionId("PROC-LIMIT"), "excluded on the parent");
-        (stored.ProcedureCount, stored.ExcludedRuleCount, stored.ExcludedProcedureCount, stored.GapCount).Should().Be((1, 1, 1, 0));
+        (stored.ProcedureCount, stored.GapCount).Should().Be((1, 0));
     }
 
     public static TheoryData<string, Action<JsonObject>> OlderOrDamaged => new()
@@ -238,12 +238,12 @@ public sealed class ProcedureSnapshotTests
         decision.Should().NotBeNull("control: the fixture is an automatic rejection");
         var summary = decision!.Facts[ProcedureSnapshot.DecisionRecordFact].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
         summary.Keys.Should().BeEquivalentTo(
-            ["version", "submissionId", "member", "procedures", "appliedRules", "displacedRules", "excludedRules", "excludedProcedures", "gaps"]);
+            ["version", "submissionId", "member", "procedures", "appliedRules", "displacedRules", "gaps"]);
         summary["submissionId"].Should().Be(submissionId.ToString("D"));
         summary["member"].Should().Be(ProcedureSnapshot.Member);
         summary.Where(s => s.Value is int).ToDictionary(s => s.Key, s => (int)s.Value!).Should().BeEquivalentTo(new Dictionary<string, int>
         {
-            ["version"] = 1, ["procedures"] = 1, ["appliedRules"] = 2, ["displacedRules"] = 1, ["excludedRules"] = 1, ["excludedProcedures"] = 1, ["gaps"] = 0,
+            ["version"] = 1, ["procedures"] = 1, ["appliedRules"] = 2, ["displacedRules"] = 1, ["gaps"] = 0,
         }, "PROC-INC and BILL-AGE applied, CD-INC displaced");
         var text = JsonSerializer.Serialize(decision.Facts);
         text.Length.Should().BeLessThan(100_000);
@@ -252,6 +252,22 @@ public sealed class ProcedureSnapshotTests
         {
             text.Should().NotContainEquivalentOf(secret);
         }
+    }
+
+    [Fact(DisplayName = "082d fix round K1 must-fire: the Decision Record summary carries no count of Exclude rows (a reader who cannot read a Secure parent learns nothing of the chain from it)")]
+    public async Task DecisionRecordSummary_CarriesNoExcludeCount()
+    {
+        var (outcome, _) = await ProcedureSnapshotFixture.OutcomeAsync(InvoiceSubmissionProcessorTests.InvoiceAgeReject());
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, ProcedureSnapshotFixture.InvoiceId);
+        var stored = ProcedureSnapshot.Read(json);
+        stored.Should().NotBeNull("control: the fixture stores two Exclude rows (a Procedure and a rule) on the parent");
+        JsonNode.Parse(json)![ProcedureSnapshot.Member]!["resolutions"]!.AsArray().Select(r => r!["excludedRules"]!.AsArray().Count + r["excludedProcedures"]!.AsArray().Count)
+            .Sum().Should().BeGreaterThan(0, "control: the internal member does hold the exclusions");
+
+        var summary = ProcedureSnapshot.DecisionRecordSummary(stored!, Guid.NewGuid());
+
+        summary.Keys.Should().NotContain(k => k.Contains("exclu", StringComparison.OrdinalIgnoreCase));
+        JsonSerializer.Serialize(summary).Should().NotContainEquivalentOf("exclu").And.NotContainEquivalentOf("override");
     }
 
     [Fact(DisplayName = "082d: a row stored before the snapshot rebuilds the SAME Decision Record facts (no summary member), so a resumed record keeps its hash")]

@@ -1322,7 +1322,7 @@ Reader compatibility: a row with no member (pre-082d), an unknown version, a mem
 
 ### Decision Record summary
 
-`facts.procedureSnapshot = {version, submissionId, member, procedures, appliedRules, displacedRules, excludedRules, excludedProcedures, gaps}`: counts and the pointer, never the basis. Only a row that stores a snapshot gets it, so a record rebuilt for a pre-082d row keeps its facts and hash.
+`facts.procedureSnapshot = {version, submissionId, member, procedures, appliedRules, displacedRules, gaps}`: counts and the pointer, never the basis. Only a row that stores a snapshot gets it, so a record rebuilt for a pre-082d row keeps its facts and hash. **Fix round 1 (K1):** the summary carries NO `excludedRules` or `excludedProcedures` count (an Exclude row sits on a core record of the chain, possibly a Secure parent; a Decision Record reader who cannot read that parent must learn nothing of the chain from it). `StoredProcedureSnapshot` no longer holds them either. Kept: `procedures`, `appliedRules` and `displacedRules` (outcome counts, not counts of override rows) and `gaps` (a Procedure gap is already a reader-facing finding via `ProcedureGap.ForReaders`). Test: `ProcedureSnapshotTests.DecisionRecordSummary_CarriesNoExcludeCount` (seed: an `excludedRules` key added back fails it and the key-set test).
 
 ### K6
 
@@ -1357,7 +1357,23 @@ The five records and `CoreRecordLink` already print no ids (082b K2, 082c C17). 
 
 ### Known limits
 
-- The ratchet is file-level (above); a column name built at run time, and readers outside `src/server`, are not seen.
+- The ratchet is file-level (above); a column name built at run time, and readers outside `src/server`, are not seen. Two more cases of `SourceScan.CodeText` (fix round 1, K3, no code change): it cuts a line at the first `//` even inside a string literal (so a `"http://..."` literal hides the rest of its line, including a `sprk_currentversion` after it), and it does not strip block comments (`/* ... sprk_currentversion ... */` counts as code, so a block comment can make a file look like a reader, or hide a `RuleDomains` call that is only commented out as a block).
 - A rate rule skipped for currency is listed as applied to its subjects (the evaluator ran it).
-- C12 interim and K3 (note only, not fixed): after a 101 correction the stored snapshot is still the submission-time one until a re-run writes a new one.
+- (Fix round 1, F4: no longer a limit.) The stored snapshot after a correction or an added line is now written by the patch itself, see "Fix round 1" below.
 - The Decision Record summary is added only for rows that store a snapshot, so the same submission's record differs before and after 082d by that one fact.
+
+### Fix round 1 (F4, F3, K1, K2, K3)
+
+**F4: the snapshot after a correction or an added line.** Both paths re-run the evaluator (`afterResult` carries `ProcedureBasis`) and patch the stored findings, but left `procedureSnapshot` as the submission wrote it. Now `ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided)` sets the member in the same conditional write: `InvoiceCorrectionReevaluation.PatchFindingsAsync` (inside the `original != root` write, so a correction whose patch writes nothing leaves the member byte-identical) and `InvoiceLineAddService` (in the one transaction, right after `AddLineFindings`).
+- **Choice, both paths:** the re-run's whole-invoice snapshot (`Build(afterResult)`) when it describes the stored findings, else JSON `null` (the readers 083 and 113 read it as "no snapshot" and fail closed). A decided line keeps its OLD entries (`PatchFindings` / `PatchPlan` skip it), so the whole-invoice snapshot is wrong exactly when something about a decided line differs between the re-run's two sides: a finding of a decided line (compared as `FindingEntryJson`), or the subjects (decided lines only) a rule version is applied / displaced / cap-displaced on. Then the stored findings mix two bases and the member is `null`. With no decided line, or decided lines the correction or the add does not touch (the usual case: a correction is refused on a decided line and an added line is undecided), the member is the re-run's basis. Same rule on both paths, one helper.
+- Not changed: a correction or add whose re-run carries no basis (a test double) writes `null` (same as the persister with no evaluation).
+- **Tests** (`ProcedureSnapshotPatchTests`, `InvoiceLineAddServiceTests.ProcedureSnapshot.cs`; the evaluator's result is shaped to carry a basis per side): correction must-fire (the member is the re-run's basis), correction with a decided line keeping an old cap finding (member JSON null), correction control with an unaffected decided line (re-run's basis), correction must-not-fire (refused into a Procedure gap: member byte-identical); the same four for Add line.
+- **Seeds** (each restored; tree clean afterwards): (1) delete the `root[ProcedureSnapshot.Member] = ...` line in `InvoiceCorrectionReevaluation.cs`: 3 correction tests fail (must-fire, decided null, decided control). (2) delete it in `InvoiceLineAddService.cs`: 3 add-line tests fail (must-fire, decided null, decided control). (3) `ForPatchedFindings` never answering null (`DecidedLinesDiffer` forced false): the two decided-null tests fail. The must-not-fire controls hold under (1) and (2) by construction (the refusal returns before the write).
+
+**F3.** Each `CurrentVersionReaderRatchetTests` baseline entry now carries a written reason and an ADR citation (tests/CLAUDE.md "Every allowlist / census entry carries a written reason and an ADR citation"): ADR-038 Amendment A1 (`tests/Spaarke.ArchTests/**` as the protected home of structural fitness functions) plus model 7.2 (ontology-r1's amendment of D-14 and the ratchet-with-baseline requirement); no domain ADR governs the rule-version pointer, which the comment says.
+
+**K1.** See "Decision Record summary" above.
+
+**K2.** The `StoredProcedureSnapshot.DisplacedPolicyVersionIds` doc said "displaced on every subject"; the reader code puts a version there when it is applied on no subject and displaced on at least one. The doc now says that; no behaviour change.
+
+**K3.** Ratchet limits added to "Known limits" (the `//` inside a string literal; block comments are not stripped).

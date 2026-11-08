@@ -35,14 +35,27 @@ public sealed class CurrentVersionReaderRatchetTests
 
     /// <summary>
     /// Known readers that do not apply <c>RuleDomains</c> (repo-relative, forward slashes), each with its owner. Worked down, never added to
-    /// without an owner's decision recorded beside the entry.
+    /// without an owner's decision recorded beside the entry. <b>Every entry carries a written reason and an ADR citation</b> (tests/CLAUDE.md:
+    /// "Every allowlist / census entry carries a written reason and an ADR citation"; ADR-038 Amendment A1 makes <c>tests/Spaarke.ArchTests/**</c>
+    /// the protected home of structural fitness functions). No domain ADR governs the rule-version pointer, so each entry also cites the decision
+    /// that does: ebilling-r1 <c>notes/procedure-and-file-model.md</c> section 7.2, which records ontology-r1's amendment of D-14 and asks for this
+    /// ratchet with a baseline (ontology F3-b).
     /// </summary>
     private static readonly Dictionary<string, string> Baseline = new(StringComparer.Ordinal)
     {
-        // ontology-r1 owns the re-key of these three (model 7.2: "ontology-r1 fixes OntologyAdminClassificationService :658/:685/:705"). They read
-        // through the Web API and tell the domains apart with OntologyDomain, not RuleDomains.
+        // Reason: ontology-r1 owns the re-key of this reader (publish: moves the pointer after the new version is in force). It tells the domains
+        // apart with OntologyDomain, not RuleDomains, so the file-level check cannot see it. Model 7.2 gives the re-key to ontology-r1.
+        // Citation: ADR-038 Amendment A1 (an ArchTests allowlist entry needs a reason and an ADR citation); model 7.2 (D-14 amended by ontology-r1).
         ["src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs"] = "ontology-r1",
+
+        // Reason: reads the pointer through the Web API ($select=_sprk_currentversion_value, model 7.2 ":658/:685/:705": "ontology-r1 fixes
+        // OntologyAdminClassificationService") and tells the domains apart with OntologyDomain, not RuleDomains.
+        // Citation: ADR-038 Amendment A1; model 7.2 (D-14 amended by ontology-r1).
         ["src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminClassificationService.cs"] = "ontology-r1",
+
+        // Reason: lists ontology policies with their pointed-to version (admin read) and tells the domains apart with OntologyDomain, not
+        // RuleDomains; ontology-r1 owns the re-key.
+        // Citation: ADR-038 Amendment A1; model 7.2 (D-14 amended by ontology-r1).
         ["src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminRulesService.cs"] = "ontology-r1",
     };
 

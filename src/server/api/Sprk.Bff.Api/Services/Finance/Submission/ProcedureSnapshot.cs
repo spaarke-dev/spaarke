@@ -129,6 +129,44 @@ internal static class ProcedureSnapshot
         };
     }
 
+    /// <summary>
+    /// 082d fix round F4: the snapshot a PATCHED findings JSON (a correction, an added line) should store: the re-run's own basis
+    /// (<paramref name="after"/>), because the patch rewrote the findings the stored basis judged. A whole-invoice snapshot describes the stored
+    /// findings only while every decided line's entries are the ones the re-run would produce; the patch leaves a decided line's old entries as stored,
+    /// so when the findings of a decided line, or the rules applied to / displaced on it, differ between <paramref name="before"/> and
+    /// <paramref name="after"/>, the stored findings mix two bases and the answer is null ("no snapshot": 083 and 113 fail closed, never a wrong
+    /// basis). Also null when <paramref name="after"/> carries no basis.
+    /// </summary>
+    internal static JsonObject? ForPatchedFindings(BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided) =>
+        DecidedLinesDiffer(before, after, decided) ? null : Build(after);
+
+    private static bool DecidedLinesDiffer(BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided)
+    {
+        if (decided.Count == 0)
+        {
+            return false;
+        }
+
+        static List<string> Findings(BillingEvaluationResult result, IReadOnlySet<int> decided) => result.Findings
+            .Where(f => f.Subject.LineIndex is { } line && decided.Contains(line))
+            .Select(f => InvoiceSubmissionPersister.FindingEntryJson(0, f, null, scrub: false).ToJsonString())
+            .Order(StringComparer.Ordinal).ToList();
+
+        static List<string> Applications(BillingEvaluationResult result, IReadOnlySet<int> decided)
+        {
+            static string Lines(IReadOnlyList<BillingSubject> subjects, IReadOnlySet<int> decided) =>
+                string.Join(',', subjects.Where(s => s.LineIndex is { } line && decided.Contains(line)).Select(s => s.LineIndex!.Value).Order());
+
+            return (result.ProcedureBasis?.Applications ?? [])
+                .Select(a => $"{a.PolicyVersionId:D}|{a.Source}|{Lines(a.Applied, decided)}|{Lines(a.Displaced, decided)}|{Lines(a.CapDisplaced, decided)}")
+                .Where(text => text.Split('|')[2..].Any(part => part.Length > 0))
+                .Order(StringComparer.Ordinal).ToList();
+        }
+
+        return !Findings(before, decided).SequenceEqual(Findings(after, decided), StringComparer.Ordinal)
+            || !Applications(before, decided).SequenceEqual(Applications(after, decided), StringComparer.Ordinal);
+    }
+
     private static JsonObject DateContent(ProcedureRulesOnDate onDate, Action<IEnumerable<ProcedureOverrideRow>> collect)
     {
         JsonArray RowIds(IReadOnlyList<ProcedureOverrideRow> deciding)
@@ -245,8 +283,6 @@ internal static class ProcedureSnapshot
             }
 
             var procedures = new HashSet<string>(StringComparer.Ordinal);
-            var excludedRules = new HashSet<string>(StringComparer.Ordinal);
-            var excludedProcedures = new HashSet<string>(StringComparer.Ordinal);
             var gaps = 0;
             foreach (var resolution in resolutions)
             {
@@ -256,12 +292,10 @@ internal static class ProcedureSnapshot
                 }
 
                 procedures.UnionWith(Ids(entry["procedures"], "procedureId"));
-                excludedRules.UnionWith(Ids(entry["excludedRules"], "policyVersionId"));
-                excludedProcedures.UnionWith(Ids(entry["excludedProcedures"], "procedureId"));
                 gaps += (entry["gaps"] as JsonArray)?.Count ?? 0;
             }
 
-            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, excludedRules.Count, excludedProcedures.Count, gaps);
+            return new StoredProcedureSnapshot(number, applied, displaced, procedures.Count, gaps);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException)
         {
@@ -290,7 +324,10 @@ internal static class ProcedureSnapshot
     /// <summary>
     /// Model 7.4 (ontology O2): the bounded summary a Decision Record written by evaluation carries instead of the basis (<c>sprk_factsnapshot</c>
     /// is capped at 100,000 characters): the pointer to the submission's member and a fixed set of counts. No id but the submission's (already a
-    /// fact of the record), no name, no reason.
+    /// fact of the record), no name, no reason. <b>No count of excluded rules or excluded Procedures (082d fix round K1):</b> an Exclude row sits on
+    /// a core record of the chain, possibly a Secure parent, and a Decision Record reader who cannot read that parent must learn nothing about the
+    /// chain from the record. The counts that stay describe the outcome (Procedures, rules applied, rules displaced by precedence) and the gaps (a
+    /// gap is also a reader-facing finding via <see cref="ProcedureGap.ForReaders"/>), never an override or Exclude row.
     /// </summary>
     internal static Dictionary<string, object?> DecisionRecordSummary(StoredProcedureSnapshot snapshot, Guid submissionId) => new(StringComparer.Ordinal)
     {
@@ -300,8 +337,6 @@ internal static class ProcedureSnapshot
         ["procedures"] = snapshot.ProcedureCount,
         ["appliedRules"] = snapshot.AppliedPolicyVersionIds.Count,
         ["displacedRules"] = snapshot.DisplacedPolicyVersionIds.Count,
-        ["excludedRules"] = snapshot.ExcludedRuleCount,
-        ["excludedProcedures"] = snapshot.ExcludedProcedureCount,
         ["gaps"] = snapshot.GapCount,
     };
 
@@ -317,12 +352,12 @@ internal static class ProcedureSnapshot
 
 /// <summary>
 /// The parts of a stored <see cref="ProcedureSnapshot"/> its readers need today. <see cref="AppliedPolicyVersionIds"/>: the versions that judged at
-/// least one subject (task 083: a clause is shown only for these); <see cref="DisplacedPolicyVersionIds"/>: those displaced on every subject they
-/// were selected for. The counts feed the Decision Record summary. Internal: it carries policy version ids.
+/// least one subject (task 083: a clause is shown only for these); <see cref="DisplacedPolicyVersionIds"/>: those applied on no subject and displaced
+/// on at least one. The counts feed the Decision Record summary (never a count of Exclude rows: see <see cref="ProcedureSnapshot.DecisionRecordSummary"/>).
+/// Internal: it carries policy version ids.
 /// </summary>
 internal sealed record StoredProcedureSnapshot(
-    int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount,
-    int ExcludedRuleCount, int ExcludedProcedureCount, int GapCount)
+    int Version, IReadOnlyList<Guid> AppliedPolicyVersionIds, IReadOnlyList<Guid> DisplacedPolicyVersionIds, int ProcedureCount, int GapCount)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {

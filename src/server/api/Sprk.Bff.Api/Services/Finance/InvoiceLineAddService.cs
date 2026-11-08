@@ -747,6 +747,10 @@ public sealed class InvoiceLineAddService
         PatchFindings(root, beforeResult, afterResult, decided, touched);
         PatchPlan(root, beforeResult, afterResult, storedFindings, SubjectsOf(command.InvoiceId, root, basis.LinesAfter), decided, touched);
         AddLineFindings(root, index, afterResult);
+
+        // 082d fix round F4: the Procedure basis the patched findings were judged with is the re-run's (afterResult), written in the same
+        // conditional write as the findings; null ("no snapshot", readers fail closed) when a decided line keeps findings the re-run would change.
+        root[ProcedureSnapshot.Member] = ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided);
         root[AddLineMember] = new JsonObject
         {
             ["decisionId"] = decisionId.ToString("D"),
