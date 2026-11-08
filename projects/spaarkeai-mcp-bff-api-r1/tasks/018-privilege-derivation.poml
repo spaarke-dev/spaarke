@@ -4,7 +4,7 @@
     <title>FR-04 privilege derivation from communications (owner option A widened)</title>
     <phase>A BFF rework</phase>
     <gate>after 015; hard gate of 022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies SignalReadService.cs and the capability (.cs); privacy-sensitive (FR-04, ADR-015)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -133,7 +133,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner ruling 2026-11-08: option A widened (notes/decisions.md). Task 022 is hard-gated on this task. Ontology DI-143 (#2630) reuses WorkItemPrivilege for the Decision Record snapshot.</notes>
+  <notes>Owner ruling 2026-11-08: option A widened (notes/decisions.md). Task 022 is hard-gated on this task. Ontology DI-143 (#2630) reuses WorkItemPrivilege for the Decision Record snapshot.
+Completed 2026-11-08 in 6aec16b753: WorkItemPrivilege (SourcesOf, FlaggedAsync), one caller read per page (per 200 distinct ids), fail closed; untyped communication subjects (DI-63) join the read. Tests: 12 fail before, all pass after (unit 4424, integration 167, ArchTests 1998). Publish delta +32,494 B, 191 files each side, no CVE. Adversarial review fixed (F4 untyped subject, F2 x2) and hardened (K1, K4 x2). Known limits in notes/decisions.md 2026-11-08 "Task 018".
+rework: fix-round-1 task 018</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
