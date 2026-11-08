@@ -228,6 +228,34 @@ public sealed partial class InvoiceSubmissionRerunTests
         world.Links.Should().Equal((shared.Id, AssignFirmRecord, (Guid?)null, (Guid?)Reviewer));
     }
 
+    [Fact(DisplayName = "095d-2b-2 (Q1, ontology-r1): a link answered ChangedSinceRead after this run's close writes nothing and is retried with the state not done (decisions stay pending, EB-D-204); the replay links and finishes")]
+    public async Task ALinkChangedSinceRead_IsRetried_AndTheReplayLinks()
+    {
+        var world = await CommittedAsync();
+        var shared = world.AddSignal(SystemCode, BillingFindingSignalMapper.InvoiceEntity, InvoiceId, 1, "fp-firm-missing");
+        world.LinkAnswer = SignalRecordLinkOutcome.ChangedSinceRead; // the Signal was touched between the close and the link
+
+        var first = await world.Rerun().RemapSignalsAsync(SubmissionId);
+
+        first.Status.Should().Be(InvoiceSubmissionRerunSignalsStatus.Retry);
+        first.Code.Should().Be(SignalEpisodeLifecycle.SignalChangedCode);
+        first.ConditionCleared.Should().BeFalse();
+        world.SignalCloses.Should().Equal((shared.Id, SignalWriter.ResolutionConditionCleared));
+        world.Links.Should().BeEmpty();
+        shared.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull("the link wrote nothing");
+        world.RerunState().Should().NotBe(InvoiceSubmissionRerun.StateDone);
+        InvoiceFirmGate.IsRerunPending(world.Findings().ToJsonString()).Should().BeTrue("EB-D-204: decisions stay refused until the run is done");
+
+        world.LinkAnswer = null;
+        var replay = await world.Rerun().RemapSignalsAsync(SubmissionId);
+
+        replay.Status.Should().Be(InvoiceSubmissionRerunSignalsStatus.Done);
+        replay.ConditionCleared.Should().BeTrue();
+        world.SignalCloses.Should().ContainSingle("the replay links the close this run made; it does not close again");
+        world.Links.Should().Equal((shared.Id, AssignFirmRecord, (Guid?)null, (Guid?)Reviewer));
+        world.RerunState().Should().Be(InvoiceSubmissionRerun.StateDone);
+    }
+
     [Theory(DisplayName = "095d-2b-2 (K2): a link answered NotApplicable (re-closed by a person after this run's close) or ForeignLink (another record) is final - the run is done, but the result does not report a ConditionCleared close and the log says what happened")]
     [InlineData(SignalRecordLinkOutcome.NotApplicable)]
     [InlineData(SignalRecordLinkOutcome.ForeignLink)]
@@ -507,6 +535,9 @@ public sealed partial class InvoiceSubmissionRerunTests
         /// <summary>Runs just before a link is applied (another path acting between the close and the link).</summary>
         public Action<Guid>? BeforeLink { get; set; }
 
+        /// <summary>When set, the writer's link answers this and writes nothing (the writer's own refusals, such as ChangedSinceRead).</summary>
+        public SignalRecordLinkOutcome? LinkAnswer { get; set; }
+
         /// <summary>What a Signal step must never write: every attribute of the invoice (its firm hold, status, review detail) and of its lines,
         /// and the submission's reason code and processing status. Row versions are left out.</summary>
         public Dictionary<string, string> HoldSnapshot()
@@ -666,6 +697,10 @@ public sealed partial class InvoiceSubmissionRerunTests
             }
 
             BeforeLink?.Invoke(signalId);
+            if (LinkAnswer is { } answer)
+            {
+                return Task.FromResult(answer);
+            }
 
             var row = _rows[signalId];
             var linked = row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id;

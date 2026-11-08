@@ -538,7 +538,7 @@ public class SubmissionCommitGate
             return;
         }
 
-        if (await SupersededByAnotherAsync(oldId, ct).ConfigureAwait(false))
+        if (await SupersededByAnotherAsync(_entities, oldId, ct).ConfigureAwait(false))
         {
             _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is superseded by another invoice; not reopened", submissionId, oldId);
             return;
@@ -571,12 +571,21 @@ public class SubmissionCommitGate
             .ConfigureAwait(false);
     }
 
-    /// <summary>Task 097c: whether a live invoice other than this commit's (already deleted when this runs) still supersedes <paramref name="invoiceId"/>.</summary>
-    private async Task<bool> SupersededByAnotherAsync(Guid invoiceId, CancellationToken ct)
+    /// <summary>Task 097c: whether a live invoice other than this commit's (already deleted when this runs) still supersedes <paramref name="invoiceId"/>.
+    /// Task 095d-2b-3 (EB-D-206): also the re-run's narrowing (b) in <see cref="InvoiceSubmissionPersister.FindSupersededInvoiceAsync"/>, whose
+    /// invoice names no predecessor, so any row found is another invoice. One read, app-only; a fault propagates.
+    /// The re-run's commit re-check (EB-D-206, amended) passes <paramref name="except"/>, its own invoice, so only ANOTHER invoice counts;
+    /// with it null (both other callers) the query is unchanged.</summary>
+    internal static async Task<bool> SupersededByAnotherAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct, Guid? except = null)
     {
         var query = new QueryExpression(InvoiceReviewService.InvoiceEntity) { ColumnSet = new ColumnSet(false), TopCount = 1, NoLock = true };
         query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, ConditionOperator.Equal, invoiceId);
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        if (except is { } self)
+        {
+            query.Criteria.AddCondition(InvoiceReviewService.InvoiceEntity + "id", ConditionOperator.NotEqual, self);
+        }
+
+        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
     }
 
     /// <summary>Deletes a row by id. True when it was there; false when it was already gone. Any other fault propagates.</summary>
