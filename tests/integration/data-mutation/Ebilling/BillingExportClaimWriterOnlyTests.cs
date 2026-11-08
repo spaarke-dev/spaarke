@@ -133,7 +133,9 @@ public class BillingExportClaimWriterOnlyTests
             new UpdateRecordActionInput(Invoice, Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { [key] = Batch.ToString("D") }, Lookups: null),
             CancellationToken.None);
-        (await set.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(Code, key);
+        var setRefusal = (await set.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        setRefusal.RefusalCode.Should().Be(Code, key);
+        AssertNamesTheUpdate(setRefusal.Message, key);
 
         var cleared = () => Core().UpdateAsync(
             new UpdateRecordActionInput(Invoice, Row, FieldMappings: null,
@@ -159,7 +161,8 @@ public class BillingExportClaimWriterOnlyTests
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed, "a configuration the platform refuses, not a server fault");
-        result.ErrorMessage.Should().Contain(Claim).And.Contain(Code, "the exception adds the code to the reason");
+        result.ErrorMessage.Should().Contain(Claim);
+        AssertNamesTheUpdate(result.ErrorMessage!, "the node's message");
         _writes.Invocations.Should().BeEmpty();
     }
 
@@ -205,9 +208,21 @@ public class BillingExportClaimWriterOnlyTests
                 Invoice, Row, new Dictionary<string, object?> { [key] = value },
                 ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(Code, key);
+            var refusal = (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+            refusal.RefusalCode.Should().Be(Code, key);
+            AssertNamesTheUpdate(refusal.Message, key);
             _writes.Invocations.Should().BeEmpty(key);
         }
+    }
+
+    /// <summary>The update refusal speaks of the update, not of an owner: it never says "owner" (the shared constructor's
+    /// message is about a create's owner), names the claim, and carries the reason code exactly once.</summary>
+    private static void AssertNamesTheUpdate(string message, string because)
+    {
+        message.Should().StartWith("The update was NOT written: ", because);
+        message.Should().Contain(Claim, because);
+        message.ToLowerInvariant().Should().NotContain("owner", because);
+        message.Split(Code).Length.Should().Be(2, $"the code appears exactly once ({because})");
     }
 
     [Fact(DisplayName = "165d must-not-fire: a playbook's output mapping still writes an ordinary invoice column")]
