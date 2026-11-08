@@ -75,7 +75,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - **ebilling-r1** — EB-D-194: invoice decisions happen only in Invoice Review. v1 shows billing Work Items only as a link out to `sprk_invoicereviewpage` (`invoiceId`, optional `lineId`, bare lower-case guids). A Copilot billing slice needs an owner decision plus uac-r2 and ebilling review.
 - **spaarke-auth-system-of-record-r1** — its planned ADR-028 amendment must be A11 or higher (A10 is ours); tell at next contact.
 - **agent-framework-fit-assessment** — a proposed `Sprk.Insights.Mcp` becomes a new `/mcp/{area}` on this host, not a second server.
-- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `spaarke-wt-spaarke-legal-ai-accelerator-80`, `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
+- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
 - Run `/conflict-check` before each BFF PR (`AuthorizationModule.cs`, `Services/Signals/**` are shared).
 
 ## 5. Environment and live actions
