@@ -123,7 +123,8 @@ public sealed partial class InvoiceSubmissionRerun
             return SignalsRetry(submissionId, SignalsUnavailableCode, "read", ex);
         }
 
-        if (submission is null || submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
+        if (submission is null || submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } link
+            || !InvoiceBlockedHold.IsOwnSubmission(link, submissionId))
         {
             return SignalsRefuse(submissionId, InvoiceSubmissionRerunCodes.NotLinked);
         }
@@ -164,7 +165,7 @@ public sealed partial class InvoiceSubmissionRerun
         }
 
         var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(json);
-        if (stored is null || stored.InvoiceId != invoiceId || !stored.HasSignalPlan)
+        if (stored is null || !InvoiceBlockedHold.IsOwnSubmission(stored.InvoiceId, submissionId) || !stored.HasSignalPlan)
         {
             return SignalsRefuse(submissionId, InvoiceSubmissionRerunCodes.FindingsUnreadable);
         }

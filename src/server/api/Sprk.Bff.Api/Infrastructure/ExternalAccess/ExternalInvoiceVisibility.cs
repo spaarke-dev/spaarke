@@ -350,7 +350,7 @@ internal static class ExternalInvoiceVisibility
 
         // Task 165c: visibility counts only a submission's own invoice (the one own-submission rule,
         // InvoiceBlockedHold.IsOwnSubmission). A submission whose invoice link is not its own invoice is withheld and decides nothing.
-        // Each pair is logged once at Warning here; the invoice read below logs a pair already logged at Debug.
+        // Each pair is logged once at Warning here; the invoice read below logs a pair already logged at Debug, and one it meets alone at Information.
         var loggedNotOwn = new HashSet<(Guid Submission, Guid Invoice)>();
         foreach (var notOwn in page.Where(s => InvoiceOf(s) is { } linked && linked != ExternalDocumentNarrowing.UnreadableLink
                      && !Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(linked, s.SubmissionId)).ToList())
@@ -519,7 +519,7 @@ internal static class ExternalInvoiceVisibility
     /// failed read THROWS.
     /// Task 165c: only the invoice's own submission counts
     /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>); a row whose link is not its own
-    /// invoice adds nothing to that invoice (no source, no hide) and is logged: at Warning, or at Debug when the submission decision of
+    /// invoice adds nothing to that invoice (no source, no hide) and is logged: at Information (pass 2: the submission reader owns the Warning), or at Debug when the submission decision of
     /// the same call already logged that pair (<paramref name="loggedNotOwn"/>). A row whose own id cannot be read hides the invoice.
     /// </summary>
     private static async Task<HashSet<Guid>> ReadSubmissionSourcesAsync(
@@ -543,7 +543,7 @@ internal static class ExternalInvoiceVisibility
             if (!Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
             {
                 LogInvoiceLinkNotOwn(
-                    logger, loggedNotOwn.Contains((submissionId, invoiceId)) ? LogLevel.Debug : LogLevel.Warning, submissionId, invoiceId);
+                    logger, loggedNotOwn.Contains((submissionId, invoiceId)) ? LogLevel.Debug : LogLevel.Information, submissionId, invoiceId);
                 continue;
             }
 

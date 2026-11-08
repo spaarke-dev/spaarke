@@ -5,7 +5,8 @@ Task 165c (uac-r2 ruling 2026-11-06, class (c)). Rigor FULL. Branch `task/ebilli
 ## 1. What changed
 
 One rule, one place: `InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId)` (new, pure) — the submission's immutable id derives the
-invoice's (`InvoiceSubmissionPersister.InvoiceIdFor`). 165a's `OwnSubmissionOf` now calls it. Every own-submission selection uses it:
+invoice's (`InvoiceSubmissionPersister.InvoiceIdFor`). 165a's `OwnSubmissionOf` now calls it. Every site below uses it; that no other source
+spells the rule is enforced as far as section 7 says (a scan of the source, which does not follow a derived id into a parameter):
 
 | Site | Before | After |
 |---|---|---|
@@ -30,7 +31,7 @@ it. Justification for "nothing" rather than "no source only": the row is not the
 describes the invoice. Beyond the contract (one line): a row whose own id cannot be read hides the invoice (`source_link_unreadable`), since it
 cannot be shown to be the invoice's own (fail closed; Dataverse always returns the key).
 
-**Event.** Both readers log `ebilling.visibility.invoice_link_not_own` (Warning) with the submission id and the invoice id only
+**Event.** Both readers log `ebilling.visibility.invoice_link_not_own` (reader 1 at Warning; reader 2 at Debug for a pair reader 1 logged in the same call, at Information otherwise, since pass 2) with the submission id and the invoice id only
 (`ExternalInvoiceVisibility.InvoiceLinkNotOwnEvent`).
 
 **Escalation check (POML trigger).** No legitimate path writes a link that is not the submission's own invoice: the only server writer of
@@ -110,7 +111,7 @@ The delta includes all of `work/ebilling-r1` not yet on master; 165c adds no pac
 | F3-1: the empty-link shape of the reader 2 must-fire case was masked (the own row's `SpaUpload` also wrote an InvoicePdf, so the invoice stayed visible with the check dropped; only the log assertion failed) | `Reader2_ARowLinkedToAnInvoiceThatIsNotItsOwn_AddsNothingToIt` seeds the own row as Spa with no document and no Stored File, so the visibility assertion proves every shape. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` duplicated `Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden`; it is now `ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible` (the own row with a readable document, plus another row with an empty link and no Stored File: visible) | seed S2 below |
 | K-1: reader 2 logged a Warning per row on every read, and a second one when reader 1 had already withheld the row in the same call | `DecideSubmissionsAsync` records the pairs it logs and passes them to the invoice decision (a `DecideAsync` overload; the three-argument one passes none). Reader 2 logs a pair reader 1 already logged at Debug, any other at Warning. One Warning per (submission, invoice) pair per call; the event content is unchanged (`TheEvent_CarriesOnlyItsCodeAndTheIds`, unmodified) | `TheEvent_IsOneWarningPerPairPerCall` (new; fails with reader 2 always at Warning), `TheEvent_OnAnInvoiceDecisionAlone_IsAWarning` (new control) |
 | K-3: the link columns were editable on the submission form | `Deploy-EbillingFormsViews.ps1`: the `links` section lists `sprk_invoice`, `sprk_document` and `sprk_resubmissionof` as `ReadOnly`, like `sprk_vendororg`. No test pinned that section; the script was not run (an operator applies it) | ArchTest `InvoiceSubmissionFormLinksReadOnlyTests` (new: the pin, one must-not-fire and two must-fire parser controls; the pin fails on the previous script) |
-| K-4: six inline copies of the own-submission comparison | `SubmissionOverrideService.cs` (:621, :760, :1661), `InvoiceSubmissionService.cs:846`, `SubmissionEvaluationOutcome.cs:253` and `SubmitInvoiceFromEmailOperation.cs:404` call `InvoiceBlockedHold.IsOwnSubmission`. Behaviour is the same except that `Guid.Empty` on either side now gives false (stricter). Their tests pass unmodified | ArchTest `OwnSubmissionRuleSingleSourceTests` (new): outside `InvoiceBlockedHold.cs` and `InvoiceSubmissionPersister.cs`, no `src/server/**` source compares `InvoiceIdFor(...)` with `==` or `!=`; must-fire and must-not-fire controls; the baseline is empty. On the previous sources it reports exactly the six sites |
+| K-4: six inline copies of the own-submission comparison | `SubmissionOverrideService.cs` (:621, :760, :1661), `InvoiceSubmissionService.cs:846`, `SubmissionEvaluationOutcome.cs:253` and `SubmitInvoiceFromEmailOperation.cs:404` call `InvoiceBlockedHold.IsOwnSubmission`. Behaviour is the same except that `Guid.Empty` on either side now gives false (stricter). Their tests pass unmodified | ArchTest `OwnSubmissionRuleSingleSourceTests` (new): outside `InvoiceBlockedHold.cs` and `InvoiceSubmissionPersister.cs`, no `src/server/**` source uses a direct `InvoiceIdFor(...)` call as an operand of `==` or `!=`; must-fire and must-not-fire controls; the baseline is empty. On the previous sources it reports exactly the six sites. Pass 1 stated this as "no source compares the derived id"; it did not cover a comparison through a local or `Equals` (widened in section 7) |
 
 Seeds (each applied, the tests run, then the file restored byte-identical, checked by hash, and rebuilt):
 
@@ -122,5 +123,20 @@ Seeds (each applied, the tests run, then the file restored byte-identical, check
 | The forms script as before this round | `InvoiceSubmissionFormLinksReadOnlyTests` pin |
 
 Gates: filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission|InvoiceAssignFirm|SubmissionOverride|SubmitInvoiceFromEmail`) 11981 passed, 0 failed, 4 skipped (+2 new); ArchTests 2130 passed, 0 failed (+8 new); BFF build 0 warnings, 0 errors. No package, endpoint or registration added.
+
+## 7. Pass 2 follow-ups
+
+| Finding | Change | Test |
+|---|---|---|
+| K-1: the guard missed a comparison through a local (`var invoiceId = InvoiceIdFor(s); ... link != invoiceId`) or through `Equals`, so three live sites passed it | `InvoiceSubmissionRerun.Signals.cs` (:126 and the findings check at :168), `InvoiceSubmissionRerun.cs` (:330) and `InvoiceSubmissionAfterSteps.cs` (:331) call `InvoiceBlockedHold.IsOwnSubmission`. The locals stay (they are still passed on). Behaviour is the same except that `Guid.Empty` on either side now gives false, and the :331 check also requires the invoice to be the submission's own (on the first-run path it already was; on the resume path the invoice id is read from the link itself, so an unlinked-to-own submission is now refused there too). The :168 check (the stored findings name the invoice) was the one remaining true hit of the extended guard; it is the same rule spelled on the findings' invoice, so it moved too. Their tests pass unmodified | `OwnSubmissionRuleSingleSourceTests` extended |
+| The guard's claim (`InvoiceBlockedHold.IsOwnSubmission` remarks, section 1 and section 6) was wider than what it checked | The remarks and these sections now say what is enforced: a direct `InvoiceIdFor(...)` operand of `==`, `!=` or `Equals` (either side, either spelling), and a local assigned from `InvoiceIdFor(...)` that is an operand of the same within its block (not against `Guid.Empty`, `default` or `null`). Not enforced, stated in the test remarks: a derived id passed to a method that compares it, a comparison through a field or property or a second local, and a comparison on a parameter. The :331 site and the `InvoiceSubmissionRerun.cs` site compare a parameter, so reverting them is not caught | as above |
+| K-3: four `ExternalInvoiceVisibilityTests.RerunPending.cs` cases seeded `Guid.NewGuid()` invoices with `SpaUpload`, which is no submission's own invoice | Seeded with `_world.NewInvoice()` (a derived id), so the rows are the invoice's own. The assertions are unchanged and pass; none changed meaning (each is about the firm hold, which the own-submission rule does not touch) | the same four tests |
+| K-2: reader 2 logged a Warning for a row it met alone | Information (still the code and the two ids only). Reader 1 stays at Warning; a pair reader 1 already logged stays at Debug | `TheEvent_OnAnInvoiceDecisionAlone_IsInformation` (renamed from `_IsAWarning`; asserts Information 1, Warning 0, Debug 0) |
+
+Controls added: must fire - a local compared with `!=` and `==` (either side), `Equals` on a local (three spellings), `Equals` on the call itself (four spellings and a nested one);
+must not fire - a local only written, passed, interpolated, copied or compared with `Guid.Empty`/`default`/`null`; the same name as a parameter in another method of the same
+file or as a different local in another file; a name inside a string.
+
+Seed: the :126 comparison of `InvoiceSubmissionRerun.Signals.cs` put back as it was; `NoServerSource_ComparesADerivedInvoiceId_OutsideTheRule` failed naming `InvoiceSubmissionRerun.Signals.cs:126`; restored.
 
 rework: none task 165c

@@ -86,7 +86,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [MemberData(nameof(ExternalCallers))]
     public async Task TheInvoice_IsHidden_WhileItsMarkerIsPending_AndShowsAfterTheCommit(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
         _world.FirmHold(invoice, InvoiceFirmHold.InvoiceRerunPendingValue);
 
@@ -105,7 +105,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [InlineData("   ", true)]
     public async Task AnyNonBlankHold_HidesTheInvoice(string value, bool visible)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
         _world.FirmHold(invoice, value);
 
@@ -115,7 +115,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Fact(DisplayName = "095d-2b-1 fix round (uac-r2 C2): the assistant tools' taint closure hides the held invoice and its lines, and shows them after the commit")]
     public async Task TheTaintClosure_HidesTheHeldInvoiceAndItsLines()
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
         var line = _world.FamilyRow("sprk_billingevent", invoice: invoice);
         _world.FirmHold(invoice, InvoiceFirmHold.InvoiceRerunPendingValue);
@@ -134,7 +134,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Fact(DisplayName = "095d-2b-1 fix round (uac-r2 C2): the hold is read app-only, and a reader that cannot read it hides everything asked (fail closed)")]
     public async Task TheHold_IsReadAppOnly_AndAFaultHidesEverything()
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
         _world.FilingReadThrows = true;
 

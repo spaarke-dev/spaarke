@@ -200,8 +200,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _events.NotOwnAt(LogLevel.Debug).Should().ContainSingle().Which.Should().Be((other, linked));
     }
 
-    [Fact(DisplayName = "165c: an invoice decision on its own logs a row linked to an invoice that is not its own at Warning")]
-    public async Task TheEvent_OnAnInvoiceDecisionAlone_IsAWarning()
+    [Fact(DisplayName = "165c pass 2: an invoice decision on its own logs a row linked to an invoice that is not its own at Information (the submission reader owns the Warning)")]
+    public async Task TheEvent_OnAnInvoiceDecisionAlone_IsInformation()
     {
         var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
@@ -209,7 +209,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
 
         await DecideLogged("contact", invoice);
 
-        _events.NotOwnAt(LogLevel.Warning).Should().ContainSingle().Which.Should().Be((other, invoice));
+        _events.NotOwnAt(LogLevel.Information).Should().ContainSingle().Which.Should().Be((other, invoice));
+        _events.NotOwnAt(LogLevel.Warning).Should().BeEmpty();
         _events.NotOwnAt(LogLevel.Debug).Should().BeEmpty();
     }
 

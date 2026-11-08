@@ -12,9 +12,17 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// Enforced by: this source scan (CI and the Stop hook). The rule is a comparison any file can spell, so no type can stop a copy; a scan
 /// of <c>src/server/**</c> is the strongest mechanism that works. Outside the rule's file (<c>InvoiceBlockedHold.cs</c>) and the file that
-/// defines <c>InvoiceIdFor</c> and uses it to write the link (<c>InvoiceSubmissionPersister.cs</c>), no source compares <c>InvoiceIdFor(...)</c>
-/// with <c>==</c> or <c>!=</c>. Deriving an id (an assignment, an argument) is not a comparison. The baseline is empty. Controls:
-/// <see cref="TheDetector_FiresOnAComparison"/> and <see cref="TheDetector_StaysQuietOnADerivation"/>.
+/// defines <c>InvoiceIdFor</c> and uses it to write the link (<c>InvoiceSubmissionPersister.cs</c>), no source
+/// <list type="bullet">
+/// <item>uses an <c>InvoiceIdFor(...)</c> call as an operand of <c>==</c>, <c>!=</c> or <c>Equals</c> (either side, either spelling:
+/// <c>a == InvoiceIdFor(x)</c>, <c>InvoiceIdFor(x).Equals(a)</c>, <c>a.Equals(InvoiceIdFor(x))</c>, <c>Equals(a, InvoiceIdFor(x))</c>), or</item>
+/// <item>compares a local assigned from one (<c>var invoiceId = InvoiceIdFor(s);</c> ... <c>link != invoiceId</c>, <c>link.Equals(invoiceId)</c>)
+/// within that local's block, other than against <c>Guid.Empty</c>, <c>default</c> or <c>null</c>.</item>
+/// </list>
+/// Deriving an id (an assignment, an argument, a write target) is not a comparison. Not caught, by design of a scan: a derived id passed
+/// to another method that compares it, a comparison through a field or property, and a comparison through a second local copied from the
+/// first. The baseline is empty. Controls: <see cref="TheDetector_FiresOnAComparison"/>, <see cref="TheDetector_FiresOnALocalAndEquals"/>,
+/// <see cref="TheDetector_StaysQuietOnADerivation"/> and <see cref="TheDetector_StaysQuietOnALocalThatIsNotCompared"/>.
 /// </remarks>
 public class OwnSubmissionRuleSingleSourceTests
 {
@@ -26,19 +34,50 @@ public class OwnSubmissionRuleSingleSourceTests
 
     private static readonly Regex Call = new(@"\bInvoiceIdFor\s*\(", RegexOptions.Compiled);
 
-    /// <summary>The 1-based lines of <paramref name="code"/> where an <c>InvoiceIdFor(...)</c> call is an operand of <c>==</c> or <c>!=</c>.
-    /// Line comments are ignored.</summary>
+    // `x = InvoiceIdFor(` / `var x = Qualifier.InvoiceIdFor(` / `Guid x = ...`: the identifier a derived id is held in.
+    private static readonly Regex Assigned =
+        new(@"\b(?<name>[A-Za-z_]\w*)\s*=\s*[\w.]*\bInvoiceIdFor\s*\(", RegexOptions.Compiled);
+
+    // String and character literals, blanked before scanning so a brace or a name inside one cannot move the block depth or match.
+    private static readonly Regex Literal = new("\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)+'", RegexOptions.Compiled);
+
+    // A comparison with an empty value is a guard, not the own-submission rule.
+    private static readonly Regex EmptyAfter = new(@"^\s*(?:Guid\.Empty|default|null)\b", RegexOptions.Compiled);
+    private static readonly Regex EmptyBefore = new(@"\b(?:Guid\.Empty|default|null)\s*$", RegexOptions.Compiled);
+    private static readonly Regex EqualsCallAfter = new(@"^\s*\??\.\s*Equals\s*\(", RegexOptions.Compiled);
+    private static readonly Regex EqualsNameBefore = new(@"\bEquals\s*$", RegexOptions.Compiled);
+
+    /// <summary>The 1-based lines of <paramref name="code"/> where the own-submission rule is spelled outside the shared method: an
+    /// <c>InvoiceIdFor(...)</c> call as an operand of <c>==</c>, <c>!=</c> or <c>Equals</c>, or a local assigned from one and, within its
+    /// block, an operand of the same (other than against <c>Guid.Empty</c>, <c>default</c> or <c>null</c>). Line comments and literals are
+    /// ignored. A local that is only written, passed on or returned is not a comparison.</summary>
     internal static IReadOnlyList<int> ComparisonLines(string code)
     {
         var text = SourceScan.CodeText(code.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'));
-        var found = new List<int>();
+        text = Literal.Replace(text, m => Regex.Replace(m.Value, @"[^\n]", " "));
+        var found = new SortedSet<int>();
         foreach (Match match in Call.Matches(text))
         {
-            if (IsComparedBefore(text, match.Index) || IsComparedAfter(text, match.Index + match.Length - 1))
+            var open = match.Index + match.Length - 1;
+            if (IsComparedBefore(text, match.Index) || IsComparedAfter(text, open) || IsEqualsArgument(text, match.Index)
+                || IsEqualsReceiver(text, open))
                 found.Add(SourceScan.LineOf(text, match.Index));
         }
 
-        return found;
+        foreach (Match assigned in Assigned.Matches(text))
+        {
+            var name = assigned.Groups["name"].Value;
+            var scopeStart = assigned.Index + assigned.Length;
+            var scopeEnd = EndOfBlock(text, assigned.Index);
+            var use = new Regex(@"(?<![\w.])" + Regex.Escape(name) + @"\b");
+            for (var m = use.Match(text, scopeStart); m.Success && m.Index < scopeEnd; m = m.NextMatch())
+            {
+                if (IsLocalCompared(text, m.Index, m.Index + m.Length))
+                    found.Add(SourceScan.LineOf(text, m.Index));
+            }
+        }
+
+        return found.ToList();
     }
 
     // Left operand: skip the qualifier (InvoiceSubmissionPersister., Sprk.Bff.Api.…) and whitespace, then look for the operator.
@@ -55,25 +94,98 @@ public class OwnSubmissionRuleSingleSourceTests
     // Right operand: find the call's closing parenthesis, then look for the operator after it.
     private static bool IsComparedAfter(string text, int openParen)
     {
+        var close = CloseOf(text, openParen);
+        if (close < 0)
+            return false;
+        var rest = text[(close + 1)..].TrimStart();
+        return rest.StartsWith("==", StringComparison.Ordinal) || rest.StartsWith("!=", StringComparison.Ordinal);
+    }
+
+    // `Equals(InvoiceIdFor(a), x)`, `Equals(x, InvoiceIdFor(a))`, `x.Equals(InvoiceIdFor(a))`: the call is a direct argument of Equals.
+    private static bool IsEqualsArgument(string text, int start)
+    {
+        var open = EnclosingOpenParen(text, start);
+        return open >= 0 && EqualsNameBefore.IsMatch(text[..open]);
+    }
+
+    // `InvoiceIdFor(a).Equals(x)`
+    private static bool IsEqualsReceiver(string text, int openParen)
+    {
+        var close = CloseOf(text, openParen);
+        return close >= 0 && EqualsCallAfter.IsMatch(text[(close + 1)..]);
+    }
+
+    // A local holding a derived id, as an operand: `x == a`, `a != x`, `a.Equals(x)`, `x.Equals(a)`, `Equals(a, x)`.
+    private static bool IsLocalCompared(string text, int start, int end)
+    {
+        var before = text[..start].TrimEnd();
+        var after = text[end..].TrimStart();
+        if ((before.EndsWith("==", StringComparison.Ordinal) || before.EndsWith("!=", StringComparison.Ordinal))
+            && !EmptyBefore.IsMatch(before[..^2].TrimEnd()))
+            return true;
+        if ((after.StartsWith("==", StringComparison.Ordinal) || after.StartsWith("!=", StringComparison.Ordinal))
+            && !EmptyAfter.IsMatch(after[2..]))
+            return true;
+        if (EqualsCallAfter.IsMatch(after))
+            return true;
+        var open = EnclosingOpenParen(text, start);
+        return open >= 0 && EqualsNameBefore.IsMatch(text[..open]);
+    }
+
+    // The `(` that directly encloses <paramref name="index"/> (not a group already closed before it), or -1.
+    private static int EnclosingOpenParen(string text, int index)
+    {
+        var depth = 0;
+        for (var i = index - 1; i >= 0; i--)
+        {
+            if (text[i] == ')')
+                depth++;
+            else if (text[i] == '(')
+            {
+                if (depth == 0)
+                    return i;
+                depth--;
+            }
+            else if (depth == 0 && text[i] is ';' or '{' or '}')
+                return -1;
+        }
+
+        return -1;
+    }
+
+    private static int CloseOf(string text, int openParen)
+    {
         var depth = 0;
         for (var i = openParen; i < text.Length; i++)
         {
             if (text[i] == '(')
                 depth++;
             else if (text[i] == ')' && --depth == 0)
-            {
-                var rest = text[(i + 1)..].TrimStart();
-                return rest.StartsWith("==", StringComparison.Ordinal) || rest.StartsWith("!=", StringComparison.Ordinal);
-            }
+                return i;
         }
 
-        return false;
+        return -1;
+    }
+
+    // The index where the block holding <paramref name="index"/> closes (the end of the text for a top-level statement).
+    private static int EndOfBlock(string text, int index)
+    {
+        var depth = 0;
+        for (var i = index; i < text.Length; i++)
+        {
+            if (text[i] == '{')
+                depth++;
+            else if (text[i] == '}' && --depth < 0)
+                return i;
+        }
+
+        return text.Length;
     }
 
     private static string RelativeToBff(string file) =>
         Path.GetRelativePath(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api"), file).Replace('\\', '/');
 
-    [Fact(DisplayName = "165c: no server source outside InvoiceBlockedHold and InvoiceSubmissionPersister compares InvoiceIdFor(...) with == or != (use InvoiceBlockedHold.IsOwnSubmission)")]
+    [Fact(DisplayName = "165c: no server source outside InvoiceBlockedHold and InvoiceSubmissionPersister compares InvoiceIdFor(...), or a local assigned from it, with ==, != or Equals (use InvoiceBlockedHold.IsOwnSubmission)")]
     public void NoServerSource_ComparesADerivedInvoiceId_OutsideTheRule()
     {
         var copies = SourceScan.ServerSourceFiles()
@@ -82,7 +194,7 @@ public class OwnSubmissionRuleSingleSourceTests
             .ToList();
 
         Assert.True(copies.Count == 0,
-            "compares InvoiceIdFor(...) itself (a second copy of the own-submission rule); call InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId): "
+            "compares InvoiceIdFor(...) or a local holding it (a second copy of the own-submission rule); call InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId): "
             + string.Join(", ", copies));
     }
 
@@ -107,6 +219,49 @@ public class OwnSubmissionRuleSingleSourceTests
         Assert.Equal(new[] { 1, 2, 3, 4 }, ComparisonLines(code));
     }
 
+    [Fact(DisplayName = "165c pass 2 control (must fire): a local assigned from InvoiceIdFor and compared (== / != / Equals), and Equals on the call itself, both forms")]
+    public void TheDetector_FiresOnALocalAndEquals()
+    {
+        const string local = """
+            void A(Entity submission, Guid submissionId)
+            {
+                var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+                Use(invoiceId);
+                if (submission.GetAttributeValue<EntityReference>("sprk_invoice")?.Id != invoiceId) return;
+            }
+            """;
+        Assert.Equal(new[] { 5 }, ComparisonLines(local));
+
+        const string reversed = """
+            void A(Guid link, Guid submissionId)
+            {
+                Guid expected = InvoiceIdFor(submissionId);
+                var own = expected == link;
+            }
+            """;
+        Assert.Equal(new[] { 4 }, ComparisonLines(reversed));
+
+        const string equalsOnLocal = """
+            void A(Guid link, Guid submissionId)
+            {
+                var invoiceId = InvoiceIdFor(submissionId);
+                var a = link.Equals(invoiceId);
+                var b = invoiceId.Equals(link);
+                var c = Guid.Equals(link, invoiceId);
+            }
+            """;
+        Assert.Equal(new[] { 4, 5, 6 }, ComparisonLines(equalsOnLocal));
+
+        const string equalsOnCall = """
+            var a = Equals(InvoiceIdFor(s), link);
+            var b = link.Equals(InvoiceSubmissionPersister.InvoiceIdFor(s));
+            var c = Guid.Equals(link, InvoiceIdFor(s));
+            var d = InvoiceIdFor(s).Equals(link);
+            var e = Foo(Equals(Bar(), InvoiceIdFor(s)));
+            """;
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, ComparisonLines(equalsOnCall));
+    }
+
     [Fact(DisplayName = "165c control (must not fire): deriving an id, passing it on, the shared rule, and a comment")]
     public void TheDetector_StaysQuietOnADerivation()
     {
@@ -117,8 +272,54 @@ public class OwnSubmissionRuleSingleSourceTests
             var own = InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId);
             var later = invoiceId >= InvoiceIdFor(x) ? 1 : 0;
             // a note: InvoiceIdFor(s.Id) == invoiceId
+            var text = Describe(Equals(Pick(), 1), InvoiceIdFor(s));
             """;
 
         Assert.Empty(ComparisonLines(code));
+    }
+
+    [Fact(DisplayName = "165c pass 2 control (must not fire): a local from InvoiceIdFor that is only written, passed or guarded; a same-named local elsewhere")]
+    public void TheDetector_StaysQuietOnALocalThatIsNotCompared()
+    {
+        const string writeOnly = """
+            void A(Entity invoice, Guid submissionId)
+            {
+                var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+                invoice.Id = invoiceId;
+                invoice["sprk_invoice"] = new EntityReference("sprk_invoice", invoiceId);
+                Store(invoiceId, $"invoice {invoiceId} of {submissionId}");
+                if (invoiceId == Guid.Empty || Guid.Empty != invoiceId || invoiceId == default || null == invoiceId) return;
+                var same = invoiceId; // a plain copy
+            }
+            """;
+        Assert.Empty(ComparisonLines(writeOnly));
+
+        // The same name in another method of the same file: a parameter, not the derived local.
+        const string otherMethod = """
+            void A(Guid submissionId)
+            {
+                var invoiceId = InvoiceIdFor(submissionId);
+                Use(invoiceId);
+            }
+
+            bool B(Guid invoiceId, Guid link)
+            {
+                return link != invoiceId;
+            }
+            """;
+        Assert.Empty(ComparisonLines(otherMethod));
+
+        // The same name in another file: a file is scanned on its own.
+        Assert.Empty(ComparisonLines("void A(Guid submissionId) { Use(InvoiceIdFor(submissionId)); }"));
+        Assert.Empty(ComparisonLines("void B(Guid link) { var invoiceId = Guid.NewGuid(); if (link != invoiceId) return; }"));
+
+        // A name used only inside a string is not a use.
+        Assert.Empty(ComparisonLines("""
+            void A(Guid submissionId)
+            {
+                var invoiceId = InvoiceIdFor(submissionId);
+                Log("invoiceId == x and Equals(InvoiceIdFor(a), b)");
+            }
+            """));
     }
 }

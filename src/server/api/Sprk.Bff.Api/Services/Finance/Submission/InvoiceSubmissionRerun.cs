@@ -327,7 +327,8 @@ public sealed partial class InvoiceSubmissionRerun
 
         // ── The gate: the stored decision, the firm and the marker. Each refusal writes nothing. ──
         if (state.Submission is not { } submission
-            || submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
+            || submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } link
+            || !InvoiceBlockedHold.IsOwnSubmission(link, submissionId))
         {
             return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.NotLinked));
         }
