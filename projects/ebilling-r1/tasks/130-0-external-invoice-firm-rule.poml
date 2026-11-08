@@ -32,7 +32,7 @@
   <constraints>
     <constraint source="uac-r2 2026-11-08 (option 1)">Edit points outside tests are exactly: the ExternalInvoiceHiding binding in Infrastructure/DI/ExternalAccessModule.cs (a caller-firm reader), ExternalDataService.HideInvoicesForAsync / InvoiceVisibilityReadersOver (firms resolved once per call), ExternalInvoiceVisibility.cs (the new reason, with the invoice firm read in the existing app-only batch), and one reviewed-reader entry in InvoiceFirmHoldAppOnlyGuardTests. Internal callers hide nothing and trigger no firm read. The assistant tools' seam is task 130-0b.</constraint>
     <constraint source="uac-r2 2026-11-08">Fail closed: a fault reading the caller's firms, or unknown firms, hides every invoice for that caller.</constraint>
-    <constraint source="owner ruling 2026-11-08 (relayed by uac-r2)">A caller known to have no firm (the firm read succeeded, empty) keeps access to the invoices on records it can access, under every existing hide reason; the firm rule applies only to firm members. A fault, unreadable or null firm read hides every invoice. "No firm" and "unknown" are distinct states in code and tests.</constraint>
+    <constraint source="owner ruling 2026-11-08 (final; relayed by uac-r2)">Firm-match policy: a partner contact sees only invoices of its own firms, on records it can access. A caller known to have no firm (the firm read succeeded, empty) sees no invoices. A fault, unreadable or null firm read hides every invoice. "No firm" and "unknown" are distinct states in code and tests (both hide, with different reasons).</constraint>
     <constraint source="existing rule">An invoice with no firm stays withheld.</constraint>
     <constraint source="public repository">Code, comments, notes, commits and test names describe the rule, never an exposure; no identity or role names.</constraint>
   </constraints>
@@ -48,7 +48,7 @@
     <criterion testable="true">On each of the module list, /record read, project-data child reads, messages and notification feed, an invoice of a firm the caller does not belong to is hidden, with its lines and linked documents.</criterion>
     <criterion testable="true">The caller's own firm's invoice stays visible (list path and one other path).</criterion>
     <criterion testable="true">A multi-firm caller sees invoices of each of its firms and not of a third firm.</criterion>
-    <criterion testable="true">A fault reading the caller's firms hides all invoices; a caller known to have no firm sees the invoices on its accessible records (subject to existing hide reasons); an invoice with no firm stays withheld.</criterion>
+    <criterion testable="true">A fault reading the caller's firms hides all invoices; a caller known to have no firm sees none; an invoice with no firm stays withheld.</criterion>
     <criterion testable="true">One seeding proof: removing the new hide reason makes the named must-fire tests fail.</criterion>
     <criterion testable="true">Two adversarial verifier passes (tenant isolation) and uac-r2's review of the diff before merge.</criterion>
   </acceptance-criteria>
