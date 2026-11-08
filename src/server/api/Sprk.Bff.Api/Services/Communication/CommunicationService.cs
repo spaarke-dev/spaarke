@@ -3069,8 +3069,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Graph's path-keyed simple PUT, which accepts NO @microsoft.graph.conflictBehavior and is a
         // silent, unconditional REPLACE. Flattening to a bare {fileName} would therefore have been silent
         // DATA LOSS. Folding the id into the filename keeps the write flat AND keeps it unique — the same
-        // filename-carries-the-uniqueness approach EmailAttachmentProcessor.GenerateUniqueFileName already
-        // uses (Services/Email/EmailAttachmentProcessor.cs).
+        // filename-carries-the-uniqueness approach IncomingCommunicationProcessor's attachment upload uses
+        // (`$"{communicationId:N}_{SpeUploadPath.SanitizeFileName(fileName)}"`).
         //
         // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),

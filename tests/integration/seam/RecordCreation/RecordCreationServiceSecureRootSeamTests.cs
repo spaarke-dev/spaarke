@@ -354,8 +354,9 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         outcome.IsolatedCompletion!.IsComplete.Should().BeTrue();
         _creatorShareAtAssignedAccess.Should().Be(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CreatorAccessRights),
             "the pass is decided after the securing completed");
-        _queued.Should().BeEmpty("the maker is the assignee");
-        _inlinePasses.Should().Be(1, "the pass ran in the request");
+        _inlinePasses.Should().Be(1, "the maker's own subject is granted in the request");
+        _queued.Should().ContainSingle("task 049b: the full pass for the other subjects is queued after it")
+            .Which.IdempotencyKey.Should().Be($"assigned-access-create:{outcome.CreatedId:N}");
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────

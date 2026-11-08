@@ -6,8 +6,8 @@
 //
 // REFINED 2026-09-25, same owner, after they asked whether a BFF-created record even HAS an accurate
 // "user BU": the source is the TARGET record's business unit first, the acting user's only as a fallback.
-// Two reasons, both verified — some BFF creates have no acting user at all (EmailAttachmentProcessor,
-// inbound email), and where there is one their BU is often the wrong scope (a root-BU user filing to a
+// Two reasons, both verified — some BFF creates have no acting user at all (inbound email and its
+// attachments), and where there is one their BU is often the wrong scope (a root-BU user filing to a
 // child-BU matter would put the document where the matter's own team cannot see it). This matches
 // RecordContainerResolver's already-sanctioned order for SPE containers. Nothing about the team-ownership
 // convention changed; only where the business unit is read from.
@@ -219,7 +219,7 @@ public enum UnfiledOwnership
 /// often than it is the right one:
 /// </para>
 /// <list type="number">
-/// <item><b>Some creates have no acting user at all.</b> <c>EmailAttachmentProcessor</c> creates documents from
+/// <item><b>Some creates have no acting user at all.</b> <c>IncomingCommunicationProcessor</c> creates documents from
 /// inbound email — no human initiated it, so "the acting user's BU" is undefined. Creator-first would have to
 /// refuse and would break inbound attachment processing outright.</item>
 /// <item><b>Even with an acting user, their BU is often the wrong scope.</b> A root-BU paralegal filing a
@@ -505,7 +505,7 @@ public sealed record RecordOwnershipContext
     /// <list type="bullet">
     /// <item><c>sprk_todo</c> (fix round F1-a): the subject first, then the document carrier, then the email carrier, then the
     /// lineage order — the Office writer's "the record regarding first, then the document or email"
-    /// (<c>OfficeService.ResolveTodoOwnerTeamAsync</c>), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
+    /// (<c>OfficeService.CreateTodoAsync</c>, through the unified create since field mapping task 030a), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
     /// which name the regarding as the primary.</item>
     /// <item><c>sprk_signal</c> / <c>sprk_decisionrecord</c>: the typed core lookups first, then the subject, then the lineage
     /// order (<c>SignalWriter.OwnershipContextOf</c>: core, subject, stamps).</item>
