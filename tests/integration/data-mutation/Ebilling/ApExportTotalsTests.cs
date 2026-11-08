@@ -19,6 +19,9 @@ public sealed class ApExportTotalsTests
 {
     private const int Fee = 100000000;
 
+    private const string RecheckDetail =
+        "The stored totals of an invoice changed or no longer match its lines. Repeat the last line or adjustment decision on it, then export again. Nothing was exported.";
+
     private static async Task<IReadOnlyList<Guid>> CandidateIds(ApExportWorld world) =>
         (await world.Service.ListCandidatesAsync(world.Caller, CancellationToken.None))!.Candidates.Select(c => c.InvoiceId).ToList();
 
@@ -110,6 +113,7 @@ public sealed class ApExportTotalsTests
 
         result.Outcome.Should().Be(ApExportOutcome.Conflict, result.Detail);
         result.Code.Should().Be(ApExportCodes.TotalsMismatch);
+        result.Detail.Should().Be(RecheckDetail);
         world.Lifecycle.Sent.Should().BeEmpty();
         world.StoredFiles().Should().BeEmpty();
         world.InvoicesClaimedByANonCompletedBatch().Should().BeEmpty("the claim is released");
@@ -156,6 +160,7 @@ public sealed class ApExportTotalsTests
 
         result.Outcome.Should().Be(ApExportOutcome.Conflict, result.Detail);
         result.Code.Should().Be(ApExportCodes.TotalsMismatch);
+        result.Detail.Should().Be(RecheckDetail);
         world.Invoice(invoice.Id).GetAttributeValue<Money>("sprk_feestotal").Value.Should().NotBe(feesBefore, "the totals did change after the claim");
         world.Lifecycle.Sent.Should().BeEmpty();
         world.StoredFiles().Should().BeEmpty();

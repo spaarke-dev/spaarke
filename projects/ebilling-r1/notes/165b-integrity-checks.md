@@ -609,8 +609,9 @@ the calculator are both 2 decimals), and no live invoice would be refused.
 - **F4-1: the refusal names the real remedy.** Approval's `ebilling.approve.totals_mismatch` now says "The stored totals do not match the invoice lines.
   Repeat the last line or adjustment decision, then approve again."; AP export's per-invoice selection refusal says to repeat the last line or
   adjustment decision on the invoice and select it again. The earlier "an administrator must review" pointed at a tool that does not exist. The
-  known limit above was corrected: any fault in the recalculation after a committed change is the trigger. (The step-7 re-check's 409 text, "An
-  administrator must review it", is unchanged: outside this round's list; for the lead.)
+  known limit above was corrected: any fault in the recalculation after a committed change is the trigger. The step-7 re-check's 409 text was changed
+  too (lead): "The stored totals of an invoice changed or no longer match its lines. Repeat the last line or adjustment decision on it, then export
+  again. Nothing was exported." Both re-check tests now assert it.
 - **F4-2: the export fixture has distinct adjustment totals.** In the FR-41 test, invoice A is billed 1000 with a Fee line of 1000 reduced to 940 (line
   adjustments 60) and a Fixed invoice adjustment of 40 (invoice adjustments 40), approved 900; the stored totals are those the calculator derives from
   the lines. The CSV row is `1000.00,60.00,40.00,900.00` again (the JSON fee line's billed is 1000). Seed: with the line-adjustment and invoice-adjustment

@@ -540,7 +540,7 @@ public sealed class ApExportService
             if (changed.Count > 0 || freshRows.Any(r => !stillMatching.Contains(r.Id)))
             {
                 throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.TotalsMismatch,
-                    "An invoice in the selection has stored totals that no longer match its lines. Nothing was exported. An administrator must review it.");
+                    "The stored totals of an invoice changed or no longer match its lines. Repeat the last line or adjustment decision on it, then export again. Nothing was exported.");
             }
 
             // (8) The values, read once; the files, written once.
