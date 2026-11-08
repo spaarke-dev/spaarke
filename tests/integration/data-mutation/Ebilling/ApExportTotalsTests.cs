@@ -77,7 +77,7 @@ public sealed class ApExportTotalsTests
         refused.Outcome.Should().Be(ApExportOutcome.SelectionRefused, refused.Detail);
         refused.Code.Should().Be(ApExportCodes.SelectionRefused);
         refused.Invoices.Should().ContainSingle().Which.Should().Be(new ApExportInvoiceRefusal(bad.Id, ApExportCodes.ReasonTotalsMismatch));
-        refused.Detail.Should().Be("An invoice in the selection has stored totals that do not match its lines: an administrator must review it. Nothing was exported.");
+        refused.Detail.Should().Be("An invoice in the selection has stored totals that do not match its lines. Repeat the last line or adjustment decision on it, then select the invoice again. Nothing was exported.");
         world.Dataverse.Writes.Should().Be(writes, "nothing is created, claimed or sent");
         world.Batches().Should().BeEmpty();
         world.Lifecycle.Sent.Should().BeEmpty();
@@ -114,6 +114,67 @@ public sealed class ApExportTotalsTests
         world.StoredFiles().Should().BeEmpty();
         world.InvoicesClaimedByANonCompletedBatch().Should().BeEmpty("the claim is released");
         world.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    /// <summary>
+    /// After the claim, before the re-check's first invoice read, runs <paramref name="change"/> once: a rival that rewrites the invoice's lines and
+    /// stores the totals that match them (so the re-check's lines-versus-totals comparison on the fresh row passes). Not before the claim: a write to the
+    /// invoice row there would move its version and fail the claim itself.
+    /// </summary>
+    private static void ChangeAfterTheClaim(ApExportWorld world, Action change)
+    {
+        var claimed = false;
+        var changed = false;
+        world.Dataverse.BeforeConditionalUpdate = (table, _) => claimed |= table == "sprk_invoice";
+        world.Dataverse.FaultOn = (op, table, _) =>
+        {
+            if (claimed && !changed && op == "retrieve" && table == "sprk_invoice")
+            {
+                changed = true;
+                change();
+            }
+
+            return null;
+        };
+    }
+
+    [Fact(DisplayName = "165b-2 fix round 1 K2 must fire: stored totals and lines changed together after the claim (so they still match each other) are refused by the re-check (409 totals_mismatch): nothing exported, claims released")]
+    public async Task K2_TotalsAndLinesChangedTogetherAfterTheClaim_StopTheBatch()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-K2");
+        var line = world.Dataverse.RowsOf("sprk_billingevent").First(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id);
+        world.GrantEverything();
+        var feesBefore = world.Invoice(invoice.Id).GetAttributeValue<Money>("sprk_feestotal").Value;
+        ChangeAfterTheClaim(world, () =>
+        {
+            world.Dataverse.Touch("sprk_billingevent", line.Id, new Dictionary<string, object> { ["sprk_amount"] = new Money(line.GetAttributeValue<Money>("sprk_amount").Value + 10m) });
+            world.StoreTotalsFromLines(invoice.Id);
+        });
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(ApExportCodes.TotalsMismatch);
+        world.Invoice(invoice.Id).GetAttributeValue<Money>("sprk_feestotal").Value.Should().NotBe(feesBefore, "the totals did change after the claim");
+        world.Lifecycle.Sent.Should().BeEmpty();
+        world.StoredFiles().Should().BeEmpty();
+        world.InvoicesClaimedByANonCompletedBatch().Should().BeEmpty("the claim is released");
+        world.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "165b-2 fix round 1 K2 control: the same after-claim write that changes no stored total (the totals stored again from unchanged lines) does not stop the batch")]
+    public async Task K2_Control_TotalsRewrittenUnchangedAfterTheClaim_Export()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-K2C");
+        world.GrantEverything();
+        ChangeAfterTheClaim(world, () => world.StoreTotalsFromLines(invoice.Id));
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created, result.Detail);
+        world.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.SentToAp);
     }
 
     [Fact(DisplayName = "165b-2 T2 control: invoices whose stored totals match their lines (with a Reduced line and an adjustment) are candidates and export; one batched line read per check")]

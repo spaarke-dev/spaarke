@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 public sealed class InvoiceApprovalTotalsTests
 {
     private const string Refusal =
-        "This invoice's stored totals do not match its lines, so it cannot be approved. Nothing was changed. An administrator must review the invoice.";
+        "The stored totals do not match the invoice lines. Repeat the last line or adjustment decision, then approve again.";
 
     /// <summary>An invoice with a decided line, a Reduced line, a Clean line (approve accepts it in bulk, a write) and a 10% adjustment line, its stored
     /// totals derived from those lines.</summary>

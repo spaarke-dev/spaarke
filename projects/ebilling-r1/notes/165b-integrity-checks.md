@@ -588,17 +588,35 @@ the calculator are both 2 decimals), and no live invoice would be refused.
 
 - K: the window after the step-7 re-check. A line changed out of band between the re-check and the file read (step 8) is not seen; the file reads
   the lines once. The same window exists for every step-7 check.
-- K: an interrupted recalculation (the Adjustment line amounts written, the invoice totals write failed three times) leaves stored totals that
-  differ until the next line change recalculates. Approval refuses meanwhile (fail closed); repeating the line or adjustment action that failed
-  recalculates.
+- K: an interrupted recalculation leaves stored totals that differ from the lines until the next line change recalculates. The trigger is any fault
+  in the recalculation that follows a committed line decision, add-line or adjustment change (the totals read, the Adjustment line amounts write, or
+  the invoice totals write, including its three failed attempts), not only a failed totals write: that call returns Incomplete at "totals".
+  Approval and AP export refuse meanwhile (fail closed). There is no administrator recalculate tool; the remedy is to repeat the last line or
+  adjustment action, which recalculates (the refusal text says so, fix round 1).
 - K: the approval state's `canApprove` does not reflect the totals check (as for the currency check, section 6.3); approve answers 409.
 - K: the clients show `totals_mismatch` (approval and AP export) through their generic fallback, as for `approval_not_recorded`.
 - K: at completion, lines the calculator refuses are now logged with the reason `LineDecisionCodes.TotalsRefused` (the shared check's code), not the
   calculator's own code as in section 6; still 409 `completion_refused`, nothing written.
-- K: Mark Paid does not run the totals check (the POML scopes approval and AP export). A Sent to AP invoice already passed it at export.
-- K: an Adjustment line's own stored `sprk_amount` is not compared. It is a line column; the totals derive from the line's method and value, and the
+- K: Mark Paid does not run the totals check (the POML scopes approval and AP export). A Sent to AP invoice already passed it at export.- K: an Adjustment line's own stored `sprk_amount` is not compared. It is a line column; the totals derive from the line's method and value, and the
   invoice adjustments total, which is compared, shows a changed value.
 - Interpretation for the lead: the POML says an invoice that fails AP export "is left out of the batch, not the whole batch failed"; the brief says
   "the same way" as 165b-3. This follows 165b-3: left out of the candidates, refused per invoice in an explicit request (option 1: no silent partial
   export), and a whole-batch 409 at the step-7 re-check (a change during the export). If the lead wants an explicit request to export the rest
   without the refused invoice, that changes the request-level rule for every reason.
+
+### 7.1 Fix round 1 (165b-2, adversarial pass)
+
+- **F4-1: the refusal names the real remedy.** Approval's `ebilling.approve.totals_mismatch` now says "The stored totals do not match the invoice lines.
+  Repeat the last line or adjustment decision, then approve again."; AP export's per-invoice selection refusal says to repeat the last line or
+  adjustment decision on the invoice and select it again. The earlier "an administrator must review" pointed at a tool that does not exist. The
+  known limit above was corrected: any fault in the recalculation after a committed change is the trigger. (The step-7 re-check's 409 text, "An
+  administrator must review it", is unchanged: outside this round's list; for the lead.)
+- **F4-2: the export fixture has distinct adjustment totals.** In the FR-41 test, invoice A is billed 1000 with a Fee line of 1000 reduced to 940 (line
+  adjustments 60) and a Fixed invoice adjustment of 40 (invoice adjustments 40), approved 900; the stored totals are those the calculator derives from
+  the lines. The CSV row is `1000.00,60.00,40.00,900.00` again (the JSON fee line's billed is 1000). Seed: with the line-adjustment and invoice-adjustment
+  columns swapped in the export mapping the test fails; restored, it passes (the 165b-2 earlier fixture, 0.00 / 0.00, could not show a swap).
+- **K2: the export writes the re-checked values.** The step-7 re-check validated the freshly read rows, but the files are written from the rows read
+  before the claim. It now also requires each invoice's fresh stored totals (the billed total and the five totals, `StoredTotalsColumns`) to equal the
+  ones on the row the file is read from; otherwise the same 409 `ebilling.apexport.totals_mismatch`, claims released, one log line per changed
+  invoice. No extra query (the fresh rows were already read). Tests: must fire (a line and the stored totals changed together after the claim:
+  409, no file, nothing sent, claim released) and a control (the totals stored again unchanged after the claim: exports).

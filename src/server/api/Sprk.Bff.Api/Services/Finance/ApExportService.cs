@@ -529,7 +529,15 @@ public sealed class ApExportService
             // Task 165b-2 (EB-D-200 item 3): and each one's stored totals, as read now, still equal the calculator over its lines, before any file or
             // Sent to AP write. One batched line read.
             var stillMatching = await TotalsMatchAsync(freshRows, ct).ConfigureAwait(false);
-            if (freshRows.Any(r => !stillMatching.Contains(r.Id)))
+            // Fix round 1 (K2): the files are written from the rows read BEFORE the claim (step 8), so the totals the re-check just validated must be the
+            // ones those rows carry: a row whose stored totals changed after the selection read stops the batch the same way. No extra query.
+            var changed = selected.Zip(freshRows).Where(p => !StoredTotalsUnchanged(p.First, p.Second)).Select(p => p.First).ToList();
+            foreach (var row in changed.Where(r => stillMatching.Contains(r.Id)))
+            {
+                _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.TotalsMismatch, InvoiceEntity, row.Id);
+            }
+
+            if (changed.Count > 0 || freshRows.Any(r => !stillMatching.Contains(r.Id)))
             {
                 throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.TotalsMismatch,
                     "An invoice in the selection has stored totals that no longer match its lines. Nothing was exported. An administrator must review it.");
@@ -883,6 +891,13 @@ public sealed class ApExportService
     }
 
     /// <summary>
+    /// Task 165b-2 fix round 1 (K2): whether the invoice's stored totals (<see cref="InvoiceTotalsService.StoredTotalsColumns"/>) on <paramref name="fresh"/>,
+    /// read after the claim, equal the ones on <paramref name="before"/>, the row the export values are read from. Pure.
+    /// </summary>
+    private static bool StoredTotalsUnchanged(Entity before, Entity fresh) =>
+        InvoiceTotalsService.StoredTotalsColumns.All(c => before.GetAttributeValue<Money>(c)?.Value == fresh.GetAttributeValue<Money>(c)?.Value);
+
+    /// <summary>
     /// Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid's approval check. <c>Recorded</c> is true when the invoice has the writer-created
     /// approve record under its approval's key (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, the export's own batched
     /// read). Otherwise <c>Invoice</c> is the invoice's status as read now (null when the invoice does not exist), so Mark Paid can answer for an
@@ -919,7 +934,7 @@ public sealed class ApExportService
 
         if (refusals.All(r => r.Reason == ApExportCodes.ReasonTotalsMismatch))
         {
-            return "An invoice in the selection has stored totals that do not match its lines: an administrator must review it. Nothing was exported.";
+            return "An invoice in the selection has stored totals that do not match its lines. Repeat the last line or adjustment decision on it, then select the invoice again. Nothing was exported.";
         }
 
         var firm = refusals.Count(r => r.Reason == ApExportCodes.ReasonFirmMissing);

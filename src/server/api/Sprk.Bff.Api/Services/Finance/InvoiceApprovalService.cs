@@ -1311,7 +1311,7 @@ public sealed class InvoiceApprovalService
 
         _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", InvoiceApprovalCodes.TotalsMismatch, InvoiceReviewReadService.InvoiceEntity, invoiceId);
         return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.TotalsMismatch,
-            "This invoice's stored totals do not match its lines, so it cannot be approved. Nothing was changed. An administrator must review the invoice.");
+            "The stored totals do not match the invoice lines. Repeat the last line or adjustment decision, then approve again.");
     }
 
     /// <summary>
