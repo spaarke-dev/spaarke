@@ -10,6 +10,50 @@
 
 ## Open (in priority order)
 
+### DEF-062 — Dormant spend snapshot job sums billing events without the approve-record rule
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-4 adversarial review, finding 11 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2641 |
+
+**Description**: from 165b-4 on, counted spend comes only from invoices with the writer's approve Decision Record under the invoice's own key (`InvoiceApproveRecord`). `SpendSnapshotService` still sums billing events with no such rule. It is dormant today: nothing enqueues `SpendSnapshotGeneration`. If anything starts enqueuing it, its figures would differ from the rollup, the evaluator and the financial tool, and would count spend that approval never recorded.
+
+**Fix direction**: either retire `SpendSnapshotService` and its job type, or route it through the shared counted reader (`FinanceBaseValues.ReadCountedInvoicesAsync`) and add it to the spend-reader ArchTest guard.
+
+**Entry-points**: `SpendSnapshotService` (grep `SpendSnapshotGeneration`); `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceApproveRecord.cs`; `projects/ebilling-r1/notes/165b-integrity-checks.md` §8.7.
+
+**Estimated effort**: 2-4 hours.
+**Blockers**: none.
+**Related**: task 165b-4, EB-D-208.
+
+---
+
+### DEF-061 — Record when a Procedure version was published (server-written publish stamp)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 085 pass 2, ontology-r1 ruling (c) on D-203 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2640 |
+
+**Description**: whether a Retired `sprk_procedureversion` ever opened a window (D-203 (5a)/(9)) is inferred from a Published policy version under it. A version that governed only rate cards, was in force, and was then retired without a successor reads as never opened. Work in its dates is then "not applicable" instead of a gap, so its rates are not checked there, and it does not lock the Procedure's scope. Task 085 tried a Published rate card as the evidence, but a card can be Published while its version is still a Draft, so ontology-r1 ruled the card evidence out.
+
+**Fix direction**: `ProcedureService.PublishVersionAsync` stamps a new `sprk_publishedon` (date and time) on the version when it publishes. "Opened a window" becomes `From` not null AND the stamp not null. Backfill Active and Superseded versions; leave Retired versions on the policy-version evidence. This is a schema change on `sprk_procedureversion`, so it needs the owner's approval. Get ontology-r1's review for the resolver change.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs` (`ProcedureVersionRow.OpenedAWindow`); `ProcedureService.PublishVersionAsync` and `ScopeLockedAsync`; `projects/ebilling-r1/notes/085-ratecard-procedure-version.md`.
+
+**Estimated effort**: 1 day plus the schema apply.
+**Blockers**: the owner's approval of the schema change.
+**Related**: task 085, D-203, 165b (server-written sources).
+
+---
+
 ### DEF-060 — No writer populates the Signal firm reason shown to partners
 
 | Field | Value |
