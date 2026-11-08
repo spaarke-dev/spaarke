@@ -24,7 +24,7 @@
 
 ## Reviews queue
 - fm: 045A design; 052b (incl. coming contact-only owner rule → customer main-BU team, after owner picks the team); 032 round 2 waits on the owner; **032b design** (2692910f2d) reviewed 11-08: approved with 2 conditions: (1) core id pinned in the job payload at step 3a (sent to ebilling too); (2) U3 first: fm to list membership callers for entityType sprk_invoice; none → (c) drop the registry entry, the four become display copies, §3 grant machinery goes; any → (a) clear copies on core change or Revoked/Declined. U1/U2/U4/U5 approved. Also coming: 076c push-preview fix (needs BFF + RecordFamily page). 021 timing: closed on dev (20/20 lost to #2158; NFR-02 verdict moved to UAT by owner); Debug setting removed 05:19:20Z, 226 settings.
-- ebilling: 165d diff (after option A), 165e, 165f, 165b, 2b-2, the batch checklist + commit. **165b-3 part A (276c1201af) APPROVED** 11-08 (cond. on their Opus pass; notes: decision-record row updatability, currency precision, Unavailable on re-approve). Part B (approval/AP export allow-list) next; spend waits on ontology.
+- ebilling: 165d diff (after option A), **165e (76d751eb5f) APPROVED** 11-08 (cond. pass 2; K1 → 165f, same batch as 165e or K1 moves into 165e), 165f, 165b, 2b-2, the batch checklist + commit. **165b-3 part A (276c1201af) APPROVED** 11-08 (cond. on their Opus pass; notes: decision-record row updatability, currency precision, Unavailable on re-approve). Part B (approval/AP export allow-list) next; spend waits on ontology.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
