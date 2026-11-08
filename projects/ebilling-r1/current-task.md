@@ -8,7 +8,7 @@
 |-------|-------|
 | **Mode** | Owner: "keep progressing on open tasks so we can complete the project" (and earlier "proceed, parallel where possible"). At most 4 agents. Merge each finished branch after its reviews. One adversarial pass per change set; two for partner-readable/auth; a scoped Sonnet re-check when a fix changes the approach. FILTERED tests only. Every agent launch states a model. Never `--no-verify`. |
 | **Public-repo rule** | Never put the mechanism of an open access gap in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Merged into work today** | 165a + 095d-2b-2 (`2fac72b8a5`; #2571 closed; ontology OK'd the SignalWriter doc diff); 164b Add line client (`01854564a3`). |
+| **Merged into work today** | 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`; #2571 closed; ontology OK'd the SignalWriter doc diff); 164b Add line client (`01854564a3`). |
 | **Decisions today** | EB-D-206 (2b-3: the re-run writes the supersedes link in its commit; AMENDED: the predecessor's Return must predate the invoice, plus a predecessor lock); EB-D-207 (fm-032 allow-list + secure/No Access gate, uac-r2 agreed; partners have no invoice search; task 132 renders only ReadableColumns; `sprk_billingexport` writer-only → 165d). |
 
 ## Agents / branches in flight
@@ -17,7 +17,6 @@
 |---|---|---|
 | **096b** | `task/ebilling-096b` @ `7c8c5fb7f3` (wt agent-a15eb2fe1fbf31eaa) | Review → fix (chat create blocked, subgrid New hidden, wizard on core-record hosts via `NATIVE_NEW_CLOSED` + template StringParameter) → re-check → follow-ups. **Waiting only on uac-r2's OK of the secure-child template change.** Then merge, remove the wt. D3 role change deferred (R1 confirm route, R2 Office quick-create task 096, R4 launcher display rule). Live: ribbon + web resource re-import (web resource first) in the dev deploy, then `-Verify`. |
 | **165c** | `task/ebilling-165c` @ `13a10bcbfc` (wt agent-aa5057f557106a2d1) | Pass 1 → fix round done (one rule `IsOwnSubmission` at all sites + ArchTest guard; form links read-only + pin). **Pass 2 (Opus) running.** Open with uac-r2 (private): fold in the pre-existing gap close (hide an invoice with no linked own submission) and a `sprk_document` binding task (165e?) and field security on the submission link columns. Then merge. |
-| **095d-2b-3** | `task/ebilling-095d2b3` @ `d39af0cc87` (wt agent-adae31b11a091fecf) | Fix round done; scoped re-check: no F-class defect. **Follow-up running (Sonnet):** F3 latest-Return ordering test + K1 sub-second floor on createdon. Then merge. |
 | **165b** | `task/ebilling-165b` @ `f0017580b7` (wt agent-a8494c782d7ce1f7b) | Item 1 (line of unknown origin) built; **adversarial pass (Opus) running**, then merge. Items 3-4 → task 165b-2; item 2 + a completion-path fix (private, sent to uac-r2) → task 165b-3. Proposed EB-D-208 (counted statuses need the writer-created approve record; Paid has no record of its own in R1) awaits uac-r2. No ontology hunks yet. |
 | **165d** | `task/ebilling-165d` @ `998c22b365` (wt agent-a087b7b20f22d544d) | Built (10207/0, Arch 2129/0, +1 KB). **Adversarial pass (Opus) running.** U1 question sent to uac-r2: column-only check at the five person-identity writers (A, recommended) or accept + U5. Refusal code `record_update.changed_only_by_its_writer.column` (prefix match). |
 

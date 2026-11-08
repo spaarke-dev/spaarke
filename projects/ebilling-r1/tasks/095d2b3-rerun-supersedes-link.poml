@@ -4,7 +4,7 @@
     <title>Set the firm, part 2b-3: the post-Set-firm re-run writes the automatic supersedes link (EB-D-206)</title>
     <phase>3 Rules (095d split; follows 095d-2b-2)</phase>
     <gate>095d-2b-2 merged into work (it edits InvoiceSubmissionRerun*.cs).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits the re-run's conditional commit (.cs); a wrong link would close the firm's correction chain on the wrong invoice.</rigor-reason>
     <model-tier>opus</model-tier>
