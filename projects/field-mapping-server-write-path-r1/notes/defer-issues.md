@@ -226,3 +226,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Known gap, accepted by the owner 2026-11-08 |
 | **Failure** | Rows the mail ingestor and the attachment workers create get no field mapping from their parent. No profile targets those tables today, and most inbound mail arrives unfiled. Building it needs the app-only mapping gates of 032 (W3 keeps them out of R1). Build it when a profile targets an inbound-created table, reusing 032's step and 052a's metadata reader |
 | **Status** | Open |
+
+## DI-023 — Write-path doc row I-18 still says the writer identity owns a Signal
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-08, task 060 (ownership matrix), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2636 |
+| **Class** | F2, a doc that contradicts the code; doc only |
+| **Failure** | Row I-18 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` says `sprk_signal` is owned by the writer identity with `owningbusinessunit` set from the matter's unit. Since ontology task 143, `SignalWriter` writes the resolver's team and never sends `owningbusinessunit` (class remarks; census entry `SignalWriter.cs`). I-6 and §5.2 describe the current behaviour. Task 060's edit was confined to §5.2 and an I-6 pointer, so it did not fix I-18. Rewrite or retire the row (task 062 or the ontology project) |
+| **Status** | Open |
