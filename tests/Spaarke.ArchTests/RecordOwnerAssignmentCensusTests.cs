@@ -254,7 +254,9 @@ public class RecordOwnerAssignmentCensusTests
             + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
             + "keep their creator as owner; filed ones are routed secure-if-any. The per-user master thread keys on the "
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
-            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
+            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
+            + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
@@ -358,8 +360,6 @@ public class RecordOwnerAssignmentCensusTests
             "App-only profile analyses owned from the document; a refusal skips (best-effort shape)."),
         new UnscannedWriter("DataverseObservationMirror.cs", "owner of ObservationMirrorMapper's row",
             "ForChild over the mirrored row; a refusal skips the mirror."),
-        new UnscannedWriter("EmailAttachmentProcessor.cs", "seam caller (CreateDocumentAsync)",
-            "Inbound attachment documents owned from the parent document and its association."),
         new UnscannedWriter("UploadFinalizationWorker.cs", "seam caller (CreateDocumentAsync, artifact creates)",
             "Office upload documents and their artifacts carry the resolved / carried team."),
         new UnscannedWriter("DataverseDocumentsEndpoints.cs", "seam caller (POST) + PUT re-file",
@@ -2712,7 +2712,6 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> PersonLessWriters = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["IncomingCommunicationProcessor.cs"] = "inbound mail: nobody in the organisation asked for it (the sender is outside it)",
-        ["EmailAttachmentProcessor.cs"] = "inbound mail attachments: as above",
         ["MessagingIngestor.cs"] = "inbound channel message (E1, keeps the application as creator): no BFF caller",
         ["CommunicationParticipantIndexer.cs"] = "derived index rows of a communication: system work",
         ["CommunicationEnrichmentService.cs"] = "background enrichment and its review logs: system work",

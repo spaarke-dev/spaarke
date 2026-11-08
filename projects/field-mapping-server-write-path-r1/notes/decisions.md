@@ -912,3 +912,42 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 - The system creators of task 033 (generation, playbook, Signal, Decision) stay outside `RecordCreationService` as named exceptions under the W3 direction; ontology-r1 agreed that leaving the ledger writers out is valid. No field mapping goes into Signal or Decision Record rows.
 - 033's one piece another task needed (wiring the app-only column-metadata reader into Repair, including the Money attributes of #2124) moves into task 052.
 - Task 060's matrix names these creators as exceptions with guards.
+
+## 2026-11-07 — UAC-r2 review of the 032 design (`task/fm-032` a7b787ffbe): approved with conditions
+
+Binding on 032's implementation, together with ebilling-r1's answers (pending):
+- **Reader set (Q-U1):** a role-source assertion in `FeatureRolePrivilegeGuardTests` pins that `sprk_invoice` Read depth is never wider than the smallest core-table Read depth, so a widening fails CI.
+- **Partner columns (Q-U2):** the protected targets are the union of the invoice modules' `ReadableColumns`, plus the columns the invoice search-index document builder reads, unless ebilling-r1 shows partners have no search path to invoices. Ebilling-r1 confirms that partner notifications and exports render only module columns (Q-E5).
+- **#2188 exemption (Q-U3):** one entry, `Uses = 1`, pinned to the system-reader call site.
+- **Field security (Q-U4):**
+  - a metadata fault or an unknown `IsSecured` maps nothing;
+  - a source column missing from a successful metadata answer drops only its rule, with a Warning naming the rule;
+  - metadata is read per delivery, with no cache.
+- **Secure-source gate (Q-U5), required:** map nothing when the core record is Secure, or under no-access or hard-deny. Reuse Repair's `SourceMayBeCopiedAsync` logic, not a re-implementation. Tests: a Secure core maps nothing and writes the admin note (must fire); an ordinary core maps (must not fire).
+- **Mapped lookups (Q-U6):** written app-only with no AppendTo check, accepted. Filing and access-conferring lookups stay protected. Lookups that target `systemuser`, `team` or `contact` are protected too, unless they are on an explicit allow-list.
+
+## 2026-11-07 — ebilling-r1 review of the 032 design (a7b787ffbe): approved with conditions
+
+These conditions are fixed in the design before any code, together with UAC-r2's above. Checked against `work/ebilling-r1` e418803715.
+- **A refused mapped value (Q-E1): re-commit once without the mapped columns.**
+  - Only when `FailedRequestIndex == 0`, at least one column was mapped, and the outcome is not unknown.
+  - The commit and its catch are wrapped in one local function, called at most twice, so the second attempt goes through the whole existing catch chain.
+  - Request 0 and the submission update are rebuilt with the same count and order.
+  - §6 also checks option-set membership, numeric min, max and precision, and that a lookup target exists.
+  - Tests: refused once, refused twice, refused with nothing mapped.
+- **Fault note (Q-E2): faults only.** It is a new `AdminAttentionText` segment kind that `Merge` and `WithoutStopped` recognise, in a fixed order, codes only. The combined text stays within `AdminAttentionMaxLength` (500); the Signal segment shrinks to make room. A test covers the cap.
+- **Protected even when empty (Q-E3):** `sprk_currency`, `sprk_invoicedate`, `sprk_billingperiodstart` and `sprk_billingperiodend`, and `sprk_correlationid`.
+- **Re-delivery (Q-E4):** a test pins that two deliveries, the first rolled back, store exactly the second delivery's values, and that a resume reads nothing.
+- **Search index (Q-E5):** `InvoiceIndexDocument.InvoiceColumns` is excluded by reference. Partners have no search path to invoices; partner rendering is `ReadableColumns` only.
+- **Constructor (Q-E6):** three optional trailing parameters. A DI test resolves the persister from the real container with all three non-null, and one Warning is logged when the step does not run.
+- **C1, protected set:** an allow-list of target columns approved by ebilling-r1 and UAC-r2, with the deny-list as a second check. `sprk_billingexport` and `sprk_invoiceduedate` are protected unless the owner approves the due date as a target.
+- **C2, secure gate:** gate on the owner answer's secure-if-any, already resolved in the persister, so Secure ancestors are covered. Secure means map nothing and log a code, with no admin note. With UAC-r2 Q-U5, this also covers no-access and hard-deny, through Repair's `SourceMayBeCopiedAsync` logic, failing closed.
+- **C3, all or nothing:** any rule-fault warning from `ApplyFillOnly` means nothing is mapped and the note is written. A test covers it.
+- **C4, determinism:** a static resolver-field key set; ties in `ExecutionOrder` are broken by rule id; the lookup overload of `IsFilingLookup` is used.
+- **C5, money guard:** the persister exposes its owned-column list, so the step loads no money or firm string (`InvoiceMoneyColumnsAppOnlyWriteGuardTests`). That guard joins the regression list.
+
+**What 032's code waits on:** 052a's metadata reader (`task/fm-052a`), and the persister layout in `work/ebilling-r1`.
+- **UAC-r2 follow-up (2026-11-07):**
+  - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
+  - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
+  - Must-fire and must-not-fire tests.
