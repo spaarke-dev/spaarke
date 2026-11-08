@@ -590,9 +590,11 @@ internal sealed partial class RecordCreationService
     /// (<see cref="MembershipOptionsDefaults.CanonicalAccessConferringRegistry"/>) and the bound one
     /// (<see cref="MembershipOptions.AccessConferringRoles"/>, which <c>AssignedAccessMaterializer.RegistryFor</c> reads), so
     /// neither can be widened past the other. A fault reading the bound registry propagates to the mapping step, which then
-    /// maps nothing (fail closed).
+    /// maps nothing (fail closed). Task 032b-1: the table's display copies
+    /// (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>) are never filled either
+    /// (<see cref="RecordRepairReason.MappedValueIsDisplayCopy"/>). Internal so a seam test can ask it directly.
     /// </summary>
-    private IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table)
+    internal IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table)
     {
         // A column → reason map of what is NOT written (never a payload): built from column lists.
         var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -620,6 +622,14 @@ internal sealed partial class RecordCreationService
 
         foreach (var field in conferring.Select(c => c?.Field?.Trim()).Where(f => !string.IsNullOrEmpty(f)))
             columns.TryAdd(field!, RecordRepairReason.MappedValueAssignsAccess);
+
+        // Task 032b-1: a display copy (an invoice's attorney columns) is set at create only; Repair never re-fills it.
+        if (MembershipOptionsDefaults.DisplayCopyColumns.TryGetValue(table, out var displayCopies))
+        {
+            foreach (var column in displayCopies)
+                columns.TryAdd(column, RecordRepairReason.MappedValueIsDisplayCopy);
+        }
+
         return columns;
     }
 
@@ -985,6 +995,10 @@ internal static class RecordRepairReason
     /// <summary>UAC-r2 condition (b) F1-1: the ADR-024 regarding pair — filling it would change what the row is filed under
     /// (its stamp source), so Repair's mapping never fills it.</summary>
     internal const string MappedValueWouldRefilePair = "record_repair.mapped_value_would_refile_pair";
+
+    /// <summary>Task 032b-1: a display copy (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>, e.g. an invoice's
+    /// attorney columns) — set only when the row is created, never re-filled by Repair's mapping.</summary>
+    internal const string MappedValueIsDisplayCopy = "record_repair.mapped_value_display_copy";
 
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";

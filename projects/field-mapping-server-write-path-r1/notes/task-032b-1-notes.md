@@ -97,10 +97,15 @@ The change adds no endpoint, DI registration, package or background work.
 
 ## 4. Known limits (K-class, owner to note)
 
-- **Repair.** `ColumnsRepairNeverMaps` no longer lists the four invoice columns, because they left the registry. The path
-  is unreachable today: invoice-family rows are refused (`InvoiceFamilyGuardUnavailable`, #1911). Once #1911 lands,
-  Repair would fill an empty display copy, fill-only. That is the §8.5 named exception against §7 "no re-map". Decide it
-  in 032b-2.
+- **Repair: fixed in the review fix round.** `ColumnsRepairNeverMaps` now names the table's display copies itself, with
+  their own reason `record_repair.mapped_value_display_copy`, so Repair never re-fills one once #1911 lifts the invoice
+  refusal. Pinned by `RecordRepairModeTests.AnInvoiceDisplayCopy_IsNeverMappedByRepair_WithItsOwnReason`, a seam test that
+  asks the list directly because the invoice refusal masks it today. The must-not-fire control is
+  `ADisplayCopyName_OnAnotherTable_OrAPlainInvoiceColumn_IsNotADisplayCopy_MustNotFire`.
+- **Family panel: fixed in the review fix round.** `RecordFamilyActionPanel` sums `skippedRuleCount`. When it is above 0,
+  the panel shows one fixed line, "Some fields are copied only when a record is created and are not updated here.", and
+  never says "already have the current values". The Assigned To info bar now says access can change "on records where
+  these fields grant access".
 - **The invoice's `sprk_assignedto1` and `sprk_assignedto2`** are now plain data and are not display copies. A Manual
   Refresh rule onto them would push. No seeded profile targets them.
 

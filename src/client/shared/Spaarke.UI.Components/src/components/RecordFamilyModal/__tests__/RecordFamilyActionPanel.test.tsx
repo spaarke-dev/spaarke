@@ -28,6 +28,9 @@ import {
 } from '../recordFamilyPushService';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
+/** Task 032b-1: the one fixed line shown when the push skips rules (`skippedRuleCount > 0`). */
+const SKIPPED_RULES_TEXT = 'Some fields are copied only when a record is created and are not updated here.';
+
 const MATTER = 'aaaaaaaa-0000-0000-0000-000000000001';
 const EVENT_A = 'eeeeeeee-0000-0000-0000-00000000000a';
 const EVENT_B = 'eeeeeeee-0000-0000-0000-00000000000b';
@@ -223,6 +226,47 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText(/Nothing to update/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
     expect(sent.filter(b => !b.preview)).toHaveLength(0);
+  });
+
+  // Task 032b-1 (review F1): a push skips the rules it does not apply (an invoice's display copies, One-time rules) and counts
+  // them; the panel must not then say the records "already have the current values".
+  it('with rules the push skipped and nothing to change, says some fields are copied only at create, not "Nothing to update"', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([], { skippedRuleCount: 4 }) });
+    renderPanel({ authenticatedFetch: fetchFn, action: 'assignedTo' });
+
+    expect(await screen.findByText(SKIPPED_RULES_TEXT)).toBeTruthy();
+    expect(screen.queryByText(/Nothing to update/)).toBeNull();
+    expect(screen.queryByText(/already have the current values/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('with rules the push skipped and values to change, still says some fields are copied only at create', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([CHANGE_A], { skippedRuleCount: 1 }) });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(await screen.findByText(SKIPPED_RULES_TEXT)).toBeTruthy();
+    expect(screen.getByText(/1 value on 1 record will change/)).toBeTruthy();
+  });
+
+  it('with no skipped rules, keeps "already have the current values" and says nothing about create-only fields', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([]) });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText('Nothing to update: the selected records already have the current values.')
+    ).toBeTruthy();
+    expect(screen.queryByText(SKIPPED_RULES_TEXT)).toBeNull();
+  });
+
+  it('"Update Assigned To" says access can change only where the fields grant it', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([CHANGE_B]) });
+    renderPanel({ authenticatedFetch: fetchFn, action: 'assignedTo' });
+
+    expect(
+      await screen.findByText(
+        'This update includes the Assigned To fields. On records where these fields grant access, changing them can change who has access.'
+      )
+    ).toBeTruthy();
   });
 
   it('makes one preview and one apply per target table', async () => {
