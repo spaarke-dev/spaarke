@@ -4,7 +4,7 @@
     <title>Close the remaining direct invoice-create paths (EB-D-201)</title>
     <phase>4 Review</phase>
     <gate>Source and scripts: none. Each live step (role privilege, form, data cleanup) needs the owner's go typed in the ebilling session, with uac-r2 told before and after. Task 096 (Office legs) keeps its own gate.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes a create path from a shared BFF route (uac-r2 owns it), changes a security role, and cleans up dev data.</rigor-reason>
     <model-tier>sonnet</model-tier>
