@@ -531,7 +531,13 @@ public static class FieldMappingEndpoints
                     detail: $"No field mapping profile found for source entity '{request.SourceEntity}' and target entity '{request.TargetEntity}'.",
                     statusCode: 404,
                     title: "Profile Not Found",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+                    // Task 076c: a stable code so a client can tell "no profile for this pair" (per-table, the caller already
+                    // read the source) from the source-not-found 404 above (uniform, no code, a whole failure).
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["reasonCode"] = ProfileMissingReasonCode,
+                    });
             }
 
             var profileRules = profile.Rules ?? [];
@@ -1212,6 +1218,9 @@ public static class FieldMappingEndpoints
     /// <summary>Stable reason codes for the two parent-lookup refusals (task 166 r1).</summary>
     internal const string ParentLookupMissingReasonCode = "field_mapping_parent_lookup_missing";
     internal const string ParentLookupAmbiguousReasonCode = "field_mapping_parent_lookup_ambiguous";
+
+    /// <summary>Stable reason code of the push route's 404 when no active profile maps the (source, target) pair (task 076c).</summary>
+    internal const string ProfileMissingReasonCode = "field_mapping_profile_missing";
 
     /// <summary>
     /// 409: the profile's target table has no lookup — or more than one — to the source in relationship metadata, so

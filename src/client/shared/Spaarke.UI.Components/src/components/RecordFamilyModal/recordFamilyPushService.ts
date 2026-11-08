@@ -13,7 +13,7 @@
 
 import { cleanGuid } from '../../utils/guid';
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
-import { isApiError } from '../../utils/thrownFetchError';
+import { isApiError, problemOf } from '../../utils/thrownFetchError';
 import type { IFamilySelection } from './recordFamilyService';
 
 /** The BFF route (`FieldMappingEndpoints`). */
@@ -75,9 +75,19 @@ export interface IPushResponse {
   refusedChildIds: string[];
 }
 
-/** A push the server answered with a non-2xx status (a fetch that RETURNS failures). The body is never read or shown. */
+/** The stable code on the push route's 404 when no profile maps the (source, target) pair (`FieldMappingEndpoints.ProfileMissingReasonCode`). */
+export const PROFILE_MISSING_REASON_CODE = 'field_mapping_profile_missing';
+
+/**
+ * A push the server answered with a non-2xx status (a fetch that RETURNS failures). The server's text is never read or shown;
+ * only the stable `reasonCode` of a 404 is carried, so a missing profile can be told from a source that was not found.
+ */
 export class PushRequestError extends Error {
-  constructor(public readonly status: number) {
+  constructor(
+    public readonly status: number,
+    /** The problem body's `reasonCode`, read for a 404 only; `undefined` when the body had none or was not JSON. */
+    public readonly reasonCode?: string
+  ) {
     super(`The push request failed (${status}).`);
     this.name = 'PushRequestError';
   }
@@ -89,6 +99,27 @@ export class PushRequestError extends Error {
  */
 export function isNoFilingEdgeRefusal(err: unknown): boolean {
   return (err instanceof PushRequestError && err.status === 409) || isApiError(err, 409);
+}
+
+/**
+ * True when the server answered 404 with the `field_mapping_profile_missing` code: no profile maps the source to that table,
+ * so it is reported for that table only. A 404 WITHOUT the code (the source was not found) is not this: it fails the whole
+ * preview. Reached from either fetch shape: a returned 404 ({@link PushRequestError}) or a thrown `ApiError`.
+ */
+export function isNoProfileRefusal(err: unknown): boolean {
+  if (err instanceof PushRequestError) return err.status === 404 && err.reasonCode === PROFILE_MISSING_REASON_CODE;
+  return isApiError(err, 404) && problemOf(err)?.reasonCode === PROFILE_MISSING_REASON_CODE;
+}
+
+/** The `reasonCode` of a failed response's problem body, or `undefined` (no body, not JSON, not a string). Never throws. */
+async function readReasonCode(res: { json?: () => Promise<unknown> }): Promise<string | undefined> {
+  try {
+    const body = await res.json?.();
+    const code = typeof body === 'object' && body !== null ? (body as { reasonCode?: unknown }).reasonCode : undefined;
+    return typeof code === 'string' ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The request body for one target table. Ids are canonicalized (ADR-044). The server always uses the Filing family. */
@@ -174,6 +205,6 @@ export async function pushFieldMappings(fetchFn: ResponseFetchFn, request: IPush
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  if (!res.ok) throw new PushRequestError(res.status);
+  if (!res.ok) throw new PushRequestError(res.status, res.status === 404 ? await readReasonCode(res) : undefined);
   return parsePushResponse(await res.json());
 }

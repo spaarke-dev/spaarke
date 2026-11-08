@@ -17,8 +17,16 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RecordFamilyActionPanel } from '../RecordFamilyActionPanel';
 import type { RecordFamilyActionPanelProps } from '../RecordFamilyActionPanel';
-import { buildPushRequest, groupRowsByTable, PUSH_FAILED_TEXT, PUSH_PATH } from '../recordFamilyPushService';
-import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
+import {
+  buildPushRequest,
+  groupRowsByTable,
+  isNoProfileRefusal,
+  PUSH_FAILED_TEXT,
+  PUSH_PATH,
+  pushFieldMappings,
+  PushRequestError,
+} from '../recordFamilyPushService';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const MATTER = 'aaaaaaaa-0000-0000-0000-000000000001';
 const EVENT_A = 'eeeeeeee-0000-0000-0000-00000000000a';
@@ -361,6 +369,82 @@ describe('RecordFamilyActionPanel', () => {
     expect(onApplied).toHaveBeenCalledWith({ updatedCount: 1, failedCount: 0, failedTables: ['sprk_invoice'] });
   });
 
+  // Task 076c: a table with no mapping profile from the source is a 404 carrying `field_mapping_profile_missing`.
+  const NO_PROFILE = { title: 'Profile Not Found', status: 404, reasonCode: 'field_mapping_profile_missing' };
+  const DOC_A = 'dddddddd-0000-0000-0000-00000000000d';
+
+  it('reports a table with no mapping profile (a thrown 404 + reasonCode) for that table, and still previews and applies the others', async () => {
+    const onApplied = jest.fn();
+    const { fetchFn, sent } = pushServer({
+      previewStatus: b => (b.targetEntity === 'sprk_document' ? 404 : 200),
+      preview: b =>
+        b.targetEntity === 'sprk_document' ? { ...NO_PROFILE, detail: 'SECRET-CAUSE-DETAIL' } : previewBody([CHANGE_A]),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn, onApplied, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    expect(document.body.textContent).not.toContain('SECRET-CAUSE-DETAIL');
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+
+    expect(sent.filter(b => !b.preview).map(b => b.targetEntity)).toEqual(['sprk_event']);
+    expect(onApplied).toHaveBeenCalledWith({ updatedCount: 1, failedCount: 0, failedTables: [] });
+  });
+
+  it('reports a RETURNED 404 + reasonCode for that table too (a fetch that returns failures)', async () => {
+    const { fetchFn } = returningFetch(b =>
+      b.targetEntity === 'sprk_document' ? json(404, NO_PROFILE) : json(200, previewBody([CHANGE_A]))
+    );
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+  });
+
+  it('a 404 WITHOUT the profile code (the source was not found) still fails the whole preview', async () => {
+    const { fetchFn, sent } = pushServer({
+      previewStatus: b => (b.targetEntity === 'sprk_document' ? 404 : 200),
+      preview: b =>
+        b.targetEntity === 'sprk_document' ? { title: 'Not Found', status: 404 } : previewBody([CHANGE_A]),
+    });
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText(PUSH_FAILED_TEXT)).toBeTruthy();
+    expect(screen.queryByText(/No field push is set up/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Update \d/ })).toBeNull();
+    expect(sent.filter(b => !b.preview)).toHaveLength(0);
+  });
+
+  it('a RETURNED 404 with a different reason code still fails the whole preview', async () => {
+    const { fetchFn } = returningFetch(b =>
+      b.targetEntity === 'sprk_document'
+        ? json(404, { reasonCode: 'something_else' })
+        : json(200, previewBody([CHANGE_A]))
+    );
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText(PUSH_FAILED_TEXT)).toBeTruthy();
+  });
+
+  it('when every ticked table has no profile, says so per table, shows nothing to apply and not the generic failure', async () => {
+    const { fetchFn, sent } = pushServer({ previewStatus: 404, preview: () => NO_PROFILE });
+    renderPanel({
+      authenticatedFetch: fetchFn,
+      rows: [...ROWS, { table: 'sprk_document', id: DOC_A }],
+    });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_event.')).toBeTruthy();
+    expect(screen.getByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText(/Nothing to update/)).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(sent.filter(b => !b.preview)).toHaveLength(0);
+  });
+
   it('does not re-run the preview when the host passes an equal source as a new object', async () => {
     const { fetchFn, sent } = pushServer({ preview: () => previewBody([CHANGE_A]) });
     const onClose = jest.fn();
@@ -390,6 +474,59 @@ describe('RecordFamilyActionPanel', () => {
     renderPanel({ authenticatedFetch: fetchFn, open: false });
 
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('isNoProfileRefusal', () => {
+  const CODE = 'field_mapping_profile_missing';
+
+  it('fires for a thrown ApiError 404 whose problem carries the code', () => {
+    expect(isNoProfileRefusal(apiErrorFor(404, { title: 'Profile Not Found', status: 404, reasonCode: CODE }))).toBe(
+      true
+    );
+  });
+
+  it('fires for a returned 404 whose body carried the code', () => {
+    expect(isNoProfileRefusal(new PushRequestError(404, CODE))).toBe(true);
+  });
+
+  it.each([
+    ['a thrown 404 without a code', apiErrorFor(404, { title: 'Not Found', status: 404 })],
+    ['a thrown 404 with another code', apiErrorFor(404, { title: 'x', status: 404, reasonCode: 'other' })],
+    ['a thrown 404 with no problem body', apiErrorFor(404)],
+    ['a thrown 409 carrying the code', apiErrorFor(409, { title: 'x', status: 409, reasonCode: CODE })],
+    ['a thrown 500 carrying the code', apiErrorFor(500, { title: 'x', status: 500, reasonCode: CODE })],
+    ['a returned 404 without a code', new PushRequestError(404)],
+    ['a returned 404 with another code', new PushRequestError(404, 'other')],
+    ['a returned 409 carrying the code', new PushRequestError(409, CODE)],
+    ['an ordinary Error', new Error(CODE)],
+    ['a non-error', null],
+  ])('does not fire for %s', (_label, err) => {
+    expect(isNoProfileRefusal(err)).toBe(false);
+  });
+
+  it('pushFieldMappings carries only the reason code of a returned 404, and survives a body that is not JSON', async () => {
+    const request = buildPushRequest(SOURCE, 'sprk_document', { preview: true, includeAssignedTo: false });
+    const withCode = async () => json(404, { reasonCode: CODE, detail: 'SECRET-CAUSE-DETAIL' });
+    const notJson = async () =>
+      ({
+        ok: false,
+        status: 404,
+        json: async () => {
+          throw new SyntaxError('Unexpected token');
+        },
+      }) as unknown as Response;
+
+    const coded = await pushFieldMappings(withCode, request).catch(e => e);
+    expect(coded).toBeInstanceOf(PushRequestError);
+    expect(coded.reasonCode).toBe(CODE);
+    expect(JSON.stringify(coded)).not.toContain('SECRET-CAUSE-DETAIL');
+    expect(coded.message).not.toContain('SECRET-CAUSE-DETAIL');
+
+    const plain = await pushFieldMappings(notJson, request).catch(e => e);
+    expect(plain).toBeInstanceOf(PushRequestError);
+    expect(plain.reasonCode).toBeUndefined();
+    expect(isNoProfileRefusal(plain)).toBe(false);
   });
 });
 

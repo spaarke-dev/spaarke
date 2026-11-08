@@ -162,6 +162,39 @@ public class FieldMappingPushFamilyContractTests
         world.Dataverse.Queries.Should().BeEmpty();
     }
 
+    /// <summary>Task 076c: a readable source but no profile for the pair is a 404 that carries the stable code, so the Family page
+    /// can report that one table and still preview the others.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATargetWithNoProfile_Is404WithTheProfileMissingReasonCode_ForAPreviewAndAnApply(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_noprofile", preview });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        json["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ProfileMissingReasonCode);
+        json["title"]!.GetValue<string>().Should().Be("Profile Not Found");
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The source-not-found 404 stays uniform and carries NO reason code: it must not be mistaken for a missing profile
+    /// (the page treats a code-less 404 as a whole failure).</summary>
+    [Fact]
+    public async Task ASourceTheCallerCannotRead_Is404WithNoReasonCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = Guid.NewGuid(), targetEntity = "sprk_noprofile", preview = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject().ContainsKey("reasonCode")
+            .Should().BeFalse("the uniform source-not-found answer has no code, so it cannot be told from a missing profile by its absence of one");
+    }
+
     [Fact]
     public async Task IncludeAssignedTo_WithoutWriteOnTheSource_Is403_AndNothingIsReadOrWritten()
     {
