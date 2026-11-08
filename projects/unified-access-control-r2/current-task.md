@@ -28,7 +28,7 @@
 - mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
-- Report card `sprk_assigned*` registry (FR-24); prod-named SysAdmin app users on dev (dependency: the BFF identities read Decision Records only via SysAdmin; ebilling 165b-4 adds a live privilege check; the role grant goes to provisioning); G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row ("UAC gate 154 (o) braced id", it logs a malformed-entry warning by design).
+- Report card `sprk_assigned*` registry (FR-24); prod-named SysAdmin app users on dev (dependency: the BFF identities read Decision Records only via SysAdmin; ebilling 165b-4 adds a dev-run live check (Read, Global depth); the least-privilege grant is **#2635** (DEF-059), owner decision: ontology-r1 says the live test is enough, I recommend the grant); G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row ("UAC gate 154 (o) braced id", it logs a malformed-entry warning by design).
 - Older: column auditing on writer-only lookups, AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
 ## Private items (never in issues/PRs/commits)
