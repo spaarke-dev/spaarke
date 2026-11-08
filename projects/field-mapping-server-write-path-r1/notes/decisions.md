@@ -1026,3 +1026,11 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
   - 032b-1 (fm branch: shared gates, registry removal with its guard, inventory of no-caller creators) merges to master first.
   - Then 032b-2 and 032b-3 run on the current work/ebilling-r1.
 - **Contact owner team:** reuse `ExternalAccess:CustomerBusinessUnitId`, which resolves the BU's single default Owner team. It already sets the owner for the four identity-contact creates and fails closed when unset or ambiguous. The owner did not object, so it applies to the repair pass's contact rule (052b) and to the chat contact create. UAC-r2 reviews.
+
+## 2026-11-08 — Task 060: ownership matrix; outbox and gate-record exceptions kept
+
+- §5.2 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` holds the per-table ownership matrix. It has 25 rows, one per `RecordTableRules.All` entry, and I-6 points to it.
+- **Notification outbox: keep.** Recipient-owned rows are the BFF's per-user delivery key (app-only reads filtered to the caller; no target-user parameter). No Spaarke role holds any privilege on the table, and the row is filed under nothing.
+- **`DecisionRecordWriter` gate record about an unfiled communication: keep.** It is owned by the communication's own owning user and shared Read with its internal sharees (D-144 as amended, D-169). Its readers follow the communication's. It is secure-if-any first and fails closed without a readable, active user owner.
+- Contact row: today's two rules, plus "052b, pending" (every contact to the `ExternalAccess:CustomerBusinessUnitId` team).
+- Found in passing: row I-18 is stale (the Signal owner is now the resolver's team): DI-023, #2636.

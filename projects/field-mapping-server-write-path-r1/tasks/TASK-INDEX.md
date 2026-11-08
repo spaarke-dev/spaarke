@@ -87,7 +87,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 060 | [Ownership matrix + exception assessment](060-ownership-matrix-and-exception-assessment.poml) | FR-26 | opus / high | STANDARD | W6 | 033, 034 | 🔲 |
+| 060 | [Ownership matrix + exception assessment](060-ownership-matrix-and-exception-assessment.poml) | FR-26 | opus / high | STANDARD | W6 | 033, 034 | ✅ 2026-11-08 on the work branch (merge 99e3e4a260; `task/fm-060` bc4e904f28): §5.2 matrix with 25 rows; outbox and gate record kept; DI-023 #2636 filed. A role-depth observation went to UAC-r2 privately |
 | 061 | [Census and client guards](061-census-and-client-guards.poml) | FR-27 | sonnet / high | FULL | W6 | 035, 036 | 🔲 |
 | 062 | [Docs rewrite + root CLAUDE.md + CHANGELOG (main session)](062-docs-rewrite-and-root-claude-md.poml) | FR-28 | sonnet / high | MINIMAL | none | 040, 053, 060 | 🔲 |
 | 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | 🔲 |
