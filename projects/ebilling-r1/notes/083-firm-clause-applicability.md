@@ -43,3 +43,10 @@ Real `ProcedureSnapshot.Build` snapshots via `ProcedureSnapshotPatchKit`. Contra
 - (c) null snapshot passes through (`snapshot is not null && ...`): 10 fail (nine shapes plus own-submission).
 
 Before-change proof: the new tests do not compile against the old code (`FirmClauseText` has no `FirmFacingName`), and with the same two-Guid signature the old code reads the invoice id as a firm id.
+
+## Gates
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- ArchTests (full): 2159 passed, 0 failed. The first full run failed one test, `InvoiceMoneyColumnsAppOnlyWriteGuardTests` C1 (the service now names `sprk_vendororg`); `RuleSetService` is added to its `Readers` list with the reason (it reads the invoice's firm app-only and writes nothing).
+- Filtered unit (`RuleSet|Finance|Procedure`): 6916 passed, 0 failed, 4 skipped. `RuleSetServiceTests`: 165 passed.
+- Publish size (Release, framework-dependent linux-x64, `git archive` trees, `Compress-Archive -CompressionLevel Optimal`, 191 files each side): task parent `d58e3a3554` 40,471,966 B to tip 40,473,712 B (**+1,746 B**). No package changed, so no CVE delta. Not measured against a fresh master build here (the 082d notes give the project branch's own delta from master).
