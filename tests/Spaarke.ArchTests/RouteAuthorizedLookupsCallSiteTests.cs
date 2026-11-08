@@ -79,6 +79,24 @@ public class RouteAuthorizedLookupsCallSiteTests
         Assert.NotEmpty(recorders);
     }
 
+    /// <summary>
+    /// Task 043: the handler hands the field mapping of a Document to Analysis profile the document the create filter's Document
+    /// check allowed (Read + AppendTo, then the external document narrowing), so the narrowing is not asked twice. That record
+    /// must come only from the filter, after every check passed, exactly as the playbook-use record above.
+    /// </summary>
+    [Fact(DisplayName = "043: only the analysis create filter records the document decision the handler's field mapping reuses")]
+    public void OnlyTheCreateFilterRecordsTheDocumentDecision()
+    {
+        var recorders = Callers(BffTypes.Value, typeof(AnalysisAuthorizationFilter), nameof(AnalysisAuthorizationFilter.RecordDocumentAttachAuthorized));
+
+        var outside = recorders
+            .Where(c => c.Type != typeof(AnalysisAuthorizationFilter) || !c.Method.Contains("AuthorizeCreateAsync", StringComparison.Ordinal))
+            .Select(c => $"{c.Type.FullName}.{c.Method}")
+            .ToArray();
+        Assert.True(outside.Length == 0, "Only the /create filter may record that it allowed a document:\n" + string.Join("\n", outside));
+        Assert.NotEmpty(recorders);
+    }
+
     [Fact(DisplayName = "031 fix round 1 (b): the service's closed list is exactly (sprk_analysis, sprk_playbook, sprk_analysisplaybook)")]
     public void TheServicesClosedListIsTheAnalysisPlaybookOnly()
     {

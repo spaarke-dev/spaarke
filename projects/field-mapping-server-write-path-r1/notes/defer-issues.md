@@ -83,6 +83,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Deferred: RepairAsync has no production caller yet |
 | **Owner task** | 052 |
 | **Failure** | Registering the three chat tables (owner, 2026-10-30) makes RepairAsync accept them, so the scheduled pass would re-own user-created rows to a team. Exclude them in 052, or ask the owner |
+| **Resolution (owner, 2026-11-08)** | task and account are excluded from the repair pass. A contact must be owned by the customer's main business-unit team. The rule finds that team per environment, and refuses and logs if it can't, never falling back to the creator. 052b proposes a contact owner-only rule; UAC-r2 reviews it once the owner names the team. No field mapping on contacts |
 
 ## DI-009 — The owner decision does not see a secure root reached only through the derived stamp
 
@@ -195,3 +196,43 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Owner task** | Task 042c (POML written 2026-11-04), straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
 | **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
 | **Status** | **Closed 2026-11-05** by task 042c, PR #2569: by owner decision D-204 the general create (the service and chat) refuses Signal, Decision Record and Budget Revision, so no general create asks this owner question; #2561 closed |
+
+## DI-020 — Inbound mail dedupe can create a duplicate communication
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, review of tasks 030b and 034, in passing (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2625 |
+| **Class** | K, known limit: pre-existing, not changed by 030b or 034 |
+| **Failure** | In `IncomingCommunicationProcessor` (~:143), the Graph-id check is check-then-act and fails open. A blank `InternetMessageId` takes the plain create with no guard, so a concurrent redelivery can create two rows. If the host stops after the create, the redelivery stops at the duplicate check, and the attachment and archive steps never run |
+| **Status** | Open |
+
+## DI-021 — Rate card and rule set imports write the SPE pointer by a follow-up update
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, review of task 030b, in passing (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2626 |
+| **Class** | K, known limit: pre-existing |
+| **Failure** | `RateCardImportService.cs` (~:250) and `RuleSetService.cs` (~:481) create the document, then write its pointer in an update. A failed update leaves a document with no file. The fix is to use 030b's `CreateDocumentRequest.FilePointer` |
+| **Status** | Open |
+
+## DI-022 — Inbound-created communications and documents are not field-mapped
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, task 034 scope review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2633 |
+| **Class** | Known gap, accepted by the owner 2026-11-08 |
+| **Failure** | Rows the mail ingestor and the attachment workers create get no field mapping from their parent. No profile targets those tables today, and most inbound mail arrives unfiled. Building it needs the app-only mapping gates of 032 (W3 keeps them out of R1). Build it when a profile targets an inbound-created table, reusing 032's step and 052a's metadata reader |
+| **Status** | Open |
+
+## DI-023 — Write-path doc row I-18 still says the writer identity owns a Signal
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-08, task 060 (ownership matrix), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2636 |
+| **Class** | F2, a doc that contradicts the code; doc only |
+| **Failure** | Row I-18 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` says `sprk_signal` is owned by the writer identity with `owningbusinessunit` set from the matter's unit. Since ontology task 143, `SignalWriter` writes the resolver's team and never sends `owningbusinessunit` (class remarks; census entry `SignalWriter.cs`). I-6 and §5.2 describe the current behaviour. Task 060's edit was confined to §5.2 and an I-6 pointer, so it did not fix I-18. Rewrite or retire the row (task 062 or the ontology project) |
+| **Status** | Open |

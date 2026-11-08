@@ -150,6 +150,67 @@ describe('describeWebApiCreateError', () => {
     });
   });
 
+  const SECURE_CREATE_SENTENCE =
+    "You don't have the access needed to create a secure project. You can create it without Secure, or ask an administrator.";
+
+  it.each(['sdap.access.deny.delegation_write_required', 'sdap.access.deny.delegation_share_required'])(
+    'the secure-create rights refusal %s (ChildRecordWriteError) gets the one plain sentence, flagged access-denied',
+    code => {
+      const err = new ChildRecordWriteError(
+        'To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).',
+        403,
+        code
+      );
+      expect(describeWebApiCreateError(err, 'project')).toEqual({
+        message: SECURE_CREATE_SENTENCE,
+        isAccessDenied: true,
+      });
+    }
+  );
+
+  it('the same refusal thrown by authenticatedFetch as an ApiError (reasonCode in its ProblemDetails) gets the same sentence', () => {
+    const err = apiErrorFor(403, {
+      title: 'Forbidden',
+      status: 403,
+      detail: 'To create a secure record you need Write access to it and the Share privilege on its table.',
+      reasonCode: 'sdap.access.deny.delegation_write_required',
+    });
+    expect(describeWebApiCreateError(err, 'project')).toEqual({
+      message: SECURE_CREATE_SENTENCE,
+      isAccessDenied: true,
+    });
+  });
+
+  const CHECK_FAILED_SENTENCE =
+    'Whether you can create a secure project could not be checked. Try again in a moment, or create it without Secure.';
+
+  it('a secure-create rights check that could not be completed says so, and does not say the caller lacks access', () => {
+    const asApiError = apiErrorFor(403, {
+      title: 'Forbidden',
+      status: 403,
+      detail: "The caller's access to the target record could not be determined.",
+      reasonCode: 'sdap.access.deny.delegation_check_failed',
+    });
+    const asWriteError = new ChildRecordWriteError(
+      "The caller's access to the target record could not be determined.",
+      403,
+      'sdap.access.deny.delegation_check_failed'
+    );
+    for (const err of [asApiError, asWriteError]) {
+      const text = describeWebApiCreateError(err, 'project');
+      expect(text).toEqual({ message: CHECK_FAILED_SENTENCE, isAccessDenied: true });
+      expect(text.message).not.toContain("don't have the access");
+    }
+  });
+
+  it('a different sdap.access.deny code is not mapped to the secure-create sentence', () => {
+    const err = new ChildRecordWriteError('Some other refusal.', 403, 'sdap.access.deny.delegation_no_caller_token');
+    expect(describeWebApiCreateError(err, 'project')).toEqual({
+      message: 'Some other refusal.',
+      isAccessDenied: false,
+    });
+  });
+
   it('a ChildRecordWriteError with any other reasonCode is not a privilege refusal', () => {
     const err = new ChildRecordWriteError('The BFF did not return the new record id.', 201);
     expect(describeWebApiCreateError(err, 'to do')).toEqual({

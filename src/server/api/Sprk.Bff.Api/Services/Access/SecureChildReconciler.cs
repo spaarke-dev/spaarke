@@ -2457,7 +2457,12 @@ public sealed class SecureChildReconciler
                 synced.Sum(r => r.SharesGranted),
                 synced.Sum(r => r.SharesChanged),
                 synced.Sum(r => r.SharesRevoked),
-                open.Select(r => r.Detail).FirstOrDefault(d => d is not null));
+                open.Select(r => r.Detail).FirstOrDefault(d => d is not null))
+            {
+                HardDenyWiderThanRead = synced.Sum(r => r.HardDenyWiderThanRead),
+                HardDenyUnchecked = synced.Sum(r => r.HardDenyUnchecked),
+                HardDenyNarrowFailed = synced.Sum(r => r.HardDenyNarrowFailed),
+            };
         }
 
         /// <summary>

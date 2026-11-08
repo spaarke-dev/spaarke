@@ -58,6 +58,66 @@ public record PushFieldMappingsResponse
     /// Only populated when detailed results are requested.
     /// </summary>
     public FieldMappingResultDto[] FieldResults { get; init; } = [];
+
+    /// <summary>
+    /// Task 040 (FR-34): true when the request asked for a preview and nothing was written. Absent from an ordinary push.
+    /// </summary>
+    public bool? Preview { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-34), preview only: one entry per child and column whose value would change. A child whose value is
+    /// already the source's is not listed.
+    /// </summary>
+    public PushPreviewChange[]? Changes { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-34), preview only: how many candidate children were left out because the caller lacks Write on them.
+    /// </summary>
+    public int? SkippedNoWriteCount { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-34), preview only: true when more children exist than one push handles, so the list is partial.
+    /// </summary>
+    public bool? Truncated { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-23): how many of the profile's rules a push did not apply (Default, Concat, Template, or not set to
+    /// Manual Refresh). Skipped and counted, never an error.
+    /// </summary>
+    public int? SkippedRuleCount { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-34), preview only: the confirmed ids (<c>childIds</c>) the server did not derive as children of the source
+    /// for the caller. They are not previewed, and an apply refuses them per id; the client says they will not be updated.
+    /// </summary>
+    public Guid[]? RefusedChildIds { get; init; }
+}
+
+/// <summary>
+/// One value a push would change (task 040, FR-34 preview): the child, the column and what it holds now and would hold.
+/// </summary>
+public record PushPreviewChange
+{
+    /// <summary>The child record.</summary>
+    public Guid RecordId { get; init; }
+
+    /// <summary>The child's display name, or null when the caller cannot read it.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>The target column's logical name.</summary>
+    public string Column { get; init; } = string.Empty;
+
+    /// <summary>What the column holds now, as text; null when empty.</summary>
+    public string? From { get; init; }
+
+    /// <summary>What the column would hold, as text; null when it would be cleared.</summary>
+    public string? To { get; init; }
+
+    /// <summary>
+    /// The Assigned-To policies the change meets (UAC-r2 4a): "secure" (a suggestion, no access written), "restricted" (no
+    /// contact grant) and "limited" (no organization grant). Empty for an ordinary column.
+    /// </summary>
+    public string[] Flags { get; init; } = [];
 }
 
 /// <summary>

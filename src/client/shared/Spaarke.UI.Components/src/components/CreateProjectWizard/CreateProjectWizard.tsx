@@ -614,7 +614,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               // this request. Colleagues are added afterwards through Manage Access (FR-29).
             },
             authFetch,
-            bffBaseUrl
+            bffBaseUrl,
+            undefined,
+            // Task 049 fix round 2: after a project created secure from creation, this call only does what is left.
+            { securedAtCreate: result.securedAtCreate === true }
           );
 
           provisioningSucceeded = provisionResult.success;
