@@ -722,3 +722,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 - **Ruling (relayed):** the derived spend and budget Thresholds read the invoice approved total (ebilling-r1 D-130), and that total now includes reviewer-added lines (EB-D-199/EB-D-205). An added line counts its amount while undecided or Accepted, its approved amount when Reduced, and nothing when Disallowed. Pending spend moves when a line is added; counted spend moves once the invoice is in a counted status.
 - **Code:** no evaluator change. `FinanceBaseValues` doc comments updated by ebilling (164a, with ontology's OK). Reviewed by ontology (164a: no F findings).
+
+## D-212 — Work Item privilege flag is derived from communication classification (owner, 2026-11-08; relayed from spaarkeai-mcp-bff-api-r1)
+
+- **Ruling (relayed), FR-04 "option A widened":** a Work Item is privilege-flagged when its subject (when the subject is a communication) or any witness or evidence communication has `sprk_privilegeclassification` Privileged or Potentially Privileged. The read is made as the caller and fails closed: unreadable, faulted or uninterpretable sources flag the item. None or null does not flag. `sprk_signal.sprk_privilegeflagged` is not a source (DI-64). Privilege still never gates a read (2026-07-16).
+- **Code:** mcp-bff task 018, `Services/Signals/WorkItemPrivilege.cs` (`SourcesOf`, `FlaggedAsync`). Reviewed by ontology: no F findings.
+- **Ontology follow-up:** DI-143 (#2630) reuses that helper for the Decision Record snapshot once 018 is on master.
+- **Known limits accepted with the ruling:** the AI's own flag (stored in association provenance) is not a source; field security on the classification column would read as not flagged; an untyped non-communication subject is over-flagged.
