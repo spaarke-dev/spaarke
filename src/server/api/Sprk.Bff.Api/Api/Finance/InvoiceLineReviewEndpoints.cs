@@ -251,7 +251,7 @@ public static class InvoiceLineReviewEndpoints
         AddLineStatus.InvoiceNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         AddLineStatus.NotInReview or AddLineStatus.FirmMissing or AddLineStatus.CorrectionsPending or AddLineStatus.CodeSetUnavailable
             or AddLineStatus.ProcedureGap or AddLineStatus.TotalsRefused or AddLineStatus.IdReused or AddLineStatus.Busy
-            or AddLineStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+            or AddLineStatus.Changed or AddLineStatus.TooLarge => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         AddLineStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
         // The line was committed but totals, record or Signals did not finish: the repeat of the same request completes it (164a-4b, N10).
         AddLineStatus.Incomplete => Results.Problem(

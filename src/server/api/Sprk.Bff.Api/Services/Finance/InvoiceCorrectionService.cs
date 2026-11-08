@@ -98,6 +98,13 @@ public static class CorrectionCodes
     /// <summary>The correction would push the line's extraction JSON over its column limit; 409, nothing was written.</summary>
     public const string TooLarge = "ebilling.correction.too_large";
 
+    /// <summary>082d fix round 2: the patched findings would exceed <c>sprk_findingsjson</c>'s column even without the Procedure snapshot; 409, the value is saved and
+    /// the findings are not patched (the correction stays unapplied).</summary>
+    public const string FindingsTooLarge = "ebilling.correction.findings_too_large";
+
+    /// <summary>The sentence with <see cref="FindingsTooLarge"/>.</summary>
+    public const string FindingsTooLargeDetail = "The correction was saved, but the invoice's stored findings are too large to update, so its rules were not re-checked. Contact support.";
+
     /// <summary>The line's extraction JSON is missing (it was over the column limit when the invoice was stored); 409, nothing was written.</summary>
     public const string ExtractionUnavailable = "ebilling.correction.extraction_unavailable";
 
@@ -972,6 +979,12 @@ public sealed class InvoiceCorrectionService
             // Incomplete would tell the reviewer to repeat the request, which never clears a gap. The correction stays unapplied, which holds approval.
             _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but it brings in a Procedure gap, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
             return new CorrectionResult(CorrectionStatus.ProcedureGap, CorrectionCodes.ProcedureGap, CorrectionCodes.ProcedureGapDetail);
+        }
+        catch (CorrectionFindingsTooLargeException)
+        {
+            // 082d fix round 2: the value saves, the findings cannot be patched within their column. 409 with a fixed sentence; repeating never clears it.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but the patched findings are over the findings column, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.TooLarge, CorrectionCodes.FindingsTooLarge, CorrectionCodes.FindingsTooLargeDetail);
         }
         catch (CorrectionTotalsRefusedException refused)
         {

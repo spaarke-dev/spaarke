@@ -246,6 +246,8 @@ Branch `task/ebilling-082b`, from `origin/work/ebilling-r1` at `0735a566e5`. Not
 
 No surface names a parent core record today. 082d must keep `ChainRecord` and `Reason` out of any reader-facing member of `sprk_findingsjson`. Model 7.4 lists "chain record" in the submission snapshot while U3 lists findings JSON as reader-facing. **082d must resolve that tension**: for example, an internal-only member that the review read model never projects, or the distance only.
 
+Resolved in 082d: the internal-only member (`procedureSnapshot`); see "082d implementation", "The ~:247 tension, resolved".
+
 ### 082b gates and seeding proofs
 
 | Run | Result |
@@ -1294,3 +1296,108 @@ Branch `task/ebilling-082c-3b` from `origin/work/ebilling-r1` (d120d64735). Clie
 
 - R4 and the word-add-in notices are in the 082c-3 report (not sent from this slice).
 - 114 and C22 are unchanged.
+
+## 082d implementation (2026-11-08)
+
+Branch `task/ebilling-082d`, cut from `origin/work/ebilling-r1` at `ee0b173288` (contains `d415d37508`). Deviation: the agent worktree's HEAD was master-based, so the branch was created from the project branch instead of merging the project branch into that HEAD. Step 9.5 not run here (the lead runs two adversarial passes).
+
+### What changed
+
+- `InvoiceComplianceEvaluator.cs`: `BillingEvaluationResult.ProcedureBasis` (`BillingProcedureBasis`: the chain, the `ProcedureRulesOnDate` of every subject date the run judged with, and per selected version a `BillingRuleApplication` with the subjects it was applied to, displaced on (Replace) or cap-displaced on (Split)). The precedence loop now records an outright displacement before the handler check; the evaluation result is unchanged.
+- `ProcedureSnapshot.cs` (new): builds the `procedureSnapshot` member from the basis (ids, enums, numbers, distances, override reasons; **no names**), reads it back (`StoredProcedureSnapshot`) and builds the bounded Decision Record summary.
+- `InvoiceSubmissionPersister.cs`: one hunk in `BuildFindingsJson`, `[ProcedureSnapshot.Member] = ProcedureSnapshot.Build(outcome.Evaluation)`, always written (null with no evaluation).
+- `InvoiceSubmissionAfterSteps.cs`: `StoredFindings.ProcedureSnapshot` (read in `Parse`) and the summary in `BuildRejectionDecision` when the row stores a snapshot.
+- `CurrentVersionReaderRatchetTests.cs` (new ArchTest).
+- The 101 B2a golden (`InvoiceSubmissionPersisterTests.MixedInvoiceGoldenJson`) gains the trailing member; every earlier byte is unchanged.
+
+### The ~:247 tension, resolved
+
+The 7.4 basis (chain record ids, parent record ids, override row ids and reasons, Procedure and Procedure Version ids) lives in ONE internal member, `procedureSnapshot`, of the field-secured, app-only `sprk_findingsjson`. No reader projection reads it: the review read model (`InvoiceReviewReadService.ParsedFindings`) projects named members field by field and never names it; the status view and the holds read other members. Reader-facing Procedure data stays what it was: the existing `ForReaders()` gap finding. No reader-facing member was added, so no escalation. Held by tests: `ProcedureSnapshotTests` (U3: every member except `procedureSnapshot` is free of the secrets; control: the internal member carries them) and `InvoiceReviewReadServiceTests.TheReviewResponse_NeverCarriesTheProcedureBasis` (the serialized review DTO of a row that stores the basis holds no override reason, Procedure name, Procedure id, Procedure Version id, row id or chain record id).
+
+### Snapshot shape (`version` 1)
+
+`chain[{table,id,distance}]`; `overrides[]` (every deciding row once, by row id: `rowId, mode, record{table,id,distance}, procedureId, pinnedVersionId, policyId, firmId, reason`); `resolutions[]` (dates with identical content grouped: `dates[], procedures[{procedureId, procedureVersionId, level, distance, firmSpecific, sources, pinned, overrides[]}], rules[{policyId, policyVersionId, procedureId, procedureVersionId, recordRule}], excludedRules[], excludedProcedures[], gaps[]`); `applications[{policyVersionId, source, applied{invoice, lines[]}, displaced?, capDisplaced?}]`. Stored from the run's own resolution, never recomputed (`DatesResolved` unchanged by the build). Names are resolved at read time by whoever reads it (083, 113), never frozen.
+
+Reader compatibility: a row with no member (pre-082d), an unknown version, a member that is not an object, missing `applications`/`resolutions` or an application without an id reads as **no snapshot** (fail closed for 083 and 113). The re-run writes the member through the same builder (`FindingsAfter` copies fresh members), and a re-run without an evaluation writes null over an older snapshot.
+
+### Decision Record summary
+
+`facts.procedureSnapshot = {version, submissionId, member, procedures, appliedRules, displacedRules, gaps}`: counts and the pointer, never the basis. Only a row that stores a snapshot gets it, so a record rebuilt for a pre-082d row keeps its facts and hash. **Fix round 1 (K1):** the summary carries NO `excludedRules` or `excludedProcedures` count (an Exclude row sits on a core record of the chain, possibly a Secure parent; a Decision Record reader who cannot read that parent must learn nothing of the chain from it). `StoredProcedureSnapshot` no longer holds them either. Kept: `procedures`, `appliedRules` and `displacedRules` (outcome counts, not counts of override rows) and `gaps` (a Procedure gap is already a reader-facing finding via `ProcedureGap.ForReaders`). Test: `ProcedureSnapshotTests.DecisionRecordSummary_CarriesNoExcludeCount` (seed: an `excludedRules` key added back fails it and the key-set test).
+
+### K6
+
+The five records and `CoreRecordLink` already print no ids (082b K2, 082c C17). `ProcedureResolution` is a class (prints its type name) and `Chain` is a list; a test pins `ToString`, `string.Join` and interpolation of both, plus the on-date record, the basis, an application and the stored snapshot (counts only).
+
+### Ratchet (model 7.2)
+
+`CurrentVersionReaderRatchetTests`: every `src/server` file whose code names `sprk_currentversion` / `_sprk_currentversion_value` (not `sprk_currentversionid`) calls a `RuleDomains` filter or check, or is in the baseline. Baseline (owner ontology-r1): `OntologyAdminAuthoringService.cs`, `OntologyAdminClassificationService.cs`, `OntologyAdminRulesService.cs`. A baseline entry that stops reading or starts applying `RuleDomains` fails (it only shrinks). Must-fire: 4 planted readers; must-not-fire: 5 (three compliant readers, the document version lookup, a comment); the real readers classified (`BillingFactLoader`, `RuleSetService`, `SignalReevaluationJob` apply; `OntologyAdminRulesService` does not and is listed). Known limit: per file, not per read site.
+
+### NFR-01 and reads
+
+- 150 lines on 150 work dates, two Procedure Versions (11 rule types each) beside 11 legacy types: evaluation plus snapshot 101.4 ms in the first measured run, 83 ms in the gate run; 1,857 findings; snapshot 27,579 characters. Limit p90 ≤ 2 min: no escalation.
+- `BillingFactLoaderProcedureTests.TheReads_AreBounded_On150WorkDates_AndTheSnapshotReadsNothing`: the queried tables for 1 line equal those for 150 lines; building the snapshot adds no read; 2 dates resolved for 1 line, 150 for 150.
+
+### Component justification (CLAUDE.md §11)
+
+- `ProcedureSnapshot` / `BillingProcedureBasis`: existing: `ExtractionProvenance` is the same per-member builder shape; no member holds the Procedure basis. Extension: the basis is the evaluator's, so it is returned on the existing result rather than re-resolved. Cost of doing nothing: 083 cannot name the applied versions and 113 cannot compare a re-run, so model 7.4 fails.
+- No new column, endpoint, DI registration or package.
+
+### Before / after and seeds (each restored from HEAD; tree clean afterwards)
+
+- Before (persister member and Decision Record line removed): 12 of 14 snapshot tests and both re-run tests fail; the 2 that pass are guards that hold either way (pre-082d Decision Record unchanged; not recomputed).
+- Reader-projection seed: the review projection given a pipeline finding carrying the member's raw text; `TheReviewResponse_NeverCarriesTheProcedureBasis` failed on the chain record id.
+- Ratchet seed: `internal const string SeedColumn = "sprk_currentversion";` in `ProcedureSnapshot.cs`; the real-code ratchet failed naming that file.
+
+### Gates
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered unit (`ProcedureResolver|BillingRule|CoreRecordChain|Submission|Finance|InvoiceReview`): 7701 passed, 0 failed, 4 skipped.
+- ArchTests (full): 2143 passed, 0 failed.
+- Publish size (Release, framework-dependent linux-x64, `git archive` trees in the scratchpad, `Compress-Archive -CompressionLevel Optimal`, 191 files each side): task parent `ee0b173288` 41,457,612 B → `2fbb6b2465` 41,464,494 B (**+6,882 B**; `Sprk.Bff.Api.dll` +19,456 B). Against a fresh `origin/master` build (`57748ebf6d`, 41,170,157 B) the branch is +294,337 B, almost all of it the project branch's earlier slices. Total 41.5 MB, under the 55 MB review threshold. No package changed (no CVE delta).
+
+### Known limits
+
+- The ratchet is file-level (above); a column name built at run time, and readers outside `src/server`, are not seen. Two more cases of `SourceScan.CodeText` (fix round 1, K3, no code change): it cuts a line at the first `//` even inside a string literal (so a `"http://..."` literal hides the rest of its line, including a `sprk_currentversion` after it), and it does not strip block comments (`/* ... sprk_currentversion ... */` counts as code, so a block comment can make a file look like a reader, or hide a `RuleDomains` call that is only commented out as a block).
+- A rate rule skipped for currency is listed as applied to its subjects (the evaluator ran it).
+- (Fix round 1, F4: no longer a limit.) The stored snapshot after a correction or an added line is now written by the patch itself, see "Fix round 1" below.
+- The Decision Record summary is added only for rows that store a snapshot, so the same submission's record differs before and after 082d by that one fact.
+
+### Fix round 1 (F4, F3, K1, K2, K3)
+
+**F4: the snapshot after a correction or an added line.** Both paths re-run the evaluator (`afterResult` carries `ProcedureBasis`) and patch the stored findings, but left `procedureSnapshot` as the submission wrote it. Now `ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided)` sets the member in the same conditional write: `InvoiceCorrectionReevaluation.PatchFindingsAsync` (inside the `original != root` write, so a correction whose patch writes nothing leaves the member byte-identical) and `InvoiceLineAddService` (in the one transaction, right after `AddLineFindings`).
+- **Choice, both paths:** the re-run's whole-invoice snapshot (`Build(afterResult)`) when it describes the stored findings, else JSON `null` (the readers 083 and 113 read it as "no snapshot" and fail closed). A decided line keeps its OLD entries (`PatchFindings` / `PatchPlan` skip it), so the whole-invoice snapshot is wrong exactly when something about a decided line differs between the re-run's two sides: a finding of a decided line (compared as `FindingEntryJson`), or the subjects (decided lines only) a rule version is applied / displaced / cap-displaced on. Then the stored findings mix two bases and the member is `null`. With no decided line, or decided lines the correction or the add does not touch (the usual case: a correction is refused on a decided line and an added line is undecided), the member is the re-run's basis. Same rule on both paths, one helper.
+- Not changed: a correction or add whose re-run carries no basis (a test double) writes `null` (same as the persister with no evaluation).
+- **Tests** (`ProcedureSnapshotPatchTests`, `InvoiceLineAddServiceTests.ProcedureSnapshot.cs`; the evaluator's result is shaped to carry a basis per side): correction must-fire (the member is the re-run's basis), correction with a decided line keeping an old cap finding (member JSON null), correction control with an unaffected decided line (re-run's basis), correction must-not-fire (refused into a Procedure gap: member byte-identical); the same four for Add line.
+- **Seeds** (each restored; tree clean afterwards): (1) delete the `root[ProcedureSnapshot.Member] = ...` line in `InvoiceCorrectionReevaluation.cs`: 3 correction tests fail (must-fire, decided null, decided control). (2) delete it in `InvoiceLineAddService.cs`: 3 add-line tests fail (must-fire, decided null, decided control). (3) `ForPatchedFindings` never answering null (`DecidedLinesDiffer` forced false): the two decided-null tests fail. The must-not-fire controls hold under (1) and (2) by construction (the refusal returns before the write).
+
+**F3.** Each `CurrentVersionReaderRatchetTests` baseline entry now carries a written reason and an ADR citation (tests/CLAUDE.md "Every allowlist / census entry carries a written reason and an ADR citation"): ADR-038 Amendment A1 (`tests/Spaarke.ArchTests/**` as the protected home of structural fitness functions) plus model 7.2 (ontology-r1's amendment of D-14 and the ratchet-with-baseline requirement); no domain ADR governs the rule-version pointer, which the comment says.
+
+**K1.** See "Decision Record summary" above.
+
+**K2.** The `StoredProcedureSnapshot.DisplacedPolicyVersionIds` doc said "displaced on every subject"; the reader code puts a version there when it is applied on no subject and displaced on at least one. The doc now says that; no behaviour change.
+
+**K3.** Ratchet limits added to "Known limits" (the `//` inside a string literal; block comments are not stripped).
+
+### Fix round 2 (F4, F3, K x3)
+
+**F4: a patched snapshot never contradicts the stored findings.** Round 1 wrote `Build(after)` whenever no decided line differed. But both patch paths evaluate before and after under the CURRENT rules, and `InvoiceFindingsDiff.PatchFindings` patches only the before to after difference, so an untouched stored entry keeps the basis it was judged under; `Build(after)` is wrong whenever the stored basis differs from the current one (a Procedure changed since submission). Now `ProcedureSnapshot.ForPatchedFindings(root, before, after, decided)` takes the stored findings and returns `Build(after)` ONLY when all three hold: (a) `Read(root)` is not null (a stored null, a damaged or unknown-version member stay "no snapshot"; null is sticky); (b) the stored member **deep-equals** `Build(before)` (`JsonNode.DeepEquals`, structural, no hand-rolled compare); (c) `!DecidedLinesDiffer`. Otherwise JSON null.
+- **Absent member: left absent.** `SetForPatchedFindings` (the one call both paths make) does nothing when `root` has no `procedureSnapshot` key. Chosen over writing null so "never had a snapshot" (a pre-082d row) stays distinguishable from "had one and it no longer describes the findings" (JSON null); both read as no snapshot, but 113 may want to say which. The round 1 test `ALineAReviewerDecided_KeepsItsFindingsPlanAndStatus_WhenTheDiffReachesIt` (a world with no member) asserted a written null; it now asserts the key is still absent and the stored text byte-identical.
+- The `ForPatchedFindings` doc comment is rewritten (it said the re-run's basis is stored because "the patch rewrote the findings", which was the wrong reason).
+- **Changed (fix round 3): the re-run is the fourth writer and now uses the same cap helper.** `InvoiceSubmissionRerun` (at the findings-size check, was `:561`) serializes `FindingsAfter(input, reset)` through `ProcedureSnapshot.SerializeWithinCap`: when the findings are over `FindingsJsonMaxLength` only because of the snapshot, the `procedureSnapshot` member is set to JSON null and the re-run writes; findings still over the cap without it keep the `InvoiceSubmissionRerunCodes.TooLarge` refusal with nothing written. Two tests in `InvoiceSubmissionRerunTests.ProcedureSnapshot.cs` (over only because of the snapshot: drops and writes; still over without it: `TooLarge`, nothing written); `InvoiceSubmissionProcessorTests.Harness` gained an `EvaluationEdit` hook to pad the result's Procedure basis. Seed: with the line reverted, the first test fails (`Refused`, `ebilling.rerun.too_large`).
+
+**F3: tests.** `ProcedureSnapshotPatchTests` and `InvoiceLineAddServiceTests.ProcedureSnapshot` now use a realistic double: ONE rule load, so both sides carry the same rule version and differ only in subjects (correction: the invoice joins on the after side; add line: the added line joins). The stored member is built with `ProcedureSnapshot.Build` from the before basis, not hand-written. Per path: must-fire (stored equals `Build(before)`: `Build(after)` written, and it differs from the stored one), must-null (stored built from a version the current load no longer carries: JSON null), stored null stays null, absent stays absent, decided line (with (b) holding, so only (c) can make the null) stays null, decided-line control, and the no-write control (kept byte-identical).
+- **Seeds** (each restored; tree clean afterwards): (1) break (b), `JsonNode.DeepEquals(stored, storedBasis)` replaced by `true`: the two must-null tests (correction, add line) fail, 361 others pass. (2) the member written without the (a)/absent guard (`if (false && !root.ContainsKey(Member))`): the two "absent stays absent" tests fail. (3) `SerializeWithinCap` never accepting the dropped form: the correction and the add-line drop tests fail. (4) persister retry disabled (`... ProcedureBasis is null`): the persister drop test fails. (5) `procedures` added back to the Decision Record summary: the summary key-set test and `DecisionRecordSummary_CarriesOnlyThePointerAndGaps` fail.
+
+**K: Decision Record counts.** `DecisionRecordSummary` is now `{version, submissionId, member, gaps}`: the pointer (the snapshot version, the submission id, the member name) and `gaps` (already reader-facing via `ProcedureGap.ForReaders`). `procedures`, `appliedRules` and `displacedRules` are dropped as well as the Exclude counts: a count of the chain's outcome tells a Decision Record reader who cannot read the chain's records about the chain (an Exclude on a Secure parent changes how many Procedures and rules applied). Tests: the key-set assertion in `DecisionRecord_CarriesTheBoundedSummary` and `DecisionRecordSummary_CarriesOnlyThePointerAndGaps` (renamed from `..._CarriesNoExcludeCount`, asserts exactly those four keys and, as a control, that the stored counts it leaves out are non-zero). A pre-082d row still adds no fact, so its hash is unchanged (`DecisionRecord_PreV5Row_HasNoSummary`, kept). The round 1 wording above ("Kept: procedures, appliedRules and displacedRules") is superseded by this.
+
+**K: size.** `sprk_findingsjson` is capped at `InvoiceSubmissionPersister.FindingsJsonMaxLength` (1,048,576). The snapshot is the one member allowed to go ("no snapshot" is a defined state):
+- Persister: when the built JSON is over the cap and the evaluation carries a basis, it logs a warning (lengths only) and rebuilds with `includeProcedureSnapshot: false` (member JSON null), then the existing check refuses (`FindingsTooLargeCode`) if it is still over.
+- Correction and Add line: `ProcedureSnapshot.SerializeWithinCap(root, cap, out dropped)` returns the text if it fits, else the text with the member set to null, else null. Null means the findings alone are over the cap: nothing is written. Correction throws the new `CorrectionFindingsTooLargeException`, answered as 409 status `TooLarge` with the new code `ebilling.correction.findings_too_large` and a fixed sentence (the value is saved, the findings are not patched; the correction stays unapplied and holds approval, as for a Procedure gap; repeating never clears it). Add line returns the new `AddLineStatus.TooLarge`, code `ebilling.line_add.too_large`, 409 (added to the endpoint's 409 list), nothing written. Both log a warning. An absent member and a member that is already null have nothing to drop, so they go straight to the refusal.
+- Tests: persister drop; correction drop; add line drop; correction still-over-cap refusal (no findings write, stored text unchanged); add line still-over-cap refusal (no transaction, stored text unchanged).
+
+**K: notes only.** `ProcedureSnapshot.Read` returns null for BOTH a stored JSON null and an absent member (and for a damaged or unknown-version one); the doc now says so. No `ContainsKey(Member)` helper was added: the only caller that must tell them apart (`SetForPatchedFindings`) calls `root.ContainsKey(Member)` directly. **For 113:** if it must show "never had a snapshot" separately from "snapshot dropped", it should test `ContainsKey(Member)` on the parsed findings itself, or a small helper can be added then. `StoredProcedureSnapshot.ProcedureCount` no longer feeds anything in 082d (kept for 113's comparison).
+
+**Follow-ups (K1, K3, K4).**
+- K1 (round trip, correction and add line): a snapshot the REAL evaluator built at submission (`ProcedureSnapshotPatchKit.SubmissionTimeRequest`, a request built from the stored rows independently of `RequestBasis`, over a Procedure kit with two rules assigned to the matter) is PRESERVED by a normal correction of an undecided line and by a normal add, with no Procedure change: the stored member is not null and deep-equals the real `Build(after)`; the rebuilt "before" side also deep-equals the stored snapshot. Limit: the world stores no submission-time timekeeper resolution, so the submission request uses NotOnRoster and the rebuild reads None; the snapshot does not depend on it (it reads the Procedure chain, overrides, resolutions and applications). Two tests: `ACorrection_OfAnUndecidedLine_WithARealSubmissionSnapshot_PreservesTheSnapshot`, `AddLine_WithARealSubmissionSnapshot_PreservesTheSnapshot`.
+- K3: the `line_add.too_large` detail now ends "Nothing was changed. Contact support." (fixed server text, as the correction's `findings_too_large`); the existing refusal test asserts it.
+- K4: `AddLineStatus.TooLarge` moved to the end of the enum, so every earlier member keeps its numeric value (nothing in the code or the tests relies on the numbers; the endpoint maps by name).

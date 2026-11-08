@@ -557,8 +557,8 @@ public sealed partial class InvoiceSubmissionRerun
             }
         }
 
-        var findings = FindingsAfter(input, reset).ToJsonString();
-        if (findings.Length > InvoiceSubmissionPersister.FindingsJsonMaxLength)
+        var findings = ProcedureSnapshot.SerializeWithinCap(FindingsAfter(input, reset), InvoiceSubmissionPersister.FindingsJsonMaxLength, out _);
+        if (findings is null)
         {
             return (null, Refuse(input.SubmissionId, InvoiceSubmissionRerunCodes.TooLarge));
         }

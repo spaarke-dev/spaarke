@@ -246,6 +246,7 @@ public sealed class InvoiceCorrectionReevaluationTests
         var patched = Stored(world);
         patched.Remove(InvoiceCorrectionReevaluation.AppliedCorrectionsMember).Should().BeTrue("fix round, part 3: the row is recorded as followed through");
         patched.Remove(InvoiceCorrectionReevaluation.PatchedCorrectionsMember).Should().BeTrue("fix round, part 3: the empty patch still records what the findings reflect");
+        patched.ContainsKey(Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Member).Should().BeFalse("082d fix round 2: this row has no snapshot (stored before 082d), and a patch never adds one; null is for a snapshot that no longer describes the findings");
         patched.ToJsonString().Should().Be(stored, "nothing on a decided line is patched");
         StatusOf(world.Line(decidedId)).Should().Be((int)InvoiceLineStatus.Accepted);
         world.ValueWrites.Should().NotContain(w => w.Id == decidedId);

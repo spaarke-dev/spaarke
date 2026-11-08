@@ -53,6 +53,42 @@ public sealed record BillingProcedureGap(ProcedureGap Gap, bool AppliesToInvoice
     }
 }
 
+/// <summary>
+/// ebilling-r1 082d (model 7.4): how precedence (step 4) treated one selected, gate-accepted rule version, per subject. <paramref name="Applied"/>:
+/// the subjects it judged (a Split version kept for its code check included). <paramref name="Displaced"/>: the subjects where a higher-ranked valid
+/// version of its Replace key displaced it outright (it never ran there). <paramref name="CapDisplaced"/>: the Split subjects where it kept its code
+/// check and lost its cap. <see cref="object.ToString"/> prints the source and the counts only (no id; 082b K2, 082d K6).
+/// </summary>
+public sealed record BillingRuleApplication(
+    Guid PolicyVersionId, BillingRuleSource Source, IReadOnlyList<BillingSubject> Applied, IReadOnlyList<BillingSubject> Displaced,
+    IReadOnlyList<BillingSubject> CapDisplaced)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Source = ").Append(Source).Append(", Applied = ").Append(Applied.Count).Append(", Displaced = ").Append(Displaced.Count)
+            .Append(", CapDisplaced = ").Append(CapDisplaced.Count);
+        return true;
+    }
+}
+
+/// <summary>
+/// ebilling-r1 082d (model 7.4): the basis of one evaluation, as the evaluator used it: the core-record chain the resolution read, the
+/// <see cref="ProcedureRulesOnDate"/> of every distinct subject date (the C9 memo, in date order: the objects the evaluator judged with, never
+/// re-resolved), and how precedence treated each selected rule version (both streams). The submission persists it as its snapshot
+/// (<c>procedureSnapshot</c> in <c>sprk_findingsjson</c>); 083 cites it and 113 compares with it. INTERNAL: it holds record, row and Procedure
+/// ids and override reasons; a reader-facing output uses <see cref="ProcedureRulesOnDate.ForReaders"/>. <see cref="object.ToString"/> prints the
+/// counts only.
+/// </summary>
+public sealed record BillingProcedureBasis(
+    IReadOnlyList<CoreRecordLink> Chain, IReadOnlyList<ProcedureRulesOnDate> Dates, IReadOnlyList<BillingRuleApplication> Applications)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Chain = ").Append(Chain.Count).Append(", Dates = ").Append(Dates.Count).Append(", Applications = ").Append(Applications.Count);
+        return true;
+    }
+}
+
 /// <summary>The outcome of one evaluation. Deterministic: the same request and facts give equal results in equal order.</summary>
 public sealed record BillingEvaluationResult
 {
@@ -80,6 +116,9 @@ public sealed record BillingEvaluationResult
     /// holds it.
     /// </summary>
     public IReadOnlyList<BillingProcedureGap> Gaps { get; init; } = [];
+
+    /// <summary>082d (model 7.4): the basis the submission stores as its snapshot. Null only on a result built elsewhere (a test double).</summary>
+    public BillingProcedureBasis? ProcedureBasis { get; init; }
 
     /// <summary>The fact set the handlers judged.</summary>
     public required BillingFactSet Facts { get; init; }
@@ -381,6 +420,7 @@ public sealed class InvoiceComplianceEvaluator
         //    Reject into a Flag). C7 (K3): only gate-accepted definitions reach PrecedenceOf; a refused version takes no part here.
         var subjectsByVersion = new Dictionary<Guid, HashSet<BillingSubject>>();
         var capDisplaced = new Dictionary<Guid, HashSet<BillingSubject>>();
+        var displacedOutright = new Dictionary<Guid, HashSet<BillingSubject>>(); // 082d: for the snapshot only; decides nothing
         bool Valid(BillingRuleCandidate version) =>
             !downgraded.ContainsKey(version.PolicyVersionId) && HandlerAccepts(version, accepted[version.PolicyVersionId]);
         static void Add(Dictionary<Guid, HashSet<BillingSubject>> into, Guid versionId, BillingSubject subject)
@@ -423,7 +463,13 @@ public sealed class InvoiceComplianceEvaluator
                     // Below the top valid rank: Replace displaces it; Split keeps it for its code check and drops its cap (step 5). A tie
                     // with the top is not displaced: ties all apply.
                     var displaced = top is { } t && version.Rank.CompareTo(t) < 0;
-                    if ((displaced && precedence == BillingRulePrecedence.Replace) || !HandlerAccepts(version, accepted[version.PolicyVersionId]))
+                    if (displaced && precedence == BillingRulePrecedence.Replace)
+                    {
+                        Add(displacedOutright, version.PolicyVersionId, subject);
+                        continue;
+                    }
+
+                    if (!HandlerAccepts(version, accepted[version.PolicyVersionId]))
                     {
                         continue;
                     }
@@ -551,7 +597,22 @@ public sealed class InvoiceComplianceEvaluator
             Skips = skips,
             Facts = facts,
             Gaps = gaps,
+            ProcedureBasis = new BillingProcedureBasis(
+                loaded.Procedures.Chain,
+                onDate.OrderBy(d => d.Key).Select(d => d.Value).ToList(),
+                candidates
+                    .Where(c => subjectsByVersion.ContainsKey(c.PolicyVersionId) || displacedOutright.ContainsKey(c.PolicyVersionId))
+                    .Select(c => new BillingRuleApplication(
+                        c.PolicyVersionId, c.Source, SubjectsOf(subjectsByVersion, c.PolicyVersionId), SubjectsOf(displacedOutright, c.PolicyVersionId),
+                        SubjectsOf(capDisplaced, c.PolicyVersionId)))
+                    .ToList()),
         };
+
+        // The invoice first, then by line index (the findings' order).
+        static IReadOnlyList<BillingSubject> SubjectsOf(Dictionary<Guid, HashSet<BillingSubject>> bySubject, Guid versionId) =>
+            bySubject.TryGetValue(versionId, out var set)
+                ? set.OrderBy(s => s.Kind == BillingSubjectKind.Invoice ? 0 : 1).ThenBy(s => s.LineIndex ?? -1).ToList()
+                : [];
     }
 
     /// <summary>

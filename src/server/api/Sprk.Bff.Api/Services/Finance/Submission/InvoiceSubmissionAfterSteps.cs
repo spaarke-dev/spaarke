@@ -1476,6 +1476,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 ["sentence"] = RecordSentence(p),
             }).ToList(),
         };
+        if (stored.ProcedureSnapshot is { } basis)
+        {
+            // 082d (model 7.4, ontology O2): a bounded summary and the pointer to the submission's snapshot, never the basis. Only a row that stores
+            // a snapshot gets it, so a record rebuilt for a row stored before 082d keeps its facts, and its hash, unchanged.
+            facts[ProcedureSnapshot.DecisionRecordFact] = ProcedureSnapshot.DecisionRecordSummary(basis, submissionId);
+        }
+
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["submissionId"] = submissionId.ToString("D"),
@@ -1573,6 +1580,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         public IReadOnlyList<int> DecidingIndexes { get; init; } = [];
         public IReadOnlyDictionary<int, StoredFinding> Findings { get; init; } = new Dictionary<int, StoredFinding>();
         public IReadOnlyList<StoredPlanEntry> Plan { get; init; } = [];
+
+        /// <summary>082d: the stored Procedure basis (<see cref="global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(JsonObject)"/>);
+        /// null on a row stored before it, or a damaged one.</summary>
+        public StoredProcedureSnapshot? ProcedureSnapshot { get; init; }
+
         private JsonArray PipelineFindings { get; init; } = [];
         private JsonArray CodingFindings { get; init; } = [];
         private JsonObject? CodeSet { get; init; }
@@ -1740,6 +1752,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     CodingFindings = root["codingFindings"] as JsonArray ?? [],
                     CodeSet = root["codeSet"] as JsonObject,
                     InvoiceNumberReadConfidence = root["invoiceNumberReadConfidence"]?.GetValue<decimal>(),
+                    ProcedureSnapshot = global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(root),
                     ResolvedSet = root[ResolvedSetMember] switch
                     {
                         null => null,
