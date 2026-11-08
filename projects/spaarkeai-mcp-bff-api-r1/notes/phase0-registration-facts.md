@@ -14,7 +14,7 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 | Service principal object ID | `f841f04b-4d78-4c62-a012-0d988f402791` |
 | Tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
 | Sign-in audience | `AzureADMyOrg` (single tenant) |
-| Allow public client flows | Yes (`isFallbackPublicClient = true`) |
+| Allow public client flows | Set to Yes at creation; switched to **No** on 2026-11-08 because the Dev Portal requires a secret, which makes this a confidential client |
 | Credentials | none (0 passwords, 0 certificates) |
 | Requested permission | BFF `1e40baad-…` delegated `user_impersonation` (`18afc847-a660-40b2-8925-747aed613f36`) |
 | Admin consent | granted: `oauth2PermissionGrant` consentType `AllPrincipals`, scope `user_impersonation` |
@@ -33,7 +33,7 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 
 - Registration ID: _tbd_
 - Redirect URI shown by the portal: _tbd_
-- Secret required? _tbd_. If yes, STOP and get the owner's confirmation.
+- Secret required? **Yes** (the portal will not save without one, 2026-11-08). The owner confirmed it and creates it in Entra, pasting it straight into the portal; the value is never in the repo or the agent. Expiry: _tbd_ (dev Path A: up to 24 months). Named owner: the project owner.
 
 ## (c) Copilot connector "Spaarke" — pending (owner)
 

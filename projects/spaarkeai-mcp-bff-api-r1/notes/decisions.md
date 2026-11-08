@@ -276,3 +276,17 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - Ontology accepts the three known limits as part of the ruling; they record it as D-212.
 - Their DI-143 (#2630) will reuse `WorkItemPrivilege.SourcesOf` + `FlaggedAsync` with the deciding caller's client once 018 is on master.
 - **Obligation:** notify ontology when 018 reaches master. It rides the project PR #2587.
+
+## 2026-11-08 — 002 (b): the Dev Portal requires a client secret; owner confirms; ADR-028 A10 Path A (dev expiry up to 24 months)
+
+- **Finding:** the Teams Developer Portal OAuth client registration does not save without a client secret, so A10's preferred public client with PKCE is not available. This feeds the A10 follow-up note (A10 "Open … T5").
+- **Owner confirmed creating the secret** (CLAUDE.md §9).
+  - The owner creates it in Entra and pastes the value straight into the Dev Portal; the agent never sees the value.
+  - Named owner: the project owner.
+- **Owner chose Path A (§6.5)** after the ADR-conflict notice:
+  - the dev connector secret may expire up to 24 months out (the Entra portal maximum), instead of A10's 180 days;
+  - the 180-day cap stays for customer stamps;
+  - recorded in spec.md ADR Tensions.
+- **Consequences:**
+  - the connector app becomes a confidential client: "Allow public client flows" off, and the portal redirect URI goes on the **Web** platform;
+  - a rotation runbook is still owed (`docs/guides/`, task 052).
