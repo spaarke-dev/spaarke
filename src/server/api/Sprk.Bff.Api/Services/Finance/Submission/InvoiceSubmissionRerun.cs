@@ -420,9 +420,7 @@ public sealed partial class InvoiceSubmissionRerun
         // attached by anything else is never written; the rebuild's count check would miss one swapped in at the same sequence.
         foreach (var line in state.Lines)
         {
-            if (line.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense
-                && (line.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) is not { } sequence || sequence < 1
-                    || line.Id != InvoiceSubmissionPersister.LineIdFor(submissionId, sequence - 1)))
+            if (InvoiceLineOrigin.IsChargeLine(line) && !InvoiceLineOrigin.IsIntakeLineOf(line, submissionId))
             {
                 return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.LineNotOwned, InvoiceSubmissionPersister.LineEntity, line.Id));
             }

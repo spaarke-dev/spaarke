@@ -286,6 +286,7 @@ public sealed partial class InvoiceLineAddServiceTests
             InvoiceLineStatus.Flagged, 200m, extraction: ExtractionProvenance.ForReviewerAddedLine(addDecision),
             id: ExtractionProvenance.AddedLineIdFor(w.InvoiceId, addDecision));
         ExtractionProvenance.IsReviewerAdded(added).Should().BeTrue("the setup: an added line");
+        await w.RecordAddedLineAsync(added.Id, addDecision); // task 165b: Add line's own record (the line's known origin)
 
         var refused = await w.ApproveAs(ApprovalWorld.AliceUser);
 

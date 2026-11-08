@@ -471,7 +471,9 @@ public partial class InvoiceSubmissionPersisterTests
         // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
         ApprovalWorld WorldWith(Entity line)
         {
-            var world = new ApprovalWorld("sprk_matter");
+            // Task 165b: the world's invoice is the persister's own (its submission's), so the line is that submission's intake line.
+            InvoiceLineOrigin.IsIntakeLineOf(line, Submission).Should().BeTrue("the persister wrote the line for its own submission");
+            var world = new ApprovalWorld("sprk_matter", ownSubmissionId: Submission);
             var row = new Entity(line.LogicalName, line.Id);
             foreach (var attribute in line.Attributes)
             {
@@ -618,7 +620,9 @@ public partial class InvoiceSubmissionPersisterTests
         // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
         static ApprovalWorld WorldWith(Entity line)
         {
-            var world = new ApprovalWorld("sprk_matter");
+            // Task 165b: the world's invoice is the persister's own (its submission's), so the line is that submission's intake line.
+            InvoiceLineOrigin.IsIntakeLineOf(line, Submission).Should().BeTrue("the persister wrote the line for its own submission");
+            var world = new ApprovalWorld("sprk_matter", ownSubmissionId: Submission);
             var row = new Entity(line.LogicalName, line.Id);
             foreach (var attribute in line.Attributes)
             {
