@@ -26,6 +26,7 @@
     <in>
       - Readers 1 and 2 call the one rule (no copy). A mismatched pair logs a reason code with ids only, following 165c's log-level split (reader 1 Warning; reader 2 Information, or Debug when reader 1 already logged the pair).
       - Extend `OwnSubmissionRuleSingleSourceTests`, or add a sibling guard with the same mechanics, so that a document-id comparison outside the rule fails.
+      - (From 165e pass 1, K1.) Reader 1 decides a submission with no invoice link whose derived invoice exists (looked up the way the firm-hold check already does, `InvoiceKeysOf`) by that invoice's verdict, not by channel alone. A read fault there withholds the submission.
     </in>
     <out>
       - Field security on the submission link columns (owner question, dev-deploy checklist).
@@ -37,6 +38,7 @@
   <acceptance-criteria>
     <criterion>Must-fire, each with its must-not-fire control: in reader 1 and in reader 2, a submission whose `sprk_document` is not its own document contributes nothing. Control: the submission's own document is used, as today.</criterion>
     <criterion>A read fault in the document check hides the invoice (fail closed). One test per reader.</criterion>
+    <criterion>K1 item: a submission with no invoice link whose derived invoice is hidden is withheld by reader 1. Control: its derived invoice is visible, so the submission is too. A read fault withholds it.</criterion>
     <criterion>One seed per reader: drop the check, and that reader's must-fire test fails. Also the guard's must-fire fixture.</criterion>
     <criterion>Dev data (read-only): count the submissions whose document link fails the rule. Expected 0. If more than 0, STOP and send the ids to the lead only.</criterion>
     <criterion>Filtered unit tests (ExternalAccess, ExternalInvoiceVisibility, Finance, Submission) and the full ArchTests pass. The BFF builds.</criterion>
