@@ -76,3 +76,9 @@ UI hides are not a privilege boundary: a user can still create a row through the
 Two deviations from `Deploy-EbillingBillingExportRibbon.ps1`: (1) the hide list is printed BEFORE the stored-ribbon refusal, so a refused dry run still shows the hides; (2) `$SourceDiff` is hard-coded to the mixed-case folder `sprk_BillingEvent` (the checked-in source folder), while the shell and the table logical name are lower case.
 
 P1 is met in the inverse direction: the script refuses when dev carries rows the diff does not (outside the four-id allow-list), because the import would delete them.
+
+### Q6 allow-list widened (lead, 2026-11-08)
+
+uac-r2 approved adding the three further rows of the same SecureChild New button, and confirmed against master's `sprk_BillingEvent/RibbonDiff.xml` that the SecureChild footprint on this table is exactly: the CustomAction `sprk.SecureChild.sprk_billingevent.SubGrid.New.CustomAction`, the CommandDefinitions `sprk.SecureChild.sprk_billingevent.New.Command` and `Mscrm.AddNewRecordFromSubGridStandard`, the EnableRules `...NativeNewAllowed.EnableRule` and `...NewAvailable.EnableRule`, the LocLabels `...New.LabelText` and `...New.ToolTipDescription`, plus the Button `sprk.SecureChild.sprk_billingevent.SubGrid.New` if dev stores it as its own row. `$ReplacedByQ6` now holds exactly those eight ids (exact, case-sensitive; no prefix, no wildcard); any other id still refuses. The "four ids" wording above is superseded.
+
+`-Verify` now also requires every hide in the diff (11) to be a stored `ribbondiffs` row on the table (uac-r2 condition 2), besides the effective-ribbon absence and the sibling `Save` control.

@@ -14,7 +14,7 @@
     ribbon-only solution BillingEventRibbons (the shell infrastructure/dataverse/ribbon/BillingEventRibbons holds the sprk_billingevent root
     component with behavior 2 = no subcomponents; the RibbonDiff.xml is copied in at pack time, so there is one copy). The import REPLACES the
     table's RibbonDiffXml, which is why the diff is the whole file, not only the hides. So the dry run REFUSES (exit 2) while dev's stored ribbon
-    for the table holds anything the checked-in diff does not contain, EXCEPT the four ids in $ReplacedByQ6 below (uac-r2 Q6 (b): the import may
+    for the table holds anything the checked-in diff does not contain, EXCEPT the ids in $ReplacedByQ6 below (uac-r2 Q6 (b): the import may
     replace exactly those). Any other id, including any other sprk.SecureChild.* row, still refuses. Scoped publish only: sprk_billingevent, never PublishAllXml
     (scripts/lib/Publish-SolutionComponents.ps1).
 
@@ -55,18 +55,24 @@ $SourceDiff = Join-Path $repo 'src' 'dataverse' 'solutions' 'SpaarkeMaster' 'Ent
 
 # A control that always exists on the table's form ribbon: -Verify and the post-apply check require it, so an empty or wrong payload cannot pass.
 $PositiveControl = 'Mscrm.Form.sprk_billingevent.Save'
-# replaced by this import per uac-r2 Q6 (b), 2026-11-08; billingevent's SecureChild New was removed in 096b/164a
+# replaced by this import per uac-r2 Q6 (b), 2026-11-08; billingevent's SecureChild New was removed in 096b/164a.
+# The whole SecureChild footprint on this table (uac-r2 confirmed against master's RibbonDiff.xml): one CustomAction, two
+# CommandDefinitions, two EnableRules, two LocLabels, plus the Button inside the CustomAction if dev stores it as its own row.
 # Exact, case-sensitive match only (-ccontains): no prefix, no wildcard. Every other live id the checked-in diff does not carry still refuses.
 $ReplacedByQ6 = @(
+    'sprk.SecureChild.sprk_billingevent.SubGrid.New.CustomAction'
+    'sprk.SecureChild.sprk_billingevent.SubGrid.New'
     'sprk.SecureChild.sprk_billingevent.New.Command'
+    'Mscrm.AddNewRecordFromSubGridStandard'
     'sprk.SecureChild.sprk_billingevent.NativeNewAllowed.EnableRule'
     'sprk.SecureChild.sprk_billingevent.NewAvailable.EnableRule'
-    'Mscrm.AddNewRecordFromSubGridStandard'
+    'sprk.SecureChild.sprk_billingevent.New.LabelText'
+    'sprk.SecureChild.sprk_billingevent.New.ToolTipDescription'
 )
 # The refusal advice: SecureChild definitions belong to unified-access-control-r2, so they are never merged into the billing-event diff.
 function Get-RefusalAdvice([string[]]$Ids) {
     if (@($Ids | Where-Object { $_ -cmatch '^sprk\.SecureChild\.' -or $_ -ceq 'Mscrm.AddNewRecordFromSubGridStandard' }).Count -gt 0) {
-        return 'These are SecureChild definitions owned by unified-access-control-r2 and must not be merged into the billing-event diff; ask uac-r2 (the Q6 allow-list covers only four ids).'
+        return 'These are SecureChild definitions owned by unified-access-control-r2 and must not be merged into the billing-event diff; ask uac-r2 (the Q6 allow-list covers only the SecureChild footprint uac-r2 named).'
     }
     "Merge dev's version into $SourceDiff first (the rollback copy has it)."
 }
@@ -104,8 +110,14 @@ if ($Verify) {
         Write-Host "VERIFY FAIL: the sibling control $PositiveControl is not in the effective ribbon of $Table, so an empty or wrong payload came back; the hides cannot be judged." -ForegroundColor Red
         exit 1
     }
-    if ($present.Count -eq 0) { Write-Host "VERIFY PASS: none of the $($hides.Count) hidden controls is in the effective ribbon of $Table (sibling control $PositiveControl present)." -ForegroundColor Green; exit 0 }
-    Write-Host "VERIFY FAIL: still in the effective ribbon: $($present -join ', '). Run again in a few minutes if an import just ran." -ForegroundColor Red
+    # uac-r2 Q6 condition 2: every hide must also be a stored ribbondiffs row on the table, not only absent from the effective ribbon.
+    $verifyStored = @()
+    $vnext = "$api/ribbondiffs?`$filter=entity eq '$Table'&`$select=diffid"
+    while ($vnext) { $vpage = Invoke-RestMethod -Headers $headers -Uri $vnext; $verifyStored += @($vpage.value | ForEach-Object { "$($_.diffid)" }); $vnext = $vpage.'@odata.nextLink' }
+    $notStored = @($hides | Where-Object { $verifyStored -notcontains $_.Id } | ForEach-Object { $_.Id })
+    if ($present.Count -eq 0 -and $notStored.Count -eq 0) { Write-Host "VERIFY PASS: none of the $($hides.Count) hidden controls is in the effective ribbon of $Table, all $($hides.Count) hides are stored ribbondiffs rows, and the sibling control $PositiveControl is present." -ForegroundColor Green; exit 0 }
+    if ($present.Count -gt 0) { Write-Host "VERIFY FAIL: still in the effective ribbon: $($present -join ', '). Run again in a few minutes if an import just ran." -ForegroundColor Red }
+    if ($notStored.Count -gt 0) { Write-Host "VERIFY FAIL: hides not stored as ribbondiffs rows on ${Table}: $($notStored -join ', ')." -ForegroundColor Red }
     exit 1
 }
 
@@ -162,7 +174,7 @@ foreach ($h in $hides) {
     $state = if ($present -contains $h.Location) { 'present now (will be hidden)' } elseif ($storedIds -contains $h.Id) { 'already hidden' } else { 'NOT FOUND' }
     Write-Host ("  {0,-70} {1}" -f $h.Location, $state)
 }
-# The four ids the import may replace (uac-r2 Q6 (b)), as they stand on dev.
+# The ids the import may replace (uac-r2 Q6 (b)), as they stand on dev.
 $liveIds = @(@($storedIds) + @($storedCommands | ForEach-Object { "$($_.command)" }) + @($storedRules | ForEach-Object { "$($_.ruleid)" }))
 foreach ($q in $ReplacedByQ6) {
     $q6state = if ($liveIds -ccontains $q) { 'will be replaced (uac-r2 Q6)' } else { 'not on dev (nothing to replace)' }
@@ -173,7 +185,7 @@ $drift = @()
 foreach ($d in $storedDiffs) { $s = Find-SourceNode $d.diffid 'diff'; if ($s) { [xml]$x = $d.rdx; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($d.diffid)"; Text = "ribbondiff $($d.diffid)" } } } }
 foreach ($c in $storedCommands) { $s = Find-SourceNode $c.command 'command'; if (-not $s) { $drift += [pscustomobject]@{ Id = "$($c.command)"; Text = "command $($c.command) (not in the checked-in diff)" } } else { [xml]$x = $c.commanddefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($c.command)"; Text = "command $($c.command)" } } } }
 foreach ($r in $storedRules) { $s = Find-SourceNode $r.ruleid 'rule'; if (-not $s) { $drift += [pscustomobject]@{ Id = "$($r.ruleid)"; Text = "rule $($r.ruleid) (not in the checked-in diff)" } } else { [xml]$x = $r.ruledefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($r.ruleid)"; Text = "rule $($r.ruleid)" } } } }
-# Q6 (b): the four allow-listed ids are replaced on purpose; every other difference still refuses.
+# Q6 (b): the allow-listed ids are replaced on purpose; every other difference still refuses.
 $drift = @($drift | Where-Object { $ReplacedByQ6 -cnotcontains $_.Id })
 Write-Host "Stored definitions compared by content: $($storedDiffs.Count) diff rows, $($storedCommands.Count) commands, $($storedRules.Count) rules; differing from the checked-in diff (outside the Q6 allow-list): $($drift.Count)"
 if ($drift.Count -gt 0) {
