@@ -118,6 +118,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             throw new RecordOwnerUnresolvedException(entityLogicalName, writerOnly.RefusalCode!, writerOnly.Reason!);
         }
 
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
+        // planner, with this handler's own app-only reader) BEFORE the guards below and the write, so they see the pair as it will
+        // be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
+        fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct)
+            .ConfigureAwait(false);
+
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
         // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
         // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).

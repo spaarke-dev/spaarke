@@ -229,6 +229,18 @@ internal sealed class UpdateRecordActionCore
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, writerOnly.RefusalCode!, writerOnly.Reason!);
         }
 
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
+        // planner, with the app-only reader this core already uses for the invoice-family guard) BEFORE the guards below and the
+        // write, so they see the pair as it will be written. It adds no check (UAC-r2, 2026-11-07). A failed read refuses.
+        if (OwnedChildWrite.RegardingPairPlannerApplies(input.EntityLogicalName, updatePayload))
+        {
+            using var pairScope = _scopeFactory.CreateScope();
+            updatePayload = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                    pairScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
+                    updatePayload, "UpdateRecord", _logger, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         async Task Patch(CancellationToken ct)
         {
             // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below

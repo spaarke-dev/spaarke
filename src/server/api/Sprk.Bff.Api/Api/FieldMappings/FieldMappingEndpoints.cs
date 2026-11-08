@@ -1427,6 +1427,13 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
+                    // pair that repeated it along (the update planner, with the push's own app-only reader), before every check
+                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
+                        lookupsAreMapped: true);
+
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a
                     // host without the gate refuses such a write too).
