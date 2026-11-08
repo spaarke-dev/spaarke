@@ -18,6 +18,9 @@
 - [CIAM user provisioning (2026-07-19)](ciam-user-provisioning-graph-2026-07-19.md) — POST /users; `oid` link key
 - [Power Pages vs Entra External ID (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
 
+## Anthropic Claude platform (plugins / Cowork / Claude for Word)
+- [Claude plugin install + runtime (2026-11-07)](claude-plugin-install-runtime-2026-11-07.md) — zip upload syncs chat/Cowork/Code; no bin/; Cowork cloud-default since 10-06; Word gets plugin skills, scripts [U]
+
 ## Word add-in / Office / Teams
 - [NAA web/new Outlook fallback + redirect (2026-11-03)](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME config; brk-multihub redirectUri = AADSTS7000471; use https redirect; isSetSupported gate; WebView2 cookies
 - [TAC INVALID_PRIVILEGE (2026-10-29)](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page; licence/propagation community-only; New-TeamsApp/Graph alternatives
@@ -110,6 +113,8 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
 
 ## AI platform / models / competitors
+- [Claude for Legal synopsis (2026-11-07)](claude-for-legal-synopsis-2026-11-07.md) — @4a6c651 unchanged; 151 skills/10 agents/0 live hooks; profile path broken in Cowork (#55,#94); plugin surface matrix; deps field
+- [Claude visual outputs (2026-11-07)](claude-visual-outputs-2026-11-07.md) — artifacts template model; MCP Apps no UI in Claude Code; local .mcpb Desktop-only; Word tracked changes; cross-platform
 - [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
 - [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired; .docx playbooks only; ISV MCP plugin path; Business-apps plugin writes Dataverse
 - [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA; Work IQ `retrieve` (SPE, preview); Dataverse-in-Work-IQ deprioritised; AF 1.26
