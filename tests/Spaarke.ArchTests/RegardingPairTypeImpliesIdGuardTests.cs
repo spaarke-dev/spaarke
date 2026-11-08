@@ -17,14 +17,26 @@ namespace Spaarke.ArchTests;
 /// with that value in the same file, a shared constant (<c>PairTypeColumn</c>, <c>RegardingRecordTypeColumn</c>,
 /// <c>FieldRegardingRecordType</c>, <c>EventRecordTypeNavigationProperty</c>), or that shared constant interpolated with
 /// <c>@odata.bind</c>; the id's keys alike (<c>PairIdColumn</c>, <c>RegardingRecordIdColumn</c>, <c>FieldRegardingRecordId</c>).</para>
-/// <para><b>Rule.</b> An indexer assignment (<c>e[KEY] = …</c>, not <c>==</c>; an object initializer's <c>[KEY] = …</c> too), a
-/// <c>.Add(KEY, …)</c> / <c>.TryAdd(KEY, …)</c>, an <c>Entity.SetAttributeValue(KEY, …)</c> or a JSON writer call with the type's
-/// key must have a write of the id's key in the same member (from one access-modified declaration to the next).</para>
-/// <para>Not seen: a key built at run time, a dictionary collection initializer (<c>{ { KEY, v } }</c>), an anonymous object, a
-/// hand-written JSON string, a DTO property mapped by <c>[JsonPropertyName]</c>, a conditional write (the guard sees that both
-/// writes are in the member, not that both always run), a write in a field initializer (attributed to the member before it), and
-/// a type and id written by two members of one call chain. Enforced by: this guard (ArchTests in CI and the Stop hook). No
-/// baseline: there are no violations today.</para>
+/// <list type="number">
+/// <item><b>Rule 1, keyed writes.</b> An indexer assignment (<c>e[KEY] = …</c>, not <c>==</c>; an object initializer's
+/// <c>[KEY] = …</c> too), a <c>.Add(KEY, …)</c> / <c>.TryAdd(KEY, …)</c>, an <c>Entity.SetAttributeValue(KEY, …)</c> or a JSON
+/// writer call with the type's key must have a write of the id's key in the same member (from one access-modified declaration
+/// to the next).</item>
+/// <item><b>Rule 2, column maps.</b> No map entry has the type's column as its VALUE (<c>[x] = "sprk_regardingrecordtype"</c>):
+/// such a map routes a write to the type through a run-time key (<c>entity[map[x]] = …</c>) that rule 1 cannot pair. Fix round 1
+/// (K4): <c>TaskActionCore.RegardingFieldByEntity</c> had one (<c>sprk_recordtype_ref</c> → the type), writing a task's pair
+/// type with no id; the entry is gone and this rule keeps it gone.</item>
+/// </list>
+/// <para>Not seen: a key built at run time in any other way — a loop over a column list (<c>InvoiceCorrectionService</c>'s copy
+/// of an invoice's resolver fields, <c>foreach (var column in new[] { …RegardingRecordTypeColumn, … }) row[column] = …</c>,
+/// which copies the type and the id together but only as far as the source row holds both), a computed name, a map value
+/// held in a variable; a dictionary collection initializer (<c>{ { KEY, v } }</c>); an anonymous object; a hand-written JSON
+/// string; a DTO property mapped by <c>[JsonPropertyName]</c>; a conditional write (the guard sees that both writes are in the
+/// member, not that both always run); a type and id written by two members of one call chain. Member spans are approximate:
+/// a member declared without an access modifier (an explicit interface implementation, a local function is fine — it stays
+/// in its member) and a field initializer are attributed to the member before them. Only <c>//</c> comments are stripped: a
+/// write inside a <c>/* … */</c> block comment is still seen (a false positive, never a false negative). Enforced by: this guard
+/// (ArchTests in CI and the Stop hook). No baseline: since fix round 1 (K4) no current site violates either rule.</para>
 /// <para><b>Controls.</b> <see cref="Control_ATypeWrittenWithoutItsIdInItsMember_IsFound"/> (must fire) and
 /// <see cref="Control_APairWriteInOneMember_AReadOrARefuseList_IsNotFound"/> (must not fire) run the same detector over synthetic
 /// source.</para>
@@ -91,8 +103,20 @@ public class RegardingPairTypeImpliesIdGuardTests
                          + $"('{write.Value.Trim()}') with no write of {IdColumn} in the same member");
         }
 
+        // Rule 2: no map entry routes a write to the type (the type's column as an entry's VALUE).
+        foreach (Match entry in TypeAsMapValue.Matches(code))
+        {
+            problems.Add($"line {SourceScan.LineOf(code, entry.Index)}: a map entry names the regarding record type as a column to "
+                         + $"write ('{entry.Value.Trim()}'); a write through it has a run-time key no rule can pair with {IdColumn}");
+        }
+
         return (problems, typeWrites.Count);
     }
+
+    /// <summary>An entry <c>[…] = "sprk_regardingrecordtype"</c> (any case, with or without the bind): a column map's value.</summary>
+    private static readonly Regex TypeAsMapValue = new(
+        @"\]\s*=\s*""" + Regex.Escape(TypeColumn) + @"(?:@odata\.bind)?""\s*[,;}\r\n]",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     [Fact(DisplayName = "045a guard 1: server code that writes sprk_regardingrecordtype also writes sprk_regardingrecordid in the same member")]
     public void EveryRegardingTypeWrite_AlsoWritesTheIdInItsMember()
@@ -150,6 +174,18 @@ public class RegardingPairTypeImpliesIdGuardTests
             private void WriteType(Entity entity) { entity["sprk_regardingrecordtype"] = r; }
             private void WriteId(Entity entity) { entity["sprk_regardingrecordid"] = id; }
             """).Problems);
+
+        // Rule 2 (fix round 1, K4): a column map routing a write to the type — TaskActionCore's former entry, verbatim.
+        Assert.Single(Scan("""
+            private static readonly IReadOnlyDictionary<string, string> RegardingFieldByEntity =
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["sprk_matter"] = "sprk_regardingmatter",
+                    ["sprk_recordtype_ref"] = "sprk_regardingrecordtype",
+                    ["account"] = "sprk_regardingaccount",
+                };
+            """).Problems);
+        Assert.Single(Scan("""map["recordtype"] = "SPRK_RegardingRecordType";""").Problems);
 
         // An id only in a comment is no id; an id that is only READ is no write.
         Assert.Single(Scan("""
@@ -223,6 +259,15 @@ public class RegardingPairTypeImpliesIdGuardTests
             private static readonly string[] Display = ["sprk_regardingrecordtype", "sprk_regardingrecordname"];
             var refused = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingrecordtype" };
             leftOut.Add(SecureRootInheritance.PairTypeColumn);
+            """).Problems);
+
+        // Rule 2 must not fire: the type as a switch arm's pattern, a comparison, or a map's KEY read; another column as a value.
+        Assert.Empty(Scan("""
+            var nav = column switch { "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty, _ => null };
+            if (column == "sprk_regardingrecordtype") return;
+            var target = map["sprk_regardingrecordtype"];
+            fields["sprk_regardingrecordtypename"] = "x";
+            map["sprk_matter"] = "sprk_regardingrecordtypes_note";
             """).Problems);
 
         // A different column whose name merely contains the type's (no word boundary) is not the type.
