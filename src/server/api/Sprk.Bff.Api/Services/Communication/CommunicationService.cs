@@ -2907,6 +2907,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 primary.EntityType);
         }
 
+        // A reply's copied type and number describe the SOURCE's record (CopyRegardingFromSourceAsync): when the explicit
+        // association names another record they leave with the id they described, so the row never holds one record's id
+        // beside another's type or number. The same record keeps them.
+        if (communication.GetAttributeValue<string>("sprk_regardingrecordid") is { Length: > 0 } copiedId
+            && !string.Equals(copiedId, primary.EntityId.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            communication.Attributes.Remove("sprk_regardingrecordtype");
+            communication.Attributes.Remove("sprk_regardingrecordnumber");
+        }
+
         // Set denormalized regarding fields
         if (primary.EntityName is not null)
             communication["sprk_regardingrecordname"] = TruncateTo(primary.EntityName, 100);
@@ -2973,7 +2983,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var columns = new List<string>
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
-                "sprk_regardingrecordurl", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -2996,9 +3006,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Denormalized regarding pointer — copy only populated values (additive).
             CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
             CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
             CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
+
+            // The pair's TYPE is a lookup to sprk_recordtype_ref, so it is copied as a reference (045c, owner Q6 (c); the
+            // string read this replaces always came back empty, so a reply never carried the type). Only beside the id it
+            // describes: with no id to copy, or an id the row already holds for another record, the type stays behind, so
+            // the copy never makes a half pair or a mismatched one.
+            if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
+                && !communication.Attributes.ContainsKey("sprk_regardingrecordtype")
+                && source.GetAttributeValue<string>("sprk_regardingrecordid") is { Length: > 0 } sourceRecordId
+                && string.Equals(communication.GetAttributeValue<string>("sprk_regardingrecordid"), sourceRecordId, StringComparison.OrdinalIgnoreCase))
+            {
+                communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+            }
 
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))

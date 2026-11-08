@@ -357,11 +357,19 @@ describe('buildTodoRegardingClear', () => {
     expect(payload['sprk_regardingrecordurl']).toBeNull();
   });
 
-  it('producesSixteenNullFieldsInTotal', () => {
+  it('nullsTheRegardingRecordNumberToo_soNoStaleNumberOutlivesTheClear', () => {
+    // field-mapping-server-write-path-r1 045c: the display columns (name, number, url) follow the pair, so clearing the
+    // pair clears the number as well. A kept number would describe a record the To Do no longer names.
     const payload = buildTodoRegardingClear(buildTodoNavProps());
-    // 12 entity-specific binds + 1 record-type bind + 3 text/URL fields = 16
+    expect(payload['sprk_regardingrecordnumber']).toBeNull();
+    expect(Object.keys(payload)).toContain('sprk_regardingrecordnumber');
+  });
+
+  it('producesSeventeenNullFieldsInTotal', () => {
+    const payload = buildTodoRegardingClear(buildTodoNavProps());
+    // 12 entity-specific binds + 1 record-type bind + 4 text/URL fields (id, name, url, number) = 17
     const nulledKeys = Object.keys(payload).filter(k => payload[k] === null);
-    expect(nulledKeys).toHaveLength(16);
+    expect(nulledKeys).toHaveLength(17);
   });
 
   it('worksWithEmptyNavProps_fallsBackToLookupAttributeNames', () => {

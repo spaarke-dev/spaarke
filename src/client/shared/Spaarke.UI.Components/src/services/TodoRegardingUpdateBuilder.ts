@@ -228,10 +228,12 @@ export async function buildTodoRegardingUpdate(
 /**
  * Build the Web API payload that CLEARS a `sprk_todo`'s regarding entirely.
  *
- * Per FR-13 + ADR-024, "no regarding" requires nulling all fifteen fields:
+ * Per FR-13 + ADR-024, "no regarding" requires nulling every regarding field:
  *   - The 11 entity-specific lookups (sprk_regardingmatter, …, sprk_regardingdocument)
- *   - The 4 resolver fields (sprk_regardingrecordtype, sprk_regardingrecordid,
- *     sprk_regardingrecordname, sprk_regardingrecordurl)
+ *   - The resolver fields: the pair (sprk_regardingrecordtype, sprk_regardingrecordid) and the
+ *     display columns that follow it (sprk_regardingrecordname, sprk_regardingrecordurl,
+ *     sprk_regardingrecordnumber). The number is cleared with the rest so none outlives the pair
+ *     (field-mapping-server-write-path-r1 045c).
  *
  * Resolver text/URL fields are set to `null` (Dataverse accepts null for
  * Text+URL fields). The two lookups (entity-specific + `sprk_regardingrecordtype`)
@@ -277,10 +279,11 @@ export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardi
   const recordTypeKey = recordTypeNavProp?.navPropName ?? 'sprk_RegardingRecordType';
   entity[`${recordTypeKey}@odata.bind`] = null;
 
-  // 3. Null the three resolver text/URL fields.
+  // 3. Null the four resolver text/URL fields (id, name, url and the reference number).
   entity['sprk_regardingrecordid'] = null;
   entity['sprk_regardingrecordname'] = null;
   entity['sprk_regardingrecordurl'] = null;
+  entity['sprk_regardingrecordnumber'] = null;
 
   return entity;
 }

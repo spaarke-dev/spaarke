@@ -2929,6 +2929,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 payload["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
             }
 
+            // The relative record URL beside the id and name (045c, gap G5): the writer holds the table and the id, and
+            // RegardingRecordType owns the format every other writer of the pair uses. The reference number needs a read of
+            // the record, which this adapter does not make, so it is left unset (never guessed).
+            payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(reg.LogicalName, regardingId.ToString("D"));
+
             // Best-effort record-type ref (the denormalized ADR-024 resolver lookup): the typed lookup above is the
             // load-bearing relationship; a missing type only affects cross-entity display.
             var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
