@@ -120,7 +120,7 @@ public sealed class InquiryReplyTodoCreator(
 
         await new TodoRegardingBuilder(recordTypes, coreAncestors, logger)
             .ApplyResolverFieldsAsync(
-                entity, "sprk_matter", matterRef.Id, matterName, ct, matter.GetAttributeValue<string>(MatterNumberColumn))
+                entity, "sprk_matter", matterRef.Id, matterName, matter.GetAttributeValue<string>(MatterNumberColumn), ct)
             .ConfigureAwait(false);
 
         // The service request the UI calls the disposition route with: a machine-readable first line of the notes. The

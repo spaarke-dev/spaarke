@@ -222,7 +222,15 @@ export async function buildTodoRegardingUpdate(
     );
   }
 
-  return result.payload as ITodoRegardingUpdate;
+  const payload = result.payload as ITodoRegardingUpdate;
+
+  // The resolver writes the reference number only when the new target has one. An UPDATE must not leave the previous target's
+  // number beside the new id, so a target with no number clears the column (sprk_todo carries it). 045c.
+  if (payload['sprk_regardingrecordnumber'] === undefined) {
+    payload['sprk_regardingrecordnumber'] = null;
+  }
+
+  return payload;
 }
 
 /**

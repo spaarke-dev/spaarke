@@ -198,12 +198,12 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string regardingDisplayName,
-        CancellationToken ct = default,
-        string? regardingRecordNumber = null)
+        string? regardingRecordNumber = null,
+        CancellationToken ct = default)
     {
         // 1) Specific lookup + 2) resolver fields (4), populated atomically.
         await ApplyLookupAndPairAsync(
-            todoEntity, nameof(todoEntity), regardingEntityName, regardingId, regardingDisplayName, ct, regardingRecordNumber);
+            todoEntity, nameof(todoEntity), regardingEntityName, regardingId, regardingDisplayName, regardingRecordNumber, ct);
 
         // 3) FR-26 core-ancestor stamp — LAST, so it can never be overwritten by steps 1–2, and so the
         //    ADR-024 mutual-exclusion guard above (which fires on an ALREADY-SET lookup) does not mistake
@@ -263,7 +263,7 @@ internal sealed class TodoRegardingBuilder
                 nameof(host));
         }
 
-        await ApplyLookupAndPairAsync(host!, nameof(host), regardingEntityName, regardingId, regardingDisplayName, ct)
+        await ApplyLookupAndPairAsync(host!, nameof(host), regardingEntityName, regardingId, regardingDisplayName, null, ct)
             .ConfigureAwait(false);
     }
 
@@ -277,8 +277,8 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string? regardingDisplayName,
-        CancellationToken ct,
-        string? regardingRecordNumber = null)
+        string? regardingRecordNumber,
+        CancellationToken ct)
     {
         if (host is null)
             throw new ArgumentNullException(hostParameterName);
@@ -322,7 +322,7 @@ internal sealed class TodoRegardingBuilder
         };
 
         // 2) Resolver fields (4) — populated atomically
-        await ApplyResolverPairAsync(host, regardingEntityName, regardingId, regardingDisplayName, ct, regardingRecordNumber);
+        await ApplyResolverPairAsync(host, regardingEntityName, regardingId, regardingDisplayName, regardingRecordNumber, ct);
     }
 
     /// <summary>
@@ -344,8 +344,8 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string? regardingDisplayName,
-        CancellationToken ct = default,
-        string? regardingRecordNumber = null)
+        string? regardingRecordNumber = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(host);
 
