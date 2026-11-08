@@ -549,11 +549,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           };
         }
 
-        // FR-WIZ-01: resolve BU-derived cascade defaults (sprk_containerid +
-        // sprk_searchindexname) BEFORE creating the matter. Non-fatal — if the
-        // host doesn't provide `resolveUserBuDefaults` or it throws, the matter
-        // is still created without the cascade fields applied (caller will see
-        // sprk_searchindexname unset; BFF tenant-default chain handles fallback).
+        // Resolve the host's BU-derived cascade defaults and hand them to MatterService. Since task 021 (FR-16,
+        // FR-38/FR-40) nothing reads them: the matter's index and container columns are the server's, and the
+        // uploaded files are indexed without naming an index. The call stays so existing hosts keep their
+        // `resolveUserBuDefaults` contract. Non-fatal: if the host doesn't provide it or it throws, the matter is
+        // created the same way.
         let cascadeDefaults: IUserBuCascadeDefaults | undefined;
         if (resolveUserBuDefaults) {
           try {
@@ -571,11 +571,10 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           context.speContainerId || undefined,
           tenantId
         );
-        // Task 020 (spec FR-12): pass the AssociateToStep selection so
-        // MatterService can drive the Field Mapping Framework engine
-        // (graceful no-op when there's no association or no configured
-        // profile for the pair). MatterService already holds
-        // authenticatedFetch/bffBaseUrl from the constructor above.
+        // Task 021 (FR-16): the server creates the matter (POST /api/v1/child-records/sprk_matter). The
+        // AssociateToStep selection goes to that route as the explicit mapping source, and the SERVER maps the
+        // fields (fill-only: the user's own values win), owns the record and numbers it. The wizard maps nothing;
+        // with no association no source is named and the server maps nothing.
         const result = await service.createMatter(
           mergedFormValues,
           context.uploadedFiles,
@@ -776,9 +775,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
                 <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{matterName}&rdquo;</span>{' '}
                 has been created
-                {hasWarnings
-                  ? ', though some follow-on actions could not complete. See details below.'
-                  : ' and is ready to use.'}
+                {hasWarnings ? ', with warnings. See details below.' : ' and is ready to use.'}
               </Text>
               {filingNote && (
                 <Text block size={300} style={{ color: tokens.colorNeutralForeground2 }}>

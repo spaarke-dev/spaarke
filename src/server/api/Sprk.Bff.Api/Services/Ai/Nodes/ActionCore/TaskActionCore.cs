@@ -104,7 +104,9 @@ internal sealed class TaskActionCore
             ["sprk_event"] = "sprk_regardingevent",
             ["sprk_communication"] = "sprk_regardingcommunication",
             ["sprk_organization"] = "sprk_regardingorganization",
-            ["sprk_recordtype_ref"] = "sprk_regardingrecordtype",
+            // Field mapping task 045a fix round 1: no sprk_recordtype_ref entry. Its "typed lookup" was the ADR-024 pair's TYPE
+            // column, so a task "regarding" a catalog row was written with a type and no id (a half pair). A catalog row is not
+            // a record a task is filed under; such a task now takes the unfiled branch below, as any other non-parent type.
             ["account"] = "sprk_regardingaccount",
             ["contact"] = "sprk_regardingcontact",
         };
@@ -218,30 +220,27 @@ internal sealed class TaskActionCore
                 // this core wrote the typed lookup alone, so a later form clear of that lookup left the row's stamp copy
                 // with nothing saying it was one: the core-ancestor reconciliation job could not find it and the old
                 // root's access stayed granted. With the pair's id the job finds the cleared record and clears the
-                // orphaned copy. New rows only; nothing is backfilled. Skipped for a sprk_recordtype_ref target, whose
-                // typed lookup IS the pair's type column.
-                if (!string.Equals(regardingField, TodoRegardingBuilder.FieldRegardingRecordType, StringComparison.OrdinalIgnoreCase))
+                // orphaned copy. New rows only; nothing is backfilled. (Task 045a fix round 1: no map entry targets the pair's
+                // type column any more, so every typed regarding here gets the whole pair.)
+                var regardingName = await ReadRegardingNameAsync(
+                    input.RegardingObjectType, input.RegardingObjectId.Value, cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    var regardingName = await ReadRegardingNameAsync(
-                        input.RegardingObjectType, input.RegardingObjectId.Value, cancellationToken).ConfigureAwait(false);
-                    try
-                    {
-                        await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
-                            .ApplyResolverPairAsync(
-                                entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                    {
-                        // Task 141 review F1: a sprk_recordtype_ref read that FAULTS is not "no catalog row" — the builder
-                        // throws instead of writing an untyped pair. Same error contract as the stamp failure below (the
-                        // degraded-success Guid.Empty): the task is NOT created, and every caller already handles that.
-                        // Task 141 fix round 2 (K1): still Guid.Empty (a rethrow would 500 CommunicationCreateTaskApplyService and
-                        // abort CommunicationRiActionService's outbox write), but a denied BFF identity and a malformed call are
-                        // not a transient catalog fault: Error + their own EventId + counter. Other faults stay at Warning.
-                        LogRegardingPairFault(ex, input.RegardingObjectType, input.RegardingObjectId.Value);
-                        return Guid.Empty;
-                    }
+                    await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+                        .ApplyResolverPairAsync(
+                            entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    // Task 141 review F1: a sprk_recordtype_ref read that FAULTS is not "no catalog row" — the builder
+                    // throws instead of writing an untyped pair. Same error contract as the stamp failure below (the
+                    // degraded-success Guid.Empty): the task is NOT created, and every caller already handles that.
+                    // Task 141 fix round 2 (K1): still Guid.Empty (a rethrow would 500 CommunicationCreateTaskApplyService and
+                    // abort CommunicationRiActionService's outbox write), but a denied BFF identity and a malformed call are
+                    // not a transient catalog fault: Error + their own EventId + counter. Other faults stay at Warning.
+                    LogRegardingPairFault(ex, input.RegardingObjectType, input.RegardingObjectId.Value);
+                    return Guid.Empty;
                 }
 
                 // FR-26 core-ancestor stamp (task 052) - applied after the typed lookup. Four of the
