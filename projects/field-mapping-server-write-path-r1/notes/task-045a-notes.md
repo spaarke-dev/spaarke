@@ -23,7 +23,10 @@ agreeing lookup, else clear; Q3 (a): a warning on clear only). Design: `task-045
 | type, no id (absent/null/""/whitespace), one agreeing lookup of the type's table (caller-sent or server-set) | id filled, no warning |
 | same record in two agreeing columns | one candidate: filled |
 | no candidate, two different candidates, only a mapped candidate, only an I-1 stamp column while an intermediate is bound, type naming no table | type, id and display columns cleared; one warning |
-| catalog read fails (403, 404, other status) | left as sent; step 5 answers as before (uniform 404 in the tested shapes) |
+| catalog read 403 / 404 | left as sent; step 5 answers as before (uniform 404) |
+| catalog read other failure (fix round 1) | upstream refusal |
+| a clear without AppendTo on the type row (fix round 1) | step 5's uniform 404 |
+| system principal, type only (fix round 1) | cleared without a read, same warning |
 | whole pair, no pair, id only | untouched, no extra read |
 
 Cost: a type-only pair costs one extra catalog read (as the caller) and, when filled, step 5's usual AppendTo on the
@@ -60,9 +63,20 @@ Harness: `SecureChildOwnershipAiToolTests.ScriptedUserClient` gained the analysi
   candidate read.
 - The warning code lives on `RecordCreationWarning`; the update path reports through log events (Q5).
 
+## Fix round 1 (adversarial review of 818c61d623)
+
+| Item | Change | Fail on 818c61d623 → pass |
+|---|---|---|
+| F4 | Before a clear, step 4½ asks `CheckCallerMayAppendToAsync` on the type lookup and refuses through `CallerCheckRefused` (step 5's answer) | seam F4 theory (2), `ChildCreate_…WithoutItsAppendToPrivilege…`, `ChildCreate_…RecordTypeRowThatDoesNotExist…` |
+| F3 | `ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated…` registers the matter type's table (`CatalogKnowsTheMatterType`) | passes both (fill path) |
+| F2 | A catalog read other than 403/404 refuses with `Upstream` | seam F2 (only the first read fails) |
+| K4 | `TaskActionCore.RegardingFieldByEntity` loses its `sprk_recordtype_ref` entry (the pair's TYPE column, written with no id); such a task is created unfiled. Guard rule 2 flags a map entry whose value is the type column | `ServerWriterAncestorStampingTests` K4 test; guard fired on `TaskActionCore.cs:107` |
+| K2 | The system principal's type-only pair is cleared without a read (`WithoutRegardingPair`), same warning | seam K2 |
+| — | `RateCardImportServiceTests` asserted `CreateDocumentRequest` has no `*Lookup` property; 030b added `ParentDocumentLookup`. Test fixed (assert the values are null); the import sets none, so the code is right | was failing before this round |
+
+The first-round test "a catalog read that fails upstream leaves the row as sent" is replaced by the F2 test (that outcome
+was the defect).
+
 ## Open
 
-- The system principal is skipped by step 4½ (no caller to read the catalog as; no production system creator).
-- A non-throwing failure of step 4½'s catalog read alone (step 5's own read then succeeding) would still store a type-only
-  pair; in the tested shapes step 5's read of the same row fails too.
 - On a fill, display columns the caller sent are kept as sent (045c owns display columns).
