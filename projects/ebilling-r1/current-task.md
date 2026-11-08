@@ -17,7 +17,7 @@
 | Item | Branch / worktree | State → next action |
 |---|---|---|
 | **165b-3** | ✅ merged `5ae5590b66`, tip verified (2174/0, 11236/0), wt removed | Re-check K1-K4 in notes 6.4. |
-| **165b-4 design note** | `task/ebilling-165b4-design` (Opus, note only, from `adfb7aeec8`) | Notes §7: O8 content + the key-match problem (FetchXML cannot read `sprk_steps`; options a/b). Next: review → send to ontology-r1 (and the key-match question to uac-r2) → code after their OK. |
+| **165b-4** | design note on work `a6f3c17f5e` (notes §7; identity details redacted, sent privately; unredacted branch deleted) | **Waiting on ontology-r1 (Q1-Q7) and uac-r2 (key match for spend, K2, parent-scoped reads).** Recommends (b): one static keyed matcher `InvoiceApproveRecord`, 4 reads/chunk, retires the grouped spend path (H5). Code (Opus) after both answer. |
 | **165e + 165f** | ✅ merged; guard follow-up merged `6ab63efbf7` (ArchTests 2181/0, unit 4976/0) | **Ship together; send uac-r2 the dev-batch sha** when the batch is cut. |
 | **165b-2** | `task/ebilling-165b2` (Opus, from `c66b6933cf`) | Running. T1/T2 totals at approval and AP export, seeds, dev counts; pending spend out (165b-4). Next: one adversarial pass → merge. |
 | **083** | `task/ebilling-083` @ `94c2969b60` (wt agent-abce3e9bf2270020c) | Built: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)` reads own submission's `procedureSnapshot`, text only if version APPLIED; label firm-facing name / "Billing instructions for this record"; rule set Published or Retired (deviation); 3 seeds OK; ArchTests 2159/0, unit 6916/0; +1.7 KB. 135 criteria ~141-142 keep old wording (fix at merge). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → 130. |
