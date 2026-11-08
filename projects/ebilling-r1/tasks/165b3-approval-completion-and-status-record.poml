@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice integrity, part 165b-3: approval completion decides only from server-written sources; counted statuses need the approve record (EB-D-200)</title>
     <phase>4 Review (165 family)</phase>
-    <gate>165b item 1 merged into work. Part B waits for uac-r2's reply on the proposed status rule (EB-D-208, sent 2026-11-07); part A does not wait.</gate>
+    <gate>165b item 1 merged into work. Part A built (276c1201af). Part B: uac-r2 agreed EB-D-208 (writer-identity condition); B1 approval and the writer allow-list, B2 AP export run here; the spend paths moved to task 165b-4 (ontology-r1).</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>The approval write path and the counted-status readers (.cs); integrity of the approve Decision Record.</rigor-reason>
@@ -29,7 +29,7 @@
          - Whether the approval is complete is decided from the writer-created approve Decision Record, not from columns a user can write.
          - On a refusal, nothing is written: 409 with a distinct code; the log carries the table and row id only.
       B. Counted status needs its record (EB-D-208, once uac-r2 agrees):
-         - Approval, AP export selection and both spend paths count an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it.
+         - Approval and AP export selection (spend paths: task 165b-4) count an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it.
          - Otherwise approval and AP export refuse or leave it out with a distinct code, and spend does not count it.
          - Reuse 165b's writer-identity record lookup (InvoiceLineOrigin's createdby rule); no copy.
          - Paid carries no record of its own in R1 (known limit, recorded in the notes).
@@ -50,7 +50,6 @@
     </criterion>
     <criterion>Part B, must-fire, each with its must-not-fire control:
       - R1: an Approved invoice with no writer-created approve record is left out of AP export.
-      - R2: the same invoice is not counted in spend, on both paths.
       - R3: the record's createdby must be the writer identity.
       Control for each: the same invoice with the writer's record exports and counts.
     </criterion>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165b-4" project="ebilling-r1">
+  <metadata>
+    <title>Invoice integrity, part 165b-4: the spend paths decide only from server-written sources (pending spend excludes held invoices; counted spend needs the approve record)</title>
+    <phase>4 Review (165 family)</phase>
+    <gate>ontology-r1 agrees on the shape (asked 2026-11-08: the writer-identity signature for FinanceBaseValues.ReadAsync, DerivedBaseColumns, and the third reader). 165b-3 part A merged (the single writer-identity rule).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Spend values read by Signals and the finance UI (.cs); ontology-r1-owned code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Three spend readers, a batched hold evaluation and an aggregate FetchXML change that must not double count.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>FinanceBaseValues is ontology-r1's; FinanceRollupService is shared with the 165 family.</parallel-reason>
+    <deps>165b-3</deps>
+    <tags>bff-api, ebilling, integrity</tags>
+  </metadata>
+
+  <prompt>This is task 165 item 4 (moved from 165b-2) and the spend part of EB-D-208 (moved from 165b-3 part B). Read first:
+    - EB-D-200, D-102, D-103 and EB-D-208 in notes/decisions-log.md;
+    - notes/165b-integrity-checks.md §6 (part B findings: the dev probe of an `exists` link to the writer's approve records inside the grouped spend FetchXML);
+    - ontology-r1's answer to the 2026-11-08 questions (the lead adds it to the brief);
+    - FinanceBaseValues.cs, FinanceRollupService.cs, FinancialCalculationToolHandler.cs ~:128, SignalEvaluator.cs ~:233.
+    Wording in commits, notes, comments and the PR stays neutral: "decides only from server-written sources".</prompt>
+
+  <goal>Every spend reader counts an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it. Every pending-spend reader leaves out an invoice that InvoiceBlockedHold holds. The readers cannot disagree.</goal>
+
+  <scope>
+    <in>
+      1. Counted spend: an `exists` link to the writer-created approve record (writer-identity rule `InvoiceLineOrigin.AddWriterCreatedConditions`; no copy) in `BuildGroupedSpendFetchXml` and in `FinanceRollupService`'s invoice query. One query per call, never one per invoice.
+      2. Pending spend: exclude held invoices on both paths, with the hold sources read in a batch for the candidate set and InvoiceBlockedHold's rule applied in memory.
+      3. The third reader (FinancialCalculationToolHandler) follows the same rules through the same helper, if ontology-r1 agrees it is in scope.
+      4. DerivedBaseColumns and its guards take the new columns, as ontology-r1 agrees.
+      Each FinanceBaseValues hunk stays minimal and is listed for ontology-r1's review.
+    </in>
+    <out>
+      - Approval and AP export (165b-2, 165b-3).
+      - D-103's status set itself.
+      - Any client change.
+    </out>
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>Must-fire, each with its must-not-fire control, on every reader in scope:
+      - S1: an Approved invoice with no writer-created approve record is not counted. Control: the same invoice with the record is.
+      - S2: a record created by another identity, or on behalf of the writer, does not count. Control: the writer's record does.
+      - S3: a held invoice is not in pending spend. Control: the same invoice released is.
+      - S4: a hold-source or record read fault fails the spend read the way the path fails today; it never counts the invoice.
+      - S5: an invoice with two approve records is counted once.
+    </criterion>
+    <criterion>One seed per guard (the record link, the hold exclusion). Record both in the notes.</criterion>
+    <criterion>Dev data (read-only): counted and pending spend per core record, before and after, for the dev records with invoices. Any difference is explained in the notes; ids go to the lead only.</criterion>
+    <criterion>The query count for a core record with 1 invoice and with 50 invoices is equal. NFR-01 is respected.</criterion>
+    <criterion>Filtered unit tests (Finance, Signals, FinanceRollup, FinancialCalculation) and the full ArchTests pass. The BFF builds. Measure the publish delta.</criterion>
+    <criterion>Notes go in notes/165b-integrity-checks.md, in a new 165b-4 section, with the FinanceBaseValues hunks listed.</criterion>
+    <criterion>Test scope: exactly S1–S5, the seeds, the query-count check and the dev comparison.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any reader cannot apply a rule without one query per invoice, STOP and report the query plan.</trigger>
+    <trigger>If ontology-r1's answer differs from this file, the answer wins; update the brief, not the code.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>
