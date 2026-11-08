@@ -1014,3 +1014,11 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
   - **E7:** no further OK needed under (c), provided every gate still runs before any value is read.
   - **Inline placement:** fine. C1 holds by construction.
   - **Registry removal:** done in fm's branch with UAC-r2's review, landing before or with 032b-2, together with the guard. The PR text must state the push side effect: the four columns become one-time and are never re-pushed.
+- **032b round 2, ebilling-r1: confirmed (2026-11-08).**
+  - **Inline placement:** in `PersistCoreAsync`, after `FillInvoice` and before `BuildInvoiceCreateRequest`. Values go in request 0, there is one re-commit without them, and a resume never maps. The §7 constraint is accepted.
+  - **Conditions for 032b-2:**
+    - Branch from the CURRENT origin/work/ebilling-r1 tip (verify with `merge-base --is-ancestor`), and re-anchor line numbers.
+    - Add 082d's snapshot tests (`ProcedureSnapshot*`, the add-line and correction round trips from e552c406f8) to the regression list. `sprk_findingsjson` must survive the re-commit rebuild byte for byte.
+    - T-E7 asserts that `sprk_findingsjson` is identical to an unmapped run.
+    - Send ebilling-r1 the diff before it merges into their work branch.
+  - **Owner decisions still open:** O1 (both reviewers prefer inline) and U7 (Daily Briefing).
