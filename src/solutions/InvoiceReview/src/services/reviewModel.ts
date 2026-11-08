@@ -464,8 +464,9 @@ export function buildAddLineRequest(
   const num = (text: string, label: string): { value: number | null; error: string | null } => {
     const t = text.trim();
     if (t.length === 0) return { value: null, error: null };
-    // Plain decimal text only: Number() would also accept "0x10", "1e3" and "Infinity"-like forms the reviewer did not mean as a number.
-    const n = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : NaN;
+    // Plain decimal text only, as the server reads it (an optional sign, ".25", "5." and "2.5" all count): Number() would also accept
+    // "0x10", "1e3" and "Infinity"-like forms the reviewer did not mean as a number.
+    const n = /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t) ? Number(t) : NaN;
     return Number.isFinite(n) ? { value: n, error: null } : { value: null, error: `${label} must be a number, for example 2.5.` };
   };
   const fee = form.costType === 'fee';

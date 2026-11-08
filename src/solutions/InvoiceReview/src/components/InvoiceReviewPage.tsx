@@ -424,7 +424,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         failureText?: (f: ApiFailure) => string;
         /** A refusal that also stays in the dialog (default: only the firm-first 409), for forms whose 409s are fixed by editing the form. */
         staysInDialog?: (f: ApiFailure) => boolean;
-        after?: (value: T, fresh: InvoiceReview | null) => void;
+        /**
+         * Runs after a saved write and its re-read. `isRepeat` is true for the page's own Repeat: the form of the original write was closed
+         * by the first 503, so a Repeat must not close a form the reviewer has opened since (it would lose what they typed).
+         */
+        after?: (value: T, fresh: InvoiceReview | null, isRepeat: boolean) => void;
         /**
          * What Repeat sends after a 503 incomplete. Default: the same call. Accept all Clean cannot repeat itself (its lines left Clean), so
          * its repeat is the multi-line route with the committed line ids (InvoiceLineDecisionService).
@@ -451,7 +455,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
             ? { intent: 'success', text: opts.success }
             : { intent: 'warning', text: `${opts.success} — but the page could not refresh.`, action: { label: 'Reload', run: () => void reload() } }
         );
-        opts.after?.(result.value, fresh);
+        opts.after?.(result.value, fresh, opts.isRepeat === true);
         return true;
       }
       const f = result.failure;
@@ -537,8 +541,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         success: `Saved · ${request.lines.length} ${request.lines.length === 1 ? 'line' : 'lines'} ${request.action === 'accept' ? 'accepted' : request.action === 'disallow' ? 'disallowed' : 'reduced'}`,
         inDialog: true,
         closeDialog: () => setBulk(null),
-        after: () => {
-          setBulk(null);
+        after: (_, __, isRepeat) => {
+          if (!isRepeat) setBulk(null);
           setChecked(prev => new Set([...prev].filter(id => !request.lines.some(l => l.lineId === id))));
         },
       }
@@ -554,7 +558,9 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
         closeDialog: () => setCorrect(null),
-        after: () => setCorrect(null),
+        after: (_, __, isRepeat) => {
+          if (!isRepeat) setCorrect(null);
+        },
       }
     );
   };
@@ -579,8 +585,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       closeDialog: () => setAddLine(null),
       failureText: addLineFailureMessage,
       staysInDialog: staysInAddLineForm,
-      after: (added, fresh) => {
-        setAddLine(null);
+      after: (added, fresh, isRepeat) => {
+        if (!isRepeat) setAddLine(null);
         // Show the new line (from the server's fresh state) so it can be decided next.
         if (fresh?.lines.some(l => l.id === added.lineId)) {
           setSelectedLineId(added.lineId);

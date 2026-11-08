@@ -81,3 +81,13 @@ The adversarial review's fix-now findings and the cheap known limits. Tests are 
 - The "Added by reviewer" badge's `aria-label`.
 - `FormModal` carries `aria-hidden` on its surface in jsdom after a send (the tests use DOM queries and `hidden: true`).
 - Focus after the form closes.
+
+## Re-check follow-ups
+
+Tests are in `src/__tests__/InvoiceReviewPage.test.tsx` and `src/__tests__/reviewModel.test.ts`. Prettier does not apply to `src/solutions/` (`.prettierignore`), so the files keep their hand-formatted style.
+
+| Finding | Change | Test |
+|---|---|---|
+| F3-1: the number regex was stricter than the server | `buildAddLineRequest` tests `/^[+-]?(\d+(\.\d*)?\|\.\d+)$/` after trim, which matches the server's reading in `InvoiceLineAddService.cs` (`.25` hours is routine). Still refused: `0x10`, `1e3`, `1E3`, `Infinity`, `--2`, `1,5`, `1 2`, and the bare `.`, `+`, `-.` | `reviewModel.test.ts`: `.5`, `.25`, `5.`, `+2`, `-.5` moved to accepted; the refused list keeps the rest and adds the three bare forms |
+| F3-2: the Accept all Clean Repeat change had no test | Test only | `acceptClean` -> 503 incomplete with committed ids; Repeat -> `decideLines` with no answer (status 0); Repeat -> `decideLines` ok. `decideLines` is called twice with identical bodies, `acceptClean` once, one decision id throughout. Seeded: reverting `repeatAgain ? call : ...` to the old `opts.repeatCall(f)` sent a second `acceptClean`, and the test failed |
+| K1: a successful Repeat closed a newly opened form | `runWrite` passes `isRepeat` as a third argument to `after`. The Add line, Correct and bulk `after` callbacks skip their form-closing call (`setAddLine`, `setCorrect`, `setBulk`) on a Repeat; the data refresh, the new-line selection and the ticked-row clean-up still run | 503 incomplete; open Add line again and type a Description; Repeat succeeds; the new form is still open with its value. Seeded: restoring the unconditional `setAddLine(null)` made it fail |

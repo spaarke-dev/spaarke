@@ -499,6 +499,37 @@ describe('InvoiceReviewPage: failures and recovery (task 110 fix round 2)', () =
     });
   });
 
+  it('F3-2: Accept all clean keeps its multi-line Repeat (same body, same decision id) after a Repeat that got no answer', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const api = mockApi(normal());
+      api.acceptClean.mockResolvedValueOnce(
+        failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The lines were saved; the totals were not.', failedStep: 'totals', committedLineIds: [lineId(1)] }))
+      );
+      api.decideLines.mockResolvedValueOnce(failed(new TypeError('Failed to fetch')));
+      renderPage(api);
+      await screen.findByTestId('review-title');
+      fireEvent.click(screen.getByTestId('accept-clean'));
+
+      // First Repeat: the multi-line route; it gets no answer, so Repeat stays.
+      fireEvent.click(await screen.findByTestId('notice-repeat'));
+      await waitFor(() => expect(api.decideLines).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('No answer came back, so the repeat may not have finished'));
+
+      // Second Repeat: the same closure again (a no-answer failure carries no committed ids to choose a route from), and it goes through.
+      fireEvent.click(screen.getByTestId('notice-repeat'));
+      await waitFor(() => expect(api.decideLines).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('Clean lines accepted'));
+
+      expect(api.acceptClean).toHaveBeenCalledTimes(1);
+      const [first, second] = api.decideLines.mock.calls.map(c => c[1]);
+      expect(second).toEqual(first);
+      expect(first).toEqual({ decisionId: api.acceptClean.mock.calls[0][1], action: 'accept', reason: null, lines: [{ lineId: lineId(1), approvedAmount: null }] });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('shows the server state before offering Repeat after a 503 incomplete', async () => {
     const api = mockApi(normal());
     api.decideLine.mockResolvedValueOnce(failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The line was saved; the record was not.' })));
@@ -960,6 +991,29 @@ describe('InvoiceReviewPage: Add line (task 164b)', () => {
     const dialog = await openAndFillFee();
     submit(dialog);
     expect(await within(dialog).findByTestId('add-line-error')).toHaveTextContent('correction on this invoice is still being applied');
+  });
+
+  it('K1: a successful Repeat does not close an Add line form the reviewer opened while the Repeat notice was showing', async () => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValueOnce(incompleteAddLine());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+    const repeat = await screen.findByTestId('notice-repeat');
+    noDialog();
+
+    // Open the form again and type a value before repeating.
+    fireEvent.click(await screen.findByTestId('add-line'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'A second call, half typed' } });
+
+    fireEvent.click(repeat);
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('Line added'));
+
+    // The new form is still open with what was typed.
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(within(screen.getByRole('dialog', { hidden: true })).getByLabelText('Description')).toHaveValue('A second call, half typed');
   });
 
   it('F1-1: a Repeat that gets a 409 busy keeps Repeat with the same requestId and never says nothing was changed', async () => {
