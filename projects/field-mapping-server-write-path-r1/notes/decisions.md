@@ -951,3 +951,21 @@ These conditions are fixed in the design before any code, together with UAC-r2's
   - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
   - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
   - Must-fire and must-not-fire tests.
+
+## 2026-11-07 — Owner approves the 045 recommendations (in fm's session)
+
+Design: `task/fm-045` f35b4d12b1, `notes/task-045-regarding-propagation-design.md`. The owner chose "follow recommendation" for Q1–Q12:
+- **Q1 (a):** the 18 tables that carry the full pair.
+- **Q2 (a):** the id is filled from the agreement columns, never from the stamp columns, and never from mapped lookups.
+- **Q3 (a):** a warning on clear only.
+- **Q4 (b):** updates keep the pair in step with a moved typed lookup, on all pair tables.
+- **Q5 (a):** an update reports a clear by log event; the response is unchanged.
+- **Q6 (c):** id-only pairs: only the reply copy is fixed.
+- **Q7:** display columns are re-derived on a move (b), and cleared otherwise (a). Renames go to the 052 report.
+- **Q8 (a):** the invoice family is re-derived on the row's own core-lookup change.
+- **Q9 (a):** direct writes are covered by the 052 report, Repair and column audit.
+- **Q10 (a):** the connections control's unlink is left as is.
+- **Q11 (a):** no change to the timing windows.
+- **Q12 (a):** the split is 045a (create step and guard 1), 045b (update planner and wiring, guard 2), 045c (invoice re-derivation, missing display columns, reply type, client number clear), plus a 052 report line.
+
+UAC-r2 (2026-11-07): the playbook Update Record and output-mapping paths run as the user, or app-only behind authoring controls. 045b adds no AppendTo check there.
