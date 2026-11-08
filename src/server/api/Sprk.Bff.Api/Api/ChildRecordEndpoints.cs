@@ -678,6 +678,16 @@ public static class ChildRecordEndpoints
         if (RecordTableRules.RefuseWriterOnlyTableUpdate(entity) is { } writerOnly)
             return Problem(StatusCodes.Status403Forbidden, DeniedCode, writerOnly.Reason!);
 
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets (the invoice's AP
+        // export claim), on the body's shape alone, before any read or write. This route writes AS the caller, so only the column check is
+        // asked here, never RefuseAppOnlyWrite. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyColumns(
+                entity, body.ValueKind == JsonValueKind.Object ? body.EnumerateObject().Select(p => p.Name) : []) is { } writerOnlyColumn)
+        {
+            return Problem(StatusCodes.Status403Forbidden, RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode,
+                $"The {Noun(entity)} was not saved: {writerOnlyColumn.Reason}.");
+        }
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)

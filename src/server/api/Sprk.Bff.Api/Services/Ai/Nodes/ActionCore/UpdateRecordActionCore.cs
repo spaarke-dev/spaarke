@@ -208,7 +208,12 @@ internal sealed class UpdateRecordActionCore
             && InheritedAccessPermission.RefuseAppOnlyWrite(
                 input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
-            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
+            // The writer-only column refusal (EB-D-207) is about an update to an existing row: not the owner constructor, whose
+            // message is about a create's owner. The update's own words, the same as the fixed-after-create refusal below.
+            throw documentRefusal.RefusalCode == RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode
+                ? new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal.RefusalCode,
+                    $"The update was NOT written: {documentRefusal.Reason} ({documentRefusal.RefusalCode}).")
+                : new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
 
         // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths

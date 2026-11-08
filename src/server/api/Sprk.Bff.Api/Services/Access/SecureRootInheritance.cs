@@ -4301,7 +4301,8 @@ public sealed partial class SecureRootInheritance
         var at = name.IndexOf('@');
         if (at >= 0)
             name = name[..at];
-        if (name.StartsWith('_') && name.EndsWith("_value", StringComparison.OrdinalIgnoreCase))
+        // 165d fix round: a key of exactly "_value" has no column inside it, and slicing it threw.
+        if (name.Length > "_value".Length && name.StartsWith('_') && name.EndsWith("_value", StringComparison.OrdinalIgnoreCase))
             name = name[1..^"_value".Length];
         return name.ToLowerInvariant();
     }

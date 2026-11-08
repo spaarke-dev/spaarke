@@ -1267,7 +1267,8 @@ internal static class InheritedAccessPermission
     /// security.</para>
     /// <para><b>Precedence</b> (the first match decides the code): a table that is not an identifier; then an access table;
     /// then, on a document, its Access Permission or own-narrowing record, then its D7 links, then its BFF-owned columns;
-    /// then a secure root's columns; then a non-root table's access columns; then, on every table, the owner, then the
+    /// then a secure root's columns; then a non-root table's access columns; then, on every table and for every identity, a
+    /// writer-only column (<c>RecordTableRule.WriterOnlyColumns</c>, task 165d); then, on every table, the owner, then the
     /// creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
@@ -1361,6 +1362,14 @@ internal static class InheritedAccessPermission
                         : "it decides who may see what";
             return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
                 $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke ({decides}), so it was not written");
+        }
+
+        // ebilling-r1 task 165d (EB-D-207; uac-r2 U1-U2, approved 2026-11-07): a column only the table's typed writer sets
+        // (RecordTableRule.WriterOnlyColumns: the invoice's AP export claim). Refused for EVERY identity, the field-mapping push included,
+        // and not through AccessColumns (it decides no access). Declared in RecordTableRules; its code extends the changed_only_by_its_writer marker.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyColumns(trimmed, columns) is { } writerOnlyColumn)
+        {
+            return writerOnlyColumn;
         }
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).

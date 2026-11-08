@@ -4,7 +4,7 @@
     <title>The AP export claim (sprk_invoice.sprk_billingexport) is written only by AP export: refused to generic app-only writers and to field mapping (EB-D-207)</title>
     <phase>4 Review (165 family, EB-D-200 integrity)</phase>
     <gate>uac-r2 approved the RefuseAppOnlyWrite hook on 2026-11-07, with conditions U1-U5 below. Run after the 165a and 2b-2 merge lands on work.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the refusal every generic app-only writer asks (.cs); integrity of the AP export selection.</rigor-reason>
     <model-tier>sonnet</model-tier>
