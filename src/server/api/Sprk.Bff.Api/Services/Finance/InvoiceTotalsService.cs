@@ -232,7 +232,8 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         line.GetAttributeValue<OptionSetValue>(LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment
         || (line.GetAttributeValue<OptionSetValue>(LineState)?.Value ?? StateActive) == StateActive;
 
-    private static InvoiceLineInput ToRow(Entity line) => new(
+    /// <summary>A line row as the calculator reads it. The one mapping: 165b-3's completion check derives the approved total through it too.</summary>
+    internal static InvoiceLineInput ToRow(Entity line) => new(
         line.Id,
         OptionOf<InvoiceLineCostType>(line, LineCostType),
         line.GetAttributeValue<Money>(LineAmount)?.Value ?? 0m,

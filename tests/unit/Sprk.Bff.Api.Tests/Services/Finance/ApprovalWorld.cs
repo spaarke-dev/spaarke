@@ -126,6 +126,8 @@ internal sealed class ApprovalWorld
         Put(new Entity("sprk_invoice", InvoiceId)
         {
             ["statuscode"] = new OptionSetValue(invoiceStatus),
+            // Task 165b-3 part B: Dataverse stamps every row's createdon; completion bounds the decision time by it.
+            ["createdon"] = Now.UtcDateTime.AddDays(-7),
             ["sprk_totalamount"] = new Money(1000m),
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId),
@@ -164,6 +166,16 @@ internal sealed class ApprovalWorld
         });
 
         H = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
+
+        // Task 165b-3 fix round (K4): each row the writer creates has its own id, returned by the create (the harness returns one shared id for
+        // every create), so a reader that keys on the row id cannot confuse two records.
+        H.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity created, CancellationToken _) =>
+            {
+                created.Id = Guid.NewGuid();
+                H.Created.Add(created);
+                return Task.FromResult(created.Id);
+            });
         H.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId) };
 
         Settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => SettingsValue);
@@ -638,11 +650,30 @@ internal sealed class ApprovalWorld
             var rows = Ordered(
                     source.Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link))),
                     query.Orders)
-                .Select(r => WithLinkColumns(Copy(r), query.LinkEntities))
+                .Select(r => WithLinkColumns(ProjectLineColumns(Copy(r), query), query.LinkEntities))
                 .Take(query.TopCount ?? int.MaxValue)
                 .ToList();
             return Task.FromResult(new EntityCollection(rows) { MoreRecords = false });
         }
+    }
+
+    /// <summary>Task 165b-3 fix round (F3): a line read returns only the columns it asks for, as Dataverse does, so a reader that uses a column it did
+    /// not request (the adjustment method and value, for one) sees it missing here too. Only the lines are narrowed: other tables keep the
+    /// whole row, as their readers were written against.</summary>
+    private static Entity ProjectLineColumns(Entity row, QueryExpression query)
+    {
+        if (query.EntityName != "sprk_billingevent" || query.ColumnSet is null || query.ColumnSet.AllColumns || query.ColumnSet.Columns.Count == 0)
+        {
+            return row;
+        }
+
+        var wanted = new HashSet<string>(query.ColumnSet.Columns, StringComparer.Ordinal);
+        foreach (var name in row.Attributes.Keys.Where(k => !wanted.Contains(k)).ToList())
+        {
+            row.Attributes.Remove(name);
+        }
+
+        return row;
     }
 
     /// <summary>Task 165a: the query's <c>AddOrder</c>s applied before <c>TopCount</c>, as Dataverse does (an empty value sorts first ascending,
@@ -861,10 +892,17 @@ internal sealed class ApprovalWorld
         row["versionnumber"] = ++_nextVersion;
     }
 
-    /// <summary>Task 165b: a row the writer created, as Dataverse stores it (<c>createdby</c> is the writer's own user).</summary>
-    private static Entity StoredByTheWriter(Entity created)
+    /// <summary>Task 165b: a row the writer created, as Dataverse stores it (<c>createdby</c> is the writer's own user). Task 165b-3: with the id
+    /// the create returned (the harness's <see cref="DecisionRecordWriterTests.Harness.NewId"/> when the writer sent none), as the harness's own
+    /// lookups store it, so a reader that keys on the row id sees the record the approval linked.</summary>
+    private Entity StoredByTheWriter(Entity created)
     {
         var stored = Copy(created);
+        if (stored.Id == Guid.Empty)
+        {
+            stored.Id = H.NewId;
+        }
+
         stored["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
         return stored;
     }

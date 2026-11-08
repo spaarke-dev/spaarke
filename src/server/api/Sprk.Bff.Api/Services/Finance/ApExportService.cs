@@ -63,6 +63,14 @@ public static class ApExportCodes
 
     /// <summary>409 (task 095c-4): after the claim, an invoice of the batch had no firm or was held "firm needed"; nothing was exported.</summary>
     public const string FirmMissing = "ebilling.export.firm_missing";
+
+    /// <summary>Task 165b-3 part B (EB-D-208): the invoice is Approved but has no approve Decision Record the writer identity created, so it is not
+    /// counted as approved. A per-invoice reason of <see cref="SelectionRefused"/>; the candidate list leaves the invoice out.</summary>
+    public const string ReasonApprovalNotRecorded = "approval_not_recorded";
+
+    /// <summary>The log code of <see cref="ReasonApprovalNotRecorded"/> (logged with the table and the row id only). Task 165b-3 part B fix round
+    /// (K1): also the 409 <c>errorCode</c> of Mark Paid on a Sent to AP invoice without that record (nothing is written).</summary>
+    public const string ApprovalNotRecorded = "ebilling.apexport.approval_not_recorded";
 }
 
 /// <summary>Stable codes of <c>POST /api/finance/invoices/{invoiceId}/mark-paid</c> (task 151a). A refused move carries the lifecycle's own <see cref="InvoiceTransitionReasons"/> code.</summary>
@@ -191,8 +199,11 @@ public sealed class ApExportService
     private readonly StoredFileService _files;
     private readonly StoredFileBlobs _blobs;
     private readonly IRecordOwnershipResolver _owners;
+    private readonly BillingDecisionRecorder _recorder;
     private readonly ILogger<ApExportService> _logger;
 
+    /// <param name="recorder">Task 165b-3 part B: the source of the writer identity only (<see cref="BillingDecisionRecorder.WriterUserIdAsync"/>),
+    /// so the export counts an invoice as approved only with the approve record that identity created. The export writes no Decision Record.</param>
     public ApExportService(
         IGenericEntityService entities,
         IInvoiceLifecycleService lifecycle,
@@ -201,6 +212,7 @@ public sealed class ApExportService
         StoredFileService files,
         StoredFileBlobs blobs,
         IRecordOwnershipResolver owners,
+        BillingDecisionRecorder recorder,
         ILogger<ApExportService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -210,6 +222,7 @@ public sealed class ApExportService
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _blobs = blobs ?? throw new ArgumentNullException(nameof(blobs));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
+        _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -347,6 +360,28 @@ public sealed class ApExportService
             }
         }
 
+        // Task 165b-3 part B (EB-D-208): AP export decides only from server-written sources. An Approved invoice without the writer-created approve
+        // record is refused per invoice (the request is refused as a whole, as for every other reason; nothing is claimed). One batched read.
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> recorded;
+            try
+            {
+                recorded = await ApproveRecordedAsync(selected, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError("AP export: the approve records of the selected invoices could not be read ({ExceptionType}); nothing was claimed", ex.GetType().Name);
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => !recorded.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonApprovalNotRecorded));
+            }
+        }
+
         if (refusals.Count > 0)
         {
             return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused, SelectionRefusedDetail(refusals), null, refusals, null);
@@ -444,6 +479,14 @@ public sealed class ApExportService
             if ((await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false)).Count > 0)
             {
                 throw FirmMissingStop(InvoiceFirmNeed.Held);
+            }
+
+            // Task 165b-3 part B (EB-D-208): and each still has its writer-created approve record, before any file or Sent to AP write. One batched read.
+            var stillRecorded = await ApproveRecordedAsync(selected, ct).ConfigureAwait(false);
+            if (selected.Any(r => !stillRecorded.Contains(r.Id)))
+            {
+                throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
+                    "An invoice in the selection changed while the export was being prepared. Nothing was exported. Reload and try again.");
             }
 
             // (8) The values, read once; the files, written once.
@@ -578,6 +621,14 @@ public sealed class ApExportService
         {
             var firmHeld = await InvoiceFirmHold.HeldInvoicesAsync(_entities, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
             rows = rows.Where(r => !InvoiceFirmHold.HasNoFirm(r) && !firmHeld.Contains(r.Id)).ToList();
+        }
+
+        // Task 165b-3 part B (EB-D-208): an Approved invoice without the writer-created approve record is not offered. One batched read; a fault
+        // (the read or the writer identity) throws, so nothing is shown.
+        if (rows.Count > 0)
+        {
+            var recorded = await ApproveRecordedAsync(rows, ct).ConfigureAwait(false);
+            rows = rows.Where(r => recorded.Contains(r.Id)).ToList();
         }
 
         var allowed = await _authorization.FilterExportableAsync(caller, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
@@ -744,6 +795,42 @@ public sealed class ApExportService
         throw new InvalidOperationException($"Invoice {invoiceId} kept changing; its claim by batch {batchId} could not be released.");
     }
 
+    /// <summary>
+    /// Task 165b-3 part B (EB-D-208): the invoices of <paramref name="rows"/> that have the approve Decision Record the writer identity created
+    /// (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, one batched read). Each one without it is logged with the code, the
+    /// table and the row id only. Throws on a read fault.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> ApproveRecordedAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        var recorded = await InvoiceApprovalService.InvoicesWithApproveRecordAsync(
+            _entities, rows.Select(r => r.Id).ToList(), _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        foreach (var row in rows.Where(r => !recorded.Contains(r.Id)))
+        {
+            _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.ApprovalNotRecorded, InvoiceEntity, row.Id);
+        }
+
+        return recorded;
+    }
+
+    /// <summary>
+    /// Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid's approval check. <c>Recorded</c> is true when the invoice has the writer-created
+    /// approve record under its approval's key (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, the export's own batched
+    /// read). Otherwise <c>Invoice</c> is the invoice's status as read now (null when the invoice does not exist), so Mark Paid can answer for an
+    /// invoice that is not Sent to AP as before without moving anything. Read app-only. Throws on a read fault (Mark Paid answers 503).
+    /// </summary>
+    public async Task<(bool Recorded, Entity? Invoice)> MarkPaidApprovalAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var recorded = await InvoiceApprovalService.InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        if (recorded.Contains(invoiceId))
+        {
+            return (true, null);
+        }
+
+        var query = new QueryExpression(InvoiceEntity) { ColumnSet = new ColumnSet("statuscode"), TopCount = 1 };
+        query.Criteria.AddCondition(InvoiceEntity + "id", ConditionOperator.Equal, invoiceId);
+        return (false, (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault());
+    }
+
     /// <summary>The 409 <see cref="ApExportCodes.FirmMissing"/> of step 7, worded for why the invoice needs a firm (095c-4 review K1).</summary>
     private static Stopped FirmMissingStop(InvoiceFirmNeed need) => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing, need == InvoiceFirmNeed.Held
         ? "An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first."
@@ -755,6 +842,11 @@ public sealed class ApExportService
     /// </summary>
     internal static string SelectionRefusedDetail(IReadOnlyCollection<ApExportInvoiceRefusal> refusals)
     {
+        if (refusals.All(r => r.Reason == ApExportCodes.ReasonApprovalNotRecorded))
+        {
+            return "An invoice in the selection has no recorded approval: an administrator must review it. Nothing was exported.";
+        }
+
         var firm = refusals.Count(r => r.Reason == ApExportCodes.ReasonFirmMissing);
         return firm == 0
             ? "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported."

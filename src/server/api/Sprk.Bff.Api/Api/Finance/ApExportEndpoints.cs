@@ -1,3 +1,4 @@
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -125,7 +126,8 @@ public static class ApExportEndpoints
             .WithDescription(
                 "Moves the invoice from Sent to AP to Paid through the invoice lifecycle service (payment is the full approved total, one payment, never " +
                 "reopened). The caller needs the decide right and Read on the invoice (uniform 404 otherwise). Any other current status, Paid included, " +
-                "is 409 invoice.transition_not_allowed with currentStatus and nothing is written.")
+                "is 409 invoice.transition_not_allowed with currentStatus and nothing is written. A Sent to AP invoice without the server-written approve " +
+                "Decision Record is 409 ebilling.apexport.approval_not_recorded and nothing is written.")
             .Produces<InvoiceMarkPaidResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -332,8 +334,53 @@ public static class ApExportEndpoints
     private static IResult FileNotAvailable(string format) =>
         InvoiceLineReviewEndpoints.Refused(StatusCodes.Status404NotFound, ApExportCodes.FileNotAvailable, $"This batch has no {format} file to download.");
 
-    private static async Task<IResult> MarkPaid(Guid invoiceId, IInvoiceLifecycleService lifecycle, HttpContext httpContext, ILoggerFactory loggerFactory, CancellationToken ct)
+    private static async Task<IResult> MarkPaid(
+        Guid invoiceId, IInvoiceLifecycleService lifecycle, ApExportService exports, HttpContext httpContext, ILoggerFactory loggerFactory, CancellationToken ct)
     {
+        // Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid decides only from server-written sources. Without the writer-created approve record
+        // (the export's own batched check) the lifecycle is not called: a Sent to AP invoice is 409 approval_not_recorded, any other status keeps the
+        // answer FR-42 gives it, and nothing is written. A read fault is 503.
+        (bool Recorded, Entity? Invoice) approval;
+        try
+        {
+            approval = await exports.MarkPaidApprovalAsync(invoiceId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            loggerFactory.CreateLogger(typeof(ApExportEndpoints).FullName!).LogError(
+                "Mark Paid: the approval of invoice {InvoiceId} could not be read ({ExceptionType}) (503)", invoiceId, ex.GetType().Name);
+            return InvoiceLineReviewEndpoints.Refused(
+                StatusCodes.Status503ServiceUnavailable, InvoicePaymentCodes.Unavailable,
+                "The payment could not be recorded. Check the invoice's status and try again.");
+        }
+
+        if (!approval.Recorded)
+        {
+            if (approval.Invoice is null)
+            {
+                return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
+            }
+
+            if (approval.Invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value is not { } code
+                || !InvoiceStatusCodes.TryFromStatusCode(code, out var current))
+            {
+                return NotMarkable(InvoiceTransitionReasons.StatusUnknown, null, "Only an invoice that is Sent to AP can be marked Paid. Nothing was changed.");
+            }
+
+            if (current != InvoiceLifecycleStatus.SentToAp)
+            {
+                return NotMarkable(InvoiceTransitionReasons.NotAllowed, current, current == InvoiceLifecycleStatus.Paid
+                    ? "The invoice is already Paid."
+                    : "Only an invoice that is Sent to AP can be marked Paid. Nothing was changed.");
+            }
+
+            loggerFactory.CreateLogger(typeof(ApExportEndpoints).FullName!).LogWarning(
+                "Mark Paid refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.ApprovalNotRecorded, ApExportService.InvoiceEntity, invoiceId);
+            return InvoiceLineReviewEndpoints.Refused(
+                StatusCodes.Status409Conflict, ApExportCodes.ApprovalNotRecorded,
+                "This invoice has no recorded approval, so it cannot be marked Paid. Nothing was changed. An administrator must review the invoice.");
+        }
+
         InvoiceTransitionResult result;
         try
         {

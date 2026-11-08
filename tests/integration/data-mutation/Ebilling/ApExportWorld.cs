@@ -6,11 +6,15 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
+using Sprk.Bff.Api.Tests.Services.Finance;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
@@ -43,6 +47,13 @@ internal sealed class ApExportWorld
     public StoredFileService Files { get; }
     public ApExportAuthorization Authorization { get; }
     public ApExportService Service { get; }
+
+    /// <summary>Task 165b-3 part B: the Decision Record writer's harness, whose WhoAmI answers the writer identity
+    /// (<see cref="DecisionRecordWriterTests.WriterUser"/>) or, with <c>WhoAmIFault</c> set, faults. The export reads only that identity from it.</summary>
+    public DecisionRecordWriterTests.Harness Writer { get; } = new();
+
+    /// <summary>Task 165b-3 part B: the export's log lines (level, rendered message).</summary>
+    public ApprovalListLogger<ApExportService> Log { get; } = new();
 
     /// <summary>When set, the settings mapping JSON (null = the D-56 default).</summary>
     public string? MappingJson { get; set; }
@@ -103,7 +114,9 @@ internal sealed class ApExportWorld
         Authorization = new ApExportAuthorization(
             new AuthorizationService(Access, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance), Probe,
             NullLogger<ApExportAuthorization>.Instance);
-        Service = new ApExportService(Dataverse.Service, Lifecycle, Settings.Object, Authorization, Files, Blobs, Owners.Object, NullLogger<ApExportService>.Instance);
+        var recorder = new BillingDecisionRecorder(Writer.Writer, new Mock<IIdentityNormalizationService>().Object, NullLogger<BillingDecisionRecorder>.Instance);
+        Service = new ApExportService(
+            Dataverse.Service, Lifecycle, Settings.Object, Authorization, Files, Blobs, Owners.Object, recorder, Log);
 
         Dataverse.Put(new Entity("sprk_organization", FirmId) { ["sprk_organizationname"] = "Acme Law LLP" });
         Dataverse.Put(new Entity("contact", ApproverContact) { ["fullname"] = "Pat Approver" });
@@ -119,9 +132,12 @@ internal sealed class ApExportWorld
         }
     }
 
-    /// <summary>Adds an invoice (default: Approved, no batch) with one approval and <paramref name="lines"/> lines, and returns it.</summary>
+    /// <summary>Adds an invoice (default: Approved, no batch) with one approval and <paramref name="lines"/> lines, and returns it. Task 165b-3 part B:
+    /// with <paramref name="approveRecord"/> (the default) an invoice in Approved, Sent to AP or Paid also gets the approve Decision Record the writer
+    /// identity created (<see cref="AddApproveRecord"/>), as every approved invoice on dev has.</summary>
     public Entity AddInvoice(
-        string number, int status = InvoiceStatusCodes.Approved, decimal approved = 900m, int lines = 2, bool grant = true, Guid? batch = null)
+        string number, int status = InvoiceStatusCodes.Approved, decimal approved = 900m, int lines = 2, bool grant = true, Guid? batch = null,
+        bool approveRecord = true)
     {
         var id = Guid.NewGuid();
         var invoice = new Entity("sprk_invoice", id)
@@ -177,7 +193,42 @@ internal sealed class ApExportWorld
             Access.Grant("sprk_invoices", id, AccessRights.Read | AccessRights.Write);
         }
 
+        if (approveRecord && status is InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid)
+        {
+            AddApproveRecord(invoice);
+        }
+
         return invoice;
+    }
+
+    /// <summary>Task 165b-3 part B: an approve Decision Record regarding <paramref name="invoice"/>, as Dataverse stores it: <c>createdby</c> is
+    /// <paramref name="createdBy"/> (default the writer identity) and <c>createdonbehalfby</c> is <paramref name="onBehalfBy"/> (default empty).
+    /// Fix round (uac-r2 F1): its <c>sprk_steps</c> carries the key the writer gives the approval of the invoice's portion
+    /// (<see cref="ApprovalKeyOf"/>), or <paramref name="reviewId"/> when given.</summary>
+    public Entity AddApproveRecord(Entity invoice, Guid? createdBy = null, Guid? onBehalfBy = null, Guid? reviewId = null)
+    {
+        var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice.Id),
+            ["sprk_actioncode"] = "approve-invoice",
+            ["createdby"] = new EntityReference("systemuser", createdBy ?? DecisionRecordWriterTests.WriterUser),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{reviewId ?? ApprovalKeyOf(invoice):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+        };
+        if (onBehalfBy is { } behalf)
+        {
+            record["createdonbehalfby"] = new EntityReference("systemuser", behalf);
+        }
+
+        Dataverse.Put(record);
+        return record;
+    }
+
+    /// <summary>The approve record's key for <paramref name="invoice"/>'s one portion: <see cref="BillingDecisionKey.IdOf"/>(<c>sprk_invoice</c>, invoice,
+    /// <see cref="InvoiceApprovalService.DecisionIdFor"/>(portion)), as the Decision Record writer stores it.</summary>
+    public Guid ApprovalKeyOf(Entity invoice)
+    {
+        var portion = Dataverse.RowsOf("sprk_invoiceapproval").Single(r => r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id);
+        return BillingDecisionKey.IdOf("sprk_invoice", invoice.Id, InvoiceApprovalService.DecisionIdFor(portion.Id));
     }
 
     /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>
