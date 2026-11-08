@@ -225,6 +225,24 @@ public sealed partial class ExternalInvoiceVisibilityTests
         /// <summary>The (submission, invoice) pairs of the 165c event logged at <paramref name="level"/>.</summary>
         public IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwnAt(LogLevel level) => NotOwnWhere(l => l == level);
 
+        /// <summary>Task 165e: the (submission, invoice) pairs of the own-submission-missing event, at any level (no submission id: the invoice read's).</summary>
+        public IReadOnlyList<(Guid? Submission, Guid Invoice)> OwnMissing => OwnMissingWhere(_ => true);
+
+        /// <summary>Task 165e: the same, logged at <paramref name="level"/>.</summary>
+        public IReadOnlyList<(Guid? Submission, Guid Invoice)> OwnMissingAt(LogLevel level) => OwnMissingWhere(l => l == level);
+
+        private IReadOnlyList<(Guid? Submission, Guid Invoice)> OwnMissingWhere(Func<LogLevel, bool> level)
+        {
+            lock (Entries)
+            {
+                return Entries
+                    .Where(e => level(e.Level)
+                        && e.Values.TryGetValue("EventCode", out var code) && Equals(code, ExternalInvoiceVisibility.OwnSubmissionMissingEvent))
+                    .Select(e => (e.Values.TryGetValue("SubmissionId", out var s) ? (Guid?)s : null, (Guid)e.Values["InvoiceId"]!))
+                    .ToList();
+            }
+        }
+
         private IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwnWhere(Func<LogLevel, bool> level)
         {
             lock (Entries)

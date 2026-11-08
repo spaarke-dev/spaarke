@@ -342,7 +342,8 @@ public sealed partial class InvoiceSubmissionRerunTests
     /// The partner decision over one submission (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, the routes' and the assistant
     /// tools' one decision), with readers that find no Stored File, source or Restricted root: so only the firm rules can withhold it. The
     /// invoice's firm hold is read by the REAL app-only reader (<see cref="ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync"/>) over the
-    /// world's rows, so the marker the re-run clears is the one the decision reads.
+    /// world's rows, so the marker the re-run clears is the one the decision reads. Task 165e: the submission read returns the submission
+    /// itself, linked to the invoice the view names, on the Spa channel (never a source), so the invoice's own submission is found.
     /// </summary>
     private static Task<InvoiceVisibilityResult> PartnerDecisionAsync(World world, InvoiceSubmissionView view)
     {
@@ -350,7 +351,15 @@ public sealed partial class InvoiceSubmissionRerunTests
         entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => world.Query(query));
         return ExternalInvoiceVisibility.DecideSubmissionsAsync([view], new InvoiceVisibilityReaders(
-            (_, _, _) => Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>([]),
+            (set, _, _) => Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(
+                set == "sprk_invoicesubmissions" && view.InvoiceId is { } linked
+                    ? [new Dictionary<string, JsonElement>
+                    {
+                        ["sprk_invoicesubmissionid"] = JsonSerializer.SerializeToElement(view.SubmissionId),
+                        ["_sprk_invoice_value"] = JsonSerializer.SerializeToElement(linked),
+                        ["sprk_channel"] = JsonSerializer.SerializeToElement((int)InvoiceSubmissionChannel.Spa),
+                    }]
+                    : []),
             (_, _) => throw new InvalidOperationException("no source is decided here"),
             (_, _) => throw new InvalidOperationException("no root walk here"),
             (_, ids, _) => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(ids.ToDictionary(id => id, _ => default(RootRecordFlags))),
