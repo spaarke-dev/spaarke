@@ -153,6 +153,9 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 |---|---|---|---|---|---|---|
 | 130-0 | 🔄 [in progress; uac-r2 approved four edit points: ExternalAccessModule binding, ExternalDataService.HideInvoicesForAsync, ExternalInvoiceVisibility, one guard-test entry] | External invoices: apply the firm rule on every path (design.md:414) | FULL | opus / high | none | 044, 051 |
 | 130-0b | 🔲 [open; shape to uac-r2 before coding; must land before the batch carrying 130-0 reaches dev] | Assistant tools' seam: apply the same firm rule for external callers | FULL | opus / high | none | 130-0 |
+| 130a | 🔄 [built on task/ebilling-130a 60a2b64dc0; merges with 130b after two passes] | Firm findings projection service (no routes) | FULL | sonnet / high | none | 083, 100 |
+| 130b | 🔄 [in progress, on 130a] | Firm outcome external GET routes: firm-scope 403 filter, ledger entries, auth tests; line reasons only from writer-created records | FULL | sonnet / high | none | 130a |
+| 130c | 🔲 [open; after 130b] | FR-18: a rejected submission projects its findings from the submission's own stored findings (line, values read, rule, clause through GetFirmClauseAsync, flag-gated) | FULL | sonnet / high | none | 130b |
 | 130 | 🔲 [open; amended by EB-D-202: In Review shows reviewer-added and decided lines with reasons] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | 🔲 [open] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 132 | 🔲 [open] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 133, 024, 103, 104 |
