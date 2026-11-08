@@ -116,6 +116,8 @@ export {
   discoverNavProps,
   _resetNavPropCacheForTests,
   applyResolverFields,
+  // 045c: a re-regard of a SAVED host nulls the previous number when the new target has none.
+  nullRecordNumberWhenTargetHasNone,
   // FR-A4-01 / FR-C1-01 additions (set-regarding-and-field-mapping-resolver-r1):
   resolveRecordNumberFieldName,
   _resetRecordNumberFieldCacheForTests,

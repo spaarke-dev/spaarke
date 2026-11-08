@@ -13,6 +13,17 @@ Branch `task/fm-045c`. Line numbers are at the commit the file was written on.
 | Builder takes an optional number (last parameter); writes the column only when non-blank | `TodoRegardingBuilder.ApplyResolverFieldsAsync` and `ApplyResolverPairAsync` | `RegardingRecordNumberTests` |
 | `InquiryReplyTodoCreator` passes the matter's number from the matter read it already makes (`sprk_matternumber` added to that read's columns) | `InquiryReplyTodoCreator.CreateIfNeededAsync` | `RegardingRecordNumberTests` |
 
+## Review round 3: the number on a re-regard of a saved record
+
+| Item | Where | Test |
+|---|---|---|
+| A re-regard of a saved host whose new target has no number nulls `sprk_regardingrecordnumber` (gated to hosts that carry `sprk_regardingrecordtype`, since writing a missing column is a 400) | shared `nullRecordNumberWhenTargetHasNone` (`PolymorphicResolverService.ts`), called by `ResolverWriteHandler.applyRegardingSelection` (saved-host path only) | `PolymorphicResolverService.test.ts`, `ResolverWriteHandler.test.ts` |
+| Same for the Communication Connections primary | `ConnectionsWriteHandler.applyRegardingSelection` | `ConnectionsWriteHandler.test.ts` |
+| Create-mode form: picking a target with no number clears the number an earlier auto-detect staged | `RegardingResolverApp.handlePickerSelect` | `RegardingResolverApp.test.tsx` |
+
+- **Filing route:** `PATCH /api/communications/{id}/filing` (`CommunicationEndpoints.cs:133`) runs `ChildRecordEndpoints.UpdateAsync(filingOnly: true)`, which writes the `sprk_regarding...` columns it is sent. `OwnedChildWrite.cs:474-475` clears the display columns (name, number, url) only when a typed lookup is cleared with no replacement; it does not derive or clear the number when a new pair is sent. So the client defect was live and is fixed on the client. The server is not the single owner today: deriving display columns on a move (045 Q7) belongs to the Q8/045d work, which already needs `OwnedChildWrite.cs` and `ChildRecordEndpoints.cs`, files this task may not touch.
+- **`buildTodoRegardingUpdate` null-number fix** (`TodoRegardingUpdateBuilder.ts`, round 2): it has no production caller (the live update paths are the two handlers above). It is harmless and left in place.
+
 ## Not changed, on purpose
 
 - **Office to-do number (W11):** the request contract has no number field and the adapter reads no record. The number stays unset. No field was added to the Office request.

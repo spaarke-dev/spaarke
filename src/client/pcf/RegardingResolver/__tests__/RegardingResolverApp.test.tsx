@@ -188,6 +188,10 @@ jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () 
   // its nav-prop name; with an empty nav-prop table (jest.setup's fetch returns
   // no relationships) the honest answer is "the host has no such column".
   findHostNavPropForLookup: () => undefined,
+  // 045c: consumed by `applyRegardingSelection` on a SAVED host. The shared helper has its own unit tests and the
+  // real-service suite (ResolverWriteHandler.test.ts) drives it end to end; with this suite's empty nav-prop table the
+  // host carries no pair, so the honest answer is "add nothing".
+  nullRecordNumberWhenTargetHasNone: () => undefined,
   CORE_ANCESTOR_LOOKUPS: [
     { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject' },
     { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter' },
@@ -1468,6 +1472,87 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       } finally {
         restore();
       }
+    });
+
+    // 045c review round 3 — an unsaved form that already staged target A's number (the auto-detect path writes it onto
+    // the form attribute) must not keep it when the user picks a target B that has none.
+    describe('the staged number follows the latest pick', () => {
+      const withCreateModeXrmAndNumberAttr = (): { numberWrites: unknown[]; restore: () => void } => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        const originalXrm = w.Xrm;
+        const numberWrites: unknown[] = [];
+        w.Xrm = {
+          WebApi: xrmWebApiStub(),
+          Page: {
+            data: { entity: { getId: () => '' } },
+            getAttribute: (name: string) =>
+              name === 'sprk_regardingrecordnumber'
+                ? { getValue: () => 'MAT-A', setValue: (v: unknown) => numberWrites.push(v) }
+                : null,
+          },
+        };
+        return {
+          numberWrites,
+          restore: () => {
+            if (originalXrm === undefined) delete w.Xrm;
+            else w.Xrm = originalXrm;
+          },
+        };
+      };
+
+      test('picking a target with NO number clears the number staged on the form', async () => {
+        const { numberWrites, restore } = withCreateModeXrmAndNumberAttr();
+        try {
+          mockApplyResolverFields.mockResolvedValueOnce({ recordNumber: null, recordNumberSourceField: null });
+          const { context } = buildContext();
+          renderWithProvider(
+            <RegardingResolverApp
+              context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+              readOnly={false}
+              onRecordTypeChanged={() => undefined}
+              version="1.3.6"
+            />
+          );
+
+          fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+          await waitFor(() => {
+            expect(numberWrites).toEqual([null]);
+          });
+        } finally {
+          restore();
+        }
+      });
+
+      test('picking a target that HAS a number does not clear it (the bridge carries the new one)', async () => {
+        const { numberWrites, restore } = withCreateModeXrmAndNumberAttr();
+        try {
+          mockApplyResolverFields.mockResolvedValueOnce({
+            recordNumber: 'MAT-B',
+            recordNumberSourceField: 'sprk_matternumber',
+          });
+          const { context } = buildContext();
+          renderWithProvider(
+            <RegardingResolverApp
+              context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+              readOnly={false}
+              onRecordTypeChanged={() => undefined}
+              version="1.3.6"
+            />
+          );
+
+          fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+          await waitFor(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            expect((window as any).__sprk_regarding_pending__?.recordNumber).toBe('MAT-B');
+          });
+          expect(numberWrites).toEqual([]);
+        } finally {
+          restore();
+        }
+      });
     });
 
     test('CREATE-mode seam key set matches the presave v1.3.0 contract exactly', async () => {
