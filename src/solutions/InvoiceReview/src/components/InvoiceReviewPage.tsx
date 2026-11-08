@@ -15,6 +15,9 @@
  * requestId is made when the form opens and is kept for every send from it, including Repeat after a 503 incomplete, so the server adds the
  * line once. The page checks none of what the server owns; a refusal shows in the form.
  *
+ * Launch line (EB-D-194): an optional `initialLineId` selects that line once, when the first review has loaded, through the same `onSelect`
+ * a click uses, and scrolls its row into view. An id that is not one of the invoice's lines does nothing (no error, default selection).
+ *
  * Slots for task 111: `paneTabs` (Context, Related work, History), `headerExtras` (Awaiting approvers), `banners` (the blocked-submission
  * state) and `invoiceActions` (Decide invoice…).
  */
@@ -208,6 +211,8 @@ export interface ReviewSlotContext {
 
 export interface InvoiceReviewPageProps {
   invoiceId: string;
+  /** The line to preselect once the lines have loaded (the launch `lineId`, EB-D-194). Applied once; an unknown id is ignored. */
+  initialLineId?: string;
   api: InvoiceReviewApi;
   /** Opens the core record (Xrm navigation in the host). */
   openRecord?: (entityName: string, id: string) => void;
@@ -284,7 +289,7 @@ function Stat({ label, value, big, testId }: { label: string; value: string; big
 }
 
 export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
-  const { invoiceId, api, openRecord, pollIntervalMs = 5000, firmNeeded = false, paneTabs = [], headerExtras, banners, invoiceActions } = props;
+  const { invoiceId, initialLineId, api, openRecord, pollIntervalMs = 5000, firmNeeded = false, paneTabs = [], headerExtras, banners, invoiceActions } = props;
   const s = useStyles();
 
   const [review, setReview] = React.useState<InvoiceReview | null>(null);
@@ -406,6 +411,29 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     setSelectedField(field);
     setTab('review');
   }, []);
+
+  // EB-D-194: preselect the launch line once, when the first review has loaded (later re-reads never move the selection). A line that is not
+  // on the invoice is ignored. The row is scrolled into view by the effect below, once it is rendered.
+  const launchLineHandled = React.useRef(false);
+  const scrollToLineId = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (launchLineHandled.current || !review) return;
+    launchLineHandled.current = true;
+    // Select by the server's own id, so the grid row and pane match whatever casing the read model uses.
+    const match = initialLineId ? review.lines.find(l => l.id.toLowerCase() === initialLineId) : undefined;
+    if (match) {
+      scrollToLineId.current = match.id;
+      onSelect(match.id, null);
+    }
+  }, [review, initialLineId, onSelect]);
+  const gridRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const id = scrollToLineId.current;
+    if (!id || selectedLineId !== id) return;
+    scrollToLineId.current = null;
+    const el = gridRef.current?.querySelector(`[data-testid="line-row-${id}"]`);
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+  }, [selectedLineId, review]);
 
   /**
    * One write: busy, the call, then the server's state. A refusal changes nothing on the page; a 403 turns it read-only; a 503 incomplete
@@ -775,7 +803,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
       <div className={s.main} ref={panes.containerRef as React.RefObject<HTMLDivElement>}>
         <div style={{ width: panes.primaryWidth, display: 'flex', minWidth: 0 }}>
-          <div className={s.card} style={{ flex: 1 }}>
+          <div className={s.card} style={{ flex: 1 }} ref={gridRef}>
             <div className={s.toolbar}>
               <div className={s.cards}>
                 <MetricCardRow layout="wide" ariaLabel="Line filters" cards={cards} />

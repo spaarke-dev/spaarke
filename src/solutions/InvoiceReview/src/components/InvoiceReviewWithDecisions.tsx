@@ -22,7 +22,7 @@ import { HistoryTab } from './tabs/HistoryTab';
 import { RelatedWorkTab } from './tabs/RelatedWorkTab';
 import type { InvoiceDecisionApi } from '../services/decisionApi';
 
-export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageProps, 'invoiceId' | 'api' | 'openRecord' | 'pollIntervalMs'> {
+export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageProps, 'invoiceId' | 'initialLineId' | 'api' | 'openRecord' | 'pollIntervalMs'> {
   decisionApi: InvoiceDecisionApi;
   /** The optional firm-notice step of a reject or return (a slot: nothing is built in it). Absent: the wizard has no notify step. */
   notifyStep?: NotifyStep;
@@ -37,7 +37,7 @@ function ReviewPageWithApproval(props: InvoiceReviewPageProps) {
   return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} />;
 }
 
-export function InvoiceReviewWithDecisions({ invoiceId, api, decisionApi, openRecord, pollIntervalMs, notifyStep }: InvoiceReviewWithDecisionsProps) {
+export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, notifyStep }: InvoiceReviewWithDecisionsProps) {
   const paneTabs = React.useMemo<PaneTabSlot[]>(
     () => [
       { value: 'context', label: 'Context', render: () => <ContextTab api={decisionApi} invoiceId={invoiceId} /> },
@@ -51,6 +51,7 @@ export function InvoiceReviewWithDecisions({ invoiceId, api, decisionApi, openRe
     <ApprovalProvider api={decisionApi} invoiceId={invoiceId}>
       <ReviewPageWithApproval
         invoiceId={invoiceId}
+        initialLineId={initialLineId}
         api={api}
         openRecord={openRecord}
         pollIntervalMs={pollIntervalMs}

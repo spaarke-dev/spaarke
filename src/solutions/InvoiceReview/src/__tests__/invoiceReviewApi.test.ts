@@ -1,5 +1,7 @@
 import { createInvoiceReviewApi, isIncomplete, loadFailureMessage, routes, toFailure, writeFailureMessage } from '../services/invoiceReviewApi';
 import { parseLaunch } from '../services/launch';
+// The real decoder, through the jest seam for the library barrel.
+import { parseDataParams } from '@spaarke/ui-components';
 import { AuthError, INVOICE_ID, PDF_ID, lineId, problem, review } from './testKit';
 
 const BASE = 'https://bff.example.test/';
@@ -155,5 +157,30 @@ describe('parseLaunch', () => {
     expect(parseLaunch({ id: INVOICE_ID, typename: 'sprk_matter' }).ok).toBe(false);
     expect(parseLaunch({}).ok).toBe(false);
     expect(parseLaunch({ invoiceId: 'not-a-guid' }).ok).toBe(false);
+  });
+
+  // EB-D-194: the optional lineId is a hint and never blocks the invoice.
+  const LINE = lineId(2);
+
+  it('reads a lineId from the URL or from the Xrm data envelope', () => {
+    expect(parseLaunch(parseDataParams(`?invoiceId=${INVOICE_ID}&lineId=${LINE}`))).toEqual({ ok: true, invoiceId: INVOICE_ID, lineId: LINE });
+    expect(parseLaunch(parseDataParams(`?data=${encodeURIComponent(`invoiceId=${INVOICE_ID}&lineId=${LINE}`)}`))).toEqual({
+      ok: true,
+      invoiceId: INVOICE_ID,
+      lineId: LINE,
+    });
+    expect(parseLaunch({ invoiceId: INVOICE_ID, lineid: LINE })).toEqual({ ok: true, invoiceId: INVOICE_ID, lineId: LINE });
+  });
+
+  it('leaves lineId undefined when it is missing, or present but not a GUID, and still opens the invoice', () => {
+    for (const params of [{ invoiceId: INVOICE_ID }, { invoiceId: INVOICE_ID, lineId: 'not-a-guid' }, { invoiceId: INVOICE_ID, lineId: '' }]) {
+      const result = parseLaunch(params);
+      expect(result).toMatchObject({ ok: true, invoiceId: INVOICE_ID });
+      expect(result.ok && result.lineId).toBeUndefined();
+    }
+  });
+
+  it('normalises a lineId with braces and upper case', () => {
+    expect(parseLaunch({ invoiceId: INVOICE_ID, lineId: `{${LINE.toUpperCase()}}` })).toEqual({ ok: true, invoiceId: INVOICE_ID, lineId: LINE });
   });
 });
