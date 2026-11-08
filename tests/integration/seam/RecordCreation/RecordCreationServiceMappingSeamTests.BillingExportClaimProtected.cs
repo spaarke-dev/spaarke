@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -65,5 +66,97 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().ContainSingle()
             .Which.Should().Match<RecordCreationWarning>(w =>
                 w.Code == RecordCreationWarning.MappingRuleSkippedCode && w.Detail.Contains(ApExportService.BatchLookup));
+    }
+
+    // ── The create path (165d fix round, EB-D-207): an invoice must not be created already claimed ──────────────────
+
+    [Theory(DisplayName = "165d fix round: a CALLER's create naming the AP export claim is refused (blocked column, the writer-only code, nothing created), in every key form")]
+    [InlineData("sprk_BillingExport@odata.bind")]
+    [InlineData("sprk_billingexport@odata.bind")]
+    [InlineData("sprk_billingexport")]
+    [InlineData("_sprk_billingexport_value")]
+    public async Task CreateAsync_ACallersInvoiceNamingTheApExportClaim_IsRefused(string key)
+    {
+        var outcome = await Service().CreateAsync(InvoiceNaming(key), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull("the claim is AP export's alone (must fire)");
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.BlockedColumn);
+        outcome.Refusal.Code.Should().Be(RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode);
+        outcome.Refusal.Detail.Should().Contain(ApExportService.BatchLookup).And.Contain("changed only by Spaarke itself");
+        Problem(outcome, "sprk_invoice").Status.Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden);
+        _creates.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "165d fix round: a SYSTEM create naming the AP export claim is refused too (the caller's column policy is skipped, this column's is not)")]
+    [InlineData("sprk_billingexport")]
+    [InlineData("sprk_BillingExport@odata.bind")]
+    public async Task CreateAsync_ASystemInvoiceNamingTheApExportClaim_IsRefused(string key)
+    {
+        var outcome = await Service().CreateAsync(
+            InvoiceNaming(key), RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.BlockedColumn);
+        outcome.Refusal.Code.Should().Be(RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode);
+        _creates.Should().BeEmpty();
+    }
+
+    /// <summary>An invoice create whose (already mapped) item names <paramref name="key"/> beside an ordinary column.</summary>
+    private static RecordCreationRequest InvoiceNaming(string key) =>
+        new("sprk_invoice", new RecordCreationPayload.Mapped(new DataverseWriteItemMapper.MappedItem(
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sprk_invoicenumber"] = "INV-165D",
+                [key] = "/sprk_billingexports(165d0000-0000-0000-0000-00000000ba7c)",
+            }),
+            ["sprk_invoicenumber", key])))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+
+    [Fact(DisplayName = "165d fix round must-not-fire: the same invoice create without the claim, or with an unprotected column, is not blocked")]
+    public async Task CreateAsync_AnInvoiceNamingNoClaim_IsNotBlocked()
+    {
+        RecordCreationService.CallerBlockedColumnRefusal(RecordTableRules.Get("sprk_invoice"), "invoice", ["sprk_invoicenumber", "sprk_description"])
+            .Should().BeNull("an unprotected column creates");
+        RecordCreationService.CallerBlockedColumnRefusal(RecordTableRules.Get("sprk_billingevent"), "line", [ApExportService.BatchLookup])
+            .Should().BeNull("only the invoice carries the claim");
+        RecordCreationService.CallerBlockedColumnRefusal(RecordTableRules.Get("sprk_invoice"), "invoice", ["sprk_BillingExport@odata.bind"])
+            .Should().NotBeNull();
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_invoice", new Dictionary<string, object?>
+            {
+                ["sprk_invoicenumber"] = "INV-165D",
+                ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            }, mapping: false),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle();
+    }
+
+    // ── K1 (165d fix round): the invoices can also be associated FROM the batch row, through the collection-valued navigation ──────────
+
+    [Fact(DisplayName = "165d fix round K1: no generic writer creates a batch row, so the batch-side navigation (sprk_invoice_billingexport_billingexport) cannot associate invoices on create")]
+    public async Task CreateAsync_ABatchRowNamingTheInvoiceNavigation_IsNotCreatedHere()
+    {
+        // The batch table is in no registry and on no create list: AP export is its only BFF creator. A collection-valued @odata.bind is accepted by
+        // Dataverse on a POST only, so the navigation needs no refusal of its own while this holds; if the table is ever registered or listed, this fails
+        // and the navigation must be added to a WriterOnlyColumns set first.
+        RecordTableRules.Find("sprk_billingexport").Should().BeNull();
+        Sprk.Bff.Api.Api.ChildRecordEndpoints.CreateTables.Should().NotContain("sprk_billingexport");
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_billingexport", new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "BATCH-165D",
+                ["sprk_invoice_billingexport_billingexport@odata.bind"] = new[] { $"/sprk_invoices({Guid.NewGuid():D})" },
+            }, mapping: false),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.TableUnsupportedCode);
+        _creates.Should().BeEmpty();
     }
 }

@@ -777,6 +777,12 @@ internal static class OwnedChildWrite
         if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(table) is { } writerOnly)
             return new RefileOutcome { Invalid = writerOnly.Reason };
 
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets (the invoice's AP
+        // export claim), on the item's shape alone, before any read or write. The re-file core applies the caller's own PATCH, so only the
+        // column check is asked here, never RefuseAppOnlyWrite. Nothing written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyColumns(table, item.Columns) is { } writerOnlyColumn)
+            return new RefileOutcome { Invalid = $"{writerOnlyColumn.Reason} ({writerOnlyColumn.RefusalCode})" };
+
         // ebilling-r1 FR-05 (ISS-010, #1973; unified-access-control-r2): BEFORE anything else — re-file or ordinary update —
         // an update that sets or clears an invoice-family row's guarded lookups is decided on the stored lookups overlaid
         // with the change (read as the caller, once). A refusal writes nothing. D-96: an invoice's lines are counted with

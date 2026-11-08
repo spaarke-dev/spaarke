@@ -6,6 +6,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.FieldMappings.Dtos;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.FieldMapping;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -69,7 +70,8 @@ public class BillingExportClaimWriterOnlyTests
             refused.Should().NotBeNull($"{key} as {identity}");
             refused!.RefusalCode.Should().Be(Code, $"{key} as {identity}");
             refused.RefusalCode.Should().StartWith(MarkerFamily, "the gate query counts the changed_only_by_its_writer marker");
-            refused.Reason.Should().StartWith($"{Claim} of a {Invoice} ").And.Contain("nothing was written").And.Contain(MarkerFamily);
+            refused.Reason.Should().StartWith($"{Claim} of a {Invoice} ").And.NotContain("nothing was written", "the throwing writers add their own tail")
+                .And.NotContain(MarkerFamily, "the code travels in RefusalCode; each writer adds it to its own message");
         }
 
         // The table is matched trimmed and in any case.
@@ -96,6 +98,16 @@ public class BillingExportClaimWriterOnlyTests
             CodeOf("sprk_invoicesubmission", Claim, identity).Should().BeNull("the submission carries no export claim");
             CodeOf("sprk_billingexport", "sprk_name", identity).Should().BeNull("the batch row's own columns are ordinary");
             CodeOf("sprk_matter", Claim, identity).Should().BeNull("only the invoice carries the claim");
+        }
+    }
+
+    [Fact(DisplayName = "165d fix round must-not-fire: a payload key that merely looks like the read-back form (\"_value\") is no column and no exception")]
+    public void AKeyThatOnlyLooksLikeTheReadBackForm_IsNotARefusalAndDoesNotThrow()
+    {
+        foreach (var key in new[] { "_value", "_VALUE", "__value", "_", "", "  " })
+        {
+            RecordTableRules.RefuseWriterOnlyColumns(Invoice, [key]).Should().BeNull(key);
+            InheritedAccessPermission.RefuseAppOnlyWrite(Invoice, [key], InheritedAccessPermission.WriteIdentity.Caller).Should().BeNull(key);
         }
     }
 
@@ -136,6 +148,32 @@ public class BillingExportClaimWriterOnlyTests
         (await lookup.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(Code, key);
 
         _writes.Invocations.Should().BeEmpty(key);
+    }
+
+    [Fact(DisplayName = "165d fix round: the Update Record NODE maps the claim's refusal to a validation failure (not an internal error), with the code in its message and nothing written")]
+    public async Task TheUpdateRecordNode_AConfiguredClaimWrite_FailsAsValidation()
+    {
+        var result = await Node().ExecuteAsync(
+            NodeContext($$"""{ "entityLogicalName": "sprk_invoice", "recordId": "{{Row}}", "fields": { "sprk_billingexport": "{{Batch}}" } }"""),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed, "a configuration the platform refuses, not a server fault");
+        result.ErrorMessage.Should().Contain(Claim).And.Contain(Code, "the exception adds the code to the reason");
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "165d fix round must-not-fire: the Update Record NODE still writes an ordinary invoice column")]
+    public async Task TheUpdateRecordNode_AnOrdinaryColumn_IsWritten()
+    {
+        var result = await Node().ExecuteAsync(
+            NodeContext($$"""{ "entityLogicalName": "sprk_invoice", "recordId": "{{Row}}", "fields": { "sprk_description": "reviewed" } }"""),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            Invoice, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact(DisplayName = "165d must-not-fire: the Update Record node still writes an ordinary invoice column, and the claim's name on another table")]
@@ -324,6 +362,43 @@ public class BillingExportClaimWriterOnlyTests
             .BuildServiceProvider()
             .GetRequiredService<IServiceScopeFactory>(),
         NullLogger.Instance);
+
+    private UpdateRecordNodeExecutor Node() => new(
+        new TemplateEngine(NullLogger<TemplateEngine>.Instance),
+        _writes.Object,
+        new ServiceCollection()
+            .AddSingleton(InvoiceUnderAMatter())
+            .AddSingleton(new StampWorld().Restamper)
+            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>(),
+        NullLogger<UpdateRecordNodeExecutor>.Instance);
+
+    private static NodeExecutionContext NodeContext(string configJson)
+    {
+        var actionId = Guid.NewGuid();
+        return new NodeExecutionContext
+        {
+            RunId = Guid.NewGuid(),
+            PlaybookId = Guid.NewGuid(),
+            Node = new PlaybookNodeDto
+            {
+                Id = Guid.NewGuid(),
+                PlaybookId = Guid.NewGuid(),
+                ActionId = actionId,
+                Name = "Update Record Node",
+                ExecutionOrder = 1,
+                OutputVariable = "updateResult",
+                ConfigJson = configJson,
+                IsActive = true,
+            },
+            Action = new AnalysisAction { Id = actionId, Name = "Update Record" },
+            ExecutorType = ExecutorType.UpdateRecord,
+            Scopes = new ResolvedScopes([], [], []),
+            TenantId = "test-tenant",
+            StartedBy = PlaybookRunStartedBy.System,
+        };
+    }
 
     private DataverseUpdateHandler Handler() =>
         new(_writes.Object, InvoiceUnderAMatter(), new StampWorld().Restamper, new RecordOwnershipResolverDouble(),

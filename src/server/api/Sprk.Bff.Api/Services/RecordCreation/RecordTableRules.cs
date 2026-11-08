@@ -567,8 +567,7 @@ internal static partial class RecordTableRules
         return named is null
             ? null
             : RecordOwnerResolution.Refused(ChangedOnlyByItsWriterColumnReasonCode,
-                $"{named} of a {rule.Table} is changed only by Spaarke itself and can't be changed by this write; nothing was written. " +
-                $"({ChangedOnlyByItsWriterColumnReasonCode})");
+                $"{named} of a {rule.Table} is changed only by Spaarke itself and can't be changed by this write");
     }
 
     /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes

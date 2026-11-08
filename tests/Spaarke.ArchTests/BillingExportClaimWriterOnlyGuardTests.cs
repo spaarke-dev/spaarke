@@ -17,10 +17,13 @@ namespace Spaarke.ArchTests;
 /// <para><b>U3 - the writers are covered.</b> The generic update and delete paths are the members that ask
 /// <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> / <see cref="RecordTableRules.RefuseWriterOnlyTableDelete"/> (the table-level
 /// writer-only rule; <c>WriterOnlyTablesUpdateGuardTests</c> and <c>WriterOnlyTablesDeleteGuardTests</c> pin that every generic path asks it).
-/// Each such member must ALSO ask <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> (so the column rule reaches it with no edit of its own),
-/// or be listed in <see cref="Exempt"/> with its reason. A listed member that does ask the refusal is stale and fails, so the list can only
-/// shrink. <c>RecordTableRules.RefuseWriterOnlyColumns</c> is asked from one place, <c>RefuseAppOnlyWrite</c> (the single extension of uac-r2's
-/// refusal).</para>
+/// Each such member must ALSO ask the column refusal - <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> (so the column rule reaches it with no
+/// edit of its own) or <c>RecordTableRules.RefuseWriterOnlyColumns</c> directly - or be listed in <see cref="Exempt"/> with its reason. A listed
+/// member that does ask the refusal is stale and fails, so the list can only shrink. <c>RecordTableRules.RefuseWriterOnlyColumns</c> is asked from
+/// <c>RefuseAppOnlyWrite</c> (the single extension of uac-r2's refusal) and from the exact callers in <see cref="DirectColumnAskers"/>: the two
+/// create-path members of <c>RecordCreationService</c> (the CREATE is not an update and asks no table-level check) and the work-product persister
+/// (its target column comes from a registry row, configuration, #2257). The pin checks MEMBERS, not branches: a member in the list that asks
+/// the refusal for only one of its identities or modes still passes it.</para>
 /// <para><b>U4 - AP export writes through its own path.</b> <see cref="ApExportService"/> never asks <c>RefuseAppOnlyWrite</c> or
 /// <c>RefuseWriterOnlyColumns</c> and reaches Dataverse through <see cref="IGenericEntityService"/>; and the set of types that name the column
 /// (an IL string load, so the inlined constant is found) is exactly the reviewed one, so a new writer must be reviewed before it can name the
@@ -54,8 +57,20 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
             "The browser child-record update writes AS the caller (IDataverseUserClient), the shape of a form edit: their own Dataverse privileges decide it.",
         ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.RefileAsync"] =
             "The re-file core applies the caller's own PATCH AS the caller (IDataverseUserClient): their own Dataverse privileges decide it.",
+    };
+
+    /// <summary>
+    /// The only members that ask <c>RecordTableRules.RefuseWriterOnlyColumns</c> other than <c>RefuseAppOnlyWrite</c>, each with why. A new asker must be
+    /// reviewed and added here (the list is exact: a member that stops asking, or a new one, fails).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DirectColumnAskers = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.CallerBlockedColumnRefusal"] =
+            "The caller's create (and the chat create tool's pre-suspend check): an invoice must not be created already claimed.",
+        ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.DecideAsync"] =
+            "The system principal's create (step 2): the caller's column policy is skipped for it, this column's is not.",
         ["Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister.PersistAsync"] =
-            "Patches one registry-declared column under the person's token; the registry row is a reviewed configuration, and it names a work-product envelope column.",
+            "The target column comes from a registry row (configuration, not reviewed code), so it is asked as a configuration-built payload (#2257): 'fix the registry row'.",
     };
 
     /// <summary>Why the delete members are not listed: a delete carries no payload columns, so it cannot ask a column refusal; the table-level refusal is the whole rule.</summary>
@@ -67,7 +82,7 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
         var types = BffTypes.Value;
         var updateAskers = AskersOf(types, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyTableUpdate));
         var deleteAskers = AskersOf(types, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyTableDelete));
-        var appOnlyAskers = AskersOf(types, typeof(InheritedAccessPermission), "RefuseAppOnlyWrite");
+        var appOnlyAskers = ColumnRefusalAskers(types);
 
         var problems = Uncovered(updateAskers, appOnlyAskers, Exempt).ToList();
 
@@ -89,19 +104,19 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
         }
 
         Assert.True(problems.Count == 0,
-            "The AP export claim is a writer-only column (RecordTableRule.WriterOnlyColumns), refused by InheritedAccessPermission.RefuseAppOnlyWrite. "
-            + "Every generic write path that asks the writer-only TABLE check must also ask that refusal over the payload's column keys, so the column rule "
-            + "reaches it; a path that cannot is listed in Exempt with its reason:\n" + string.Join("\n", problems));
+            "The AP export claim is a writer-only column (RecordTableRule.WriterOnlyColumns), refused by InheritedAccessPermission.RefuseAppOnlyWrite "
+            + "(or RecordTableRules.RefuseWriterOnlyColumns directly). Every generic write path that asks the writer-only TABLE check must also ask that "
+            + "refusal over the payload's column keys, so the column rule reaches it; a path that cannot is listed in Exempt with its reason:\n" + string.Join("\n", problems));
     }
 
-    [Fact(DisplayName = "165d U3: the column refusal is asked from RefuseAppOnlyWrite alone (the one extension of the shared refusal), never by a writer of its own")]
-    public void TheColumnRefusal_IsAskedFromTheAppOnlyRefusalAlone()
+    [Fact(DisplayName = "165d U3: the column refusal is asked from RefuseAppOnlyWrite and the reviewed direct callers alone, never by a writer of its own")]
+    public void TheColumnRefusal_IsAskedFromTheAppOnlyRefusalAndTheReviewedCallersAlone()
     {
         var askers = AskersOf(BffTypes.Value, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyColumns));
 
         Assert.Equal(
-            new[] { $"{typeof(InheritedAccessPermission).FullName}.RefuseAppOnlyWrite" },
-            askers.Select(a => $"{a.Type.FullName}.{a.Method}").ToArray());
+            DirectColumnAskers.Keys.Append($"{typeof(InheritedAccessPermission).FullName}.RefuseAppOnlyWrite").Order(StringComparer.Ordinal).ToArray(),
+            askers.Select(a => $"{a.Type.FullName}.{a.Method}").Order(StringComparer.Ordinal).ToArray());
     }
 
     [Fact(DisplayName = "165d U3: the registry's writer-only column set is read by the refusal (it cannot become a hand-written list)")]
@@ -174,18 +189,22 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
     [Fact(DisplayName = "165d controls: the coverage detector finds a table-check asker that skips the app-only refusal, and not the clean shapes or a listed one")]
     public void Coverage_MustFireAndMustNotFire()
     {
-        var types = new[] { typeof(BillingClaimControlTableOnly), typeof(BillingClaimControlBoth), typeof(BillingClaimControlDeleteOnly), typeof(BillingClaimControlListed) }
+        var types = new[]
+            {
+                typeof(BillingClaimControlTableOnly), typeof(BillingClaimControlBoth), typeof(BillingClaimControlDeleteOnly), typeof(BillingClaimControlListed),
+                typeof(BillingClaimControlColumnsDirect),
+            }
             .SelectMany(IlCallScan.WithNested).ToList();
         var updateAskers = AskersOf(types, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyTableUpdate));
         var deleteAskers = AskersOf(types, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyTableDelete));
-        var appOnlyAskers = AskersOf(types, typeof(InheritedAccessPermission), "RefuseAppOnlyWrite");
+        var appOnlyAskers = ColumnRefusalAskers(types);
         Assert.Contains((typeof(BillingClaimControlDeleteOnly), "Delete"), deleteAskers); // the scan sees a delete asker
         var listed = new Dictionary<string, string>
         {
             [$"{nameof(BillingClaimControlListed)}.Update"] = "listed with a reason",
         };
 
-        // Must fire: the table check without the app-only refusal. Must not fire: both asked, a listed member, a delete-only member.
+        // Must fire: the table check without the column refusal. Must not fire: both asked (either form of the column refusal), a listed member, a delete-only member.
         var found = Uncovered(updateAskers, appOnlyAskers, WithFullNames(listed)).Select(p => p.Split(':')[0]).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(new[] { $"{typeof(BillingClaimControlTableOnly).FullName}.Update" }, found);
 
@@ -203,6 +222,16 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
         Assert.DoesNotContain(typeof(BillingClaimNamesTheColumn), Reviewed);
 
         Assert.Empty(TypesNamingTheColumn(IlCallScan.WithNested(typeof(BillingClaimNamesAnotherColumn))));
+
+        // Every form a writer sends the column in is found, not only the exact string (the folded BatchLookup + "@odata.bind" is one constant).
+        foreach (var fixture in new[] { typeof(BillingClaimNamesTheFoldedBind), typeof(BillingClaimNamesTheLowerBind), typeof(BillingClaimNamesTheValueForm), typeof(BillingClaimNamesTheMixedCase) })
+        {
+            Assert.Contains(fixture, TypesNamingTheColumn(IlCallScan.WithNested(fixture)));
+            Assert.DoesNotContain(fixture, Reviewed);
+        }
+
+        // Must not fire: neighbouring names, with and without a bind.
+        Assert.Empty(TypesNamingTheColumn(IlCallScan.WithNested(typeof(BillingClaimNamesNeighbours))));
 
         // C4's detector, over the fixture that asks the refusal and one that does not.
         Assert.NotEmpty(AsksTheRefusal(typeof(BillingClaimControlBoth)));
@@ -252,9 +281,26 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
             .Select(r => (IlCallScan.Outermost(r.Caller), CoreRecordPairUpdateCheckGuardTests.SourceMember(r.Caller, r.CallerMethod)))
             .ToHashSet();
 
+    /// <summary>
+    /// Whether a string constant names the claim in ANY form a writer sends it (the refusal's own key matching):
+    /// <c>sprk_BillingExport</c>, <c>sprk_billingexport@odata.bind</c> (a compiler-folded <c>BatchLookup + "@odata.bind"</c> is one such constant)
+    /// and <c>_sprk_billingexport_value</c>. An exact comparison would let a bind key slip past the pin.
+    /// </summary>
+    private static bool NamesTheClaim(string? value) =>
+        value is not null && string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(value), Claim, StringComparison.Ordinal);
+
+    /// <summary>Every member that asks a column refusal: <c>RefuseAppOnlyWrite</c>, or <c>RefuseWriterOnlyColumns</c> directly.</summary>
+    private static IReadOnlySet<(Type Type, string Method)> ColumnRefusalAskers(IEnumerable<Type> types)
+    {
+        var all = types as IReadOnlyCollection<Type> ?? types.ToList();
+        return AskersOf(all, typeof(InheritedAccessPermission), "RefuseAppOnlyWrite")
+            .Concat(AskersOf(all, typeof(RecordTableRules), nameof(RecordTableRules.RefuseWriterOnlyColumns)))
+            .ToHashSet();
+    }
+
     private static HashSet<Type> TypesNamingTheColumn(IEnumerable<Type> types) =>
         IlCallScan.StringLoads(types)
-            .Where(s => string.Equals(s.Value, Claim, StringComparison.OrdinalIgnoreCase))
+            .Where(s => NamesTheClaim(s.Value))
             .Select(s => IlCallScan.Outermost(s.Caller))
             .ToHashSet();
 }
@@ -291,6 +337,43 @@ internal static class BillingClaimControlListed
 internal static class BillingClaimNamesTheColumn
 {
     public static string Name() => "sprk_billingexport";
+}
+
+/// <summary>Names the column as a compiler-folded bind key (a constant concatenation), which an exact-string pin would miss (must fire).</summary>
+internal static class BillingClaimNamesTheFoldedBind
+{
+    public static string Name() => ApExportService.BatchLookup + "@odata.bind";
+}
+
+/// <summary>Names the column as a lower-case bind key (must fire).</summary>
+internal static class BillingClaimNamesTheLowerBind
+{
+    public static string Name() => "sprk_billingexport@odata.bind";
+}
+
+/// <summary>Names the column in the read-back form (must fire).</summary>
+internal static class BillingClaimNamesTheValueForm
+{
+    public static string Name() => "_sprk_billingexport_value";
+}
+
+/// <summary>Names the column in mixed case with a bind (must fire).</summary>
+internal static class BillingClaimNamesTheMixedCase
+{
+    public static string Name() => "sprk_BillingExport@odata.bind";
+}
+
+/// <summary>Must-not-fire control for the column scan: neighbouring names, with and without a bind.</summary>
+internal static class BillingClaimNamesNeighbours
+{
+    public static string[] Names() => ["sprk_billingexports@odata.bind", "_sprk_billingexports_value", "xsprk_billingexport@odata.bind"];
+}
+
+/// <summary>MUST NOT FIRE: asks the table check and the column refusal directly (the form the work-product persister uses).</summary>
+internal static class BillingClaimControlColumnsDirect
+{
+    internal static bool Update(string table, IEnumerable<string> keys) =>
+        RecordTableRules.RefuseWriterOnlyTableUpdate(table) is null && RecordTableRules.RefuseWriterOnlyColumns(table, keys) is null;
 }
 
 /// <summary>Must-not-fire control for the column scan: names another column only.</summary>
