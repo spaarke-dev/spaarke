@@ -20,13 +20,15 @@
 4. **Merge 130-0 + fix1 + 130-0b into work together**, verify the tip, mark TASK-INDEX 130-0 and 130-0b ✅, and remove worktrees `agent-ab27afb0265db7790` and the agents' worktrees.
 5. **130b done**: two adversarial passes over 130a+130b, the diff to uac-r2, merge both. Then 130c (FR-18).
 
+**Merge note (uac-r2):** 130-0 fix1 and 130b fix1 both edit `WorkforceRoleCeilingGate.cs`. 130-0 defines `ReadInvoiceSubmissionsWithInvoice` (submission + invoice, for both GET `/invoice-submissions` routes); 130b adds `BillingEventTable` + `ReadInvoiceOutcome` (invoice + billingevent) and the submission-outcome set. On the second merge into work: one definition per set, reuse `InvoiceTable`/`BillingEventTable`, no duplicates; uac-r2 reviews both gate hunks together. Workforce role on dev already holds Read on invoice, billingevent and submission (checked read-only).
+
 ## Agents in flight
 
 | Work | Branch / base | Next |
 |---|---|---|
 | 130-0 fix round 1 (Opus) | `task/ebilling-130-0-fix1` from `64cdfbe304`, merges `446a40bb4e` (130-0b helper + firm refactor + ArchTest listing) | uac-r2 rulings: (a) full seam decision per linked invoice; (b) any linked invoice (document: `sprk_invoice` + `sprk_relatedinvoice`); (c) child decided by its invoice; (d) analysis/memo routes join; ROOTS never hidden, invoice link redacted (incl. fault); census; K1 503; K2-K4 lines. Then pass 2 (census check), diff to uac-r2. |
 | 130-0b step 1 of 3 (Opus): firm rule on the family seam | `task/ebilling-130-0b` (done: `10107ef8ac` helper, `ac3da15fb7` root/child, `18746299d2` `ReadContactFirmsAsync`/`ReadSystemUserFirmsAsync`, `446a40bb4e`) | Then step 2 (child rows via `InvoiceLinks`, per table x tool x 3 cases), step 3 (root link redaction; search_data hit fields open). Submission on assistant plane: hidden if invoice not visible OR own firm not caller's (sent to uac-r2 for veto). Then two passes, diff to uac-r2. |
-| 130a+130b adversarial pass 1 (Opus) | `13a8c63292..origin/task/ebilling-130b` (`34f6188cb5`) | Fix round if needed, pass 2, diff to uac-r2, merge both. Key check: 130b's firm source = the 130-0 definition. Then 130c (FR-18). |
+| 130b fix round 1 (Opus) | `task/ebilling-130b-fix1` from `34f6188cb5` | Pass 1 (not ready): F1 submission route must take the full invoice decision (reproduced cross-firm read); F1 permanent states 200 closed not 503; F2 billed-total fault 503; F3 two-firm clause + submission-seam fault tests; F4 ceiling sets (uac-r2 approved gate edit); K3 test double; K4 stale text; K1/K2 notes. Then pass 2, diff to uac-r2 (incl. gate hunk), merge 130a+130b. Then 130c. |
 
 Idle: 130-0 implementer worktree `agent-ab27afb0265db7790` (`task/ebilling-130-0` @ `64cdfbe304`); 130a implementer; 130b implementer (`agent-a4fe3b028fa655e29`); 130-0b first implementer (`agent-a8e4c13635e858018`).
 
