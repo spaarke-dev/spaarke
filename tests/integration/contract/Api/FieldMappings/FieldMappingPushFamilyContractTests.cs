@@ -162,6 +162,39 @@ public class FieldMappingPushFamilyContractTests
         world.Dataverse.Queries.Should().BeEmpty();
     }
 
+    /// <summary>Task 076c: a readable source but no profile for the pair is a 404 that carries the stable code, so the Family page
+    /// can report that one table and still preview the others.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATargetWithNoProfile_Is404WithTheProfileMissingReasonCode_ForAPreviewAndAnApply(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_noprofile", preview });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        json["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ProfileMissingReasonCode);
+        json["title"]!.GetValue<string>().Should().Be("Profile Not Found");
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The source-not-found 404 stays uniform and carries NO reason code: it must not be mistaken for a missing profile
+    /// (the page treats a code-less 404 as a whole failure).</summary>
+    [Fact]
+    public async Task ASourceTheCallerCannotRead_Is404WithNoReasonCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = Guid.NewGuid(), targetEntity = "sprk_noprofile", preview = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject().ContainsKey("reasonCode")
+            .Should().BeFalse("the uniform source-not-found answer has no code, so it cannot be told from a missing profile by its absence of one");
+    }
+
     [Fact]
     public async Task IncludeAssignedTo_WithoutWriteOnTheSource_Is403_AndNothingIsReadOrWritten()
     {
@@ -300,6 +333,39 @@ public class FieldMappingPushFamilyContractTests
         json["preview"]!.GetValue<bool>().Should().BeTrue();
         json["changes"]!.AsArray().Should().BeEmpty();
         json["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
+    }
+
+    /// <summary>Task 076c: an active profile whose rules are all off returns no rules at all. A preview must still answer AS a
+    /// preview (the Family page throws on a 200 that is not), and an apply keeps its ordinary answer.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AProfileWithNoRules_AnswersAPreviewAsAPreview_AndAnApplyAsBefore(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA], rules: []);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["success"]!.GetValue<bool>().Should().BeTrue();
+        json["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal("Profile has no mapping rules configured.");
+        if (preview)
+        {
+            json["preview"]!.GetValue<bool>().Should().BeTrue();
+            json["changes"]!.AsArray().Should().BeEmpty();
+            json["skippedNoWriteCount"]!.GetValue<int>().Should().Be(0);
+            json["truncated"]!.GetValue<bool>().Should().BeFalse();
+        }
+        else
+        {
+            (json["preview"]?.GetValue<bool>() ?? false).Should().BeFalse("an apply keeps today's non-preview answer");
+            json["changes"].Should().BeNull();
+        }
+
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
     }
 
     // ───────────────────────── the Assigned-To policies on a previewed change ─────────────────────────

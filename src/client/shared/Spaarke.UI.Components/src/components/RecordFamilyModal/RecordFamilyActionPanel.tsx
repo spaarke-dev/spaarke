@@ -45,6 +45,7 @@ import {
   buildPushRequest,
   groupRowsByTable,
   isNoFilingEdgeRefusal,
+  isNoProfileRefusal,
   PUSH_FAILED_TEXT,
   pushFieldMappings,
   type IPushError,
@@ -94,6 +95,8 @@ interface IReview {
   refusedCount: number;
   /** Tables no Filing edge joins to the source: their ticked records cannot be pushed to. */
   unsupportedTables: string[];
+  /** Tables with no field mapping profile from the source (404 `field_mapping_profile_missing`): nothing is set up to push there. */
+  noProfileTables: string[];
 }
 
 type Phase =
@@ -176,6 +179,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
           truncated: false,
           refusedCount: 0,
           unsupportedTables: [],
+          noProfileTables: [],
         };
         for (const { table, ids } of groupRowsByTable(rows)) {
           let response;
@@ -185,10 +189,18 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
               buildPushRequest(from, table, { preview: true, includeAssignedTo, childIds: ids })
             );
           } catch (error) {
-            // No Filing edge joins this table to the source: reported for this table; the other tables still preview.
-            if (!isNoFilingEdgeRefusal(error)) throw error;
-            review.unsupportedTables.push(table);
-            continue;
+            // No Filing edge joins this table to the source, or no mapping profile maps the source to it: reported for this
+            // table; the other tables still preview. Any other failure (including a 404 without the profile code, i.e. the
+            // source itself was not found) fails the whole preview.
+            if (isNoFilingEdgeRefusal(error)) {
+              review.unsupportedTables.push(table);
+              continue;
+            }
+            if (isNoProfileRefusal(error)) {
+              review.noProfileTables.push(table);
+              continue;
+            }
+            throw error;
           }
           if (!response.preview) throw new Error('The server did not treat the request as a preview.');
           review.groups.push({ table, changes: response.changes });
@@ -215,6 +227,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
       truncated: phase.truncated,
       refusedCount: phase.refusedCount,
       unsupportedTables: phase.unsupportedTables,
+      noProfileTables: phase.noProfileTables,
     };
     setPhase({ kind: 'applying', ...review });
     // Each table is applied on its own: a table whose request fails is named, and what the other tables wrote is still
@@ -342,9 +355,17 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                 </MessageBarBody>
               </MessageBar>
             )}
+            {phase.noProfileTables.map(table => (
+              <Text key={table} className={styles.muted}>
+                {`No field push is set up from this record to ${table}.`}
+              </Text>
+            ))}
             {valueCount === 0 ? (
               <Text>
-                {phase.refusedCount > 0 || phase.unsupportedTables.length > 0 || phase.skippedNoWriteCount > 0
+                {phase.refusedCount > 0 ||
+                phase.unsupportedTables.length > 0 ||
+                phase.noProfileTables.length > 0 ||
+                phase.skippedNoWriteCount > 0
                   ? 'Nothing to update among the records that can be updated.'
                   : 'Nothing to update: the selected records already have the current values.'}
               </Text>
