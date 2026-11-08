@@ -39,7 +39,7 @@ public static class InvoiceLineOrigin
     private const string DecisionRecordEntity = "sprk_decisionrecord";
     private const string RecordLineLookup = "sprk_regardinginvoiceline";
     private const string RecordActionCode = "sprk_actioncode";
-    private const string RecordSteps = "sprk_steps";
+    internal const string RecordSteps = "sprk_steps";
     private const string RecordFacts = "sprk_factsnapshot";
     private const string CreatedOnBehalfByColumn = "createdonbehalfby";
 
@@ -118,9 +118,7 @@ public static class InvoiceLineOrigin
         };
         query.Criteria.AddCondition(RecordLineLookup, ConditionOperator.In, added.Keys.Cast<object>().ToArray());
         query.Criteria.AddCondition(RecordActionCode, ConditionOperator.Equal, InvoiceLineAddService.ActionCode);
-        query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId);
-        // K4: a row created on behalf of the writer by another identity is not the writer's own record.
-        query.Criteria.AddCondition(CreatedOnBehalfByColumn, ConditionOperator.Null);
+        AddWriterCreatedConditions(query.Criteria, writerUserId);
         query.AddOrder(DecisionRecordEntity + "id", OrderType.Ascending);
 
         var found = new HashSet<Guid>();
@@ -139,8 +137,20 @@ public static class InvoiceLineOrigin
         return found;
     }
 
+    /// <summary>
+    /// The one rule for "a Decision Record the writer identity created" (task 165b; 165b-3 reuses it for the approve record): <c>createdby</c> is
+    /// <paramref name="writerUserId"/> and <c>createdonbehalfby</c> is empty, so a row created on the writer's behalf by another identity does not
+    /// count (K4). Adds both conditions to <paramref name="criteria"/>.
+    /// </summary>
+    internal static void AddWriterCreatedConditions(FilterExpression criteria, Guid writerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+        criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId);
+        criteria.AddCondition(CreatedOnBehalfByColumn, ConditionOperator.Null);
+    }
+
     /// <summary>The record's key (<c>sprk_steps.reviewId</c>); null when unreadable.</summary>
-    private static Guid? ReviewIdOf(Entity row)
+    internal static Guid? ReviewIdOf(Entity row)
     {
         try
         {

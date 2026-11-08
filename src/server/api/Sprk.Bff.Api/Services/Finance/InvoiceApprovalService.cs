@@ -25,6 +25,7 @@ using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -128,6 +129,16 @@ public static class InvoiceApprovalCodes
     /// <summary>409 (task 165b item 1): a Fee or Expense line of unknown origin (<see cref="InvoiceLineOrigin"/>); nothing was written.</summary>
     public const string LineOriginUnknown = InvoiceLineOrigin.UnknownOriginCode;
 
+    /// <summary>409 (task 165b-3): the approval's completion re-ran the approval checks and one failed; no approve record was written. The log
+    /// names the failed check's reason code, the table and the row id only.</summary>
+    public const string CompletionRefused = "ebilling.approve.completion_refused";
+
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/>: a Clean line is undecided (approve accepts them before its claim).</summary>
+    public const string CompletionCleanUndecided = "ebilling.approve.completion.clean_undecided";
+
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/>: the approved amount is not the total derived from the lines.</summary>
+    public const string CompletionAmountMismatch = "ebilling.approve.completion.amount_mismatch";
+
     public const string TransitionRefused = "ebilling.approve.refused";
     public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
     public const string Busy = LineDecisionCodes.Busy;
@@ -220,7 +231,10 @@ public sealed record ApprovalResult(
 /// <see cref="BillingDecisionRecorder.Preflight"/>. The order is: complete an earlier attempt's bulk accept (F2) → accept Clean → Unreviewed rows
 /// → totals → claim → transition → portion Approved → record → Signals → link. A failure after the transition answers 503
 /// <c>ebilling.approval.incomplete</c>; the CLAIMANT repeating the approve finds the invoice Approved and completes the portion, the record (same
-/// id, same content: the hash ignores facts and time), the Signals and the link. Anyone else gets a 200 no-op and no record.</para>
+/// id, same content: the hash ignores facts and time), the Signals and the link. Anyone else gets a 200 no-op and no record. Task 165b-3:
+/// completion decides only from server-written sources: "complete" needs the writer-created approve record, and before the repeat writes that
+/// record it re-runs the approval checks and requires the approved amount to equal the line-derived total (409
+/// <c>ebilling.approve.completion_refused</c> otherwise, nothing written).</para>
 /// </remarks>
 public sealed class InvoiceApprovalService
 {
@@ -236,6 +250,10 @@ public sealed class InvoiceApprovalService
     internal const string PortionDecidedOn = "sprk_decidedon";
     internal const string PortionDecidedBy = "sprk_decidedby";
     internal const string PortionRecord = "sprk_decisionrecord";
+
+    /// <summary>Task 165b-3: the approve record's invoice lookup, as the Decision Record writer files a record regarding an invoice.</summary>
+    private static readonly string ApproveRecordInvoiceLookup =
+        TodoRegardingBuilder.RegardingLookupsByHostTable[InvoiceReviewReadService.DecisionRecordEntity][InvoiceReviewReadService.InvoiceEntity];
 
     /// <summary>The line-decision codes whose record proves a line's decision is recorded (F2).</summary>
     private static readonly string[] LineActionCodes = ["accept-line", "reduce-line", "disallow-line"];
@@ -521,28 +539,19 @@ public sealed class InvoiceApprovalService
         }
 
         // ── FR-35, EB-D-171: eligibility, LIVE from the core record, by the caller's OWN contact. The stored N:N never grants. ──
-        EligibleApproverSet set;
-        try
-        {
-            set = await _resolver.ResolveAsync(core.Entity, core.Id, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return Unavailable(invoiceId, "eligibility", ex);
-        }
-
         var callerContact = await CallerContactAsync(invoiceId, caller, ct).ConfigureAwait(false);
         if (callerContact.Failure is { } identityFailure)
         {
             return identityFailure;
         }
 
-        if (set.ForContact(callerContact.ContactId) is not { } approver)
+        var eligibility = await EligibleApproverAsync(invoiceId, core, callerContact.ContactId, ct).ConfigureAwait(false);
+        if (eligibility.Refusal is { } notEligible)
         {
-            _logger.LogWarning("Approve of invoice {InvoiceId}: the caller is not an eligible approver ({Eligible} eligible, caller contact {Resolved}); nothing changed.",
-                invoiceId, set.Approvers.Count, callerContact.ContactId is null ? "unresolved" : "resolved");
-            return new ApprovalResult(ApprovalOutcome.NotEligible, InvoiceApprovalCodes.NotEligible, "You are not an eligible approver of this invoice.");
+            return notEligible;
         }
+
+        var approver = eligibility.Approver!;
 
         // ── K1: another person's unfinished claim is theirs to complete; nothing is written over it. ──
         if (portion.GetAttributeValue<EntityReference>(PortionDecidedBy) is { } claimedBy && claimedBy.Id != Guid.Empty && claimedBy.Id != approver.ContactId)
@@ -552,70 +561,14 @@ public sealed class InvoiceApprovalService
                 "Another approver's approval of this invoice has not finished. They complete it by approving again.");
         }
 
-        // ── FR-20: a blocked submission holds the invoice from approval until it is decided. ──
-        // ── 101 fix round, part 3 (F-2): a correction whose follow-through did not finish holds it until repeated. A read fault refuses (fail closed). ──
-        List<Entity> lineRows;
-        IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
-        try
+        // ── The holds, the corrections, I-2 and the line origin, on the line set read under both locks, before any write. ──
+        var approvable = await CheckApprovableAsync(invoice, ct).ConfigureAwait(false);
+        if (approvable.Refusal is { } refused)
         {
-            if (await HoldAsync(invoiceId, ct).ConfigureAwait(false) is { Held: true } hold)
-            {
-                // Task 165a: the same code; an invoice whose own submission is not linked cannot be released by deciding a submission.
-                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.Held,
-                    hold.ReasonCode == InvoiceBlockedHold.HeldOwnSubmissionUnlinked
-                        ? InvoiceBlockedHold.OwnSubmissionUnlinkedDetail
-                        : "The invoice is held until its blocked submission is decided.");
-            }
-
-            // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
-            //    Task 095d-0 (EB-D-185): the same gate every decision uses (InvoiceFirmGate): no firm, held for one, or the post-Set-firm re-run pending. ──
-            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var need)
-            {
-                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
-                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmDetailFor(need));
-            }
-
-            // ── 082c-2 (brief C11, C14): a Procedure hold, both channels (the stored submission state, never sprk_reviewdetail). After the FR-20 and
-            //    firm holds (the review-detail priority: the firm first), before I-2. An Internal gap is Blocked, so the FR-20 hold answers first;
-            //    this one answers for an SPA gap (Accepted) until a re-check clears it or task 114's Override releases it: a released submission
-            //    (reason code Overridden AND the field-secured Override stamp, InvoiceProcedureHold.IsReleased) holds no Procedure reason
-            //    (InvoiceProcedureHold.ReasonsOf), so an Internal gap passes here once overridden. ──
-            if (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false) is { Count: > 0 } procedureHolds)
-            {
-                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice is held for its Procedures ({Reasons}); nothing changed.",
-                    invoiceId, string.Join(",", procedureHolds.Order(StringComparer.Ordinal)));
-                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.ProcedureHeld, InvoiceApprovalCodes.ProcedureDetailFor(procedureHolds));
-            }
-
-            lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
-            unapplied = await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lineRows, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return Unavailable(invoiceId, "read", ex);
+            return refused;
         }
 
-        if (unapplied.Count > 0)
-        {
-            _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, unapplied.Count);
-            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CorrectionsPending, InvoiceCorrectionReevaluation.UnappliedText(unapplied, lineRows, "approve again"));
-        }
-
-        // ── I-2: no line Pending or Flagged (a line with no recognised status counts as Pending: fail closed). ──
-        var open = OpenLines(lineRows);
-        if (open.Total > 0)
-        {
-            return new ApprovalResult(ApprovalOutcome.LinesOpen, InvoiceApprovalCodes.LinesOpen,
-                $"{open.Pending} lines are still being processed and {open.Flagged} are flagged; decide them before approving.", OpenLines: open);
-        }
-
-        // ── Task 165b item 1 (EB-D-200 (4)): approval refuses a line of unknown origin, on the line set read under both per-invoice locks and
-        //    before any write. ──
-        if (await CheckLineOriginAsync(invoiceId, lineRows, ct).ConfigureAwait(false) is { } origin)
-        {
-            return origin;
-        }
-
+        var lineRows = approvable.Lines;
         var decidedOn = Seconds(_time.GetUtcNow());
 
         // ── EB-D-172: the invoice's open Signals created by the decision time, derived server-side; the close authorized BEFORE any write. ──
@@ -742,16 +695,31 @@ public sealed class InvoiceApprovalService
     /// EB-D-171) completes what is missing: the portion status, the record (same id and content), the Signals and the link. Anyone else gets a
     /// no-op, and at most the portion's status is aligned (no attribution changes).
     /// </summary>
+    /// <remarks>Task 165b-3: approval completion decides only from server-written sources. "Complete" needs the writer-created approve record
+    /// (<see cref="WriterApproveRecordsAsync"/>); the portion's link counts only when it names that record. While no such record exists, the
+    /// claimant's completion re-runs the approval checks (<see cref="CheckCompletionAsync"/>) before it writes one.</remarks>
     private async Task<ApprovalResult> CompleteOrNoOpAsync(
         Entity invoice, Entity portion, Guid caller, string? callerBearerToken, Guid decisionId, CancellationToken ct)
     {
         var invoiceId = invoice.Id;
         var decidedBy = portion.GetAttributeValue<EntityReference>(PortionDecidedBy);
-        var recordId = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id;
         var portionStatus = StatusOf(portion);
-        var complete = portionStatus == PortionApproved && recordId is { } r && r != Guid.Empty;
+
+        IReadOnlyList<Guid> recorded;
+        try
+        {
+            recorded = await WriterApproveRecordsAsync(invoiceId, decisionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "read", ex);
+        }
+
+        Guid? recordId = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id is { } link && recorded.Contains(link) ? link : null;
+        var complete = portionStatus == PortionApproved && recordId is not null;
 
         var claimant = false;
+        Guid? callerContactId = null;
         if (!complete && decidedBy is not null && decidedBy.Id != Guid.Empty)
         {
             var callerContact = await CallerContactAsync(invoiceId, caller, ct).ConfigureAwait(false);
@@ -760,7 +728,8 @@ public sealed class InvoiceApprovalService
                 return failure;
             }
 
-            claimant = callerContact.ContactId == decidedBy.Id;
+            callerContactId = callerContact.ContactId;
+            claimant = callerContactId == decidedBy.Id;
         }
 
         if (complete || !claimant || InvoiceStatus(invoice) != InvoiceStatusCodes.Approved)
@@ -779,7 +748,8 @@ public sealed class InvoiceApprovalService
                 }
             }
 
-            return new ApprovalResult(ApprovalOutcome.AlreadyApproved, "ok", DecisionId: decisionId, DecisionRecordId: recordId);
+            return new ApprovalResult(ApprovalOutcome.AlreadyApproved, "ok", DecisionId: decisionId,
+                DecisionRecordId: recordId ?? (recorded.Count > 0 ? recorded[0] : null));
         }
 
         // The claimant's repeat: rebuild the decision from what the claim froze (the hash ignores facts and time, so it matches a first write).
@@ -787,6 +757,13 @@ public sealed class InvoiceApprovalService
         {
             _logger.LogError("Approve of invoice {InvoiceId}: the invoice names no single core record; the approval cannot be completed.", invoiceId);
             return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no single core record.");
+        }
+
+        // ── Task 165b-3: no writer-created approve record yet, so this call would write it: the approval checks run again first. ──
+        if (recorded.Count == 0
+            && await CheckCompletionAsync(invoice, portion, core, callerContactId, ct).ConfigureAwait(false) is { } completionRefused)
+        {
+            return completionRefused;
         }
 
         var decidedOn = portion.GetAttributeValue<DateTime?>(PortionDecidedOn) is { } on
@@ -1100,6 +1077,193 @@ public sealed class InvoiceApprovalService
         return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceLineOrigin.UnknownOriginCode,
             "A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines."
             + (unknown.Any(l => l.AddedWithoutRecord) ? " If a line was added and the add did not finish, repeat the add." : string.Empty));
+    }
+
+    // ── The approval checks (shared by approve and its completion, task 165b-3) ──
+
+    private sealed record Eligibility(EligibleApprover? Approver, ApprovalResult? Refusal);
+
+    /// <summary>FR-35, EB-D-171: the caller's eligible-approver entry, resolved LIVE from the core record by the caller's OWN contact (the stored
+    /// N:N never grants). A read fault is Unavailable; a caller who is not eligible is NotEligible. Nothing is written.</summary>
+    private async Task<Eligibility> EligibleApproverAsync(Guid invoiceId, (string Entity, Guid Id) core, Guid? callerContactId, CancellationToken ct)
+    {
+        EligibleApproverSet set;
+        try
+        {
+            set = await _resolver.ResolveAsync(core.Entity, core.Id, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new Eligibility(null, Unavailable(invoiceId, "eligibility", ex));
+        }
+
+        if (set.ForContact(callerContactId) is { } approver)
+        {
+            return new Eligibility(approver, null);
+        }
+
+        _logger.LogWarning("Approve of invoice {InvoiceId}: the caller is not an eligible approver ({Eligible} eligible, caller contact {Resolved}); nothing changed.",
+            invoiceId, set.Approvers.Count, callerContactId is null ? "unresolved" : "resolved");
+        return new Eligibility(null, new ApprovalResult(ApprovalOutcome.NotEligible, InvoiceApprovalCodes.NotEligible, "You are not an eligible approver of this invoice."));
+    }
+
+    private sealed record Approvable(List<Entity> Lines, ApprovalResult? Refusal);
+
+    /// <summary>
+    /// The checks approve runs on the invoice and its line set before any write, in this order: the FR-20 hold, the firm gate, the Procedure
+    /// hold, the corrections whose follow-through did not finish, I-2 (no line Pending or Flagged) and the line origin (165b). Returns the lines
+    /// read (under the caller's locks) when every check passes. A read fault is Unavailable (fail closed). Nothing is written.
+    /// </summary>
+    private async Task<Approvable> CheckApprovableAsync(Entity invoice, CancellationToken ct)
+    {
+        var invoiceId = invoice.Id;
+
+        // ── FR-20: a blocked submission holds the invoice from approval until it is decided. ──
+        // ── 101 fix round, part 3 (F-2): a correction whose follow-through did not finish holds it until repeated. A read fault refuses (fail closed). ──
+        List<Entity> lineRows;
+        IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
+        try
+        {
+            if (await HoldAsync(invoiceId, ct).ConfigureAwait(false) is { Held: true } hold)
+            {
+                // Task 165a: the same code; an invoice whose own submission is not linked cannot be released by deciding a submission.
+                return new Approvable([], new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.Held,
+                    hold.ReasonCode == InvoiceBlockedHold.HeldOwnSubmissionUnlinked
+                        ? InvoiceBlockedHold.OwnSubmissionUnlinkedDetail
+                        : "The invoice is held until its blocked submission is decided."));
+            }
+
+            // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
+            //    Task 095d-0 (EB-D-185): the same gate every decision uses (InvoiceFirmGate): no firm, held for one, or the post-Set-firm re-run pending. ──
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var need)
+            {
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
+                return new Approvable([], new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmDetailFor(need)));
+            }
+
+            // ── 082c-2 (brief C11, C14): a Procedure hold, both channels (the stored submission state, never sprk_reviewdetail). After the FR-20 and
+            //    firm holds (the review-detail priority: the firm first), before I-2. An Internal gap is Blocked, so the FR-20 hold answers first;
+            //    this one answers for an SPA gap (Accepted) until a re-check clears it or task 114's Override releases it: a released submission
+            //    (reason code Overridden AND the field-secured Override stamp, InvoiceProcedureHold.IsReleased) holds no Procedure reason
+            //    (InvoiceProcedureHold.ReasonsOf), so an Internal gap passes here once overridden. ──
+            if (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false) is { Count: > 0 } procedureHolds)
+            {
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice is held for its Procedures ({Reasons}); nothing changed.",
+                    invoiceId, string.Join(",", procedureHolds.Order(StringComparer.Ordinal)));
+                return new Approvable([], new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.ProcedureHeld, InvoiceApprovalCodes.ProcedureDetailFor(procedureHolds)));
+            }
+
+            lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
+            unapplied = await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lineRows, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new Approvable([], Unavailable(invoiceId, "read", ex));
+        }
+
+        if (unapplied.Count > 0)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, unapplied.Count);
+            return new Approvable(lineRows, new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CorrectionsPending,
+                InvoiceCorrectionReevaluation.UnappliedText(unapplied, lineRows, "approve again")));
+        }
+
+        // ── I-2: no line Pending or Flagged (a line with no recognised status counts as Pending: fail closed). ──
+        var open = OpenLines(lineRows);
+        if (open.Total > 0)
+        {
+            return new Approvable(lineRows, new ApprovalResult(ApprovalOutcome.LinesOpen, InvoiceApprovalCodes.LinesOpen,
+                $"{open.Pending} lines are still being processed and {open.Flagged} are flagged; decide them before approving.", OpenLines: open));
+        }
+
+        // ── Task 165b item 1 (EB-D-200 (4)): approval refuses a line of unknown origin, on the line set read under both per-invoice locks and
+        //    before any write. ──
+        return new Approvable(lineRows, await CheckLineOriginAsync(invoiceId, lineRows, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Task 165b-3: before completion writes the approve record, the approval's checks run again under the same locks (approval completion
+    /// decides only from server-written sources): the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
+    /// line is undecided (approve accepts them in bulk before its claim, so a completion never has one), and the portion's approved amount equals
+    /// the approved total <see cref="InvoiceTotalsCalculator"/> derives from the lines read now. Null when all pass. A read fault is Unavailable;
+    /// any refusal is 409 <see cref="InvoiceApprovalCodes.CompletionRefused"/>, logged with the reason code, the table and the row id only.
+    /// Nothing is written either way.
+    /// </summary>
+    private async Task<ApprovalResult?> CheckCompletionAsync(
+        Entity invoice, Entity portion, (string Entity, Guid Id) core, Guid? callerContactId, CancellationToken ct)
+    {
+        var invoiceId = invoice.Id;
+        var eligibility = await EligibleApproverAsync(invoiceId, core, callerContactId, ct).ConfigureAwait(false);
+        if (eligibility.Refusal is { } notEligible)
+        {
+            return CompletionRefused(invoiceId, notEligible);
+        }
+
+        var approvable = await CheckApprovableAsync(invoice, ct).ConfigureAwait(false);
+        if (approvable.Refusal is { } refused)
+        {
+            return CompletionRefused(invoiceId, refused);
+        }
+
+        if (CleanCount(approvable.Lines) > 0)
+        {
+            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionCleanUndecided);
+        }
+
+        var totals = InvoiceTotalsCalculator.Calculate(
+            invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value,
+            approvable.Lines.Where(InvoiceTotalsService.IsCounted).Select(InvoiceTotalsService.ToRow).ToList());
+        if (totals.IsRefused)
+        {
+            return CompletionRefused(invoiceId, reasonCode: totals.Refusal!.Code);
+        }
+
+        return portion.GetAttributeValue<Money>(PortionAmount)?.Value == totals.ApprovedTotal
+            ? null
+            : CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionAmountMismatch);
+    }
+
+    /// <summary>A completion refusal: an Unavailable check stays Unavailable (nothing was changed; try again); anything else is 409
+    /// <see cref="InvoiceApprovalCodes.CompletionRefused"/>, with one log line naming the reason code, the table and the row id.</summary>
+    private ApprovalResult CompletionRefused(Guid invoiceId, ApprovalResult? check = null, string? reasonCode = null)
+    {
+        if (check is { Outcome: ApprovalOutcome.Unavailable })
+        {
+            return check;
+        }
+
+        _logger.LogWarning("Approval completion refusal {ReasonCode} on {Table} {RowId}",
+            reasonCode ?? check?.Code, InvoiceReviewReadService.InvoiceEntity, invoiceId);
+        return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CompletionRefused,
+            "The approval cannot be completed because the invoice does not pass the approval checks. Nothing was changed. An administrator must review the invoice.");
+    }
+
+    /// <summary>
+    /// Task 165b-3: the ids of the approve Decision Records for <paramref name="decisionId"/> on the invoice that the writer identity created
+    /// (<see cref="InvoiceLineOrigin.AddWriterCreatedConditions"/>: <c>createdby</c> the writer, <c>createdonbehalfby</c> empty), matched on the
+    /// record's key (<see cref="BillingDecisionKey.IdOf"/>). Read app-only. Whether an approval is complete is decided from these, never from
+    /// the portion's columns. Throws on a read fault (the caller answers Unavailable).
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
+    {
+        var writer = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
+        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceLineOrigin.RecordSteps),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
+        InvoiceLineOrigin.AddWriterCreatedConditions(query.Criteria, writer);
+        query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+
+        var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
+        return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
+            .Where(row => row.Id != Guid.Empty && InvoiceLineOrigin.ReviewIdOf(row) == key)
+            .Select(row => row.Id)
+            .ToList();
     }
 
     // ── F2: an earlier attempt's bulk accept ──

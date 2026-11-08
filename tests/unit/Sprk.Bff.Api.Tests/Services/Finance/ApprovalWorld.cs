@@ -861,10 +861,17 @@ internal sealed class ApprovalWorld
         row["versionnumber"] = ++_nextVersion;
     }
 
-    /// <summary>Task 165b: a row the writer created, as Dataverse stores it (<c>createdby</c> is the writer's own user).</summary>
-    private static Entity StoredByTheWriter(Entity created)
+    /// <summary>Task 165b: a row the writer created, as Dataverse stores it (<c>createdby</c> is the writer's own user). Task 165b-3: with the id
+    /// the create returned (the harness's <see cref="DecisionRecordWriterTests.Harness.NewId"/> when the writer sent none), as the harness's own
+    /// lookups store it, so a reader that keys on the row id sees the record the approval linked.</summary>
+    private Entity StoredByTheWriter(Entity created)
     {
         var stored = Copy(created);
+        if (stored.Id == Guid.Empty)
+        {
+            stored.Id = H.NewId;
+        }
+
         stored["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
         return stored;
     }

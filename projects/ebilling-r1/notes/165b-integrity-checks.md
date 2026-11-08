@@ -110,3 +110,69 @@ states it without a decision from the lead and the owner.
 ## 5. Gates
 
 See the task report: filtered unit tests, full ArchTests and the BFF build.
+
+## 6. 165b-3 part A — approval completion decides only from server-written sources
+
+Task `tasks/165b3-approval-completion-and-status-record.poml`, part A. Rigor FULL. Branch `task/ebilling-165b3` from `work/ebilling-r1` at
+`d415d37508`.
+
+**Rule.** When an approve call finds the invoice already Approved (the completion path, `CompleteOrNoOpAsync`):
+
+- **Complete** means a writer-created approve Decision Record exists for the approval's decision id: `sprk_actioncode` = `approve-invoice`,
+  regarding the invoice, key `BillingDecisionKey.IdOf(sprk_invoice, invoiceId, DecisionIdFor(approvalId))`, `createdby` = the writer identity
+  and `createdonbehalfby` empty. The portion's link counts only when it names that record. The portion's own columns never decide it.
+- **Before completion writes the approve record** (no such record yet), the approval checks run again, under the same two per-invoice locks:
+  the caller is still an eligible approver; the FR-20 hold, the firm gate, the Procedure hold, the unfinished corrections, I-2 and the 165b line
+  origin all pass (one shared method, `CheckApprovableAsync`, which approve itself now calls); no Clean Fee or Expense line is undecided (approve
+  accepts them in bulk before its claim, so a completion never has one); and the portion's approved amount equals the approved total
+  `InvoiceTotalsCalculator` derives from the lines read now (`InvoiceTotalsService.ToRow`, the same mapping and rounding as the totals
+  service).
+- **On a refusal** nothing is written: 409 `ebilling.approve.completion_refused`, and one log line
+  `Approval completion refusal {ReasonCode} on sprk_invoice {id}`, where the reason code is the failed check's code, or
+  `ebilling.approve.completion.clean_undecided`, `ebilling.approve.completion.amount_mismatch`, or the calculator's refusal code. A read fault
+  is 503 Unavailable, nothing written. The response text does not name the check.
+- **Once the record exists**, a repeat finishes the remaining steps (portion status, Signals, link) without re-running the checks: the record
+  is already the server's, and the writer answers it again under the same id and content, so no second record is written.
+
+**Reuse (§11).** No new type, endpoint, DI registration or package. `InvoiceLineOrigin.AddWriterCreatedConditions` is now the one place for the
+writer-identity rule (`createdby` and `createdonbehalfby`); the 165b add-line lookup and the new approve-record lookup both call it, and both
+match the key with `InvoiceLineOrigin.ReviewIdOf`. The approve checks moved unchanged into `EligibleApproverAsync` and `CheckApprovableAsync`
+(approve and completion call the same methods). One behaviour detail moved: approve now reads the caller's contact before the eligible set (both
+are reads before any write; a fault in either is still Unavailable).
+
+**Tests** (`InvoiceApprovalCompletionTests`, 13 cases):
+
+- C1 must fire (6 cases): the invoice in the post-transition state with a failing check — the caller not eligible, the FR-20 hold, no firm, a
+  Flagged line, a line of unknown origin, an undecided Clean line. Each: 409 `completion_refused`, no approve record, no write, the one log
+  line. Control: an approve interrupted after its transition is completed by its approver's repeat with one record.
+- C2 must fire: an approved amount that differs from the line-derived total, both in the post-transition state and after a real interruption
+  before the record. Control: equal amounts complete.
+- C3 must fire (2 cases): a portion that says Approved and links an approve record created by another identity, or on the writer's behalf by
+  one, is not complete; the checks run (and refuse here). Control: the writer's own record makes it complete (a no-op).
+- C4: a replay after the approval finished writes nothing; with the portion's link lost, the replay relinks the same record and writes no
+  second one.
+
+**Seeds.** With the completion re-check removed, the 9 must-fire cases of C1, C2 and C3 fail and the 4 controls pass. With "complete" decided
+from the portion's link again, the 2 C3 cases fail and the other 11 pass.
+
+**Fixture change.** `ApprovalWorld` now reads back a record the writer created with the id its create returned (the writer harness's `NewId`),
+as the harness's own lookups do, so a reader that keys on the row id sees the record the approval linked.
+
+**Dev data (read-only, 2026-11-07).** Approved, Sent to AP or Paid invoices: 2 (both Sent to AP). Each has exactly one approve record created by
+the writer identity (`mi-ontology-writer-dev`), `createdonbehalfby` empty, with the derived key; each portion links it. Approvals in flight
+(a decider on a Pending portion, or an Approved invoice with no approve record): 0. No live approval would be refused at completion.
+
+**Escalation triggers.** Not fired. Multi-portion: approve refuses an invoice with other than one portion before the completion path is
+reached. Override decides a held submission and never approves. The approver's repeat after an interrupted approve meets the amount equality
+(the amount was frozen from the same lines).
+
+**Known limits (part A).**
+
+- K: the checks run once, under the approval locks, before the record is written. A change after that by a path that takes no approval lock is
+  not seen by this completion.
+- K: a legitimate path that changed an Approved invoice's lines or billed total would make completion refuse (fail closed). None is known: line
+  decisions, Add line and adjustments refuse an invoice that is not In Review.
+- K: the Decision Record writer's own "already recorded" lookup (`DecisionRecordWriter.cs`, ontology-r1; DI-144) filters `createdby` without
+  `createdonbehalfby`. Completion's lookup applies both, and the writer is reached only after the completion checks pass. Not changed here.
+- K: field security on the invoice status and the portion's columns is an owner schema question, out of scope.
+- K: the D-72 Unreviewed rows are written by approve before its claim; completion does not write them again.
