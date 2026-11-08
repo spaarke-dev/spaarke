@@ -20,7 +20,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.NewService(_identity.Object, _events).HideSubmissionsForAsync(Caller(caller), submissions, _world.RootFlags);
 
     private Task<InvoiceVisibilityResult> DecideLogged(string caller, params Guid[] invoices) =>
-        _world.NewService(_identity.Object, _events).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags);
+        _world.NewService(_identity.Object, _events).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags, _world.CallerFirms);
 
     private static string NotOwnCode => $"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.InvoiceLinkNotOwn)}=1";
 

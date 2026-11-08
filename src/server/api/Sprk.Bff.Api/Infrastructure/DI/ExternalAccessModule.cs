@@ -125,9 +125,18 @@ public static class ExternalAccessModule
         // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
         // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
         // their readers lazily, on the first call.
+        // Task 130-0 (design.md:414): with the caller's firms, read once per call through the one definition the submission routes
+        // and /me use (ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync), so a partner sees only its own firms' invoices.
         services.AddScoped<ExternalInvoiceHiding>(sp =>
             (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
-                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (principal, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(
+                        principal, sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
         // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
         // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
         services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>

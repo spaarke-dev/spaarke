@@ -914,6 +914,41 @@ public class ExternalMessageEndpointsTests
             .Which.Should().BeEquivalentTo(new[] { hiddenInvoice, visibleInvoice });
     }
 
+    // ── ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms, through the REAL seam ──
+
+    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "130-0 messages (must fire): another firm's invoice thread answers as a nonexistent invoice, and a message regarding it is withheld from the shared matter's thread; one regarding the caller's own firm's invoice is listed")]
+    public async Task Task130_OwnFirms_AnotherFirmsInvoice_ItsThreadIsRefused_AndItsMessageIsWithheldFromTheMattersThread()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var matter = Guid.NewGuid();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        AddInvoiceUnder(other, matter);
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+        var plain = Guid.NewGuid();
+        var aboutOther = Guid.NewGuid();
+        var aboutOwn = Guid.NewGuid();
+        var otherRow = MessageRow(aboutOther, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        otherRow["_sprk_regardinginvoice_value"] = El(other.ToString("D"));
+        var ownRow = MessageRow(aboutOwn, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-03T09:00:00Z");
+        ownRow["_sprk_regardinginvoice_value"] = El(own.ToString("D"));
+        _roots.AddFilingRow("sprk_invoice", other, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddFilingRow("sprk_invoice", own, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), otherRow, ownRow);
+
+        var listed = Messages(await Get("matters", matter, Ciam(matter: matter))).Select(m => m.SprkCommunicationid).ToList();
+
+        listed.Should().Contain(plain.ToString("D"));
+        listed.Should().Contain(aboutOwn.ToString("D"));
+        listed.Should().NotContain(aboutOther.ToString("D"));
+
+        ShouldBeTheSameAnswer(await Get("invoices", other, Ciam(matter: matter)), await Get("invoices", Guid.NewGuid(), Ciam(matter: matter)));
+    }
+
     [Fact]
     public async Task Task098_AMessageWithAMalformedInvoiceRegarding_IsWithheld_FailClosed()
     {

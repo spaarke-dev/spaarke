@@ -17,6 +17,15 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// the 065 communication rule on S or its chain; or ANY root S is filed under (its six root links and the live roots of its
 /// other parents) is effectively Restricted. Rule 1 (root grants) is never applied, so a refile never hides the invoice from
 /// its firm. An invoice with no source is not hidden by this rule.</para>
+/// <para><b>Own firms (task 130-0, design.md:414: an external user sees only their firm's submissions and invoices).</b> On the
+/// caller-aware invoice seam (<see cref="ExternalDataService.HideInvoicesForAsync"/>) a caller sees only invoices whose
+/// <c>sprk_vendororg</c> is one of the caller's firms; any other invoice, and one with no firm, is hidden
+/// (<see cref="InvoiceHiddenReason.FirmNotCallers"/>). The firm is read in the same app-only batch as the firm hold
+/// (<see cref="ReadFirmHeldInvoicesAsync"/>). The caller's firms come from <see cref="CallerFirmReader"/> as a <see cref="CallerFirms"/>,
+/// which keeps two states apart: a caller KNOWN to have no firm sees no invoice (owner decision 2026-11-08; reason
+/// <see cref="InvoiceHiddenReason.FirmNotCallers"/>, not a fault), and firms that are UNKNOWN hide every asked invoice as a failed read
+/// (<see cref="InvoiceVisibilityResult.ReadFailed"/>). The submission routes and the assistant tools' seam do not apply it here
+/// (<see cref="InvoiceVisibilityReaders.CallerFirms"/> is <c>null</c> there).</para>
 /// <para><b>Own submission (task 165e).</b> The invoice is decided only from its own submission
 /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>, read with the other submissions linked to
 /// it in the same batch): an invoice whose own submission is not found among them is hidden
@@ -150,8 +159,21 @@ internal static class ExternalInvoiceVisibility
         //     statuses). Only the completed re-run clears the marker, so the invoice shows exactly when the re-run commits. No source read is
         //     spent on it.
         var firmHeld = await readers.FirmHeld(asked, ct).ConfigureAwait(false);
-        foreach (var invoiceId in asked.Where(firmHeld.Contains))
+        foreach (var invoiceId in asked.Where(firmHeld.Held.Contains))
             hidden[invoiceId] = InvoiceHiddenReason.FirmMissing;
+
+        // (0b) Task 130-0 (design.md:414): a partner sees only invoices of its own firms. The invoice's sprk_vendororg comes from the
+        //      same app-only read as the hold above; an invoice with no firm, or one that did not come back, is not one of the caller's.
+        //      Applied only on the caller-aware invoice seam (CallerFirms is null on the other seams).
+        if (readers.CallerFirms is { } callerFirms)
+        {
+            foreach (var invoiceId in asked.Where(id => !hidden.ContainsKey(id)))
+            {
+                if (firmHeld.FirmOf(invoiceId) is not { } firm || !callerFirms.Contains(firm))
+                    hidden[invoiceId] = InvoiceHiddenReason.FirmNotCallers;
+            }
+        }
+
         var open = asked.Where(id => !hidden.ContainsKey(id)).ToList();
         if (open.Count == 0)
             return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
@@ -365,7 +387,7 @@ internal static class ExternalInvoiceVisibility
         //     id (InvoiceSubmissionPersister.InvoiceIdFor), so unlinking or repointing the submission does not lift it either. The stored
         //     reason firm_missing (IsUndecidedForFirm) is kept as an EXTRA withhold only: it can add a withhold, never lift one.
         var firmHeld = await readers.FirmHeld(page.SelectMany(InvoiceKeysOf).Distinct().ToList(), ct).ConfigureAwait(false);
-        foreach (var firmless in page.Where(s => HasNoFirm(s) || IsUndecidedForFirm(s) || InvoiceKeysOf(s).Any(firmHeld.Contains)).ToList())
+        foreach (var firmless in page.Where(s => HasNoFirm(s) || IsUndecidedForFirm(s) || InvoiceKeysOf(s).Any(firmHeld.Held.Contains)).ToList())
         {
             withheld[firmless.SubmissionId] = InvoiceHiddenReason.FirmMissing;
             page.Remove(firmless);
@@ -990,31 +1012,43 @@ internal static class ExternalInvoiceVisibility
     /// Writers". An invoice that does not come back holds nothing (as <c>InvoiceFirmHold.InvoiceHoldStateAsync</c>). A failed read THROWS.
     /// Bound to <see cref="InvoiceVisibilityReaders.FirmHeld"/> by <see cref="ExternalDataService"/>; the ArchTest
     /// <c>InvoiceFirmHoldAppOnlyGuardTests</c> lists this type as a reviewed reader.
+    /// Task 130-0: the same read also returns each invoice's firm (<c>sprk_vendororg</c>), for the own-firms rule; no extra query.
     /// </summary>
-    internal static async Task<IReadOnlySet<Guid>> ReadFirmHeldInvoicesAsync(
+    internal static async Task<InvoiceFirmRead> ReadFirmHeldInvoicesAsync(
         Spaarke.Dataverse.IGenericEntityService entities, IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(invoiceIds);
         var held = new HashSet<Guid>();
+        var firms = new Dictionary<Guid, Guid>();
         foreach (var chunk in invoiceIds.Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink).Distinct().Chunk(ChunkSize))
         {
             var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(InvoiceTable)
             {
-                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn),
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(
+                    Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn, InvoiceFirmColumn),
                 Criteria = new Microsoft.Xrm.Sdk.Query.FilterExpression(Microsoft.Xrm.Sdk.Query.LogicalOperator.And),
             };
             query.Criteria.AddCondition(InvoiceIdField, Microsoft.Xrm.Sdk.Query.ConditionOperator.In, chunk.Cast<object>().ToArray());
             var inChunk = chunk.ToHashSet();
             foreach (var invoice in (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities)
             {
-                if (inChunk.Contains(invoice.Id) && Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.IsInvoiceHeld(invoice))
+                if (!inChunk.Contains(invoice.Id))
+                    continue;
+                if (Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.IsInvoiceHeld(invoice))
                     held.Add(invoice.Id);
+                // A value that is not a firm reference reads as "no firm" (fail closed under the own-firms rule).
+                if (invoice.Attributes.TryGetValue(InvoiceFirmColumn, out var value)
+                    && value is Microsoft.Xrm.Sdk.EntityReference { Id: var firm } && firm != Guid.Empty)
+                    firms[invoice.Id] = firm;
             }
         }
 
-        return held;
+        return new InvoiceFirmRead(held, firms);
     }
+
+    /// <summary>Task 130-0: the invoice's firm, read with the firm hold (<see cref="ReadFirmHeldInvoicesAsync"/>).</summary>
+    internal const string InvoiceFirmColumn = Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg;
 
     /// <summary>Absent or null: <c>null</c> (not set); a non-empty GUID string: that id; anything else
     /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.</summary>
@@ -1044,18 +1078,98 @@ public delegate Task<IReadOnlyDictionary<Guid, RootRecordFlags>> EffectiveRootFl
 /// <param name="RootFlags">The effective root flags.</param>
 /// <param name="Logger">For the live-parent walk's own fail-closed lines (counts only).</param>
 /// <param name="FirmHeld">095d-2b-1: the invoices whose own field-secured firm hold is set, read app-only
-/// (<see cref="ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync"/>); a failed read THROWS.</param>
+/// (<see cref="ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync"/>); a failed read THROWS. Since task 130-0 the same read also
+/// returns each invoice's firm.</param>
+/// <param name="CallerFirms">Task 130-0: the caller's firms, at least one, on the caller-aware invoice seam
+/// (<see cref="ExternalDataService.HideInvoicesForAsync"/>): an invoice whose firm is not one of them is hidden
+/// (<see cref="InvoiceHiddenReason.FirmNotCallers"/>). <c>null</c> on the seams that do not apply the rule here (the submission routes,
+/// scoped by firm in their filter, and the assistant tools' seam).</param>
 internal sealed record InvoiceVisibilityReaders(
     CommunicationOpenThreadGate.RowQuery Query,
     InvoiceSourceDecider DecideSources,
     LiveParentRootReader LiveParents,
     EffectiveRootFlagReader RootFlags,
     ILogger Logger,
-    InvoiceFirmHoldReader FirmHeld);
+    InvoiceFirmHoldReader FirmHeld,
+    IReadOnlySet<Guid>? CallerFirms = null);
 
-/// <summary>095d-2b-1: of a batch of invoices, those whose own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>) is set, read
-/// app-only. A failed read THROWS.</summary>
-internal delegate Task<IReadOnlySet<Guid>> InvoiceFirmHoldReader(IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct);
+/// <summary>095d-2b-1: of a batch of invoices, those whose own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>) is set, and
+/// (task 130-0) each invoice's firm, read app-only in one read per chunk. A failed read THROWS.</summary>
+internal delegate Task<InvoiceFirmRead> InvoiceFirmHoldReader(IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct);
+
+/// <summary>
+/// 095d-2b-1 / task 130-0: what <see cref="ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync"/> read: the invoices whose firm hold is set,
+/// and the firm (<c>sprk_vendororg</c>) of each invoice that came back with one.
+/// </summary>
+internal sealed class InvoiceFirmRead
+{
+    private readonly IReadOnlyDictionary<Guid, Guid> _firms;
+
+    internal InvoiceFirmRead(IReadOnlySet<Guid> held, IReadOnlyDictionary<Guid, Guid> firms)
+    {
+        Held = held ?? throw new ArgumentNullException(nameof(held));
+        _firms = firms ?? throw new ArgumentNullException(nameof(firms));
+    }
+
+    /// <summary>The invoices whose own firm hold is set.</summary>
+    internal IReadOnlySet<Guid> Held { get; }
+
+    /// <summary>The firm of <paramref name="invoiceId"/>; <c>null</c> when it has none, or did not come back.</summary>
+    internal Guid? FirmOf(Guid invoiceId) => _firms.TryGetValue(invoiceId, out var firm) ? firm : null;
+}
+
+/// <summary>
+/// Task 130-0: the caller's firms as the caller-aware invoice seam reads them, with "no firm" and "unknown" kept apart: a caller
+/// <see cref="CallerFirmsState.Known"/> to be a member of firms, a caller known to have <see cref="CallerFirmsState.NoFirm"/>, and
+/// firms that could not be read (<see cref="CallerFirmsState.Unknown"/>).
+/// </summary>
+internal sealed class CallerFirms
+{
+    private CallerFirms(CallerFirmsState state, IReadOnlySet<Guid> firms)
+    {
+        State = state;
+        Firms = firms;
+    }
+
+    internal CallerFirmsState State { get; }
+
+    /// <summary>The caller's firms; empty unless <see cref="State"/> is <see cref="CallerFirmsState.Known"/>.</summary>
+    internal IReadOnlySet<Guid> Firms { get; }
+
+    /// <summary>The read could not be completed: never "no firm".</summary>
+    internal static CallerFirms Unknown { get; } = new(CallerFirmsState.Unknown, new HashSet<Guid>());
+
+    /// <summary>The read completed and the caller is a member of no firm.</summary>
+    internal static CallerFirms NoFirm { get; } = new(CallerFirmsState.NoFirm, new HashSet<Guid>());
+
+    /// <summary>
+    /// From <c>ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync</c>'s answer (the one definition of "the caller's
+    /// firms", shared with the submission routes and /me): <paramref name="unreadable"/> or a null list is
+    /// <see cref="Unknown"/>; no usable id is <see cref="NoFirm"/>; otherwise <see cref="CallerFirmsState.Known"/>.
+    /// </summary>
+    internal static CallerFirms From(IReadOnlyCollection<Guid>? firms, bool unreadable)
+    {
+        if (unreadable || firms is null)
+            return Unknown;
+        var known = firms.Where(id => id != Guid.Empty).ToHashSet();
+        return known.Count == 0 ? NoFirm : new CallerFirms(CallerFirmsState.Known, known);
+    }
+}
+
+/// <summary>Task 130-0: the three states of <see cref="CallerFirms"/>.</summary>
+internal enum CallerFirmsState
+{
+    Unknown = 0,
+    NoFirm,
+    Known,
+}
+
+/// <summary>
+/// Task 130-0: the caller's firms, read once per call of the caller-aware invoice seam. Bound by <c>AddExternalAccess</c> to
+/// <c>ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync</c> through <see cref="CallerFirms.From"/>. A fault may THROW;
+/// the seam treats a throw, a null answer and <see cref="CallerFirmsState.Unknown"/> alike (every asked invoice hidden).
+/// </summary>
+internal delegate Task<CallerFirms> CallerFirmReader(CallerPrincipal caller, CancellationToken ct);
 
 /// <summary>
 /// The caller-aware seam every external surface applies (<see cref="ExternalDataService.HideInvoicesForAsync"/>): an internal
@@ -1112,6 +1226,11 @@ internal enum InvoiceHiddenReason
     /// <summary>ebilling-r1 task 165e: an INVOICE whose own submission is not found among the submissions linked to it (visibility decides
     /// only from the invoice's own submission, failing closed), and every submission that takes that invoice's verdict.</summary>
     OwnSubmissionMissing,
+
+    /// <summary>ebilling-r1 task 130-0 (design.md:414): an INVOICE whose firm (<c>sprk_vendororg</c>) is not one of the caller's firms
+    /// (an invoice with no firm included), and every invoice for a caller known to be a member of no firm (owner decision 2026-11-08).
+    /// Applied on the caller-aware invoice seam only.</summary>
+    FirmNotCallers,
 }
 
 /// <summary>What one decision read (counts only).</summary>
@@ -1202,6 +1321,7 @@ internal sealed class InvoiceVisibilityResult
         InvoiceHiddenReason.FirmMissing => "firm_missing",
         InvoiceHiddenReason.InvoiceLinkNotOwn => "invoice_link_not_own",
         InvoiceHiddenReason.OwnSubmissionMissing => "own_submission_missing",
+        InvoiceHiddenReason.FirmNotCallers => "firm_not_callers",
         _ => "read_failed",
     };
 }

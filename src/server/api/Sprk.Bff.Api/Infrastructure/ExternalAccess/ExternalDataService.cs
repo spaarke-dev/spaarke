@@ -1925,19 +1925,43 @@ public class ExternalDataService
     /// caller — a CIAM contact, a flagged systemuser, an unresolvable one, one whose lookup FAILED (unknown is never internal)
     /// — gets the predicate. A failed read hides every asked invoice (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
     /// <see cref="ExternalInvoiceHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// Task 130-0 (design.md:414): a partner sees only invoices of its own firms. The caller's firms are read ONCE per call through
+    /// <paramref name="callerFirms"/>, after the internal check (an internal systemuser causes no firm read). Firms that are unknown
+    /// (a throw, a null answer, <see cref="CallerFirmsState.Unknown"/>) hide every asked invoice as a failed read; a caller known to be
+    /// a member of no firm sees no invoice (owner decision 2026-11-08).
     /// </summary>
     internal async Task<InvoiceVisibilityResult> HideInvoicesForAsync(
-        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CallerFirmReader callerFirms,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(invoiceIds);
         ArgumentNullException.ThrowIfNull(rootFlags);
+        ArgumentNullException.ThrowIfNull(callerFirms);
         var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
             return InvoiceVisibilityResult.NotHidden(asked);
         try
         {
-            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+            var firms = await callerFirms(caller, ct) ?? CallerFirms.Unknown;
+            switch (firms.State)
+            {
+                case CallerFirmsState.Known:
+                    break;
+                case CallerFirmsState.NoFirm:
+                    // Owner decision 2026-11-08: a caller who is a member of no firm sees no invoice. THE one place this is decided.
+                    _logger.LogInformation(
+                        "[EXT-INVOICE-VISIBILITY] The caller is a member of no firm: {Count} invoice(s) hidden (firm_not_callers).", asked.Count);
+                    return new InvoiceVisibilityResult(
+                        asked, asked.ToDictionary(id => id, _ => InvoiceHiddenReason.FirmNotCallers), faulted: false);
+                default:
+                    _logger.LogWarning(
+                        "[EXT-INVOICE-VISIBILITY] The caller's firms are unknown. Failing CLOSED: none of {Count} invoice(s) is shown.",
+                        asked.Count);
+                    return InvoiceVisibilityResult.ReadFailed(asked);
+            }
+
+            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
             LogInvoiceVisibilityCost("external", asked.Count, decision);
             return decision;
         }
@@ -2010,9 +2034,11 @@ public class ExternalDataService
     /// <summary>
     /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
     /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
-    /// the live-parent walk and <paramref name="rootFlags"/>.
+    /// the live-parent walk and <paramref name="rootFlags"/>. Task 130-0: <paramref name="callerFirms"/> only from
+    /// <see cref="HideInvoicesForAsync"/> (the own-firms rule); <c>null</c> on the other seams.
     /// </summary>
-    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(EffectiveRootFlagReader rootFlags) => new(
+    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(
+        EffectiveRootFlagReader rootFlags, IReadOnlySet<Guid>? callerFirms = null) => new(
         QueryRowsOrThrowAsync,
         (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, QueryRowsOrThrowAsync, ct, honourSubmissionMarker: true),
         GetLiveParentRootsAsync,
@@ -2022,7 +2048,8 @@ public class ExternalDataService
         // the read throws and every asked invoice and submission is hidden (fail closed).
         (invoiceIds, ct) => _filing is null
             ? throw new InvalidOperationException("No app-only reader for the invoice firm hold; failing closed.")
-            : ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(_filing, invoiceIds, ct));
+            : ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(_filing, invoiceIds, ct),
+        callerFirms);
 
     /// <summary>The ONE (a′) cost line per request: invoices checked and hidden, reads per level. Counts only (ADR-015).</summary>
     private void LogInvoiceVisibilityCost(string plane, int invoices, InvoiceVisibilityResult decision)

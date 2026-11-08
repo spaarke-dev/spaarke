@@ -861,6 +861,56 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             .Should().Be(HttpStatusCode.Created);
     }
 
+    // ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms. Through the REAL caller-aware seam, another
+    // firm's invoice on the caller's matter has no documents for the caller (answered as a missing invoice); the caller's own firm's
+    // invoice on the same matter lists them.
+
+    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "130-0 project-data child reads (must fire / must not fire): another firm's invoice on a shared matter denies its document list, download and versions; the caller's own firm's invoice lists")]
+    public async Task Task130_OwnFirms_AnotherFirmsInvoiceOnASharedMatter_HasNoDocuments_TheCallersOwnInvoiceLists()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        _fixture.Data.InvoiceParents[own] = (MatterM, null);
+        _fixture.Data.InvoiceParents[other] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        var documentOnOther = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, other, "other.pdf", "b!o", "item-o");
+        _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, own, "own.pdf", "b!w", "item-w");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var otherPath = $"/api/v1/external/invoices/{other}/documents";
+        var hidden = new[]
+        {
+            await client.GetAsync(otherPath),
+            await client.GetAsync($"{otherPath}/{documentOnOther}/content"),
+            await client.GetAsync($"{otherPath}/{documentOnOther}/versions"),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+
+        hidden.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
+        (await hidden[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
+            "another firm's invoice and one that does not exist are indistinguishable");
+        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
+        _fixture.Downloads.Should().BeEmpty();
+
+        var ownList = await client.GetAsync($"/api/v1/external/invoices/{own}/documents");
+        ownList.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ownList.Content.ReadAsStringAsync()).Should().Contain("own.pdf");
+    }
+
     private static readonly Guid ProjectX = Guid.Parse("c0310000-0000-4000-8000-0000000000a7");
     private static readonly Guid AgreementG = Guid.Parse("c0310000-0000-4000-8000-0000000000a8");
 

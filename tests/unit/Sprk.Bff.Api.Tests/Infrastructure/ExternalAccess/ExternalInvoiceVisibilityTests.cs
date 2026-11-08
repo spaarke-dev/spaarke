@@ -80,7 +80,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     };
 
     private Task<InvoiceVisibilityResult> Decide(string caller, params Guid[] invoices) =>
-        _world.NewService(_identity.Object).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags);
+        _world.NewService(_identity.Object).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags, _world.CallerFirms);
 
     private async Task ShouldBeHidden(string caller, Guid invoice, InvoiceHiddenReason reason)
     {
@@ -795,7 +795,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Source(invoice, permission: Restricted);
 
         var decision = await _world.NewService(identity: null)
-            .HideInvoicesForAsync(Caller("internal-systemuser"), new[] { invoice }, _world.RootFlags);
+            .HideInvoicesForAsync(Caller("internal-systemuser"), new[] { invoice }, _world.RootFlags, _world.CallerFirms);
 
         decision.IsVisible(invoice).Should().BeFalse();
     }
@@ -873,7 +873,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Source(invoice, permission: Restricted);
 
         var decision = await _world.NewService(resolver)
-            .HideInvoicesForAsync(SystemUser(user), new[] { invoice }, _world.RootFlags);
+            .HideInvoicesForAsync(SystemUser(user), new[] { invoice }, _world.RootFlags, _world.CallerFirms);
 
         decision.IsVisible(invoice).Should().BeTrue($"an internal systemuser (flag {flag?.ToString() ?? "blank"}) is never hidden");
         flagReads.Should().ContainSingle(q => q.EntityName == "systemuser" && q.ColumnSet.Columns.Contains("sprk_isexternal"),
@@ -1347,11 +1347,13 @@ public sealed partial class ExternalInvoiceVisibilityTests
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
         services.AddHttpContextAccessor();
         // Production registers the filing reader elsewhere; a parentless source makes no filing read (strict: any other call fails).
-        // 095d-2b-1: the one read it makes is the invoice firm hold, app-only through this reader (no invoice holds here).
+        // 095d-2b-1: the one read it makes is the invoice firm hold, app-only through this reader (no invoice holds here); since task
+        // 130-0 the same read also selects the invoice's firm.
         var filing = new Mock<IGenericEntityService>(MockBehavior.Strict);
         var firmHoldReads = 0;
         filing.Setup(d => d.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.SequenceEqual(new[] { "sprk_firmhold" })),
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice"
+                    && q.ColumnSet.Columns.SequenceEqual(new[] { "sprk_firmhold", "sprk_vendororg" })),
                 It.IsAny<CancellationToken>()))
             .Callback(() => firmHoldReads++)
             .ReturnsAsync(new EntityCollection());
@@ -1645,6 +1647,17 @@ internal sealed class InvoiceWorld : HttpMessageHandler
                     .ToHashSet();
                 lock (_filing)
                 {
+                    if (string.Equals(query.EntityName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+                        && query.ColumnSet.Columns.Contains(Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn))
+                    {
+                        // Task 130-0: the firm-hold read (the only one that selects the hold): every asked invoice exists, with its firm
+                        // (sprk_vendororg): InvoiceWorld.Firm unless the test set another one, or none (InvoiceFirm). Projected through the
+                        // query's ColumnSet, so a read that does not select the firm reads "no firm". Other invoice reads (the live-parent
+                        // walk) answer from the filing as before.
+                        InvoiceReads.Enqueue(query);
+                        return new EntityCollection(ids.Select(id => Projected(InvoiceRow(id), query.ColumnSet)).ToList());
+                    }
+
                     return new EntityCollection(_filing
                         .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
                         .Select(kv => Projected(kv.Value, query.ColumnSet))
@@ -1652,6 +1665,62 @@ internal sealed class InvoiceWorld : HttpMessageHandler
                 }
             });
     }
+
+    // ── Task 130-0: the invoice's firm and the caller's firms ──────────────────────────────────────────────────────────
+
+    private readonly Dictionary<Guid, Guid?> _invoiceFirm = new();
+
+    /// <summary>Every app-only read of <c>sprk_invoice</c> (the firm hold and firm read), in order.</summary>
+    public ConcurrentQueue<QueryExpression> InvoiceReads { get; } = new();
+
+    /// <summary>Sets <paramref name="invoice"/>'s firm (<c>sprk_vendororg</c>); <see langword="null"/>: the invoice has no firm.</summary>
+    public void InvoiceFirm(Guid invoice, Guid? firm)
+    {
+        lock (_filing) _invoiceFirm[invoice] = firm;
+    }
+
+    private Entity InvoiceRow(Guid id)
+    {
+        var row = new Entity("sprk_invoice", id);
+        if (_filing.TryGetValue(("sprk_invoice", id), out var stored))
+        {
+            foreach (var attribute in stored.Attributes)
+                row[attribute.Key] = attribute.Value;
+        }
+
+        var firm = _invoiceFirm.TryGetValue(id, out var set) ? set : Firm;
+        if (firm is { } f)
+            row[ExternalInvoiceVisibility.InvoiceFirmColumn] = new EntityReference("sprk_organization", f);
+        return row;
+    }
+
+    /// <summary>The caller's firms the seam reads (<see cref="CallerFirms"/>); <see cref="Firm"/> by default.</summary>
+    public Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms CallerFirmsAnswer { get; set; } =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms.From(new[] { Firm }, unreadable: false);
+
+    /// <summary>When set, the caller-firm read throws it.</summary>
+    public Exception? CallerFirmsFault { get; set; }
+
+    /// <summary>When true, the caller-firm read answers <see langword="null"/>.</summary>
+    public bool CallerFirmsNull { get; set; }
+
+    private int _callerFirmReads;
+
+    /// <summary>How many times the caller's firms were read.</summary>
+    public int CallerFirmReads => Volatile.Read(ref _callerFirmReads);
+
+    /// <summary>The caller-firm reader the caller-aware seam takes (as <c>AddExternalAccess</c> binds it, over this world's answer).</summary>
+    public CallerFirmReader CallerFirms => (_, _) =>
+    {
+        Interlocked.Increment(ref _callerFirmReads);
+        if (CallerFirmsFault is { } fault)
+            throw fault;
+        return Task.FromResult(CallerFirmsNull ? null! : CallerFirmsAnswer);
+    };
+
+    /// <summary>The REAL caller-aware seam (<see cref="ExternalDataService.HideInvoicesForAsync"/>) over this world, every caller external.</summary>
+    public ExternalInvoiceHiding Seam => (caller, invoiceIds, ct) =>
+        NewService(identity: null).HideInvoicesForAsync(caller, invoiceIds, RootFlags, CallerFirms, ct);
 
     private static Entity Projected(Entity stored, ColumnSet? columns)
     {

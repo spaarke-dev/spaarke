@@ -49,6 +49,8 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
         // the hold is set. ReadFirmHeldInvoicesAsync reads the column through the IGenericEntityService ExternalDataService passes (its
         // app-only filing reader; none -> the read throws and everything asked is hidden). It never writes the column, and the decision never
         // reads it from a caller-token row.
+        // READER (ebilling-r1 task 130-0, the own-firms rule): the same app-only batch also reads the invoice's firm, sprk_vendororg
+        // (ExternalInvoiceVisibility.InvoiceFirmColumn), through that IGenericEntityService; no other query and no caller-token read.
         typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceVisibility),
     ];
 

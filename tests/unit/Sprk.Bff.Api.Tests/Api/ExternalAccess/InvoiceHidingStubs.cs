@@ -11,13 +11,23 @@ internal sealed class InvoiceHidingStub
 {
     private readonly HashSet<Guid> _hidden;
     private readonly bool _fault;
+    private readonly ExternalInvoiceHiding? _real;
     private readonly List<Guid[]> _calls = new();
 
-    private InvoiceHidingStub(IEnumerable<Guid> hidden, bool fault)
+    private InvoiceHidingStub(IEnumerable<Guid> hidden, bool fault, ExternalInvoiceHiding? real = null)
     {
         _hidden = hidden.ToHashSet();
         _fault = fault;
+        _real = real;
     }
+
+    /// <summary>
+    /// Task 130-0: the REAL caller-aware seam over <paramref name="world"/> (<see cref="Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Seam"/>:
+    /// <see cref="ExternalDataService.HideInvoicesForAsync"/> with the world's caller firms), recording each call. For surface tests that
+    /// must prove the own-firms rule reaches them.
+    /// </summary>
+    public static InvoiceHidingStub Real(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld world) =>
+        new(Array.Empty<Guid>(), fault: false, world.Seam);
 
     /// <summary>Hides nothing (every asked invoice is visible).</summary>
     public static InvoiceHidingStub NoneHidden() => new(Array.Empty<Guid>(), fault: false);
@@ -36,6 +46,8 @@ internal sealed class InvoiceHidingStub
     {
         var asked = invoiceIds.ToArray();
         lock (_calls) _calls.Add(asked);
+        if (_real is not null)
+            return _real(caller, asked, ct);
         if (_fault)
             return Task.FromResult(InvoiceVisibilityResult.ReadFailed(asked));
         var hidden = asked.Where(_hidden.Contains).Distinct().ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden);

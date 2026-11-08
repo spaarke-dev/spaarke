@@ -1115,6 +1115,54 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         body.Entities.Select(r => r["sprk_name"]).Should().Equal("Fine");
     }
 
+    // ---- ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms, through the REAL seam ----
+
+    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "130-0 module list (must fire / must not fire): on a shared record, another firm's invoice is absent and the caller's own firm's invoice is listed")]
+    public async Task InvoicesModuleFetch_OwnFirms_AnotherFirmsInvoiceIsAbsent_TheCallersOwnIsListed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        var hiding = InvoiceHidingStub.Real(world);
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?>(InvoiceRow("Own firm", project: RecordA)) { ["sprk_invoiceid"] = own },
+            new Dictionary<string, object?>(InvoiceRow("Other firm", project: RecordA)) { ["sprk_invoiceid"] = other },
+        }, hiding.Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Own firm");
+        body.Truncated.Should().BeFalse("a row the own-firms rule hides is not a read failure");
+        world.CallerFirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0 /record read (must fire): another firm's invoice is refused, as every invoice id is on this route, before any read")]
+    public async Task InvoicesModule_SingleRecordRead_OwnFirms_AnotherFirmsInvoiceIsRefused_BeforeAnyRead()
+    {
+        // The route never returns an invoice to an external caller (task 098 classification above), so the own-firms rule holds
+        // there without the seam: the answer for another firm's invoice is the same 403 as for any id, and nothing is read.
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        var reads = 0;
+        Task<IReadOnlyDictionary<string, object?>> Read(string _, Guid __, string[]? ___, CancellationToken ____)
+        {
+            reads++;
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
+        }
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_invoice", other, select: null, caller, Registry(), Read, NullLogger.Instance, CancellationToken.None);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
+        reads.Should().Be(0);
+    }
+
     private static IReadOnlyDictionary<string, object?> InvoiceRow(
         string name, Guid? project = null, Guid? matter = null, Guid? agreement = null) => new Dictionary<string, object?>
     {
