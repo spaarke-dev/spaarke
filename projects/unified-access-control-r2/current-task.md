@@ -4,45 +4,38 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-07 ~20:45Z (checkpoint #102: 22487c6537 (049b + MCP spike) deployed, gate + spike gate PASS; 032 design answered; 096b dev cleanup read back).
+> **Last Updated**: 2026-11-08 ~04:15Z (checkpoint #103: 6fbb3a7642 (049c + MCP spike) deployed with the RecordCreation Debug setting; gate running to 04:30:55Z; PR #2629 review in progress).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; a peer's go is never the owner's. |
-| **Dev state** | BFF = **22487c6537** (master d53d67f604 = 049b, plus the MCP spike from draft PR #2615) since 2026-11-07 20:06:34Z. `sprk_recordfamily`, `sprk_fieldmapping_push` v1.3.0 and `sprk_spaarkeai` are at cc11294300 (no client change since). G-8 ON. 226 settings. Junction 1700 rows. Gate records: `notes/deploy-gate-2026-11-07-cc11294300.md` and `-22487c6537.md`. Rollback: `deploy/rollback/wwwroot-20261107T200500Z.zip` (cc11294300). Detached worktree `C:/wtd2248`: remove with `Remove-WorktreeSafe.ps1`. |
-| **Next action** | 1. Read the server side for the owner's browser checks (a) and (c) when fm sends the times, and for word-add-in's three owner checks. 2. Next window = master with 049c (#2624) + the spike rebuilt on it (mcp-bff-api sends the SHA when green); owner go here. 3. Check the private 045 residual: can a user make an app-only playbook run execute a node they authored (system or scheduled trigger)? Then tell fm. 4. Reviews: fm 030b, 034, 045A design, 052; ebilling 096b route diff + app-only proof, 165a, 165c, 2b-2, the batch checklist; the 032 replies (ebilling Q-E5 and search path). |
+| **Running** | Background gate query (bash `bkdj4pti1`) for window 04:00:55Z → 04:30:55Z; it waits until 04:31:40Z and prints REQ/ROUTES/MARKERS/RCDEBUG/EXC/WARN. When it lands: write `notes/deploy-gate-2026-11-08-6fbb3a7642.md` (template: `deploy-gate-2026-11-07-22487c6537.md`), commit, tell fm, ontology, ebilling, word-add-in. |
+| **Dev state** | BFF = **6fbb3a7642** (master 23567b2f93 = 049c, plus the MCP spike; PR #2615 green) since 2026-11-08 04:00:55Z (owner go: "Deploy + logging setting"). **227 settings**: `Logging__ApplicationInsights__LogLevel__Sprk.Bff.Api.Services.RecordCreation=Debug` set 03:59:32Z for fm's 021 timing run; REMOVE it after fm's run (or with the next deploy). Read-back: 39.96 MB, hashes OK, healthz/dataverse 200, anon 401; MCP gate PASS (anon 401, signed 200). Pre-checks PASS (-Verify, reconcile false, 174/175 OPEN, no 095a, no client change, baseline 130 req 0 5xx 0 403). Rollback: `deploy/rollback/wwwroot-20261108T035611Z.zip` (22487c6537). Detached worktree `C:/wtd6fbb`: remove with `Remove-WorktreeSafe.ps1`. |
+| **Next action** | 1. Finish the review of fm **PR #2629** (030b + 034 + 052a, head f5fb4fc01b, auto-merge OFF until I approve). Checked so far: Office save/worker/attachment children put association, parent link and SPE pointer in the CREATE; the new CreateDocumentRequest members are `[JsonIgnore]` (Association has internal set); `StageDocumentAssociation` refuses non-association columns. Still to read: Repair.cs (052a metadata + fit), EmailAttachmentProcessor deletion, the guard tests. Then reply "approve" or findings. 2. Gate write-up (above). 3. Remove the Debug setting after fm's 021 run. |
 
-## Next dev window (needs the owner's go here)
-- Content: master from d53d67f604 (049b via #2619; 049c if merged) + spike HEAD (green). Spike gate: anonymous `/mcp/legal-operations` and `/mcp/spike-area-b` → 401, signed-in → 2xx. Send mcp-bff-api the SHA and read-back.
-- ebilling's branch batch (164a + 166 + 095a + ...) comes later as one checklist. Its gates: creator-person -Verify, `sprk_sourceemaildocument` IsSecured read true by me, 166 field security applied with the owner's go, reconcile off.
-- Standing pre-checks: 174/175 absent, no 095a code unless gated, -Verify exit 0, `Ebilling__StoredFileReconcileEnabled` false, census, 2h baseline.
+## Decisions and rulings this stretch
+- Owner (here): "Deploy now" for 22487c6537 (done, PASS); "Deploy + logging setting" for 6fbb3a7642 (done).
+- 032 design: approved with conditions (role-depth pin; module ReadableColumns; #2188 Uses=1; per-delivery metadata; REQUIRED secure-source gate + No Access extension; allow-list backed). fm put FR-20 scope (A narrow / B own task / C defer) to the owner; if A, three items come back to me.
+- 045 residual: closed (no user-steered app-only run); latent by-name lookup filed **#2627**.
+- ebilling (private items in messages only): 165d → option A (column check at the five person-token sites); 165e scope confirmed + fail-closed read + linked-to-another test; 165f = sprk_document binding (ebilling's); field-security bundle (3 submission link columns, sprk_billingexport, portion claim columns) = owner question on ebilling's dev checklist; 165b F1 fix 165b-3 (ebilling's, I review); EB-D-208 no objection (writer-created = createdby in the writer allow-list, read app-only); **096b 7c8c5fb7f3 APPROVED**.
+- Gate query must use a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
-## Decisions this session (owner, here)
-- 2026-11-06: W3 = named exceptions plus guards; 046c Core User for all five add-on holders (done); root team Console User removed (done); EB-D-200 option D.
-- Partners (SPA) SEE reviewer-added lines and reasons while In Review (EB-D-202; reasons via the typed invoice-module projection in task 130).
-- #2292: fixed, deployed, back-filled.
-- MCP spike on dev: no time limit; rides with each deploy once its CI is green.
-- 2026-11-07: "Deploy the batch now" → done as plain master (spike CI red). Then "Deploy now" for 22487c6537 (049b + spike): done, PASS.
-
-## Reviews state
-- **fm (`-69`):** 044, 040+075, 049b fix2 approved and on master. 049c: (A) OK with conditions (no value logging; step-2 refusal shape unchanged, with a test; audit noise is a K), (B) OK with cancellation; merges after its fix2 (A2 in-flight-probe test). 033 dropped by the owner (Repair reader → 052). **032 design answered** (approved with conditions: a role-depth pin in FeatureRolePrivilegeGuardTests; partner columns = module ReadableColumns, pending ebilling Q-E5 + search path; #2188 exemption Uses=1; metadata read per delivery; a REQUIRED secure-source gate (nothing mapped from a Secure core record); person lookups protected unless allow-listed). 045 private item: intended under #2257 round 123 (person runs impersonate, so Dataverse checks AppendTo). Coming: 045A, 030b (parent link in the create), 034, 052. Live checks (b) and (d) read back clean.
-- **ebilling (`-c7`):** 164a + follow-up `647ad48a8e` APPROVED (merged to work as eeac33b1c2 + 682dc4a661; the 166 guard got InvoiceLineAddService as Writer and InvoiceFindingsDiff as Reader, to look at in the batch diff). Coming: 165a, then **165c** (the link counts only if it equals `InvoiceIdFor(id)`), 096b, 2b-2, then the 130 projection.
-- **ontology (`-38`):** told them the "Signal writer access team" proposal is not mine (they ask fm). Roles alone cover Signal writers. 174/175 held until ebilling 112.
-- **mcp-bff-api (`-68`):** spike scanner fix in progress. A10, B-4 and production task 021 (FR-02) still to come.
+## Reviews queue
+- fm: #2629 (in progress); 045A design; 052b; 032 round 2 waits on the owner.
+- ebilling: 165d diff (after option A), 165e, 165f, 165b + 165b-3, 2b-2, the batch checklist + commit.
+- mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
-- Report card: should its 8 `sprk_assigned*` lookups confer access (registry FR-24)? Today no.
-- Dev app users with prod-like names hold System Administrator.
-- G-8 for customer environments; #2590 rule; `Set-FieldMappingRuleSyncMode -Apply` review (fm).
+- Report card `sprk_assigned*` registry (FR-24); prod-named SysAdmin app users on dev; G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row ("UAC gate 154 (o) braced id", it logs a malformed-entry warning by design).
 - Older: column auditing on writer-only lookups, AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
 ## Private items (never in issues/PRs/commits)
-- Open gaps stay in peer messages only: the ebilling hold-column item (165a), the submission-link readers (165c). The line: identifiers are fine in public; "X can still write Y today" for an open gap is not.
+- ebilling: submission link columns + sprk_document user-writable (165e/165f), portion claim columns (165b F1), hold column (165a). The line: identifiers are fine in public; "X can still write Y today" for an open gap is not.
 
 ## My own backlog
-#2621 (filed today), #2585, #2576, #2524, gate null-column hardening, SharePoint census, #2543, K-P1 for task 191, communications by-regarding timeout → 500 (maybe 503; not filed); parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
+#2627, #2621, #2585, #2576, #2524, gate null-column hardening, SharePoint census, #2543, K-P1 for task 191, communications by-regarding timeout → 500 (maybe 503; not filed); parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
 
 ## Peers
 uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · mcp-bff-api `spaarke-wt-spaarkeai-mcp-bff-api-r1-68` · website `spaarke-website-cb` · SPA R4 `spaarke-wt-spa-external-access-platform-ad`.
