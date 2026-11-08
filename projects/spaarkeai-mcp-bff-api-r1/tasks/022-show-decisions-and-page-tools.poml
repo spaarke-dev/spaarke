@@ -101,6 +101,10 @@
   </steps>
 
   <escalation>
+    <trigger>HARD GATE (ontology review of 015, K1, binding, 2026-11-07): do NOT start until the FR-04 privilege-derivation task is done and its ruling is recorded in notes/decisions.md.
+      - `PrivilegeFlagged` currently reads the always-false `sprk_signal` column (ontology DI-64), so nothing would be reduced.
+      - The derivation lives in `Services/Signals/` so ontology DI-143 (#2630) can reuse it.
+      - Its done-when includes a test: a Privileged or Potentially Privileged communication subject has no SubjectName or Title in this tool's model-visible text.</trigger>
     <trigger>If no existing setting or builder gives the Console URL for a Work Item deep link, STOP and escalate rather than hard-coding a URL.</trigger>
     <trigger>If laneCountFilters.ts' partition cannot be mirrored exactly (e.g. depends on client-only state), STOP and escalate with the case.</trigger>
     <trigger>If any privileged detail would have to appear in model-visible output to satisfy another criterion, STOP: FR-04 wins; escalate.</trigger>

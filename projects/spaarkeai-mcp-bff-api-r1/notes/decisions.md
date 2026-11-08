@@ -210,3 +210,16 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Review fix F4 (option A, coordinator 2026-11-07).** Each `WorklistItemSummary` carries its group's `CoreRecordId` (54 bytes, taken out of the text budgets: title 48→28, subject name 56→36, rule short name 32→18 escaped bytes; the worst-case row stays at 600). `DecidePageResult.Cores` maps each core record with a row on the page, once, to a `WorklistCoreSummary` (name clipped to 120 bytes, number to 40) taken from the same caller-trimmed `WorklistGroup.Core` the REST worklist returns. A record with no row on the page has no entry. Worst-case page (50 worst rows, 50 worst entries, a cursor remembering 256 groups) is pinned under 64 KiB (NFR-02). REST unchanged; no golden edits.
 - **022 must also drop page-map entries (core name and number) for groups whose items are privilege-reduced in model-visible structuredContent.**
 - **Master sync.** origin/master has no change to `Services/Signals/**`, `Api/Signals/**` or the two test projects since the merge base. PR #2580 (task 174) overlaps the files but is already an ancestor of this branch. Ontology reviews `Services/Signals/**` and `Api/Signals/**` (noted in the commit body).
+
+## 2026-11-07 — Ontology review of 015: OK; FR-04 derivation is a hard gate on 022
+
+- Ontology reviewed 015 (`4b23aec7fd`, `3eccab0c81`, `42a3a35efa`): OK, no F findings.
+- **K1, binding.** The FR-04 privilege-derivation task is a hard prerequisite of 022. There is an escalation trigger in the 022 POML, and the TASK-INDEX dependency gets added when the task is created after the owner's ruling.
+  - The derivation lives in `Services/Signals/` so ontology DI-143 (#2630) can reuse it for the Decision Record snapshot.
+  - Its done-when test: a Privileged or Potentially Privileged communication subject has no SubjectName or Title in model-visible text.
+- **K2:** each page re-reads the whole lane. If lanes grow past 256 groups, consider a short per-caller cache. No change now.
+- **Recommendation to the owner (ontology agrees): "A widened."**
+  - Derive at read time, as the caller, batched per page, from the subject communication's `sprk_privilegeclassification` plus its witness communications.
+  - Privileged or Potentially Privileged = flagged; a read fault or an unreadable record = flagged; None or null = not flagged.
+  - The owner's ruling is pending.
+
