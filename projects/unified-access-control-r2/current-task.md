@@ -13,7 +13,7 @@
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; a peer's go is never the owner's. |
 | **Running** | Nothing. Worktree clean, pushed. |
 | **Dev state** | BFF = **6fbb3a7642** (master 23567b2f93 = 049c + MCP spike, PR #2615) since 2026-11-08 04:00:55Z. Gate PASS (`notes/deploy-gate-2026-11-08-6fbb3a7642.md`); two boot-window 500s unexplained: check the next deploy's boot window. **226 settings** (RecordCreation Debug removed 05:19:20Z), reconcile false. Rollback: `deploy/rollback/wwwroot-20261108T035611Z.zip` (22487c6537). Detached worktree `C:/wtd6fbb`: remove with `Remove-WorktreeSafe.ps1`. Master since: #2629 (57748ebf6d, fm 030b/034/052a), not on dev. Next deploy = master + spike, owner go per SHA. |
-| **Next action** | Review **fm 032b design round 2**: `task/fm-032b-design` 9083f5df93, `projects/field-mapping-server-write-path-r1/notes/task-032b-design.md` (a rewrite). fm asks me to confirm: U3 → (c) (sprk_invoice leaves the access registry; the four attorney/paralegal columns become display copies; grant/verify/I-G deleted; test fails if the entry returns), U7 (Daily Briefing stops selecting invoices via those columns), and that map-nothing on a gate/rule fault (E7) needs no further OK under (c). Placement changed to INLINE before the persister transaction (owner asked; values in the create payload); C1 core-pin holds by construction. Verify fm's enumeration: AccessibleRecordSetService :2384/:2879/:2959 only asked for project/matter/WA (CallerPrincipalResolver.cs:831-835); DailyBriefingCollector :168/:722 select-only; LookupUserMembershipNodeExecutor :318, MembershipEndpoints :269, PortfolioService :387 matter-only. Also check the push one-time effect and the Q-U6 exception scope. Reply to fm + ebilling-r1. |
+| **Next action** | Wait for peer items (no review in hand). fm: the 032b registry-removal PR (review: one-entry removal of sprk_invoice from CanonicalAccessConferringRegistry + guard) and 032b-2/3 code; contact owner rule after the owner picks the team. ebilling: ribbon source removal on master, then dev batch SHA for the gate. |
 
 ## Rulings this stretch (2026-11-08)
 - fm 021 timing: dev export lost 20/20 to #2158; owner moved NFR-02 verdict to UAT. Closed.
@@ -24,7 +24,7 @@
 - Gate query uses a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
 ## Reviews queue
-- fm: **032b round 2 (next)**; 045A design; 052b incl. the contact-only owner rule (after the owner picks the team); 032 round 2 waits on the owner; 076c push-preview fix (BFF + RecordFamily page) joins their next PR.
+- fm: **032b round 2 APPROVED** 11-08 (U3 (c) confirmed on master + ebilling work: only project/matter/WA compose rights; no dev registry override; U7 accepted, owner to see it; E7 map-nothing OK under (c); inline placement OK; registry removal in fm's branch with my review); 045A design; 052b incl. the contact-only owner rule (after the owner picks the team); 032 round 2 waits on the owner; 076c push-preview fix (BFF + RecordFamily page) joins their next PR.
 - ebilling: tell-me items: ribbon source removal reaching master; dev batch SHA (165e/f etc.) for the gate; 2b-2; the batch checklist + commit; field-security owner question.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration; A10, B-4, 021 later. Every deploy = master + spike until they say Phase 0 is done.
 
