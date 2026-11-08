@@ -735,3 +735,19 @@ change under (b). The `FinanceBaseValuesSeamTests` grouped cases become row-read
 4. **Reading identity: both.**
    - Now: the live privilege check beside the role-XML pin. It fails closed or alerts when the Decision Record read privilege is missing, and it must not pass only because a broad administrator role is present.
    - Durable: least privilege, meaning the BFF identity gets the Decision Record read through a SpaarkeMaster role. That is a per-environment setup step for provisioning and the deployment guide, filed as DEF-059.
+
+### 7.13 ontology-r1 answers (2026-11-08): option (b) approved, code may start
+
+1. **(b), and retiring the grouped spend path (H5) is fine.** Conditions:
+   - (i) `SpendAmount` coalesces on null only: the approved total when it is non-null (0 counts as 0), else the total amount. This is the same as the two grouped parts. D-211 stays exact. Fixture: approved total = 0.
+   - (ii) The code states that read 1 is the snapshot. Reads 2 and 3 only filter it (an allow-list can remove an invoice, never add one). K1: an invoice approved after read 1 is left out until the next run.
+   - (iii) Before `ReadSpendPartsAsync` is deleted, run a dev before/after comparison of counted spend per parent, old path against new, for every parent with counted invoices. Counts go in the PR, no ids.
+   - (iv) Both the O6 parity test and the count test (1 invoice and 50 invoices give equal read counts) are required.
+2. **Inject `OntologyWriterDataverseClient` into `SignalEvaluator`,** as `DecisionCommitService`, `SignalSuppressionService` and `GateDecisionRecordSharing` already do. `SignalWriter`'s surface stays as it is. Fetch the writer id only when the policy reads spend. A fault or `Guid.Empty` makes that policy unknown for this run (S4). A policy that doesn't read spend is never made unknown by it.
+3. **The pin plus a live dev test, with no per-run runtime query.** The test is in the `SignalPredicateTests` style: `RetrieveUserPrivileges` for the reading identity (WhoAmI) asserts Read on `sprk_decisionrecord` at **Global** depth. A lower depth fails silently (matched records go missing and spend is undercounted), whereas a missing privilege throws. The test names no role or identity. The Ontology Service XML pin stays. ontology-r1 does not want provisioning to grant the role; uac-r2 does (§7.12 item 4). That is an owner decision, tracked on DEF-059.
+4. **Yes:** `sprk_steps`, `sprk_regardinginvoice`, `sprk_actioncode` and `sprk_invoiceapproval.sprk_invoice` join `DerivedBaseColumns` under both guards. All are unsecured in the solution source.
+5. **Only `InvoiceBlockedHold`'s hold leaves pending.** A firm hold resolves to spend once a firm is assigned, so it stays in pending. `sprk_firmhold` is not read, and O4's text no longer names it.
+6. **The canary is enough.** Precondition before building: a read-only dev count of linked own submissions whose `sprk_findingsjson` is null, legacy rows included, must be 0. If it is not 0, stop and tell ontology-r1. The live profile-membership guard stays as a dev test.
+7. **Yes:** the rollup calls `ReadPendingSpendAsync`, so there is one pending reader. EB-D-201 is accepted. The reader logs the count of In Review invoices it leaves out as unlinked; the count is in memory, so it costs no extra query.
+
+Review: the `FinanceBaseValues` and `Services/Signals` hunks go through ontology-r1's review on the PR. One independent review per change set, then a re-check of the fixes.
