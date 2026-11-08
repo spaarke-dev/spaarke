@@ -1675,9 +1675,10 @@ internal sealed partial class RecordCreationService
     /// <item>none, or more than one, or a type naming no table → the type is CLEARED (with the id and the display columns
     /// the item sent), with one <see cref="RecordCreationWarning.RegardingTypeClearedCode"/> warning — but first AppendTo is
     /// asked on the type's catalog row, as step 5 would have, and a refusal is step 5's own (fix round 1, F4);</item>
-    /// <item>a catalog read answered 403 or 404 → the items are left as sent: step 5 then asks AppendTo on the type's own
-    /// catalog row and answers exactly as before (NFR-07). Any other failed answer is the caller's upstream refusal (fix
-    /// round 1, F2); a thrown fault propagates (fail closed).</item>
+    /// <item>a catalog read answered 404 → the items are left as sent: step 5 then asks AppendTo on the type's own catalog
+    /// row and answers exactly as before (NFR-07). A 403 is a type naming no table (fix round 2): AppendTo asked, then
+    /// cleared. Any other failed answer is the caller's upstream refusal (fix round 1, F2); a thrown fault propagates (fail
+    /// closed).</item>
     /// </list>
     /// A whole pair, an empty pair and an id with no type are untouched (nothing is read). The step runs before step 5, so the
     /// caller's AppendTo is asked on the pair as it is written. The system principal has no caller to read the catalog as: its
@@ -1703,12 +1704,16 @@ internal sealed partial class RecordCreationService
                 "[RECORD-CREATE] step 4½: a {Table}'s regarding pair names a type only, and its record type could not be read as " +
                 "the caller (status {Status})", table, typeRow.StatusCode);
 
-            // 403/404: left as sent — step 5 asks AppendTo on the type's own catalog row and gives its uniform 404 (a missing
-            // row and an unappendable one alike). Any other status (a 429, a 503, no answer) is the caller's own failure, as
-            // in PairTargetAsync: refused, so a type-only pair is never written past a read that did not answer.
-            return typeRow.StatusCode is 403 or 404
-                ? new TypeOnlyPairStep(callerItem, item, null)
-                : new TypeOnlyPairStep(null, null, Upstream(typeRow, noun));
+            // 404: left as sent — step 5 asks AppendTo on the type's own catalog row, whose existence read gives its uniform
+            // 404. 403 (fix round 2): the caller may not read which table the type names, though they may still be able to
+            // append to the row — so it is a type naming no table: AppendTo asked below, then cleared, never stored type-only.
+            // Any other status (a 429, a 503, no answer) is the caller's own failure, as in PairTargetAsync: refused, so a
+            // type-only pair is never written past a read that did not answer.
+            if (typeRow.StatusCode == 404)
+                return new TypeOnlyPairStep(callerItem, item, null);
+            if (typeRow.StatusCode != 403)
+                return new TypeOnlyPairStep(null, null, Upstream(typeRow, noun));
+            // 403: pairTable is null (a failed read names no table), so there is no candidate and the type is cleared below.
         }
 
         var records = pairTable is null ? [] : RegardingPairFillRecords(table, item, pairTable, mappedValues);

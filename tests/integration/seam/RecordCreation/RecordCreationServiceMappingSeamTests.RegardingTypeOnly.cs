@@ -276,7 +276,13 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
     public static TheoryData<string> CatalogFailures => new() { "forbidden", "not-found" };
 
-    [Theory(DisplayName = "045a: a type the caller cannot read is refused as before, and nothing is written")]
+    /// <summary>
+    /// A type row the caller cannot read at all (every read of it 403) or that does not exist (404): the uniform 404, nothing
+    /// written. Fix round 2: the two now reach it by different steps — a 403 is treated as a type naming no table, so step 4½
+    /// asks AppendTo before clearing and that ask's existence read refuses; a 404 is left as sent and step 5 refuses — and
+    /// still answer byte for byte alike (the F4 theory compares them).
+    /// </summary>
+    [Theory(DisplayName = "045a: a type the caller cannot read at all, or that does not exist, is the uniform 404, and nothing is written")]
     [MemberData(nameof(CatalogFailures))]
     public async Task CreateAsync_ATypeOnlyPairWhoseTypeTheCallerCannotRead_IsTheUniform404_AsBefore(string failure)
     {
@@ -352,6 +358,45 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
         outcome.MappingWarnings.Should().BeEmpty();
         _creates.Should().BeEmpty("a type-only pair is never written past a read that did not answer");
+    }
+
+    /// <summary>Fix round 2: only the read of WHICH table the type names is refused (403); the row itself can be appended to.</summary>
+    private void TheTypesTableIsUnreadable() =>
+        _user.FailOn = path => path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal)
+                               && path.Contains("$select=sprk_recordlogicalname", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(403, "AccessDenied", "Principal user is missing prvRead privilege.")
+            : null;
+
+    [Fact(DisplayName = "045a fix round 2: a 403 on step 4½'s catalog read, with AppendTo on the type row allowed, clears the type with the warning")]
+    public async Task CreateAsync_ATypeOnlyPairWhoseTableReadIsForbidden_ButAppendToIsAllowed_IsCleared_WithTheWarning()
+    {
+        TheRecordTypes();
+        TheTypesTableIsUnreadable();
+
+        var outcome = await Service().CreateAsync(
+            TypeOnlyEvent(PairType(MatterType), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        ThePairWasNotWritten(_creates.Should().ContainSingle().Subject.Fields);
+        TheOneClearWarning(outcome, MatterType, OrdinaryMatter);
+    }
+
+    [Fact(DisplayName = "045a fix round 2: a 403 on step 4½'s catalog read, with AppendTo on the type row denied, is the uniform 404")]
+    public async Task CreateAsync_ATypeOnlyPairWhoseTableReadIsForbidden_AndAppendToIsDenied_IsTheUniform404()
+    {
+        TheRecordTypes();
+        TheTypesTableIsUnreadable();
+        _scripted.Held.Remove("prvAppendTosprk_recordtype_ref");
+
+        var outcome = await Service().CreateAsync(
+            TypeOnlyEvent(PairType(MatterType), FiledUnder("sprk_RegardingMatter", "sprk_matters", OrdinaryMatter)),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status404NotFound);
+        outcome.MappingWarnings.Should().BeEmpty();
+        _creates.Should().BeEmpty();
     }
 
     public static TheoryData<string> ClearedTypes => new() { "no-candidate", "names-no-table" };

@@ -300,7 +300,9 @@ internal static class CallerWriteAuthorization
     /// The table the pair's TYPE names: its <c>sprk_recordtype_ref</c> catalog row read AS THE CALLER, and the table that row
     /// names (<c>sprk_recordlogicalname</c>, trimmed, lower case, a logical name), or <c>null</c> when it names none. The read's
     /// own response is returned, so each caller answers a failed read in its own contract: <see cref="PairTargetAsync"/>
-    /// refuses, and the create's type-only step (<c>RecordCreationService</c>, step 4½, task 045a) leaves the item as sent.
+    /// refuses; the create's type-only step (<c>RecordCreationService</c>, step 4½, task 045a) leaves the item as sent on a
+    /// 404 only (step 5's existence read then answers), treats a 403 as a type naming no table (AppendTo asked, then cleared),
+    /// and refuses any other failure as the caller's upstream one.
     /// </summary>
     internal static async Task<(DataverseUserResponse Row, string? Table)> PairTypeTableAsync(
         IDataverseUserClient user, Guid typeId, string? typeEntitySet, CancellationToken ct)

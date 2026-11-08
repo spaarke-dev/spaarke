@@ -30,7 +30,9 @@ namespace Spaarke.ArchTests;
 /// <para>Not seen: a key built at run time in any other way — a loop over a column list (<c>InvoiceCorrectionService</c>'s copy
 /// of an invoice's resolver fields, <c>foreach (var column in new[] { …RegardingRecordTypeColumn, … }) row[column] = …</c>,
 /// which copies the type and the id together but only as far as the source row holds both), a computed name, a map value
-/// held in a variable; a dictionary collection initializer (<c>{ { KEY, v } }</c>); an anonymous object; a hand-written JSON
+/// held in a variable; a dictionary collection initializer (<c>{ { KEY, v } }</c>); a column map built in the other shapes rule 2
+/// does not read — <c>map.Add("x", "sprk_regardingrecordtype")</c> / <c>TryAdd</c> calls, a <c>{ { "x", "sprk_regardingrecordtype" } }</c>
+/// initializer, and a tuple list (<c>("x", "sprk_regardingrecordtype")</c>) routed through later; an anonymous object; a hand-written JSON
 /// string; a DTO property mapped by <c>[JsonPropertyName]</c>; a conditional write (the guard sees that both writes are in the
 /// member, not that both always run); a type and id written by two members of one call chain. Member spans are approximate:
 /// a member declared without an access modifier (an explicit interface implementation, a local function is fine — it stays
