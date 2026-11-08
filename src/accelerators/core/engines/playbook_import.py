@@ -112,22 +112,34 @@ def tokens(text):
     return out
 
 
+FALLBACK_SENT_RE = re.compile(r"^acceptable fallback\b[^:]*:", re.I)  # our Word copy repeats the fallback (gap #30)
+IF_MISSING_RE = re.compile(r"^if missing\s*:\s*", re.I)
+ESCALATE_LABEL_RE = re.compile(r"^(escalate(\s+if)?|prohibited[^:]{0,20})\s*:\s*", re.I)
+
+
 def split_instructions(text):
-    preferred, escalate = [], []
+    """Instructions cell -> (preferred, escalate, if_missing). A repeated "Acceptable fallback" line is dropped:
+    the Compromise column is the fallback's source."""
+    preferred, escalate, if_missing = [], [], []
     for s in SENT_RE.split(text or ""):
         s = s.strip()
-        if not s:
+        if not s or FALLBACK_SENT_RE.match(s):
+            continue
+        mm = IF_MISSING_RE.match(s)
+        if mm:
+            if_missing.append(s[mm.end():].strip())
             continue
         m = ESCALATE_RE.match(s)
-        if m and s.lower().startswith(("escalate:", "prohibited")):
-            escalate.append(s[m.end():].strip())
+        lab = ESCALATE_LABEL_RE.match(s)
+        if m and lab:  # a labelled line ("Escalate if: …", "Prohibited: …"): keep only the position
+            escalate.append(s[lab.end():].strip())
         elif m:
             escalate.append(s)
         else:
             preferred.append(s)
     if not preferred:  # never leave Preferred empty: the instructions as a whole are the position
         preferred, escalate = [text.strip()], escalate
-    return " ".join(preferred), " ".join(escalate) or None
+    return " ".join(preferred), " ".join(escalate) or None, " ".join(if_missing) or None
 
 
 def clean_name(name):
@@ -206,6 +218,8 @@ def render(title, meta, intro, topics):
         out.append(f"Preferred: {one_line(t['preferred'])}")
         out.append(f"Fallback: {one_line(t.get('fallback')) or 'n/a'}")
         out.append(f"Prohibited / escalate: {one_line(t.get('escalate')) or 'n/a'}")
+        if t.get("if_missing"):
+            out.append(f"If missing: {one_line(t['if_missing'])}")
         if t.get("model_language"):
             out.append(f"Model language: \"{one_line(t['model_language'])}\"")
         if t.get("rationale"):
@@ -245,13 +259,13 @@ def convert(docx_path, catalogue, side=None, baseline=None, name=None, today=Non
             if r["gap"]:
                 gap_topics.append(tid)
                 continue
-            preferred, escalate = split_instructions(r["instructions"])
+            preferred, escalate, if_missing = split_instructions(r["instructions"])
             note = f"Imported from {src}, row {r['row']} ({r['label']})."
             if len(hits) > 1:
                 note += " Merged row: also covers " + ", ".join(h[0] for h in hits if h[0] != tid) + "; check the wording."
             if method == "keyword":
                 note += f" Mapped by keyword (score {sc}); confirm."
-            topics[tid] = {"id": tid, "preferred": preferred, "escalate": escalate,
+            topics[tid] = {"id": tid, "preferred": preferred, "escalate": escalate, "if_missing": if_missing,
                            "fallback": "; then ".join(r["compromise_list"]) or None,
                            "model_language": r["example"] or None, "rationale": note,
                            "priority": cat_by_id[tid].get("default_priority", "Medium")}

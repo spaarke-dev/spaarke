@@ -385,3 +385,38 @@ Prompt, in the same task: "Yes. Redline the three with the most REDs: b16 Oakhol
 | Credits | 259 | 449 | **185** |
 
 6c is the cheapest of the three and the only one rated at topic level. It also leads straight into redlines: three more for 96 credits in the same task. 6b's playbook audit (gap #25) is the one thing it does that 6c doesn't.
+
+## Act 7: the document-type library (2026-11-07)
+
+**Owner direction (2026-11-07).** Organise Legal Knowledge by document type and build NDA plus one non-contract type.
+Write a quick card, test whether one habit works for both, and fold the results into the design.
+
+**Terminology (owner).**
+- "Playbook" is the primitive for the standard procedure of any document type, whether Microsoft Legal or we
+  created it. People may also call it a checklist or a procedures table.
+- It is distinct from skills and tools (consistent with ontology D-209: one concept, several formats).
+
+**Setup, done by Claude.**
+- **Library reorganised** (runbook note: old → new paths). Moves only; the empty old folders are in the site recycle
+  bin. `Inbox/` and `Matters/` moved to `Shared Documents/POC Workspace/`. The Cowork profile now points at
+  `Legal Knowledge/NDA/Playbook master/`.
+- **NDA v1.2** (X2b) is at the top of `NDA/`, with the master in `NDA/Playbook master/`, and v1.1 moved to `Archive/`.
+  Positions are unchanged from v1.1, so the v1.1 key still applies. The Word copy adds "Acceptable fallback (accept
+  without redlining)" lines, and "If missing" plus model language for reverse engineering and compelled disclosure.
+- **Non-contract type: the legal hold notice.**
+  - Why: it is a document in-house Legal reviews before sending, with objective, checkable elements.
+  - Basis: FRCP 37(e) and The Sedona Conference, Commentary on Legal Holds, 2nd ed. (2019).
+  - Playbook: `Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx`, 13 topics in the same
+    four-column shape. A numbered-requirement variant is in `POC Workspace/Test variants/` (W1b).
+  - Synthetic drafts in `POC Workspace/Matters/Harbor Point Logistics/`:
+    - **A**: 6 RED, 2 YELLOW, 5 GREEN; automatic deletion planted by absence;
+    - **B**: clean except a mailbox-only contact (YELLOW).
+  - Key: `answer-key/legal-hold-answer-key.md`.
+- **Quick card** `Legal Knowledge/Start here – Quick card.docx`:
+  - one three-step habit and a table of document types;
+  - optional follow-ups (Identify regulatory gaps via "Something else"; Check execution readiness for contracts);
+  - "attach rather than save".
+- **Owner tests:** `doctype-test-script.md` (W0 card, W1a/W1b non-contract in two formats, W2 wrong playbook, W3 no
+  playbook, W1c clean draft, W4 NDA v1.2 retest).
+
+Results: pending.

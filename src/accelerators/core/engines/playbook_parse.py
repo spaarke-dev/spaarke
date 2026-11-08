@@ -13,6 +13,7 @@ Format (see references/playbook-format.md):
   Preferred: ...
   Fallback: ...
   Prohibited / escalate: ...
+  If missing: ...          (optional: what to do when the agreement has no clause on the topic)
   Model language: "..."
   Rationale: ...
   Priority: High
@@ -34,6 +35,7 @@ FIELDS = {
     "preferred": "preferred",
     "fallback": "fallback",
     "prohibited / escalate": "escalate",
+    "if missing": "if_missing",
     "model language": "model_language",
     "rationale": "rationale",
     "priority": "priority",
@@ -125,7 +127,7 @@ def parse(text, catalogue_ids, side_filter=None):
         if t.get("priority") not in PRIORITIES:
             errors.append(f"line {t['line']}: topic {tid} priority {t.get('priority')!r} is not High/Medium/Low")
         t["model_language"] = t.get("model_language", "").strip().strip('"“”') or None
-        for f in ("fallback", "escalate", "rationale"):
+        for f in ("fallback", "escalate", "if_missing", "rationale"):
             t.setdefault(f, None)
             if t[f] and t[f].strip().lower() in ("n/a", "none", "-"):
                 t[f] = None

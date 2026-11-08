@@ -138,8 +138,18 @@ def example_text(model_language):
     return text
 
 
+FALLBACK_LABEL = "Acceptable fallback (accept without redlining)"  # Word keeps only Rules + Examples (gap #30)
+
+
 def instruction_paragraphs(topic, topic_ids):
+    """Instructions cell. Word's saved playbook keeps only Name / Rules / Examples and drops the Compromise
+    column (POC gap #30), so the fallback is repeated here; "If missing" makes absence topics imperative
+    (gap #31). The Compromise column still carries the fallback for Cowork and review-contract."""
     out = [topic["preferred"].strip()]
+    if topic.get("if_missing"):
+        out.append(f"If missing: {topic['if_missing'].strip()}")
+    if topic.get("fallback"):
+        out.append(f"{FALLBACK_LABEL}: {topic['fallback'].strip()}")
     if topic.get("escalate"):
         out.append(f"Escalate if: {topic['escalate'].strip()}")
     if topic_ids == "instructions":

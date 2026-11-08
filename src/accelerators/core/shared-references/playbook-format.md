@@ -23,7 +23,7 @@ Priority: High
 | Title | `# Playbook: <name>` |
 | Header | `Version` and `Side` required; `Side` is `mutual`, `disclosing` or `receiving`. Labels: Version, Owner, Effective, Jurisdiction default, Side, Status |
 | Topics | `## topic: <id>`; the id must be in `topics.json`; each id once |
-| Fields | Exactly: Preferred (required), Fallback, Prohibited / escalate, Model language, Rationale, Priority (required) |
+| Fields | Exactly: Preferred (required), Fallback, Prohibited / escalate, If missing, Model language, Rationale, Priority (required). "If missing" (optional) says what to do when the document has no clause on the topic; give Model language with it |
 | Priority | High, Medium or Low |
 | Empty field | Write `n/a` |
 | Continuation | A field continues on the next lines until a blank line |
