@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `d58e3a3554`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `adfb7aeec8`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -16,14 +16,15 @@
 
 | Item | Branch / worktree | State → next action |
 |---|---|---|
-| **165b-3** | `task/ebilling-165b3` @ `4ba88a6de1` (wt agent-a2dcae0b9ac285d6e) | Part B fix round done (key match, currency before claim, already-in-target reads the record, Mark Paid keyed, guard). **uac-r2: F1 CLOSED, part B approved** (2026-11-08). Scoped Sonnet re-check running. Next: merge + verify tip (filters incl. MarkPaidAuthorizationTests) → launch **165b-2** and the **165b-4 design note** (to ontology-r1 before code). |
+| **165b-3** | ✅ merged `5ae5590b66`, tip verified (2174/0, 11236/0), wt removed | Re-check K1-K4 in notes 6.4. |
+| **165b-4 design note** | `task/ebilling-165b4-design` (Opus, note only, from `adfb7aeec8`) | Notes §7: O8 content + the key-match problem (FetchXML cannot read `sprk_steps`; options a/b). Next: review → send to ontology-r1 (and the key-match question to uac-r2) → code after their OK. |
+| **165b-2** | queued (Opus) | Launch on the next free slot. Brief: pending spend is NOT in scope (moved to 165b-4); T1/T2 + seeds + dev counts only. |
 | **165f guard follow-up** | `task/ebilling-165f-guard` (Sonnet implementer, from `6104d8d03c`) | 165f merged `f647f83705` + tip verified (ArchTests 2148/0, unit 12087/0); wt removed. Follow-up: `=>` before `(`, bracketed `Equals`, cast operand, exemption narrowed to the rule span (seeded), vacuous fault tests noted. Next: review the diff (tests-only) → merge + verify. **165e+165f ship together; send uac-r2 the dev-batch sha.** |
 | **083** | `task/ebilling-083` (Sonnet implementer, from `d58e3a3554`) | 082 ✅ (082d merged `7cd62a1710`, tip verified 2159/0 + 7435/0; field-mapping sent the sha). 083 running (snapshot = `sprk_findingsjson.procedureSnapshot`; absent/null → no text; three seeds). Partner-readable → **two adversarial passes** → merge → **130**. |
-| **085** | `task/ebilling-085` (Sonnet implementer, from `d58e3a3554`) | Rate cards keyed to Procedure Version. One adversarial pass → merge. |
+| **085** | `task/ebilling-085` (Sonnet, from `d58e3a3554`) | Stopped at escalation, lead answered (2026-11-08): may edit `InvoiceContextService.cs` (panel = versions `RulesOn` picks per distinct line date, else invoice date; one resolver read; fault → empty, no fallback) and `ApprovedRateHandler.cs` (`approvedRate.scope` → `approvedRate.rank`, invariant, no ids/names). Resumed. Next: one adversarial pass → merge → tell ontology-r1 of the evidence-key change. |
 
 ## Queued
 
-- **165b-2** totals at approval and AP export (after 165b-3).
 - **165b-4** spend paths (after 165b-3): ontology-r1 O1-O8 in the POML; step 1 is a design note to ontology-r1 before code; reuse `WriterCreatedRecord` (with the key match).
 - **083** firm clause (after 082d), then **130** firm projection (EB-D-202, uac-r2 pin test).
 - **fm-032b:** fm's design note answered (E1-E6). Our 032b-2/032b-3 branch from work after 082d merges. uac-r2 condition for 032b-3: the job payload carries the committed core (table, id); gate 2 requires invoice core == payload core == submission core; must-fire re-point test. uac U3 may drop the grant step.
