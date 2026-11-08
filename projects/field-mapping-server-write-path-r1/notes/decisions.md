@@ -1008,3 +1008,9 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 
   The design note's round 2 answers this with a consumer inventory. It also evaluates inline-before-the-transaction if U3 lands on (c).
 - **Owner, contact owner team:** an environment setting is acceptable. First check whether a shared mechanism already exists, and use one consistent process rather than a parallel approach. An investigation is in progress.
+- **032b round 2 (9083f5df93), UAC-r2: approved (2026-11-08).**
+  - **U3 → (c), confirmed.** Re-checked on master and on work/ebilling-r1: the only rights-granting membership callers are asked for project, matter and work assignment only, so the sprk_invoice registry entry grants nothing. Dev has no app-setting override of the registry.
+  - **U7 accepted** from the access side. It is a visible product change (Daily Briefing stops selecting invoices through these columns), so the owner decides.
+  - **E7:** no further OK needed under (c), provided every gate still runs before any value is read.
+  - **Inline placement:** fine. C1 holds by construction.
+  - **Registry removal:** done in fm's branch with UAC-r2's review, landing before or with 032b-2, together with the guard. The PR text must state the push side effect: the four columns become one-time and are never re-pushed.
