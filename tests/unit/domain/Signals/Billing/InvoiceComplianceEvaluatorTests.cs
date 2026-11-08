@@ -960,4 +960,38 @@ public class InvoiceComplianceEvaluatorTests
         result.Findings.Select(f => f.RuleType).Distinct().Should().BeEquivalentTo(Bodies.Keys, "every type fires on this fixture");
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
     }
+
+    [Fact(DisplayName = "082d NFR-01: a 150-line invoice on 150 work dates over two Procedure Versions (11 rule types each, beside the 11 legacy types) is evaluated and its 7.4 snapshot built in under five seconds")]
+    public void A150LineInvoice_OnTwoProcedureVersions_IsEvaluatedAndSnapshottedInUnderFiveSeconds()
+    {
+        const string name = "Guidelines";
+        var kit = new ProcedureKit()
+            .Procedure(name, to: new DateOnly(2026, 3, 1))
+            .NextVersion(name, 2, new DateOnly(2026, 3, 1))
+            .Override(Sprk.Bff.Api.Services.Signals.Billing.ProcedureOverrideMode.FollowLatest, "follow", procedure: name, reason: "Agreed");
+        foreach (var type in Bodies.Keys)
+        {
+            kit.Rule(name, "P1-" + type, type);
+            kit.Rule(name, "P2-" + type, type, versionNumber: 2);
+        }
+
+        var (request, loaded) = EverythingWrong(150);
+        request = request with { Lines = request.Lines.Select((l, i) => l with { Date = RulesFrom.AddDays(i) }).ToList() };
+        loaded = loaded with { Procedures = kit.Build() };
+        var evaluator = Evaluator();
+        Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Build(evaluator.Evaluate(request, loaded)); // warm-up
+
+        var clock = Stopwatch.StartNew();
+        var result = evaluator.Evaluate(request, loaded with { Procedures = kit.Build() });
+        var snapshot = Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Build(result)!.ToJsonString();
+        clock.Stop();
+
+        _output.WriteLine($"082d NFR-01: 150 lines, 150 work dates, 2 Procedure Versions x 11 types + 11 legacy: {result.Findings.Count} findings, "
+            + $"snapshot {snapshot.Length} characters, in {clock.Elapsed.TotalMilliseconds:F1} ms");
+        result.ProcedureBasis!.Dates.Should().HaveCount(151, "150 work dates and the invoice date");
+        result.ProcedureBasis.Applications.Should().Contain(a => a.Source == BillingRuleSource.Procedure && a.Applied.Count > 0)
+            .And.Contain(a => a.Source == BillingRuleSource.Legacy && a.Displaced.Count > 0, "control: precedence ran over both streams");
+        System.Text.Json.Nodes.JsonNode.Parse(snapshot)!["resolutions"]!.AsArray().Should().HaveCount(2, "one entry per outcome, not per date");
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
 }

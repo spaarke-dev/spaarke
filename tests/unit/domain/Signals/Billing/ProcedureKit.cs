@@ -16,6 +16,9 @@ internal sealed class ProcedureKit
     /// <summary>The invoice's core record (distance 0). A manual assignment sits on it.</summary>
     internal static readonly CoreRecordLink Matter = new("sprk_matter", Id("procedure-kit:matter"), 0);
 
+    /// <summary>082d: a direct parent (distance 1); on the chain once a row names it (<see cref="Override"/>).</summary>
+    internal static readonly CoreRecordLink Parent = new("sprk_matter", Id("procedure-kit:parent"), 1);
+
     private readonly List<ProcedureOverrideRow> _overrides = [];
     private readonly List<ProcedureRow> _procedures = [];
     private readonly List<ProcedureVersionRow> _versions = [];
@@ -67,8 +70,22 @@ internal sealed class ProcedureKit
         return this;
     }
 
+    /// <summary>
+    /// 082d: an override row on <see cref="Parent"/> (or <see cref="Matter"/>) with a <paramref name="reason"/>: a Procedure-level row for
+    /// <paramref name="procedure"/>, or a rule-level Exclude of the rule <paramref name="ruleCode"/> (all firms).
+    /// </summary>
+    internal ProcedureKit Override(
+        ProcedureOverrideMode mode, string label, string? procedure = null, string? ruleCode = null, string? reason = null, bool onParent = true)
+    {
+        _overrides.Add(new ProcedureOverrideRow(
+            Id("procedure-kit:override:" + label), mode, onParent ? Parent : Matter, procedure is null ? null : ProcedureId(procedure), null,
+            ruleCode is null ? null : Id("procedure-kit:policy:" + ruleCode), null, reason));
+        return this;
+    }
+
     /// <summary>A rule of <paramref name="procedure"/>: one Published policy version under its version (number <paramref name="versionNumber"/>), in force from its window's start.</summary>
-    internal ResolvedPolicyVersion Rule(string procedure, string code, RuleType type, string? body = null, int? consequence = null, int versionNumber = 1)
+    internal ResolvedPolicyVersion Rule(
+        string procedure, string code, RuleType type, string? body = null, int? consequence = null, int versionNumber = 1, string? clauseLocation = null)
     {
         var policyId = Id("procedure-kit:policy:" + code);
         var setId = Id("procedure-kit:set:" + procedure);
@@ -83,7 +100,7 @@ internal sealed class ProcedureKit
             RuleType = ((int)type).ToString(CultureInfo.InvariantCulture),
             RuleBody = body ?? Bodies[type],
             ClauseReference = $"Clause of {code}",
-            ClauseLocation = $"Procedure {procedure}",
+            ClauseLocation = clauseLocation ?? $"Procedure {procedure}",
             InForceFrom = _versions.Single(v => v.Id == ProcedureVersionId(procedure, versionNumber)).From,
             Consequence = consequence,
             ProcedureVersionId = ProcedureVersionId(procedure, versionNumber),
@@ -93,7 +110,8 @@ internal sealed class ProcedureKit
     }
 
     internal ProcedureResolution Build() =>
-        new(new ProcedureRows(FirmId, [Matter], _overrides, _procedures, _versions, _sets, _policies, _policyVersions));
+        new(new ProcedureRows(
+            FirmId, _overrides.Any(o => o.ChainRecord == Parent) ? [Matter, Parent] : [Matter], _overrides, _procedures, _versions, _sets, _policies, _policyVersions));
 
     /// <summary>The loaded facts: <paramref name="legacy"/> as the legacy stream, this kit's rows as the Procedure stream.</summary>
     internal BillingLoadedFacts Loaded(params BillingRuleCandidate[] legacy) =>

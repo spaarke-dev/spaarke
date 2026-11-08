@@ -2257,6 +2257,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
             // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
             [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding, outcome.Resolution, StoresRerunFacts(outcome)),
+
+            // 082d (model 7.4): the Procedure basis, INTERNAL (ids and override reasons; no reader projection emits it; ProcedureSnapshot). Always
+            // written, null when nothing was evaluated, so a re-run that ends without an evaluation replaces an older snapshot instead of keeping it.
+            [ProcedureSnapshot.Member] = ProcedureSnapshot.Build(outcome.Evaluation),
         };
         if (planRefusals.Count > 0)
         {

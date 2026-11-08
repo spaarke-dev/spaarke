@@ -339,6 +339,29 @@ public sealed class InvoiceReviewReadServiceTests
         json.Should().NotContain("NAMESENTINEL").And.NotContain("QUOTESENTINEL").And.NotContain("777.125");
     }
 
+    [Fact(DisplayName = "082d (model 7.4, R3; uac-r2 snapshot design) negative: the review projection of a submission that stores the Procedure basis holds no override reason, Procedure name, Procedure id, Procedure Version id, row id or chain record id")]
+    public async Task TheReviewResponse_NeverCarriesTheProcedureBasis()
+    {
+        // The basis is the persister's real snapshot of a real evaluation (a Procedure followed on a PARENT with a reason, an excluded Procedure and
+        // an excluded rule, each with a reason); it is planted beside the reader members this test's fixture already stores.
+        var stored = JsonNode.Parse(await Submission.ProcedureSnapshotFixture.FindingsJsonAsync())!.AsObject();
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ProcedureSnapshot.Member] = stored[ProcedureSnapshot.Member]!.DeepClone();
+        findings.ToJsonString().Should().Contain(Submission.ProcedureSnapshotFixture.FollowReason, "control: the stored copy holds the basis");
+        var w = new World { Submission = SubmissionRow(findings.ToJsonString()) };
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: Extraction);
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.Lines.Single().Findings.Should().NotBeEmpty("the setup: the stored findings are read and returned");
+        var json = JsonSerializer.Serialize(review);
+        foreach (var secret in Submission.ProcedureSnapshotFixture.Secrets())
+        {
+            json.Should().NotContainEquivalentOf(secret);
+        }
+    }
+
     [Fact(DisplayName = "092: the review carries the id of the invoice's Servable Invoice PDF Stored File, asked by invoice, purpose and status, newest first")]
     public async Task InvoicePdfFileId_IsTheServableInvoicePdf()
     {

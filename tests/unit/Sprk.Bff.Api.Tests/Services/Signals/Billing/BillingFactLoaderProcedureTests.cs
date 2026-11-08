@@ -141,6 +141,30 @@ public partial class BillingFactLoaderTests
         result.Findings.Should().HaveCount(300, "both rules judge every line");
     }
 
+    [Fact(DisplayName = "082d cost bound (8.2): with a Procedure in force, 1 line and 150 lines on 150 different work dates take the same reads, and the snapshot reads nothing")]
+    public async Task TheReads_AreBounded_On150WorkDates_AndTheSnapshotReadsNothing()
+    {
+        ProcedureRule("PROC-INCREMENT", RuleType.TimeIncrement, HalfHour);
+        Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, HalfHour);
+        static BillingEvaluationRequest OnDates(int lines) => OffIncrement(MatterA, lines) with
+        {
+            Lines = OffIncrement(MatterA, lines).Lines.Select((l, i) => l with { Date = new DateOnly(2026, 1, 1).AddDays(i) }).ToList(),
+        };
+
+        var one = await Evaluator().EvaluateAsync(OnDates(1), CancellationToken.None);
+        var few = _world.QueriedTables.ToList();
+        _world.QueriedTables.Clear();
+        var many = await Evaluator().EvaluateAsync(OnDates(150), CancellationToken.None);
+        var reads = _world.QueriedTables.ToList();
+        Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Build(many);
+
+        few.Should().Contain([ProcedureEntity.Entity, ProcedureEntity.VersionEntity], "the resolver read the Procedures");
+        reads.Should().Equal(few, "150 work dates are resolved in memory from the one read");
+        _world.QueriedTables.Should().Equal(reads, "building the snapshot reads nothing");
+        one.ProcedureBasis!.Dates.Should().HaveCount(2, "control: the line date and the invoice date");
+        many.ProcedureBasis!.Dates.Should().HaveCount(150, "control: 150 work dates were resolved (the invoice date, 31 March, is one of them)");
+    }
+
     [Fact(DisplayName = "082c C4: RequireDisjoint throws when a policy version is in both streams, and passes when they are disjoint")]
     public async Task RequireDisjoint_ThrowsOnASharedVersion_C4()
     {
