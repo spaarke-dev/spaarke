@@ -104,22 +104,37 @@ public static class InvoiceApproveRecord
         ArgumentNullException.ThrowIfNull(statuses);
         ArgumentNullException.ThrowIfNull(snapshot);
         // Built first: an unknown writer refuses here, before any read, so it never becomes "no record" (S4).
-        var recordQuery = RecordQuery(writerUserId, invoiceCondition: null);
+        var recordQuery = ParentRecordQuery(writerUserId, parentEntity, parentIds, statuses);
         if (snapshot.Count == 0 || parentIds.Count == 0)
         {
             return new HashSet<Guid>();
         }
 
-        var portionQuery = PortionQuery();
-        AddInvoiceScope(portionQuery, EligibleApproverResolver.ApprovalInvoice, parentEntity, parentIds, statuses);
-        var keys = Keys(await InvoiceReviewReadService.ReadPagedAsync(entities, portionQuery, ct).ConfigureAwait(false), snapshot);
+        var keys = Keys(await InvoiceReviewReadService.ReadPagedAsync(
+            entities, ParentPortionQuery(parentEntity, parentIds, statuses), ct).ConfigureAwait(false), snapshot);
         if (keys.Count == 0)
         {
             return new HashSet<Guid>();
         }
 
-        AddInvoiceScope(recordQuery, InvoiceLookup, parentEntity, parentIds, statuses);
         return Matched(keys, await InvoiceReviewReadService.ReadPagedAsync(entities, recordQuery, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>The parent-scoped portion read (read 2 of the spend readers): <see cref="PortionQuery"/> with an inner link to the parents' invoices of <paramref name="statuses"/>.</summary>
+    internal static QueryExpression ParentPortionQuery(string parentEntity, IReadOnlyCollection<Guid> parentIds, IReadOnlyList<int> statuses)
+    {
+        var query = PortionQuery();
+        AddInvoiceScope(query, EligibleApproverResolver.ApprovalInvoice, parentEntity, parentIds, statuses);
+        return query;
+    }
+
+    /// <summary>The parent-scoped approve-record read (read 3 of the spend readers): <see cref="RecordQuery"/> with an inner link to the parents' invoices of <paramref name="statuses"/>.</summary>
+    /// <exception cref="ArgumentException"><paramref name="writerUserId"/> is <see cref="Guid.Empty"/>.</exception>
+    internal static QueryExpression ParentRecordQuery(Guid writerUserId, string parentEntity, IReadOnlyCollection<Guid> parentIds, IReadOnlyList<int> statuses)
+    {
+        var query = RecordQuery(writerUserId, invoiceCondition: null);
+        AddInvoiceScope(query, InvoiceLookup, parentEntity, parentIds, statuses);
+        return query;
     }
 
     /// <summary>The portion read (<c>sprk_invoiceapproval</c>: its invoice lookup), paged, NoLock, ordered for stable paging. Scope is added by the caller.</summary>

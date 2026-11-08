@@ -836,9 +836,8 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
   control.
 - ArchTest `SpendReaderSourceAccessGuardTests`: O3 (the reading role's Decision Record read is Global; must-fire Deep, Local, Basic, missing,
   look-alike) and O4 (each hold source is secured and the profile grants read; controls).
-- Live (opt-in, `SIGNALS_LIVE_DATAVERSE_URL`): `SpendReaderSourceAccessLiveTests` (O3 read depth and O4 profile membership for the WhoAmI
-  identity; it names no role and no identity) and the rewritten `FinanceBaseValuesSeamTests` (row reads, matcher and hold batch accepted by
-  Dataverse). Not run in this task.
+- Live (opt-in, `SIGNALS_LIVE_DATAVERSE_URL`): `SpendReaderSourceAccessLiveTests` and the rewritten `FinanceBaseValuesSeamTests` (row reads,
+  matcher and hold batch accepted by Dataverse). §8.9 has the fix-round shape of both and the live results.
 - Seeds (each file restored byte-identical; run over the 61 tests of `SpendServerWrittenSourcesTests`, `SpendHeldAndPendingTests` and the
   two evaluator tests, all passing unseeded):
   1. Drop the key match (`InvoiceApproveRecord.Matched` ignores the key): 12 fail.
@@ -854,6 +853,23 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
 - 165b-3 K2 (any-portion match) carries into spend (uac-r2 §7.12 item 2).
 - uac-r2 §7.12 item 4 asks that the live privilege check not pass only because a broad administrator role is present. The live O3 test reads the
   effective depth, so a broad role satisfies it; the least-privilege grant is the owner decision tracked on DEF-059.
+- **Portion read depth (review finding 5).** Counted spend also needs the approval portions (`sprk_invoiceapproval`) of every invoice in scope:
+  the approve-record key is built from them, so a narrower read would miss a portion and drop an approved invoice silently. The live test checks
+  Global read on `sprk_invoiceapproval` for the readers' principal, next to the Decision Record check. The offline ArchTest guards the Decision
+  Record depth only.
+- **Writer client needed by the rollup and the tool (review finding 6; open, reported to the lead).** The rollup and the financial tool now take
+  the writer id from `BillingDecisionRecorder.WriterUserIdAsync`, so they need `Ontology:Writer:ManagedIdentityClientId` even with
+  `Ebilling:Enabled=false`. That setting is not standard configuration: it is null in `appsettings.template.json`, is not in the infrastructure
+  templates or the provisioning services, and the customer deployment guide does not list it among the App Service settings. Without it the
+  writer-id fetch faults, so the rollup fails before it reads or writes anything and the tool computes no figure (fail closed, never a wrong
+  figure). No behaviour changed in this round; the lead decides.
+- **Stored totals (review finding 7).** Counted spend sums the invoice's stored total (`SpendAmount`); nothing here cross-checks it against the
+  lines. The mitigation is EB-D-200 (task 166: the totals are field-secured for the BFF writers), which is not yet applied on dev, and 165b-2's
+  check at approval and AP export.
+- **Unlinked-warning noise (review finding 10).** `ReadPendingSpendAsync` logs a Warning with the count of In Review invoices it leaves out as
+  unlinked on every read, so a long-lived unlinked invoice repeats the Warning on each evaluation and rollup.
+- **`SpendSnapshotService` (review finding 11).** It sums billing events without the approve-record rule. The path is dormant; the lead files
+  it.
 
 ### 8.8 Verification
 
@@ -865,6 +881,25 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
   Release, `Compress-Archive -CompressionLevel Optimal` over the publish folder, PDBs included, each side from a fresh `git archive` export at
   a short path, 191 files on every side. `origin/master` (57748ebf6d) 39.26 MB; the parent commit (fd628e75c5) 39.56 MB; this task 39.56 MB.
   This task's own delta is -337 bytes (0.00 MB); the +0.30 MB against master is the unmerged ebilling-r1 work already on the branch.
+
+### 8.9 Fix round 1 (review findings 1-11)
+
+- **Seam (offline only; it creates rows and is not run without the owner's OK).** `FinanceBaseValuesSeamTests` creates the In Review invoice
+  as its own submission's invoice (`InvoiceIdFor`), with that submission linked, Accepted and its findings naming it, so it counts as pending;
+  the old comment said the opposite of EB-D-201. The read-only case sends `InvoiceApproveRecord.ParentPortionQuery` and `ParentRecordQuery`
+  (the builders the parent-scoped matcher sends, now internal) directly, since the matcher skips both reads for an empty snapshot, and asserts
+  that `CheckBatchAsync` for an invoice with no submission gives one verdict, Held with `HeldOwnSubmissionUnlinked`. Submissions are swept first.
+- **Finding 8.** `WriterApproveRecordsAsync` builds its query with `InvoiceApproveRecord.RecordQuery`; its own lookup constant is gone.
+- **Live guards.** `SpendReaderSourceAccessLiveTests` checks the principal named in `SPEND_READER_PRINCIPAL_ID` (skips when unset, or when the
+  fixture impersonates), with every read unimpersonated: Global read on `sprk_decisionrecord` and on `sprk_invoiceapproval` (finding 5),
+  profile membership direct or through a team, and the must-fire control (the same helper answers "not a member" for a random principal). The
+  first live run read membership under impersonation and got 0 for a direct member; that was the false negative this fixes.
+- **`AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema`** collects every failing column and asserts once.
+- **Live results (read-only, dev).** `SpendReaderSourceAccessLiveTests` for the BFF's application user: 4 passed (O3 Decision Record, O3 approval
+  portion, O4 direct member, must-fire control). The column check fails on exactly the two task 166 entries, `sprk_invoice.sprk_totalamount`
+  and `sprk_invoice.sprk_approvedtotal` (listed as secured, not yet secured on dev: EB-D-200 is not applied there); every other column passes.
+- **Verification.** BFF build 0 errors, 0 warnings. Filtered unit tests (Spend | FinanceBaseValues | SignalEvaluator | InvoiceApproval |
+  FinanceRollup): 474 total, 470 passed, 4 skipped, 0 failed. ArchTests: 2189 passed, 0 failed.
 
 ## 9. 165b-2 — stored totals must match the lines at approval and AP export
 

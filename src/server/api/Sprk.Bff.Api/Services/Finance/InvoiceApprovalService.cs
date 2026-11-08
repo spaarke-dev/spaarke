@@ -276,10 +276,6 @@ public sealed class InvoiceApprovalService
     internal const string PortionDecidedBy = "sprk_decidedby";
     internal const string PortionRecord = "sprk_decisionrecord";
 
-    /// <summary>Task 165b-3: the approve record's invoice lookup, as the Decision Record writer files a record regarding an invoice.</summary>
-    private static readonly string ApproveRecordInvoiceLookup =
-        TodoRegardingBuilder.RegardingLookupsByHostTable[InvoiceReviewReadService.DecisionRecordEntity][InvoiceReviewReadService.InvoiceEntity];
-
     /// <summary>The line-decision codes whose record proves a line's decision is recorded (F2).</summary>
     private static readonly string[] LineActionCodes = ["accept-line", "reduce-line", "disallow-line"];
 
@@ -1388,17 +1384,9 @@ public sealed class InvoiceApprovalService
     private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
     {
         var writer = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
-        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceLineOrigin.RecordSteps),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
-            NoLock = true,
-        };
-        query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.Equal, invoiceId);
-        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
-        WriterCreatedRecord.AddConditions(query.Criteria, writer);
-        query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+        // Task 165b-4: the same record read the spend readers and InvoicesWithApproveRecordAsync use (InvoiceApproveRecord), here for one invoice.
+        var query = InvoiceApproveRecord.RecordQuery(
+            writer, new ConditionExpression(InvoiceApproveRecord.InvoiceLookup, ConditionOperator.Equal, invoiceId));
 
         var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
         return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))

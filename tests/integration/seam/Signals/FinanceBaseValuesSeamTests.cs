@@ -60,8 +60,9 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         try
         {
             // Matter (D-103): Approved 120 + Sent to AP 60 + Paid (Inactive) 20 are in the counted statuses; In Review 300 is pending;
-            // Rejected 9000, Returned to Firm 8000 and Cancelled 5000 (all Inactive) are in neither.
-            await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 300m, InvoiceLifecycleStatus.InReview);
+            // Rejected 9000, Returned to Firm 8000 and Cancelled 5000 (all Inactive) are in neither. The In Review invoice is created as its
+            // own submission's invoice (InvoiceIdFor) with that submission linked and its findings naming it, Accepted: not held.
+            await PendingInvoiceWithItsOwnSubmissionAsync(run, "sprk_matter", matter, MatterTypeRef, 300m);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 120m, InvoiceLifecycleStatus.Approved);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 60m, InvoiceLifecycleStatus.SentToAp);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 20m, InvoiceLifecycleStatus.Paid);
@@ -101,7 +102,8 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
             projects[project].Should().Be((0m, 400m));
             projects[matter].Should().Be((0m, 0m), "the matter's budgets are not the project's");
 
-            // Pending: the In Review invoice has no linked submission, so it is not held and counts as pending.
+            // Pending: the In Review invoice has its own linked submission, Accepted, so it is not held and counts as pending. (An In Review
+            // invoice with no linked own submission is held, EB-D-201, and would leave pending.)
             var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities, FinanceBaseValues.MatterEntity, [matter, project], CancellationToken.None);
             pending[matter].Should().Be(300m);
             pending[project].Should().Be(0m);
@@ -137,14 +139,21 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
             var counted = await FinanceBaseValues.ReadAsync(entities, parent, new[] { nobody }, needSpend: true, needBudget: true, writer, CancellationToken.None);
             counted[nobody].Should().Be((0m, 0m), $"the counted row read and the budget query on {parent} are accepted");
 
-            // The snapshot is empty for an unknown parent, so the readers skip reads 2 and 3; send them directly with a made-up snapshot.
-            var matched = await InvoiceApproveRecord.MatchedInvoicesAsync(entities, parent, [nobody], FinanceBaseValues.CountedInvoiceStatuses,
-                new HashSet<Guid> { Guid.NewGuid() }, writer, CancellationToken.None);
-            matched.Should().BeEmpty($"the parent-scoped portion and approve-record reads on {parent} are accepted");
+            // The snapshot is empty for an unknown parent, so the readers skip reads 2 and 3 (and read 3 is skipped whenever no portion is
+            // found); send both parent-scoped queries directly so Dataverse sees each shape.
+            var portions = await op.RetrieveMultipleAsync(InvoiceApproveRecord.ParentPortionQuery(parent, [nobody], FinanceBaseValues.CountedInvoiceStatuses));
+            portions.Entities.Should().BeEmpty($"the parent-scoped portion read on {parent} is accepted");
+            var records = await op.RetrieveMultipleAsync(InvoiceApproveRecord.ParentRecordQuery(writer, parent, [nobody], FinanceBaseValues.CountedInvoiceStatuses));
+            records.Entities.Should().BeEmpty($"the parent-scoped approve-record read on {parent} is accepted");
 
+            // An invoice with no submission at all is held as unlinked (EB-D-201): the batch read is accepted and that is the one verdict.
+            var invoice = Guid.NewGuid();
             var verdicts = await InvoiceBlockedHold.CheckBatchAsync(entities, parent, [nobody], FinanceBaseValues.PendingInvoiceStatuses,
-                [Guid.NewGuid()], CancellationToken.None);
-            verdicts.Values.Should().OnlyContain(v => !v.Held, $"the hold's batched submission read on {parent} is accepted");
+                [invoice], CancellationToken.None);
+            var verdict = verdicts.Should().ContainSingle($"the hold's batched submission read on {parent} is accepted").Subject;
+            verdict.Key.Should().Be(invoice);
+            verdict.Value.Held.Should().BeTrue();
+            verdict.Value.ReasonCode.Should().Be(InvoiceBlockedHold.HeldOwnSubmissionUnlinked);
         }
     }
 
@@ -172,6 +181,35 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         }
     }
 
+    /// <summary>
+    /// Creates an In Review invoice the way the submission operation does (EB-D-201): its id derives from its own submission's
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), and that submission is linked to it, Accepted, with findings naming it. Such an
+    /// invoice is not held, so it counts as pending. The submission is named with the prefix so the sweep removes it (before the invoice).
+    /// </summary>
+    private async Task PendingInvoiceWithItsOwnSubmissionAsync(string run, string parentEntity, Guid parentId, Guid typeRef, decimal amount)
+    {
+        var submissionId = Guid.NewGuid();
+        var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+        await _dv.OperatorClient.CreateAsync(new Entity("sprk_invoice", invoiceId)
+        {
+            ["sprk_name"] = $"{Prefix}{run}-invoice",
+            ["sprk_totalamount"] = new Money(amount),
+            ["sprk_extractionstatus"] = new OptionSetValue(100000000),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
+            [parentEntity] = new EntityReference(parentEntity, parentId),
+        });
+        await _dv.OperatorClient.CreateAsync(new Entity(FinanceBaseValues.SubmissionEntity, submissionId)
+        {
+            ["sprk_name"] = $"{Prefix}{run}-submission",
+            [TrackingNumberAllocator.TrackingNumberColumn] = $"{Prefix}{run}.1",
+            [TrackingNumberAllocator.ScopeColumn] = TrackingNumberAllocator.ScopeOf(Guid.NewGuid()),
+            [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] =
+                $$"""{"{{InvoiceBlockedHold.KindMember}}":"Accepted","{{InvoiceBlockedHold.InvoiceIdMember}}":"{{invoiceId:D}}"}""",
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", invoiceId),
+        });
+    }
+
     private async Task BudgetAsync(string run, string parentEntity, Guid parentId, decimal total) =>
         await _dv.OperatorClient.CreateAsync(new Entity("sprk_budget")
         {
@@ -190,7 +228,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
     {
         foreach (var (entity, nameColumn) in new[]
         {
-            ("sprk_invoice", "sprk_name"), ("sprk_budget", "sprk_name"), ("sprk_matter", "sprk_mattername"), ("sprk_project", "sprk_projectname"),
+            (FinanceBaseValues.SubmissionEntity, "sprk_name"), ("sprk_invoice", "sprk_name"), ("sprk_budget", "sprk_name"), ("sprk_matter", "sprk_mattername"), ("sprk_project", "sprk_projectname"),
         })
         {
             try
