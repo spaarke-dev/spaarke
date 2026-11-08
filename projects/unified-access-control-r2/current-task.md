@@ -33,6 +33,7 @@
 ## Owner items outstanding
 - **fm 060 messaging-privacy question** (confirmed on dev 11-08; two owner rulings conflict; options and detail in the private message to fm and in the owner report, not here). Awaiting the owner's pick; then tell fm.
 - **#2635** (BFF identity gets Decision Record read via a SpaarkeMaster role in env setup; ontology says the live test is enough, I recommend the grant) — linked to: prod-named SysAdmin app users on dev (BFF identities read Decision Records only via SysAdmin).
+- **#2270 + #2278** (moved from External Access R4 to uac-r2 by the owner, 11-08; hand-off comments on both): foreign-environment contact owner + contact owner backfill. Both wait on the owner-team source for a foreign environment: (a) customer-BU column on sprk_dataverseenvironment (my recommendation) or (b) default team of the new systemuser's BU. R4 keeps #2578, #2269 (comes to me for review), #2499.
 - Report card `sprk_assigned*` registry (FR-24); G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row.
 - Older: column auditing on writer-only lookups, AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
