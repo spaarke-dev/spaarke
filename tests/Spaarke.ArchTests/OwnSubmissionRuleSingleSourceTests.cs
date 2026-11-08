@@ -27,10 +27,15 @@ namespace Spaarke.ArchTests;
 /// <see cref="TheDetector_StaysQuietOnADerivation"/> and <see cref="TheDetector_StaysQuietOnALocalThatIsNotCompared"/>.
 /// <para>Task 165f: the same scan, with the same mechanics and blind spots, holds the own-document rule
 /// (<c>InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId)</c>, a document is a source only for the
-/// submission derived from it): outside <c>InvoiceSubmissionService.cs</c>, which defines the rule and the derivation, no source compares
-/// <c>ExistingDocumentSubmissionIdFor(...)</c> or a local assigned from it. The baseline is empty. Controls:
+/// submission derived from it): outside the body of that method, no source compares
+/// <c>ExistingDocumentSubmissionIdFor(...)</c> or a local assigned from it. The method is in <c>InvoiceSubmissionService.cs</c>, which is
+/// scanned like any other file with only the method's span (found by its signature and matched braces) left out. The baseline is empty. Controls:
 /// <see cref="TheDetector_FiresOnADocumentComparison"/>, <see cref="TheDetector_StaysQuietOnADocumentDerivation"/> and
 /// <see cref="TheDocumentRulesFile_Exists_AndDefinesTheRule"/>.</para>
+/// <para>Task 165f follow-up: the guard now also catches a grouped operand after a lambda arrow (<c>x =&gt; (D(d)) == s</c>), a derivation in
+/// extra parentheses as an <c>Equals</c> argument or receiver, and an operand that is a cast of the derivation (<c>(Guid?)D(d) == s</c>) or of
+/// a local holding it. Known limit: a local assigned from a cast of the derivation (<c>var a = (Guid?)D(d);</c>) is not tracked as holding
+/// it, because the local's assignment pattern is a plain call.</para>
 /// </remarks>
 public class OwnSubmissionRuleSingleSourceTests
 {
@@ -47,7 +52,11 @@ public class OwnSubmissionRuleSingleSourceTests
     /// only by <c>InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf</c>, in the file that defines both.</summary>
     internal const string DocumentDerivation = "ExistingDocumentSubmissionIdFor";
 
-    private static readonly string[] DocumentExempt = ["Services/Finance/Submission/InvoiceSubmissionService.cs"];
+    /// <summary>The file that defines the own-document rule and its derivation. Only the rule method's span is exempt in it, not the file.</summary>
+    private const string DocumentRuleFile = "Services/Finance/Submission/InvoiceSubmissionService.cs";
+
+    /// <summary>The signature of the own-document rule method; its span (found by matching braces) is the one place the derivation is compared.</summary>
+    internal const string DocumentRuleSignature = "static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)";
 
     // `InvoiceIdFor(` (or the derivation named): a call of it.
     private static Regex CallOf(string derivation) => new(@"\b" + Regex.Escape(derivation) + @"\s*\(");
@@ -83,8 +92,9 @@ public class OwnSubmissionRuleSingleSourceTests
         foreach (Match match in call.Matches(text))
         {
             var open = match.Index + match.Length - 1;
-            if (IsComparedBefore(text, match.Index, open) || IsComparedAfter(text, match.Index, open) || IsEqualsArgument(text, match.Index)
-                || IsEqualsReceiver(text, open))
+            var close = CloseOf(text, open);
+            if (IsComparedBefore(text, match.Index, open) || IsComparedAfter(text, match.Index, open)
+                || IsEqualsArgument(text, match.Index, close < 0 ? open + 1 : close + 1) || IsEqualsReceiver(text, match.Index, open))
                 found.Add(SourceScan.LineOf(text, match.Index));
         }
 
@@ -104,6 +114,44 @@ public class OwnSubmissionRuleSingleSourceTests
         return found.ToList();
     }
 
+    /// <summary>Task 165f follow-up: <see cref="ComparisonLines(string, string)"/> for the file that defines the rule, less the span of the rule
+    /// method (<paramref name="ruleSignature"/>, located by its signature and its matched braces). A comparison anywhere else in that file is
+    /// reported. Throws when the method cannot be found, so a rename cannot silently leave the whole file unchecked.</summary>
+    internal static IReadOnlyList<int> ComparisonLinesOutsideRule(string code, string derivation, string ruleSignature)
+    {
+        var (first, last) = RuleSpan(code, ruleSignature);
+        return ComparisonLines(code, derivation).Where(line => line < first || line > last).ToList();
+    }
+
+    /// <summary>The 1-based first and last line of the method declared with <paramref name="signature"/> (whitespace-insensitive), from the
+    /// signature to the brace that closes its body (an expression body ends at its <c>;</c>).</summary>
+    internal static (int FirstLine, int LastLine) RuleSpan(string code, string signature)
+    {
+        var text = SourceScan.CodeText(code.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'));
+        text = Literal.Replace(text, m => Regex.Replace(m.Value, @"[^\n]", " "));
+        var found = Regex.Matches(text, Regex.Escape(signature).Replace(@"\ ", @"\s+"));
+        if (found.Count != 1)
+            throw new InvalidOperationException($"expected exactly one declaration of '{signature}', found {found.Count}");
+
+        var afterSignature = found[0].Index + found[0].Length;
+        var bodyStart = text.IndexOfAny(['{', ';', '='], afterSignature);
+        if (bodyStart < 0)
+            throw new InvalidOperationException($"'{signature}' has no body");
+        if (text[bodyStart] != '{')
+            return (SourceScan.LineOf(text, found[0].Index), SourceScan.LineOf(text, text.IndexOf(';', bodyStart)));
+
+        var depth = 0;
+        for (var i = bodyStart; i < text.Length; i++)
+        {
+            if (text[i] == '{')
+                depth++;
+            else if (text[i] == '}' && --depth == 0)
+                return (SourceScan.LineOf(text, found[0].Index), SourceScan.LineOf(text, i));
+        }
+
+        throw new InvalidOperationException($"the body of '{signature}' is not closed");
+    }
+
     // The start of the call's operand: the qualifier (InvoiceSubmissionPersister., Sprk.Bff.Api.…) is part of it.
     private static int OperandStart(string text, int callStart)
     {
@@ -121,33 +169,51 @@ public class OwnSubmissionRuleSingleSourceTests
             i--;
         if (i < 0 || !(char.IsLetterOrDigit(text[i]) || text[i] is '_' or '>' or ']'))
             return false;
+        // `x => (…)`: the lambda arrow is not a generic's closing `>`, so the `(` after it groups the body's expression.
+        if (text[i] == '>' && i > 0 && text[i - 1] == '=')
+            return false;
         var end = i + 1;
         while (i >= 0 && (char.IsLetterOrDigit(text[i]) || text[i] == '_'))
             i--;
         return text[(i + 1)..end] != "return";
     }
 
-    // What lies either side of the operand text[start..end] once the grouping parentheses that wrap it (and only it) are skipped,
-    // with the whitespace beside them: `((x))` and `( x )` are the operand x.
-    private static (string Before, string After) Around(string text, int start, int end)
+    // A cast written in front of an operand: `(Guid?)`, `(System.Guid)`. A parenthesised type name directly before an operand (no operator
+    // between) can only be a cast, so a cast of the derived id is the derived id.
+    private static readonly Regex CastBefore = new(@"\(\s*[A-Za-z_][\w.]*(?:<[\w.,\s?<>]*>)?\??\s*\)\s*$", RegexOptions.Compiled);
+
+    // The operand text[start..end] widened over the grouping parentheses that wrap it (and only it) and over a cast in front of it, with
+    // the whitespace beside them: `((x))`, `( x )` and `(Guid?)x` are the operand x.
+    private static (int Start, int End) Widen(string text, int start, int end)
     {
-        var before = start;
-        var after = end;
         while (true)
         {
-            var b = before - 1;
+            var b = start - 1;
             while (b >= 0 && char.IsWhiteSpace(text[b]))
                 b--;
-            var a = after;
+            var a = end;
             while (a < text.Length && char.IsWhiteSpace(text[a]))
                 a++;
-            if (b < 0 || a >= text.Length || text[b] != '(' || text[a] != ')' || IsCallParen(text, b))
-                break;
-            before = b;
-            after = a + 1;
-        }
+            if (b >= 0 && a < text.Length && text[b] == '(' && text[a] == ')' && !IsCallParen(text, b))
+            {
+                start = b;
+                end = a + 1;
+                continue;
+            }
 
-        return (text[..before].TrimEnd(), text[after..].TrimStart());
+            var from = Math.Max(0, start - 200);
+            var cast = CastBefore.Match(text[from..start]);
+            if (!cast.Success)
+                return (start, end);
+            start = from + cast.Index;
+        }
+    }
+
+    // What lies either side of the widened operand text[start..end].
+    private static (string Before, string After) Around(string text, int start, int end)
+    {
+        var (wideStart, wideEnd) = Widen(text, start, end);
+        return (text[..wideStart].TrimEnd(), text[wideEnd..].TrimStart());
     }
 
     // Left operand: skip the qualifier, the grouping parentheses and whitespace, then look for the operator.
@@ -170,18 +236,19 @@ public class OwnSubmissionRuleSingleSourceTests
         return rest.StartsWith("==", StringComparison.Ordinal) || rest.StartsWith("!=", StringComparison.Ordinal);
     }
 
-    // `Equals(InvoiceIdFor(a), x)`, `Equals(x, InvoiceIdFor(a))`, `x.Equals(InvoiceIdFor(a))`: the call is a direct argument of Equals.
-    private static bool IsEqualsArgument(string text, int start)
+    // `Equals(InvoiceIdFor(a), x)`, `Equals(x, InvoiceIdFor(a))`, `x.Equals(InvoiceIdFor(a))`, also `Equals((InvoiceIdFor(a)), x)`: the call (once
+    // its grouping parentheses and a cast are skipped) is a direct argument of Equals.
+    private static bool IsEqualsArgument(string text, int start, int end)
     {
-        var open = EnclosingOpenParen(text, start);
+        var open = EnclosingOpenParen(text, Widen(text, OperandStart(text, start), end).Start);
         return open >= 0 && EqualsNameBefore.IsMatch(text[..open]);
     }
 
-    // `InvoiceIdFor(a).Equals(x)`
-    private static bool IsEqualsReceiver(string text, int openParen)
+    // `InvoiceIdFor(a).Equals(x)`, also `(InvoiceIdFor(a)).Equals(x)`
+    private static bool IsEqualsReceiver(string text, int callStart, int openParen)
     {
         var close = CloseOf(text, openParen);
-        return close >= 0 && EqualsCallAfter.IsMatch(text[(close + 1)..]);
+        return close >= 0 && EqualsCallAfter.IsMatch(Around(text, OperandStart(text, callStart), close + 1).After);
     }
 
     // A local holding a derived id, as an operand: `x == a`, `a != x`, `a.Equals(x)`, `x.Equals(a)`, `Equals(a, x)`.
@@ -196,7 +263,7 @@ public class OwnSubmissionRuleSingleSourceTests
             return true;
         if (EqualsCallAfter.IsMatch(after))
             return true;
-        var open = EnclosingOpenParen(text, start);
+        var open = EnclosingOpenParen(text, Widen(text, start, end).Start);
         return open >= 0 && EqualsNameBefore.IsMatch(text[..open]);
     }
 
@@ -273,12 +340,18 @@ public class OwnSubmissionRuleSingleSourceTests
             Assert.True(File.Exists(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", file)), file);
     }
 
-    [Fact(DisplayName = "165f: no server source outside InvoiceSubmissionService compares ExistingDocumentSubmissionIdFor(...), or a local assigned from it, with ==, != or Equals (use InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf)")]
+    [Fact(DisplayName = "165f: no server source outside the IsExistingDocumentSubmissionIdOf method compares ExistingDocumentSubmissionIdFor(...), or a local assigned from it, with ==, != or Equals (use InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf)")]
     public void NoServerSource_ComparesADerivedDocumentSubmissionId_OutsideTheRule()
     {
         var copies = SourceScan.ServerSourceFiles()
-            .Where(f => !DocumentExempt.Contains(RelativeToBff(f), StringComparer.Ordinal))
-            .SelectMany(f => ComparisonLines(File.ReadAllText(f), DocumentDerivation).Select(line => $"{SourceScan.Relative(f)}:{line}"))
+            .SelectMany(f =>
+            {
+                var code = File.ReadAllText(f);
+                var lines = RelativeToBff(f) == DocumentRuleFile
+                    ? ComparisonLinesOutsideRule(code, DocumentDerivation, DocumentRuleSignature)
+                    : ComparisonLines(code, DocumentDerivation);
+                return lines.Select(line => $"{SourceScan.Relative(f)}:{line}");
+            })
             .ToList();
 
         Assert.True(copies.Count == 0,
@@ -289,10 +362,12 @@ public class OwnSubmissionRuleSingleSourceTests
     [Fact(DisplayName = "165f control: the own-document rule's file exists and still defines the rule and the derivation")]
     public void TheDocumentRulesFile_Exists_AndDefinesTheRule()
     {
-        var file = Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", DocumentExempt[0]);
-        Assert.True(File.Exists(file), DocumentExempt[0]);
+        var file = Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", DocumentRuleFile);
+        Assert.True(File.Exists(file), DocumentRuleFile);
         var code = File.ReadAllText(file);
-        Assert.Contains("static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)", code, StringComparison.Ordinal);
+        Assert.Contains(DocumentRuleSignature, code, StringComparison.Ordinal);
+        var (first, last) = RuleSpan(code, DocumentRuleSignature);
+        Assert.True(last > first, "the rule method's span is a real body");
         Assert.Contains($"static Guid {DocumentDerivation}(Guid documentId, int generation)", code, StringComparison.Ordinal);
     }
 
@@ -377,6 +452,146 @@ public class OwnSubmissionRuleSingleSourceTests
             """;
 
         Assert.Empty(ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must fire): a comparison in a lambda body or an expression-bodied member that starts with a grouping parenthesis")]
+    public void TheDetector_FiresOnAGroupedOperandAfterALambdaArrow()
+    {
+        const string code = """
+            void A(Guid documentId, Guid s, IEnumerable<Guid> ids)
+            {
+                var a = ids.Any(x => (ExistingDocumentSubmissionIdFor(documentId)) == s);
+                Func<Guid, bool> b = x => ( InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId) ) != x;
+            }
+
+            bool Own(Guid documentId, Guid s) => (ExistingDocumentSubmissionIdFor(documentId)) == s;
+            """;
+
+        Assert.Equal(new[] { 3, 4, 7 }, ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must not fire): a lambda or generic call whose parenthesis wraps the derivation as an argument, and a grouped lambda body that is not compared")]
+    public void TheDetector_StaysQuietOnACallAfterALambdaArrowOrGeneric()
+    {
+        const string code = """
+            void A(Guid documentId, Guid s, IEnumerable<Guid> ids)
+            {
+                var a = ids.Select(x => Get(ExistingDocumentSubmissionIdFor(documentId))) == s;
+                var b = Get<Guid>(ExistingDocumentSubmissionIdFor(documentId)) == s;
+                var c = ids.Select(x => (ExistingDocumentSubmissionIdFor(documentId)));
+            }
+            """;
+
+        Assert.Empty(ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must fire): Equals with the derivation in extra parentheses, as either argument or as the receiver")]
+    public void TheDetector_FiresOnEqualsWithAWrappedDerivation()
+    {
+        const string code = """
+            void A(Guid documentId, Guid s)
+            {
+                var a = Equals((ExistingDocumentSubmissionIdFor(documentId)), s);
+                var b = s.Equals((ExistingDocumentSubmissionIdFor(documentId)));
+                var c = Guid.Equals(s, ( ( InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId) ) ));
+                var d = (ExistingDocumentSubmissionIdFor(documentId)).Equals(s);
+            }
+            """;
+
+        Assert.Equal(new[] { 3, 4, 5, 6 }, ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must not fire): Equals on unrelated values in the same shape, and the derivation nested in another call")]
+    public void TheDetector_StaysQuietOnEqualsOfUnrelatedValues()
+    {
+        const string code = """
+            void A(Guid documentId, Guid s)
+            {
+                var a = Equals((Pick(documentId)), s);
+                var b = s.Equals((Other(documentId)));
+                var c = Equals((Get(ExistingDocumentSubmissionIdFor(documentId))), s);
+                var d = s.Equals((Get(ExistingDocumentSubmissionIdFor(documentId))));
+                var e = Use((ExistingDocumentSubmissionIdFor(documentId)), s.Equals(documentId));
+            }
+            """;
+
+        Assert.Empty(ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must fire): a comparison or Equals whose operand is a cast of the derivation (or of a local holding it)")]
+    public void TheDetector_FiresOnACastOperand()
+    {
+        const string code = """
+            void A(Guid documentId, Guid? s)
+            {
+                var a = (Guid?)ExistingDocumentSubmissionIdFor(documentId) == s;
+                var b = s != (Guid?)InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId);
+                var c = ((System.Guid?)(ExistingDocumentSubmissionIdFor(documentId))) == s;
+                var d = Equals(s, (Guid?)ExistingDocumentSubmissionIdFor(documentId));
+                var e = ExistingDocumentSubmissionIdFor(documentId);
+                var f = (Guid?)e == s;
+            }
+            """;
+
+        Assert.Equal(new[] { 3, 4, 5, 6, 8 }, ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control (must not fire): a cast of the derivation that is only assigned, passed on, returned or chosen")]
+    public void TheDetector_StaysQuietOnACastThatIsNotCompared()
+    {
+        const string code = """
+            Guid? A(Guid documentId, Guid? s)
+            {
+                var a = (Guid?)ExistingDocumentSubmissionIdFor(documentId);
+                var b = Get((Guid?)ExistingDocumentSubmissionIdFor(documentId)) == s;
+                if (s == (Guid?)Guid.Empty) return (Guid?)ExistingDocumentSubmissionIdFor(documentId);
+                return Pick(a) == s ? (Guid?)ExistingDocumentSubmissionIdFor(documentId) : null;
+            }
+            """;
+
+        Assert.Empty(ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f follow-up control: only the rule method's span of the rule file is exempt; a comparison elsewhere in it is reported, and a missing rule method fails loudly")]
+    public void TheDetector_ReportsAComparisonOutsideTheRuleMethodInTheRuleFile()
+    {
+        const string code = """
+            class InvoiceSubmissionService
+            {
+                public static Guid ExistingDocumentSubmissionIdFor(Guid documentId, int generation) => generation <= 1
+                    ? ExistingDocumentSubmissionIdFor(documentId)
+                    : Guid.Empty;
+
+                internal static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)
+                {
+                    for (var generation = 1; generation <= 3; generation++)
+                    {
+                        if (ExistingDocumentSubmissionIdFor(documentId, generation) == submissionId)
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+
+                bool Elsewhere(Guid documentId, Guid x)
+                {
+                    return ExistingDocumentSubmissionIdFor(documentId) == x;
+                }
+            }
+            """;
+
+        // The whole-file scan sees both; only the rule method's span is exempt.
+        Assert.Equal(new[] { 11, 22 }, ComparisonLines(code, DocumentDerivation));
+        Assert.Equal(new[] { 22 }, ComparisonLinesOutsideRule(code, DocumentDerivation, DocumentRuleSignature));
+        Assert.Equal((7, 18), RuleSpan(code, DocumentRuleSignature));
+
+        // A rule file that holds only the rule method reports nothing; one without it throws rather than exempting nothing silently.
+        var ruleOnly = string.Join("\n", code.Split('\n').Take(19)) + "\n}";
+        Assert.Empty(ComparisonLinesOutsideRule(ruleOnly, DocumentDerivation, DocumentRuleSignature));
+        Assert.Throws<InvalidOperationException>(() =>
+            ComparisonLinesOutsideRule("class C { bool Other() => true; }", DocumentDerivation, DocumentRuleSignature));
     }
 
     [Fact(DisplayName = "165c control (must fire): a comparison on either side, == or !=, qualified or not, across a line break")]

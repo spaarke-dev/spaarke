@@ -104,7 +104,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var act = () => _world.NewService(_identity.Object)
             .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
 
-        await act.Should().ThrowAsync<Exception>();
+        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>("the failed read of the submission rows is the cause, not a setup error");
     }
 
     // ── Reader 2: the invoice predicate's submission read ───────────────────────────────────────────────────────────
