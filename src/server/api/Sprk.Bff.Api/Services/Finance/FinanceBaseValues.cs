@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -247,25 +248,27 @@ public static class FinanceBaseValues
     /// parent with no rows has spend/budget 0 (a sum of nothing, as the rollup computes). A Dataverse failure propagates: the caller must treat
     /// the value as unknown.
     /// </summary>
-    /// <param name="writerUserId">Task 165b-4 (ontology-r1 O1): the writer identity whose approve records count
-    /// (<c>OntologyWriterDataverseClient.GetWriterUserIdAsync</c>). Read only when <paramref name="needSpend"/>; <see cref="Guid.Empty"/> then
-    /// throws (the value is unknown, never "no record, so 0 counted spend").</param>
+    /// <param name="writerUserId">Task 165b-4 (ontology-r1 O1; round 2): the provider of the writer identity whose approve records count
+    /// (<c>OntologyWriterDataverseClient.GetWriterUserIdAsync</c>). Called lazily, at most once per call, and only when
+    /// <paramref name="needSpend"/> and a chunk has counted invoice rows (<see cref="ReadCountedInvoicesAsync"/>): with none, spend is 0 and it
+    /// is never called. A fault, or <see cref="Guid.Empty"/>, then throws (spend unknown, never "no record, so 0 counted spend").</param>
     public static async Task<IReadOnlyDictionary<Guid, (decimal Spend, decimal Budget)>> ReadAsync(
         IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds,
-        bool needSpend, bool needBudget, Guid writerUserId, CancellationToken ct, ILogger? logger = null)
+        bool needSpend, bool needBudget, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
-        if (needSpend && parentIds.Count > 0 && writerUserId == Guid.Empty)
-        {
-            throw new ArgumentException("The writer identity is unknown, so counted spend cannot be read.", nameof(writerUserId));
-        }
+        ArgumentNullException.ThrowIfNull(writerUserId);
+
+        // Once per call: a later chunk reuses the first answer.
+        Guid? resolved = null;
+        async Task<Guid> WriterOnce(CancellationToken token) => resolved ??= await writerUserId(token).ConfigureAwait(false);
 
         var result = new Dictionary<Guid, (decimal, decimal)>(parentIds.Count);
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
             var spend = needSpend
-                ? SumSpendByParent(parentEntity, await ReadCountedInvoicesAsync(entities, parentEntity, chunk, writerUserId, ct).ConfigureAwait(false))
+                ? SumSpendByParent(parentEntity, await ReadCountedInvoicesAsync(entities, parentEntity, chunk, WriterOnce, ct, logger: logger).ConfigureAwait(false))
                 : new Dictionary<Guid, decimal>();
             var budget = needBudget
                 ? ReadGroupedSums(await entities.RetrieveMultipleAsync(
@@ -367,21 +370,24 @@ public static class FinanceBaseValues
     /// <b>K1 (known limit):</b> an invoice approved after read 1 is left out until the next run.</para>
     /// <para><b>Reads.</b> Three per chunk (read 2 and 3 are skipped when the chunk has no counted invoice; paging adds a read per 5,000 rows),
     /// never one per invoice, and the same number for 1 invoice as for 50.</para>
-    /// <para>A read fault propagates; <paramref name="writerUserId"/> = <see cref="Guid.Empty"/> throws before any read (an unknown writer is
-    /// never "no record, so 0 counted spend").</para>
+    /// <para><b>The writer id (round 2, ontology-r1).</b> <paramref name="writerUserId"/> is a provider, called lazily: only once read 1 has
+    /// returned counted rows, and then once per call. With no counted rows counted spend is truthfully empty: no writer-id call and no read 2
+    /// or 3. With counted rows and no usable writer id (the provider faults, for example because
+    /// <see cref="OntologyWriterCredentialFactory.ConfigKey"/> is not set, or WhoAmI fails, or it answers
+    /// <see cref="Guid.Empty"/>) counted spend is unknown: a Warning naming that setting is logged and the call throws, never "no record, so
+    /// 0 counted spend".</para>
+    /// <para>A read fault propagates.</para>
     /// </remarks>
     public static async Task<IReadOnlyList<Entity>> ReadCountedInvoicesAsync(
-        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, Guid writerUserId, CancellationToken ct,
-        IReadOnlyCollection<string>? extraColumns = null)
+        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, Func<CancellationToken, Task<Guid>> writerUserId,
+        CancellationToken ct, IReadOnlyCollection<string>? extraColumns = null, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
-        if (writerUserId == Guid.Empty)
-        {
-            throw new ArgumentException("The writer identity is unknown, so no invoice can be shown to have its approve record.", nameof(writerUserId));
-        }
+        ArgumentNullException.ThrowIfNull(writerUserId);
 
         var counted = new List<Entity>();
+        Guid? writer = null;
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
             // Read 1: the snapshot.
@@ -392,14 +398,48 @@ public static class FinanceBaseValues
                 continue;
             }
 
-            // Reads 2 and 3: the keyed allow-list; they only filter read 1.
+            // Reads 2 and 3: the keyed allow-list; they only filter read 1. The writer id is needed only from here.
+            writer ??= await CountedSpendWriterAsync(writerUserId, rows.Count, parentEntity, logger, ct).ConfigureAwait(false);
             var matched = await InvoiceApproveRecord.MatchedInvoicesAsync(
-                entities, parentEntity, chunk, CountedInvoiceStatuses, rows.Select(r => r.Id).ToHashSet(), writerUserId, ct).ConfigureAwait(false);
+                entities, parentEntity, chunk, CountedInvoiceStatuses, rows.Select(r => r.Id).ToHashSet(), writer.Value, ct).ConfigureAwait(false);
             counted.AddRange(rows.Where(r => matched.Contains(r.Id)));
         }
 
         return counted;
     }
+
+    /// <summary>
+    /// Task 165b-4 round 2: the writer id for counted rows that need it. A fault, or <see cref="Guid.Empty"/>, makes counted spend unknown: it is
+    /// logged as a Warning that names <see cref="OntologyWriterCredentialFactory.ConfigKey"/> (an absent setting is the
+    /// misconfiguration an operator can fix) and thrown. The caller's own cancellation is not logged.
+    /// </summary>
+    private static async Task<Guid> CountedSpendWriterAsync(
+        Func<CancellationToken, Task<Guid>> writerUserId, int countedRows, string parentEntity, ILogger? logger, CancellationToken ct)
+    {
+        Guid writer;
+        try
+        {
+            writer = await writerUserId(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogWarning(ex, WriterUnavailableMessage, countedRows, parentEntity, OntologyWriterCredentialFactory.ConfigKey);
+            throw;
+        }
+
+        if (writer == Guid.Empty)
+        {
+            var empty = new InvalidOperationException("The writer identity is unknown (empty), so no invoice can be shown to have its approve record.");
+            logger?.LogWarning(empty, WriterUnavailableMessage, countedRows, parentEntity, OntologyWriterCredentialFactory.ConfigKey);
+            throw empty;
+        }
+
+        return writer;
+    }
+
+    private const string WriterUnavailableMessage =
+        "Counted spend is unknown for {CountedRows} counted {ParentEntity} invoice(s): the Decision Record writer's identity is unavailable. "
+        + "Check that {ConfigKey} is set on this host (and that the writer's connection and WhoAmI work); spend is not reported as 0.";
 
     /// <summary>
     /// The paged row read of the parents' invoices of <paramref name="statuses"/>: the invoice key, the parent lookup, the two

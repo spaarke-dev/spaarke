@@ -1699,22 +1699,69 @@ public partial class SignalReevaluationJobTests
             "one row read, one portion read and one approve-record read, for all five matters");
     }
 
-    [Fact]
-    public async Task Run_SpendThreshold_WhenTheWriterIdIsUnknown_IsAPolicyFailure_NeverZeroSpend_165b4()
+    /// <summary>Round 2: the writer id is unusable because <c>Ontology:Writer:ManagedIdentityClientId</c> is not set (the credential factory's
+    /// own exception, raised on the writer-id call as the connection raises it on first use), or because WhoAmI fails.</summary>
+    private static Exception WriterIdFault(string kind)
     {
-        // Task 165b-4 (ontology-r1 §7.13 item 2, S4): counted spend needs the writer id. A WhoAmI fault makes the spend policy's truth
-        // unknown this run: a policy failure, nothing raised or closed, never "no records, so 0 spend".
+        if (kind == "whoami-fault")
+        {
+            return new TimeoutException("WhoAmI timed out.");
+        }
+
+        try
+        {
+            Sprk.Bff.Api.Infrastructure.Auth.OntologyWriterCredentialFactory.Create(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException("the credential factory accepted an empty configuration");
+    }
+
+    [Theory]
+    [InlineData("setting-absent")]
+    [InlineData("whoami-fault")]
+    public async Task Run_SpendThreshold_WhenTheWriterIdIsUnknown_IsAPolicyFailure_NeverZeroSpend_165b4(string fault)
+    {
+        // Task 165b-4 (ontology-r1 §7.13 item 2, S4; round 2 tests 2 and 3): the subject has a counted invoice, so counted spend needs the
+        // writer id. An absent writer setting or a WhoAmI fault makes the spend policy's truth unknown this run: a policy failure, nothing
+        // raised or closed, never "no records, so 0 spend".
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":"<=","value":10}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
         h.WithInvoice("sprk_matter", MatterId, 30000m);
-        h.Org.WhoAmIFault = new TimeoutException("WhoAmI timed out.");
+        h.Org.WhoAmIFault = WriterIdFault(fault);
 
         var result = await h.RunAsync();
 
         result.ResultJson.Should().Contain("\"policyFailures\":1", "the fault is reported, never silent");
         h.Org.CreatedPayloads.Should().BeEmpty("an unknown writer id never reads as 0 spend (which would hold '<= 10')");
-        h.Sysadmin.Spend.Reads.Should().BeEmpty("the writer id is asked for before any spend read");
+        h.Org.WhoAmICalls.Should().Be(1);
+        h.Sysadmin.Spend.Reads.Select(q => q.EntityName).Should().Equal(new[] { "sprk_invoice" },
+            "the counted row read finds the invoice; with no usable writer id the portion and approve-record reads are not made");
+    }
+
+    [Theory]
+    [InlineData("setting-absent")]
+    [InlineData("whoami-fault")]
+    public async Task Run_SpendThreshold_WithNoCountedInvoice_NeedsNoWriterId_AndJudgesZeroSpend_165b4(string fault)
+    {
+        // Round 2 (must not fire): no counted invoice, so counted spend is truthfully 0 and the writer id is never asked for. The same fault
+        // that fails the policy above does not touch this one: '<= 10' holds on 0 and the Signal is raised.
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":"<=","value":10}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.WithInvoice("sprk_matter", MatterId, 30000m, InvoiceStatusCodes.InReview);   // pending, not counted
+        h.Org.WhoAmIFault = WriterIdFault(fault);
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"policyFailures\":0");
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 0.");
+        h.Org.WhoAmICalls.Should().Be(0, "no counted invoice: WhoAmI is not asked");
+        h.Sysadmin.Spend.Reads.Select(q => q.EntityName).Should().Equal(new[] { "sprk_invoice" }, "read 1 only");
     }
 
     [Fact]
@@ -3570,6 +3617,9 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 165b-4: WhoAmI on the writer's connection fails (the writer id is unknown).</summary>
         public Exception? WhoAmIFault { get; set; }
 
+        /// <summary>Task 165b-4 round 2: how many times WhoAmI was asked on the writer's connection.</summary>
+        public int WhoAmICalls { get; private set; }
+
         /// <summary>K1: when set, every create throws exactly this (a typed Dataverse fault, say), instead of the plain failure.</summary>
         public Exception? CreateFault { get; set; }
 
@@ -3720,6 +3770,11 @@ public partial class SignalReevaluationJobTests
 
         public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken)
         {
+            if (request is WhoAmIRequest)
+            {
+                WhoAmICalls++;
+            }
+
             switch (request)
             {
                 case WhoAmIRequest when WhoAmIFault is { } fault:

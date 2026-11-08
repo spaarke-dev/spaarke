@@ -20,8 +20,11 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </summary>
 internal sealed class SpendWorld
 {
-    /// <summary>The writer identity (WhoAmI on the writer's connection; the same id the writer test harnesses use).</summary>
-    public static readonly Guid Writer = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+    /// <summary>The writer identity (WhoAmI on the writer's connection): the writer test harness's own id.</summary>
+    public static readonly Guid Writer = Tests.Services.Signals.DecisionRecordWriterTests.WriterUser;
+
+    /// <summary>Task 165b-4 round 2: the writer-id provider the readers take, answering <see cref="Writer"/>.</summary>
+    public static Task<Guid> WriterId(CancellationToken ct) => Task.FromResult(Writer);
 
     /// <summary>Another identity (a person or another application user).</summary>
     public static readonly Guid OtherUser = Guid.Parse("0bad0bad-0000-4000-8000-000000000001");

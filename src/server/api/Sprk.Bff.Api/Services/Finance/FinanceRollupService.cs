@@ -182,10 +182,12 @@ public class FinanceRollupService
             parentEntityName, parentId);
 
         // Step 1: the counted invoices (task 165b-4: the shared reader; an invoice counts only with its approve record) and the budgets.
-        // A fault (the writer id, any read) propagates before anything is written.
-        var writerUserId = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
+        // The writer id is asked for only when the parent has counted invoice rows (round 2): with none, counted spend is 0 and the rollup
+        // writes without it. With some and no usable writer id, counted spend is unknown: the read throws (and logs a Warning naming the
+        // writer setting) before anything is written, so the WHOLE write is skipped (total budget too, it shares the counted PATCH) and
+        // pending is unchanged. Any other read fault does the same.
         var invoiceTask = FinanceBaseValues.ReadCountedInvoicesAsync(
-            _dataverseService, parentEntityName, [parentId], writerUserId, ct, [Invoice_InvoiceDate, Invoice_StatusCode]);
+            _dataverseService, parentEntityName, [parentId], _recorder.WriterUserIdAsync, ct, [Invoice_InvoiceDate, Invoice_StatusCode], _logger);
         var budgetTask = QueryBudgetTotalAsync(_dataverseService, parentId, budgetLookupField, ct);
 
         await Task.WhenAll(invoiceTask, budgetTask);

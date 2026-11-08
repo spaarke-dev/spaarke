@@ -77,7 +77,8 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
             await BudgetAsync(run, "sprk_project", project, 400m);
 
             var entities = new SignalWriterSeamTests.SysadminAdapter(op);
-            var writer = ((WhoAmIResponse)await op.ExecuteAsync(new WhoAmIRequest())).UserId;
+            var writerId = ((WhoAmIResponse)await op.ExecuteAsync(new WhoAmIRequest())).UserId;
+            Func<CancellationToken, Task<Guid>> writer = _ => Task.FromResult(writerId);
 
             // The counted row read (read 1, the snapshot) selects exactly the counted statuscodes on the real rows.
             var counted = (await op.RetrieveMultipleAsync(FinanceBaseValues.InvoiceRowQuery(
@@ -130,13 +131,14 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         var nobody = Guid.NewGuid();
         var entities = new SignalWriterSeamTests.SysadminAdapter(op);
         var writer = ((WhoAmIResponse)await op.ExecuteAsync(new WhoAmIRequest())).UserId;
+        Func<CancellationToken, Task<Guid>> writerId = _ => Task.FromResult(writer);
 
         foreach (var parent in new[] { FinanceBaseValues.MatterEntity, FinanceBaseValues.ProjectEntity })
         {
             var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities, parent, new[] { nobody }, CancellationToken.None);
             pending[nobody].Should().Be(0m, $"the pending row read and the hold batch on {parent} are accepted and an id with no invoices sums to 0");
 
-            var counted = await FinanceBaseValues.ReadAsync(entities, parent, new[] { nobody }, needSpend: true, needBudget: true, writer, CancellationToken.None);
+            var counted = await FinanceBaseValues.ReadAsync(entities, parent, new[] { nobody }, needSpend: true, needBudget: true, writerId, CancellationToken.None);
             counted[nobody].Should().Be((0m, 0m), $"the counted row read and the budget query on {parent} are accepted");
 
             // The snapshot is empty for an unknown parent, so the readers skip reads 2 and 3 (and read 3 is skipped whenever no portion is

@@ -131,7 +131,7 @@ public sealed class SignalEvaluator
 
     /// <param name="writerClient">Task 165b-4 (ontology-r1 Q2): the one writer-id source
     /// (<see cref="OntologyWriterDataverseClient.GetWriterUserIdAsync"/>, cached WhoAmI), as <c>DecisionCommitService</c> takes it. Read only when a
-    /// policy reads spend: counted spend keeps an invoice only when the writer created its approve record.</param>
+    /// policy reads spend and its candidates have counted invoices: counted spend keeps an invoice only when the writer created its approve record.</param>
     public SignalEvaluator(
         PolicyVersionValidator validator, IGenericEntityService entities, SignalWriter writer, OntologyWriterDataverseClient writerClient,
         ILogger<SignalEvaluator> logger)
@@ -236,14 +236,13 @@ public sealed class SignalEvaluator
         if (derived is not null)
         {
             var (needSpend, needBudget) = FinanceBaseValues.Needs(derived.Field);
-            // Task 165b-4: counted spend decides only from server-written sources (an invoice counts only with the writer's approve record),
-            // so a policy that reads spend needs the writer id. Fetched only then: a fault, or an empty id, throws and this policy's truth is
-            // unknown this run; a policy that reads no spend never asks.
-            var writerUserId = needSpend && candidates.Count > 0
-                ? await _writerClient.GetWriterUserIdAsync(ct).ConfigureAwait(false)
-                : Guid.Empty;
+            // Task 165b-4: counted spend decides only from server-written sources (an invoice counts only with the writer's approve record).
+            // The writer id is a provider the reader calls lazily (round 2): only when the candidates have counted invoice rows. With none,
+            // spend is 0 and WhoAmI is not asked; with some, a fault or an empty id throws and this policy's truth is unknown this run. A
+            // policy that reads no spend never asks.
             var bases = await FinanceBaseValues.ReadAsync(
-                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, writerUserId, ct, _logger).ConfigureAwait(false);
+                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, _writerClient.GetWriterUserIdAsync, ct, _logger)
+                .ConfigureAwait(false);
             var judged = new List<Entity>(candidates.Count);
             foreach (var row in candidates)
             {

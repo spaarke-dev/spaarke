@@ -772,9 +772,9 @@ invoices `InvoiceBlockedHold` holds.
   out because they have no linked own submission (EB-D-201), from memory.
 - **O5 canary** is in the batch read: an own linked submission whose findings read back empty throws, so the pending figure is unknown, never
   "not held".
-- **Writer id.** `SignalEvaluator` takes `OntologyWriterDataverseClient` by injection and fetches the id only when the policy reads spend and has
-  candidates; a fault fails that policy (unknown, S4). `ReadAsync` and `ReadCountedInvoicesAsync` refuse `Guid.Empty` before any read. The rollup
-  and the tool get it from `BillingDecisionRecorder.WriterUserIdAsync` (the same client).
+- **Writer id.** `SignalEvaluator` takes `OntologyWriterDataverseClient` by injection; the rollup and the tool get the id from
+  `BillingDecisionRecorder.WriterUserIdAsync` (the same client). Since round 2 (§8.10) the readers take it as a provider and call it only
+  when there are counted rows; a fault or an empty id then makes counted spend unknown (the evaluator's policy fails, S4).
 - **Rollup and tool reads** now go through `IGenericEntityService` (the same app-only connection); the `ServiceClient` unwrap is gone, which is
   what makes the three readers testable on one fixture.
 - **Retired** (H5): `SpendAmountPart`, `SpendAmountPartsInReadOrder`, `ReadSpendPartsAsync`, `ReadPartAsync`, `SameSums`, the grouped spend and
@@ -857,12 +857,13 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
   the approve-record key is built from them, so a narrower read would miss a portion and drop an approved invoice silently. The live test checks
   Global read on `sprk_invoiceapproval` for the readers' principal, next to the Decision Record check. The offline ArchTest guards the Decision
   Record depth only.
-- **Writer client needed by the rollup and the tool (review finding 6; open, reported to the lead).** The rollup and the financial tool now take
-  the writer id from `BillingDecisionRecorder.WriterUserIdAsync`, so they need `Ontology:Writer:ManagedIdentityClientId` even with
-  `Ebilling:Enabled=false`. That setting is not standard configuration: it is null in `appsettings.template.json`, is not in the infrastructure
-  templates or the provisioning services, and the customer deployment guide does not list it among the App Service settings. Without it the
-  writer-id fetch faults, so the rollup fails before it reads or writes anything and the tool computes no figure (fail closed, never a wrong
-  figure). No behaviour changed in this round; the lead decides.
+- **The writer id is needed only for counted rows (review finding 6; ontology-r1's rule, round 2, §8.10).** The writer setting
+  `Ontology:Writer:ManagedIdentityClientId` is not standard configuration (null in `appsettings.template.json`, not in the infrastructure
+  templates or the provisioning services, not among the guide's App Service settings). The rule for the rollup, the tool and the evaluator: the
+  writer id is a provider, called lazily and only when read 1 returns counted invoice rows. No counted rows: counted spend is 0, truthfully, with
+  no writer-id call and no read 2 or 3. Counted rows and no usable writer id (the setting absent, a WhoAmI or connection fault, or an empty id):
+  spend is unknown, and a Warning names the setting. The rollup then skips its whole write (the counted PATCH carries total budget with the
+  spend-derived fields, so nothing is written) and pending is unchanged; the tool returns its error; the evaluator's policy fails for the run.
 - **Stored totals (review finding 7).** Counted spend sums the invoice's stored total (`SpendAmount`); nothing here cross-checks it against the
   lines. The mitigation is EB-D-200 (task 166: the totals are field-secured for the BFF writers), which is not yet applied on dev, and 165b-2's
   check at approval and AP export.
@@ -900,6 +901,44 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
   and `sprk_invoice.sprk_approvedtotal` (listed as secured, not yet secured on dev: EB-D-200 is not applied there); every other column passes.
 - **Verification.** BFF build 0 errors, 0 warnings. Filtered unit tests (Spend | FinanceBaseValues | SignalEvaluator | InvoiceApproval |
   FinanceRollup): 474 total, 470 passed, 4 skipped, 0 failed. ArchTests: 2189 passed, 0 failed.
+
+### 8.10 Fix round 2 (finding 6: the writer id only for counted rows)
+
+ontology-r1 rejected "setting absent, so counted spend 0" as fail-open and set one rule for the rollup, the tool and the evaluator (§8.7).
+- **Code.**
+  - `FinanceBaseValues.ReadCountedInvoicesAsync` and `ReadAsync` take the writer id as a provider (`Func<CancellationToken, Task<Guid>>`).
+    `ReadCountedInvoicesAsync` calls it only after read 1 has returned counted rows, once per call; `ReadAsync` shares one answer across its
+    chunks.
+  - A fault or an empty id is logged as a Warning (`CountedSpendWriterAsync`) that names `Ontology:Writer:ManagedIdentityClientId`, the
+    counted-row count and the parent table, then thrown. The caller's own cancellation is not logged.
+  - The parent-scoped matcher still takes the resolved `Guid`.
+  - The rollup and the tool pass `BillingDecisionRecorder.WriterUserIdAsync` and their logger. The evaluator passes
+    `OntologyWriterDataverseClient.GetWriterUserIdAsync`, and its own `needSpend && candidates` guard is gone, because the reader decides now.
+- **Rollup outcome.** Unknown counted spend skips the whole write. Total budget shares the counted PATCH with the spend-derived fields, so
+  nothing is written, and pending is unchanged.
+- **The Warning** names the setting on every unusable-writer outcome, not only when the setting is absent: the reader cannot tell the causes
+  apart without reading configuration, and the absent setting is the one an operator fixes. The exception is attached.
+- **Tests.**
+  - Test 1: `Lazy_SettingAbsent_NoCountedRows_...`, on the evaluator read, the rollup (counted 0, budget, pending written) and the tool. No
+    writer-id call; no read 2 or 3.
+  - Tests 2 and 3: `S4_...` gains `setting-absent` and `whoami-fault` on all three readers. The rollup writes nothing, the tool errors, the
+    reader throws, and WhoAmI is called once with no read 2 or 3. `SignalReevaluationJobTests` covers the same two faults as a policy failure
+    with only the row read.
+  - Test 4: `Count_NoCountedRows_...` (row read and budget only, no call). `Count_ManyChunks...` checks one call across two chunks.
+  - The Warning test (fires with counted rows; silent without them) and an empty-id test.
+  - Evaluator must-not-fire: a spend policy with no counted invoice raises on 0 with no WhoAmI.
+  - Setting absent is the credential factory's own exception for an empty configuration, raised on the writer-id call.
+- **Seeds** (73 tests in the spend filter, all passing unseeded; each file restored byte-identical):
+  1. Drop the key match: 12 fail.
+  2. Drop the hold exclusion: 8 fail.
+  3. Drop the canary: 2 fail.
+  4. Drop the writer conditions: 4 fail.
+  5. Ask for the writer id on every read, spend or not (replaces the old evaluator-guard seed, whose code is gone): 9 fail, among them the
+     budget-only control and test 4.
+  6. New: call the provider eagerly, before read 1: 10 fail, among them tests 1 and 4.
+- **Verification.** BFF build 0 errors, 0 warnings. Filtered unit tests (Spend | FinanceBaseValues | SignalEvaluator | InvoiceApproval |
+  FinanceRollup | FinancialCalculation | SignalReevaluationJob | SignalEvaluationTrigger): 807 total, 803 passed, 4 skipped, 0 failed.
+  ArchTests: 2189 passed, 0 failed. No live run (no live writes).
 
 ## 9. 165b-2 — stored totals must match the lines at approval and AP export
 

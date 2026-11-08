@@ -1,11 +1,13 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -34,12 +36,37 @@ public class SpendServerWrittenSourcesTests
 
     // ── The readers ──
 
-    private static BillingDecisionRecorder Recorder(Exception? whoAmIFault = null)
-    {
-        var harness = new DecisionRecordWriterTests.Harness { WhoAmIFault = whoAmIFault };
-        return new BillingDecisionRecorder(harness.Writer, new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
+    private static BillingDecisionRecorder Recorder(Exception? whoAmIFault = null) =>
+        Recorder(new DecisionRecordWriterTests.Harness { WhoAmIFault = whoAmIFault });
+
+    private static BillingDecisionRecorder Recorder(DecisionRecordWriterTests.Harness harness) =>
+        new(harness.Writer, new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
             NullLogger<BillingDecisionRecorder>.Instance);
+
+    /// <summary>
+    /// Round 2: what the writer connection throws when <see cref="OntologyWriterCredentialFactory.ConfigKey"/> is not set (the factory's own
+    /// exception, from an empty configuration). Raised on the writer-id call, as the connection raises it on first use.
+    /// </summary>
+    private static Exception SettingAbsent()
+    {
+        try
+        {
+            OntologyWriterCredentialFactory.Create(new ConfigurationBuilder().Build());
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException("the credential factory accepted an empty configuration");
     }
+
+    private static Exception WriterFault(string kind) => kind switch
+    {
+        "setting-absent" => SettingAbsent(),
+        "whoami-fault" => new InvalidOperationException("WhoAmI failed"),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
 
     private sealed class RollupRun
     {
@@ -55,27 +82,39 @@ public class SpendServerWrittenSourcesTests
         public decimal? Pending => Written.FirstOrDefault(f => f.ContainsKey("sprk_pendingspend")) is { } f ? (decimal)f["sprk_pendingspend"]! : null;
     }
 
-    private static async Task<RollupRun> RunRollupAsync(SpendWorld world, Exception? whoAmIFault = null)
+    private static async Task<RollupRun> RunRollupAsync(SpendWorld world, Exception? whoAmIFault = null) =>
+        await RunRollupAsync(world, new DecisionRecordWriterTests.Harness { WhoAmIFault = whoAmIFault });
+
+    private static async Task<RollupRun> RunRollupAsync(SpendWorld world, DecisionRecordWriterTests.Harness harness)
     {
         var run = new RollupRun();
-        var service = new FinanceRollupService(world.Service().Object, run.Writes.Object, Recorder(whoAmIFault), NullLogger<FinanceRollupService>.Instance);
+        var service = new FinanceRollupService(world.Service().Object, run.Writes.Object, Recorder(harness), NullLogger<FinanceRollupService>.Instance);
         await service.RecalculateMatterAsync(MatterId);
         return run;
     }
 
-    private static async Task<PlaybookToolResult> RunToolAsync(SpendWorld world, Exception? whoAmIFault = null)
+    private static async Task<PlaybookToolResult> RunToolAsync(SpendWorld world, Exception? whoAmIFault = null) =>
+        await RunToolAsync(world, new DecisionRecordWriterTests.Harness { WhoAmIFault = whoAmIFault });
+
+    private static async Task<PlaybookToolResult> RunToolAsync(SpendWorld world, DecisionRecordWriterTests.Harness harness)
     {
-        var tool = new FinancialCalculationToolHandler(world.Service().Object, Recorder(whoAmIFault), new Mock<FinanceTelemetry>().Object,
+        var tool = new FinancialCalculationToolHandler(world.Service().Object, Recorder(harness), new Mock<FinanceTelemetry>().Object,
             NullLogger<FinancialCalculationToolHandler>.Instance);
         return await tool.ExecuteAsync(new ToolParameters(new Dictionary<string, object> { ["matterId"] = MatterId }), CancellationToken.None);
     }
+
+    /// <summary>The evaluator's read (<see cref="FinanceBaseValues.ReadAsync"/>) with the writer id from <paramref name="harness"/>'s connection,
+    /// the client the evaluator takes (<c>OntologyWriterDataverseClient.GetWriterUserIdAsync</c>, through the recorder's forward).</summary>
+    private static async Task<decimal> EvaluatorSpendAsync(SpendWorld world, DecisionRecordWriterTests.Harness harness, ILogger? logger = null) =>
+        (await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], needSpend: true, needBudget: false,
+            Recorder(harness).WriterUserIdAsync, CancellationToken.None, logger))[MatterId].Spend;
 
     private static async Task<decimal> CountedAsync(string reader, SpendWorld world)
     {
         switch (reader)
         {
             case "evaluator":
-                return (await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], needSpend: true, needBudget: false, SpendWorld.Writer,
+                return (await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], needSpend: true, needBudget: false, SpendWorld.WriterId,
                     CancellationToken.None))[MatterId].Spend;
             case "rollup":
                 return (await RunRollupAsync(world)).Counted ?? throw new InvalidOperationException("the rollup wrote no counted spend");
@@ -287,7 +326,8 @@ public class SpendServerWrittenSourcesTests
         var data = new TheoryData<string, string>();
         foreach (var reader in new[] { "evaluator", "rollup", "tool" })
         {
-            foreach (var read in new[] { "sprk_invoice", "sprk_invoiceapproval", "sprk_decisionrecord", "writer-id" })
+            // "setting-absent" (Ontology:Writer:ManagedIdentityClientId not set) and "whoami-fault": the writer id is unusable (round 2, tests 2 and 3).
+            foreach (var read in new[] { "sprk_invoice", "sprk_invoiceapproval", "sprk_decisionrecord", "setting-absent", "whoami-fault" })
             {
                 data.Add(reader, read);
             }
@@ -302,27 +342,95 @@ public class SpendServerWrittenSourcesTests
     {
         var world = new SpendWorld();
         world.Approved(Matter, MatterId, 300m);
+        world.Pending(Matter, MatterId, 40m);
         world.FaultOn = q => q.EntityName == read ? new InvalidOperationException("Dataverse unavailable") : null;
-        var whoAmIFault = read == "writer-id" ? new InvalidOperationException("WhoAmI failed") : null;
+        var writerFault = read is "setting-absent" or "whoami-fault";
+        var harness = new DecisionRecordWriterTests.Harness { WhoAmIFault = writerFault ? WriterFault(read) : null };
 
         switch (reader)
         {
             case "evaluator":
-                // The evaluator reads the writer id itself (SignalEvaluator); here the reader refuses an unknown one (Guid.Empty).
-                var writer = read == "writer-id" ? Guid.Empty : SpendWorld.Writer;
-                await FluentActions.Awaiting(() => FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, false, writer, CancellationToken.None))
-                    .Should().ThrowAsync<Exception>();
+                // The evaluator's policy fails on this throw (S4; SignalReevaluationJobTests pins the policy failure).
+                await FluentActions.Awaiting(() => EvaluatorSpendAsync(world, harness)).Should().ThrowAsync<Exception>();
                 break;
             case "rollup":
                 var run = new RollupRun();
-                var rollup = new FinanceRollupService(world.Service().Object, run.Writes.Object, Recorder(whoAmIFault), NullLogger<FinanceRollupService>.Instance);
+                var rollup = new FinanceRollupService(world.Service().Object, run.Writes.Object, Recorder(harness), NullLogger<FinanceRollupService>.Instance);
                 await FluentActions.Awaiting(() => rollup.RecalculateMatterAsync(MatterId)).Should().ThrowAsync<Exception>();
-                run.Written.Should().BeEmpty("the counted write is not made and pending is unchanged");
+                run.Written.Should().BeEmpty("the counted write is not made (the whole write is skipped) and pending is unchanged");
                 break;
             case "tool":
-                (await RunToolAsync(world, whoAmIFault)).Success.Should().BeFalse();
+                (await RunToolAsync(world, harness)).Success.Should().BeFalse();
                 break;
         }
+
+        if (writerFault)
+        {
+            harness.WhoAmICalls.Should().Be(1, "counted rows exist, so the writer id is asked for, once");
+            world.Reads.Should().NotContain(q => q.EntityName == "sprk_invoiceapproval" || q.EntityName == "sprk_decisionrecord",
+                "with no usable writer id, reads 2 and 3 are not made");
+        }
+    }
+
+    // ── Round 2 (ontology-r1): the writer id is asked for only when there are counted rows ──
+
+    [Theory]
+    [MemberData(nameof(CountedReaders))]
+    public async Task Lazy_SettingAbsent_NoCountedRows_CountsZero_WithNoWriterIdCall_AndNoKeyedRead(string reader)
+    {
+        // Test 1 (must-not-fire): no counted invoice, so counted spend is truthfully 0 and the absent setting is never touched.
+        var world = new SpendWorld();
+        world.Pending(Matter, MatterId, 40m);                                                    // In Review: pending, not counted
+        world.Invoice(Matter, MatterId, 900m, InvoiceStatusCodes.Rejected);                      // not counted
+        world.Budget(Matter, MatterId, 1000m);
+        var harness = new DecisionRecordWriterTests.Harness { WhoAmIFault = SettingAbsent() };
+
+        switch (reader)
+        {
+            case "evaluator":
+                (await EvaluatorSpendAsync(world, harness)).Should().Be(0m);
+                break;
+            case "rollup":
+                var run = await RunRollupAsync(world, harness);
+                run.Counted.Should().Be(0m, "the rollup computes and writes the counted figures");
+                run.Written.First()["sprk_totalbudget"].Should().Be(1000m);
+                run.Written.First()["sprk_remainingbudget"].Should().Be(1000m);
+                run.Pending.Should().Be(40m, "pending is written too");
+                break;
+            case "tool":
+                var result = await RunToolAsync(world, harness);
+                result.Success.Should().BeTrue(result.Error);
+                using (var json = JsonDocument.Parse((string)result.Data!))
+                {
+                    json.RootElement.GetProperty("totalSpend").GetDecimal().Should().Be(0m);
+                    json.RootElement.GetProperty("budget").GetDecimal().Should().Be(1000m);
+                }
+
+                break;
+        }
+
+        harness.WhoAmICalls.Should().Be(0, "no counted rows: the writer id is never asked for");
+        world.Reads.Should().NotContain(q => q.EntityName == "sprk_invoiceapproval" || q.EntityName == "sprk_decisionrecord",
+            "no counted rows: reads 2 and 3 are not made");
+    }
+
+    [Fact]
+    public async Task Lazy_SettingAbsent_WithCountedRows_LogsAWarningNamingTheSetting_WithoutCountedRowsLogsNothing()
+    {
+        // Must fire: counted rows and the setting absent give a Warning that names the setting, and the read throws.
+        var world = new SpendWorld();
+        world.Approved(Matter, MatterId, 300m);
+        var logger = new CapturingLogger();
+        await FluentActions.Awaiting(() => EvaluatorSpendAsync(world, new DecisionRecordWriterTests.Harness { WhoAmIFault = SettingAbsent() }, logger))
+            .Should().ThrowAsync<InvalidOperationException>();
+        logger.Warnings.Should().ContainSingle().Which.Should().Contain(OntologyWriterCredentialFactory.ConfigKey).And.Contain("1 counted");
+
+        // Must not fire: no counted rows, no call, no Warning.
+        var empty = new SpendWorld();
+        empty.Pending(Matter, MatterId, 40m);
+        var quiet = new CapturingLogger();
+        (await EvaluatorSpendAsync(empty, new DecisionRecordWriterTests.Harness { WhoAmIFault = SettingAbsent() }, quiet)).Should().Be(0m);
+        quiet.Warnings.Should().BeEmpty();
     }
 
     [Theory]
@@ -348,19 +456,34 @@ public class SpendServerWrittenSourcesTests
     }
 
     [Fact]
-    public async Task S4_AnUnknownWriter_IsRefusedBeforeAnyRead_EvenWhenNoInvoiceIsCounted()
+    public async Task S4_AnEmptyWriterId_WithCountedRows_IsUnknown_AndWithoutCountedRowsIsNeverAsked()
     {
-        var world = new SpendWorld();
+        var calls = 0;
+        Task<Guid> Empty(CancellationToken _)
+        {
+            calls++;
+            return Task.FromResult(Guid.Empty);
+        }
 
-        await FluentActions.Awaiting(() => FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, false, Guid.Empty, CancellationToken.None))
-            .Should().ThrowAsync<ArgumentException>();
-        await FluentActions.Awaiting(() => FinanceBaseValues.ReadCountedInvoicesAsync(world.Service().Object, Matter, [MatterId], Guid.Empty, CancellationToken.None))
-            .Should().ThrowAsync<ArgumentException>();
-        world.ReadCount.Should().Be(0, "never 'no record, so 0 counted spend'");
+        // Counted rows and an empty writer id: unknown (throws), never "no record, so 0 counted spend"; reads 2 and 3 are not made.
+        var world = new SpendWorld();
+        world.Approved(Matter, MatterId, 300m);
+        await FluentActions.Awaiting(() => FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, false, Empty, CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>();
+        await FluentActions.Awaiting(() => FinanceBaseValues.ReadCountedInvoicesAsync(world.Service().Object, Matter, [MatterId], Empty, CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>();
+        calls.Should().Be(2);
+        world.Reads.Select(q => q.EntityName).Should().OnlyContain(e => e == "sprk_invoice");
+
+        // No counted rows: 0, and the provider is not called.
+        var none = new SpendWorld();
+        (await FinanceBaseValues.ReadAsync(none.Service().Object, Matter, [MatterId], true, false, Empty, CancellationToken.None))[MatterId].Spend.Should().Be(0m);
+        calls.Should().Be(2, "no counted rows: never asked");
 
         // A read that needs no spend never asks for the writer.
-        world.Budget(Matter, MatterId, 10m);
-        (await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], false, true, Guid.Empty, CancellationToken.None))[MatterId].Budget.Should().Be(10m);
+        none.Budget(Matter, MatterId, 10m);
+        (await FinanceBaseValues.ReadAsync(none.Service().Object, Matter, [MatterId], false, true, Empty, CancellationToken.None))[MatterId].Budget.Should().Be(10m);
+        calls.Should().Be(2);
     }
 
     // ── O6: parity across the three readers ──
@@ -407,7 +530,7 @@ public class SpendServerWrittenSourcesTests
                 world.Pending(Matter, MatterId, 1m);
             }
 
-            await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, true, SpendWorld.Writer, CancellationToken.None);
+            await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, true, SpendWorld.WriterId, CancellationToken.None);
             var counted = world.ReadCount;
             await FinanceBaseValues.ReadPendingSpendAsync(world.Service().Object, Matter, [MatterId], CancellationToken.None);
             return (counted, world.ReadCount - counted);
@@ -418,6 +541,49 @@ public class SpendServerWrittenSourcesTests
 
         one.Should().Be(fifty);
         one.Should().Be((4, 2), "row + portion + record + budget for spend, row + submission batch for pending (NFR-01: never one per invoice)");
+    }
+
+    [Fact]
+    public async Task Count_NoCountedRows_MakesNoWriterIdCall_AndNoRead2Or3()
+    {
+        // Test 4 (round 2): with no counted invoice the spend read is the row read alone (plus the budget aggregate).
+        var world = new SpendWorld();
+        world.Budget(Matter, MatterId, 1m);
+        world.Pending(Matter, MatterId, 1m);
+        var calls = 0;
+
+        var values = await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, [MatterId], true, true, _ =>
+        {
+            calls++;
+            return Task.FromResult(SpendWorld.Writer);
+        }, CancellationToken.None);
+
+        values[MatterId].Should().Be((0m, 1m));
+        calls.Should().Be(0, "no counted rows: the writer id is not asked for");
+        world.Reads.Select(q => q.EntityName).Should().Equal(new[] { "sprk_invoice" }, "read 1 only: no portion read, no approve-record read");
+        world.ReadCount.Should().Be(2, "the row read and the budget aggregate");
+    }
+
+    [Fact]
+    public async Task Count_ManyChunksWithCountedRows_AskForTheWriterIdOnce()
+    {
+        // The provider is cached after first use within one call (ontology-r1 round 2: per chunk, or once per call).
+        var world = new SpendWorld();
+        var parents = Enumerable.Range(0, FinanceBaseValues.ParentChunkSize + 1).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var parent in parents)
+        {
+            world.Approved(Matter, parent, 10m);
+        }
+
+        var calls = 0;
+        var values = await FinanceBaseValues.ReadAsync(world.Service().Object, Matter, parents, true, false, _ =>
+        {
+            calls++;
+            return Task.FromResult(SpendWorld.Writer);
+        }, CancellationToken.None);
+
+        values.Values.Should().OnlyContain(v => v.Spend == 10m);
+        calls.Should().Be(1, "two chunks with counted rows share one writer-id answer");
     }
 
     private sealed class CapturingLogger : ILogger

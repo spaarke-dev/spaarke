@@ -141,12 +141,14 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     /// The parent's totals. Task 165b-4: the counted invoices come from the shared reader
     /// (<see cref="FinanceBaseValues.ReadCountedInvoicesAsync"/>: counted status AND the approve record), the same one the rollup and the Signal
     /// evaluator use, so the tool's totals agree with the matter form and decide only from server-written sources. Every read is app-only
-    /// through <see cref="IGenericEntityService"/>. A fault (the writer id or any read) propagates and <see cref="ExecuteAsync"/> answers an error.
+    /// through <see cref="IGenericEntityService"/>. The writer id is asked for only when the parent has counted invoice rows (round 2); with
+    /// some and no usable writer id, counted spend is unknown. That fault, or any read fault, propagates and <see cref="ExecuteAsync"/> answers
+    /// an error.
     /// </summary>
     private async Task<FinancialTotals> CalculateFinancialTotalsAsync(string parentEntity, string budgetLookup, Guid parentId, CancellationToken ct)
     {
-        var writerUserId = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
-        var invoices = await FinanceBaseValues.ReadCountedInvoicesAsync(_dataverseService, parentEntity, [parentId], writerUserId, ct).ConfigureAwait(false);
+        var invoices = await FinanceBaseValues.ReadCountedInvoicesAsync(
+            _dataverseService, parentEntity, [parentId], _recorder.WriterUserIdAsync, ct, logger: _logger).ConfigureAwait(false);
 
         var totalSpend = FinanceBaseValues.SumSpend(invoices);   // D-130: approved total, else billed total
         var invoiceCount = invoices.Count;

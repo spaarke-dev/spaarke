@@ -130,7 +130,7 @@ public class SpendHeldAndPendingTests
         world.Approved(FinanceBaseValues.MatterEntity, Matter, 10m);
         world.Pending(FinanceBaseValues.MatterEntity, Matter, 5m);
         world.Budget(FinanceBaseValues.MatterEntity, Matter, 1m);
-        await FinanceBaseValues.ReadAsync(world.Service().Object, FinanceBaseValues.MatterEntity, [Matter], true, true, SpendWorld.Writer, CancellationToken.None);
+        await FinanceBaseValues.ReadAsync(world.Service().Object, FinanceBaseValues.MatterEntity, [Matter], true, true, SpendWorld.WriterId, CancellationToken.None);
         await FinanceBaseValues.ReadPendingSpendAsync(world.Service().Object, FinanceBaseValues.MatterEntity, [Matter], CancellationToken.None);
 
         world.Reads.Select(q => q.EntityName).Distinct().Should().BeEquivalentTo("sprk_invoice", "sprk_invoiceapproval", "sprk_decisionrecord", "sprk_invoicesubmission");
