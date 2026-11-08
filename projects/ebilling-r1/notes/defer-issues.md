@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-058 — Only the billing recorder writes billing action codes to the Decision Record
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-3 part B review (uac-r2, option (b)) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2634 |
+
+**Description**: only `BillingDecisionRecorder` should be able to write a Decision Record with a billing action code (`approve-invoice` and the other billing codes in `DecisionActionCatalog`). The writer's other paths (gate decisions, Signals commits) take an action code from their caller and do not refuse billing codes. ebilling's readers do not rely on this: since 165b-3 they match the billing decision key as well as the writer identity. This is defence in depth for any future reader that counts records by action code alone.
+
+**Fix direction**: the writer refuses a billing action code on every path except the billing recorder's, plus an ArchTest that the recorder is the only caller able to write one; test pair: a gate or commit naming `approve-invoice` is refused, the recorder's approve still writes. Owner: spaarke-ontology-platform-r1 (`DecisionRecordWriter`).
+
+**Entry-points**: `Services/Signals/DecisionRecordWriter.cs` (~:1133); `Services/Signals/DecisionActionCatalog.cs` (~:407); `BillingDecisionRecorder`.
+
+**Fails without it**: a reader that counts writer-created billing records by action code alone would count a record written by a non-billing path.
+
+---
+
 ### DEF-057 — App-only write refusals on an update say "No owner could be resolved for a new <table>"
 
 | Field | Value |
