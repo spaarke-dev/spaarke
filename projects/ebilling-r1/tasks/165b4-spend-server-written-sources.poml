@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice integrity, part 165b-4: the spend paths decide only from server-written sources (pending spend excludes held invoices; counted spend needs the approve record)</title>
     <phase>4 Review (165 family)</phase>
-    <gate>ontology-r1 agrees on the shape (asked 2026-11-08: the writer-identity signature for FinanceBaseValues.ReadAsync, DerivedBaseColumns, and the third reader). 165b-3 part A merged (the single writer-identity rule).</gate>
+    <gate>ontology-r1 agreed the shape on 2026-11-08 with conditions O1-O8 below (one review of this combined task). 165b-3 merged (it moves the writer-created rule to Services/Signals). Step 1 is a design note sent to ontology-r1 BEFORE any code.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Spend values read by Signals and the finance UI (.cs); ontology-r1-owned code.</rigor-reason>
@@ -24,6 +24,17 @@
     Wording in commits, notes, comments and the PR stays neutral: "decides only from server-written sources".</prompt>
 
   <goal>Every spend reader counts an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it. Every pending-spend reader leaves out an invoice that InvoiceBlockedHold holds. The readers cannot disagree.</goal>
+
+  <constraints>
+    <constraint source="ontology-r1 O1">FinanceBaseValues stays a static, pure reader. Add a `Guid writerUserId` PARAMETER to ReadAsync (no injected provider). SignalEvaluator obtains it from the one writer-id source (`OntologyWriterDataverseClient.GetWriterUserIdAsync`, cached WhoAmI). A fault there fails that policy's evaluation (value unknown, as a Dataverse fault does today). Never Guid.Empty and never "no records, so 0 counted spend".</constraint>
+    <constraint source="ontology-r1 O2">The writer-created conditions (createdby = writer AND createdonbehalfby null) come from ONE helper in Services/Signals/ next to DecisionRecordWriter.CreatedByColumn (e.g. `WriterCreatedRecord`), with a QueryExpression form and a FetchXML link-entity form. 165b-3 moves `InvoiceLineOrigin.AddWriterCreatedConditions` there; ontology DI-144 (#2632) moves their seven sites onto it.</constraint>
+    <constraint source="ontology-r1 O3">DerivedBaseColumns gains the Decision Record link columns (sprk_regardinginvoice, sprk_actioncode) under its field-security guards, plus createdby / createdonbehalfby listed for completeness. A new ArchTest on the role XML pins that the evaluator's reading role holds prvReadsprk_DecisionRecord at Global depth (must-fire and must-not-fire controls), because an unreadable link silently returns 0 counted spend.</constraint>
+    <constraint source="ontology-r1 O4 (decided explicitly)">The hold sources (sprk_findingsjson, sprk_firmhold) are field-secured, so they must NOT join DerivedBaseColumns. The batched hold read runs as a named identity proven to hold Read on both columns through a named field-security profile. A guard pins it: the profile XML grants Read on both columns, the identity is a member (live check on dev, like AuthorableColumns_ExistAndAreNotFieldSecured), and the pair is listed separately as "secured, readable by X".</constraint>
+    <constraint source="ontology-r1 O5">A canary in the read itself: if the identity cannot read the secured hold columns, the evaluation fails (unknown), never "not held" (for example, one RetrievePrincipalAccess or profile check per run, or a known-held probe).</constraint>
+    <constraint source="ontology-r1 O6">FinancialCalculationToolHandler is ebilling's. It follows both rules through the SAME helper, plus one parity test: the same fixture through FinanceBaseValues, FinanceRollupService and the tool gives the same spend.</constraint>
+    <constraint source="ontology-r1 O7">No per-invoice queries; batched hold reads are fine; the evaluator's per-policy read stays within the existing budget (today 3 invoice + 1 budget per chunk). The ReadSpendPartsAsync re-read consistency check (it re-reads billed) still holds with the link.</constraint>
+    <constraint source="ontology-r1 O8">Before code, the design note (notes/165b-integrity-checks.md, 165b-4 section) gives: the grouped spend FetchXML with the exists link as built; the hold batch query (chunk size, queries per call); the new query count per evaluation; the test shape (held excluded from pending; held with an unreadable hold column gives unknown; approved without a writer record not counted; a record on behalf of the writer not counted; a record by another user not counted; a reviewer-added line still counts per D-211); and the re-read check. The lead sends it to ontology-r1 and waits for their OK.</constraint>
+  </constraints>
 
   <scope>
     <in>
@@ -53,7 +64,8 @@
     <criterion>The query count for a core record with 1 invoice and with 50 invoices is equal. NFR-01 is respected.</criterion>
     <criterion>Filtered unit tests (Finance, Signals, FinanceRollup, FinancialCalculation) and the full ArchTests pass. The BFF builds. Measure the publish delta.</criterion>
     <criterion>Notes go in notes/165b-integrity-checks.md, in a new 165b-4 section, with the FinanceBaseValues hunks listed.</criterion>
-    <criterion>Test scope: exactly S1–S5, the seeds, the query-count check and the dev comparison.</criterion>
+    <criterion>Additionally (ontology-r1): the Global-depth role ArchTest (O3), the hold-profile guard (O4), the canary test where an unreadable hold column gives unknown (O5), the three-reader parity test (O6), and a reviewer-added line still counting per D-211.</criterion>
+    <criterion>Test scope: exactly S1–S5, the ontology-r1 additions, the seeds, the query-count check and the dev comparison.</criterion>
   </acceptance-criteria>
 
   <escalation>

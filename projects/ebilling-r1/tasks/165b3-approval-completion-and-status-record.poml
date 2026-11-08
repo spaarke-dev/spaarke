@@ -31,7 +31,7 @@
       B. Counted status needs its record (EB-D-208, once uac-r2 agrees):
          - Approval and AP export selection (spend paths: task 165b-4) count an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it.
          - Otherwise approval and AP export refuse or leave it out with a distinct code, and spend does not count it.
-         - Reuse 165b's writer-identity record lookup (InvoiceLineOrigin's createdby rule); no copy.
+         - Move the writer-created rule (`InvoiceLineOrigin.AddWriterCreatedConditions`) to ONE helper in Services/Signals/ next to DecisionRecordWriter.CreatedByColumn (ontology-r1, e.g. `WriterCreatedRecord`), with QueryExpression and FetchXML link-entity forms, holding the writer allow-list (the BFF writer identity from `OntologyWriterDataverseClient.GetWriterUserIdAsync`). All ebilling callers use it; no copy.
          - Paid carries no record of its own in R1 (known limit, recorded in the notes).
     </in>
     <out>
