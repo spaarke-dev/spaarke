@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `7cd62a1710` (082d merge; push after verify). Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `d58e3a3554`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -16,9 +16,10 @@
 
 | Item | Branch / worktree | State → next action |
 |---|---|---|
-| **165b-3** | `task/ebilling-165b3` @ `b81098c4b6` (wt agent-a2dcae0b9ac285d6e) | Part A + its fix approved by uac-r2. Part B built (`WriterCreatedRecord` in Services/Signals + single-source guard; approval and AP export need the record). uac-r2 approved B except **F1 key match** (batched `InvoicesWithApproveRecordAsync` must match `BillingDecisionKey.IdOf(sprk_invoice, X, DecisionIdFor(portion))` via `sprk_steps`). Opus pass: currency allow-list falsely refuses (fix: `BillingCurrency.Normalise`, refuse only >2-decimal ISO codes, same check before the claim); "already in target" must read the record; guard baseline citations + patterns; Mark Paid needs the record check; FR-30 test, doc comment, chunk 200. **Fix round (Opus) running.** Next: scoped Sonnet re-check → send uac-r2 the fix diff (they re-check F1 only) → merge + verify tip → launch **165b-2** and the **165b-4 design note** (to ontology-r1 before code). |
+| **165b-3** | `task/ebilling-165b3` @ `4ba88a6de1` (wt agent-a2dcae0b9ac285d6e) | Part B fix round done (key match, currency before claim, already-in-target reads the record, Mark Paid keyed, guard). **uac-r2: F1 CLOSED, part B approved** (2026-11-08). Scoped Sonnet re-check running. Next: merge + verify tip (filters incl. MarkPaidAuthorizationTests) → launch **165b-2** and the **165b-4 design note** (to ontology-r1 before code). |
 | **165f guard follow-up** | `task/ebilling-165f-guard` (Sonnet implementer, from `6104d8d03c`) | 165f merged `f647f83705` + tip verified (ArchTests 2148/0, unit 12087/0); wt removed. Follow-up: `=>` before `(`, bracketed `Equals`, cast operand, exemption narrowed to the rule span (seeded), vacuous fault tests noted. Next: review the diff (tests-only) → merge + verify. **165e+165f ship together; send uac-r2 the dev-batch sha.** |
-| **082d** | merged into work `7cd62a1710` (K follow-ups `e552c406f8`) | Tip verification running (verify-082d.txt). Next: push → remove wt agent-a5648fd3189b27f3d → TASK-INDEX 082 row → send field-mapping the merge sha → launch **083** from the pushed tip (Sonnet; partner-readable → two adversarial passes; snapshot = `sprk_findingsjson.procedureSnapshot`, null/absent → no text) → then 130. |
+| **083** | `task/ebilling-083` (Sonnet implementer, from `d58e3a3554`) | 082 ✅ (082d merged `7cd62a1710`, tip verified 2159/0 + 7435/0; field-mapping sent the sha). 083 running (snapshot = `sprk_findingsjson.procedureSnapshot`; absent/null → no text; three seeds). Partner-readable → **two adversarial passes** → merge → **130**. |
+| **085** | `task/ebilling-085` (Sonnet implementer, from `d58e3a3554`) | Rate cards keyed to Procedure Version. One adversarial pass → merge. |
 
 ## Queued
 
