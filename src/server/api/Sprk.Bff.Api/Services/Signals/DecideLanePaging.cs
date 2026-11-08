@@ -23,12 +23,15 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <remarks>
 /// <para><b>Resuming.</b> The next page re-reads the lane as the caller, so the list is current. It lists, in this order: what is left of
 /// the cursor's own group (found by core record, not by rank) after the cursor's item; then every other group in the current Console
-/// order that is not in <see cref="Returned"/> and whose best item does not rank ahead of the cursor group's. An item resolved between pages is simply no
+/// order that is not in <see cref="Returned"/>, wherever it now ranks. An item resolved between pages is simply no
 /// longer in the list. A group is ordered by its best item, so resolving the best item of a group already returned moves that group
 /// later in the list; <see cref="Returned"/> is what keeps its remaining items from being listed a second time, and finishing the
-/// cursor's own group first keeps its remainder from waiting behind groups that moved ahead of it. Without any resolution that is
-/// exactly the Console order. Only the last <see cref="MaxReturnedGroups"/> groups are remembered (a lane with more groups than that may
-/// list the remainder of a long-ago group again).</para>
+/// cursor's own group first keeps its remainder from waiting behind groups that moved ahead of it. A group not yet returned that moved
+/// ahead of the cursor's group (a new Critical item on its core record, a subject turned high priority) is still listed. Without any
+/// change between pages that is exactly the Console order. Only the last <see cref="MaxReturnedGroups"/> groups are remembered; a cursor
+/// holding that many may have forgotten earlier ones, so it also passes over every group whose best item ranks ahead of the cursor
+/// group's (a lane with more groups than that may then list the remainder of a long-ago group again, or miss a group that moved ahead
+/// between pages).</para>
 /// <para><b>Wire form.</b> base64url (no padding) of a small versioned JSON object. It is <i>opaque</i>, not secret: it carries no
 /// record text and no key; it is not signed, because it only positions a window in the list the caller's own read returns, so a
 /// hand-edited cursor can move the window but never show a row the caller cannot read. Anything that does not decode to exactly the
@@ -201,6 +204,12 @@ internal static class DecideLanePaging
         var returned = new List<Guid>(after?.Returned ?? []);
         var skip = new HashSet<Guid>(returned);
 
+        // Every Decide group has a core record (no-core rows are Do-only, SignalReadService step 6), so while the cursor remembers every
+        // group returned in full, Returned alone says what is done, and a group not in it is listed wherever it now ranks (a new
+        // Critical item, a subject turned high priority or a policy severity change can move it ahead of the cursor's group). Only a
+        // cursor at its limit may have forgotten groups; then a group whose best item ranks ahead of the cursor's group is taken as done.
+        var rememberedOnlyInPart = after is not null && after.Returned.Count >= DecideCursor.MaxReturnedGroups;
+
         // What is left of the cursor's own group goes first, then the other groups in the current Console order. Without a resolved
         // item that is the Console order itself: every group before the cursor's has been returned.
         var cursorGroup = after is null ? null : groups.FirstOrDefault(g => g.Core?.RecordId == after.GroupCoreId);
@@ -223,7 +232,7 @@ internal static class DecideLanePaging
             var isCursorGroup = ReferenceEquals(group, cursorGroup);
             if (after is not null && !isCursorGroup
                 && ((group.Core is { } core && skip.Contains(core.RecordId))
-                    || SignalReadService.CompareRankKeys(best, after.GroupBest) < 0))
+                    || (rememberedOnlyInPart && SignalReadService.CompareRankKeys(best, after.GroupBest) < 0)))
             {
                 continue;
             }

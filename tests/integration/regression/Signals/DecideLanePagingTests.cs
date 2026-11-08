@@ -194,6 +194,34 @@ public sealed partial class SignalReadRouteTests
         rest.Should().NotIntersectWith(page1Ids.Where(id => !resolved.Contains(id)), "nothing already returned comes back");
     }
 
+    private static Guid CoreOf(World world, Guid signalId) =>
+        Guid.Parse((string)world.Signals.Single(s => s.Id == signalId).Row["sprk_corerecordid"]!);
+
+    // 015 review (F1): a group not yet returned can move AHEAD of the cursor's group between pages (here a new Critical Signal lands on
+    // its matter; a subject turned high priority or a policy severity change does the same). Its items have not been seen, so they must
+    // still arrive, each once.
+    [Fact]
+    public async Task DecidePaging_AStaleCursor_WhenAnUnreturnedGroupNowRanksAheadOfTheCursorGroup_StillReturnsItsItemsOnce()
+    {
+        var seed = SeedDecideLane(180); // 4 matters of 45: page 1 is all of the first group and part of the second
+        var original = await ConsoleGroupsAsync(seed.World);
+        var page1 = await PageAsync(seed.World, null);
+        var page1Ids = page1.Items.Select(i => i.SignalId).ToHashSet();
+        var unreturned = original[^1];
+        unreturned.Should().NotIntersectWith(page1Ids, "the last group has nothing on page 1");
+        original[1].Should().Contain(page1.Items[^1].SignalId, "the cursor sits inside the second group");
+
+        var arrived = seed.World.Signal(Decide, core: (MatterType, CoreOf(seed.World, unreturned[0])), severity: Critical,
+            firstDetected: "2026-08-01T00:00:00Z");
+        (await ConsoleGroupsAsync(seed.World))[0].Should().Contain(arrived, "that group now ranks ahead of every other, the cursor's included");
+
+        var rest = (await AllPagesAsync(seed.World, page1.NextCursor)).SelectMany(p => p.Items).Select(i => i.SignalId).ToList();
+
+        rest.Should().BeEquivalentTo(original.SelectMany(g => g).Where(id => !page1Ids.Contains(id)).Append(arrived),
+            "every item not on page 1 arrives, the new one included (FR-05)");
+        rest.Should().OnlyHaveUniqueItems();
+    }
+
     [Fact]
     public async Task DecidePaging_AStaleButWellFormedCursor_ForAnItemThatIsGone_IsNotAnError()
     {
