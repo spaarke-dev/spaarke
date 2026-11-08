@@ -969,3 +969,21 @@ Design: `task/fm-045` f35b4d12b1, `notes/task-045-regarding-propagation-design.m
 - **Q12 (a):** the split is 045a (create step and guard 1), 045b (update planner and wiring, guard 2), 045c (invoice re-derivation, missing display columns, reply type, client number clear), plus a 052 report line.
 
 UAC-r2 (2026-11-07): the playbook Update Record and output-mapping paths run as the user, or app-only behind authoring controls. 045b adds no AppendTo check there.
+
+## 2026-11-08 — Owner decisions on 032, the repair pass, inbound mapping, checks and NFR-02 (in fm's session)
+
+- **032: option B.** Extracted invoices get Matter→Invoice mapping, including the access-conferring Assigned Attorney and Paralegal columns, with the matching access grant. The work is coordinated with ebilling-r1. ebilling-r1's answers (2026-11-08):
+  - nothing reads the invoice-level copies, now or planned, so the grant may be queued; no ebilling decision may ever read them;
+  - build on `work/ebilling-r1` after its task 082d, in a separate task branch; it reaches master in ebilling-r1's PR;
+  - mechanism: a post-commit, resumable step in `InvoiceSubmissionAfterSteps` that writes the grant first, then the fill-only columns.
+
+  Next: a design note (`notes/task-032b-design.md`, on `task/fm-032b-design`), reviewed by ebilling-r1 and UAC-r2 together. UAC-r2 signs off the grant path, and answers the re-file question (revoke or keep).
+- **Repair pass (052):** task and account are excluded. A contact must be owned by the customer's main business-unit team.
+  - Today, a contact created in the model-driven form is owned by the creating user. Dataverse's default applies, and no server code runs on that create (ADR-002: no plugins).
+  - BFF chat creates use the resolver's team.
+  - Nothing re-owns contacts after create. On dev, contacts were moved to the "Spaarke Business Unit 1" team by a manual re-own on 2026-11-02.
+  - Proposal: a contact owner-only rule in 052b's pass. It finds the main team per environment, and refuses and logs if it can't, never falling back to the creator. No field mapping on contacts. UAC-r2 reviews it.
+  - Open: which team is "main". The root BU "Spaarke"'s team, or a configured team?
+- **Inbound mapping:** recorded as a known gap, DI-022 (#2633).
+- **Checks:** (a) PASS. In place of (c), the owner hit a push-preview defect: a table with no profile failed the whole preview. It is fixed in scope as task 076c (`task-040-notes.md`).
+- **NFR-02:** the dev r3 run (`task-021-live.md`) shows a p95 delta of +1288 ms. The owner moved the verdict to UAT: "we'll test this in UAT". No 049d work starts on the dev result.
