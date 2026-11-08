@@ -1,43 +1,42 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-07 late (checkpoint, session ebilling-r1-c7, authoritative). Work head `59b5f756b3`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike, 04:00:55Z; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-08 (checkpoint at 85% context, session ebilling-r1-c7, authoritative). Work head `4f52907883`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike, 04:00:55Z; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Mode** | Owner: "keep progressing on open tasks so we can complete the project" (and earlier "proceed, parallel where possible"). At most 4 agents. Merge each finished branch after its reviews. One adversarial pass per change set; two for partner-readable/auth; a scoped Sonnet re-check when a fix changes the approach. FILTERED tests only. Every agent launch states a model. Never `--no-verify`. |
+| **Mode** | Owner: "keep progressing on open tasks so we can complete the project" (earlier "proceed, parallel where possible"). At most 4 agents. Merge each finished branch after its reviews. One adversarial pass per change set; two for partner-readable/auth; a scoped Sonnet re-check when a fix changes the approach. FILTERED tests only. Every agent launch states a model. Never `--no-verify`. |
+| **Agent worktrees** | `isolation: worktree` starts on MASTER. Every brief names the base sha and says "create the task branch from `origin/work/ebilling-r1` at <sha>" and checks `git merge-base --is-ancestor`. |
 | **Public-repo rule** | Never put the mechanism of an open access gap in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Merged into work today** | 096b (`1a316a2ca0`, uac-r2 approved; 098 guard listing for `IsInvoiceCreate` added on work); 165b item 1 (`b49465d972`); 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`; #2571 closed; ontology OK'd the SignalWriter doc diff); 164b Add line client (`01854564a3`). |
-| **Decisions today** | EB-D-206 (2b-3: the re-run writes the supersedes link in its commit; AMENDED: the predecessor's Return must predate the invoice, plus a predecessor lock); EB-D-207 (fm-032 allow-list + secure/No Access gate, uac-r2 agreed; partners have no invoice search; task 132 renders only ReadableColumns; `sprk_billingexport` writer-only → 165d). |
+| **Merged into work (2026-11-07/08)** | 096b (`1a316a2ca0`; 098 guard listing for `IsInvoiceCreate` on work `e14f95181c`); 165b item 1 (`b49465d972`); 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`); 164b (`01854564a3`). Each verified on the combined tip (build, full ArchTests, filtered unit). |
+| **Decisions** | EB-D-206 (amended), EB-D-207, **EB-D-208** (counted statuses need the writer-created approve record; writer = createdby in the BFF writer allow-list, app-only, createdonbehalfby empty; Paid has no own record in R1). |
 
 ## Agents / branches in flight
 
 | Item | Branch / worktree | State → next action |
 |---|---|---|
-| **165b-3** | `task/ebilling-165b3` @ `276c1201af` (wt agent-a2dcae0b9ac285d6e) | Part A built (completion re-runs approve checks, amount = calculator total, "complete" from the writer record; 13 tests; dev 2/2 records, 0 in flight). uac-r2 APPROVED A pending our Opus pass (running). Next on the same branch: B1 approval + writer allow-list, B2 AP export (+ uac-r2 notes: non-2-decimal currency fails closed test/limit; client shows 503 as "try again"). Then merge, then 165b-2 (totals only). Spend moved to **165b-4** (ontology-r1 asked: writer id into FinanceBaseValues, DerivedBaseColumns, third reader FinancialCalculationToolHandler). Private: run a read-only count of Ontology Administrator holders on dev before the deploy batch; send uac-r2. |
-| **082d** | `task/ebilling-082d` (new wt) | **Running (Opus):** 7.4 snapshot in findings JSON (internal part vs `ForReaders()`, uac-r2 binding design), DR summary, K6 PrintMembers, ratchet ArchTest, NFR-01, publish delta. Critical path: 082d -> 083 -> 130 -> 131-135. Then two adversarial passes + uac-r2 review. |
-| **165d** | `task/ebilling-165d` @ `998c22b365` (wt agent-a087b7b20f22d544d) | Review: 3 F1 (create path never asks the column refusal; node maps the code to InternalError; doubled code in message), F3 pin bypass, K1 batch-side collection bind, TopicRegistry exempt reason wrong. **Fix round running (Sonnet).** Then a scoped re-check (create-path approach), uac-r2 diff + DEF-057 note, merge. U1 = option A (uac-r2): column-only check at the five person sites; added to the running fix round. uac-r2 gate query now contains-matches `changed_only_by_its_writer`. |
-
-The 164b and 092 wts are removed (deregistered; empty folders still held open by a process, harmless). 165d is built (`998c22b365`): the adversarial pass is running, and uac-r2 was asked to decide U1 for the five person-identity writers (A: column-only check at those sites, recommended; B: accept them and rely on U5 field security). Tell uac-r2 to match the refusal code by prefix.
+| **165b-3** | `task/ebilling-165b3` @ `276c1201af` (wt agent-a2dcae0b9ac285d6e) | Part A built; uac-r2 APPROVED A (conditional on our pass). Opus pass: F1 (In Review + portion says Approved → "alreadyApproved"), F2 (decided-on from a user column), F3 adjustments control, K3/K4 guards. **Fix round running (Sonnet).** Then scoped re-check if approach changes → send uac-r2 the fix diff → **part B on the same branch**: B1 approval + move `AddWriterCreatedConditions` to `Services/Signals/WriterCreatedRecord` (ontology O2) holding the writer allow-list; B2 AP export (new code e.g. `invoice_approval_not_recorded`, batched `In` read); + uac-r2 notes (non-2-decimal currency fails closed test; client shows 503 as "try again"). One pass on part B, uac-r2 diff, merge. |
+| **165d** | `task/ebilling-165d` @ `cac4e6e25e` (wt agent-a087b7b20f22d544d) | Fix round done (create path both branches, node mapping, message, pin normalisation, option A at the person sites, Exempt = push only, K1: no generic batch-row writer). Full ArchTests 2142/0. **Scoped Sonnet re-check running** (filtered counts, 2 seeds, OfficeService.cs:2431 quick create, merge-tree vs work). Then send uac-r2 the diff, merge. |
+| **165e** | `task/ebilling-165e` @ `76d751eb5f` (wt agent-a88cf50c0d1bce1fc) | Built: reader 2 hides `own_submission_missing`, reader 1 withholds; 18 new tests, 59 fixtures moved to `InvoiceWorld.OwnedInvoice()`; dev re-count 0. **Adversarial pass 1 (Opus) running.** Then fix, pass 2, uac-r2 diff, merge, then **165f**. POML status / index not yet updated. |
+| **082d** | `task/ebilling-082d` (wt agent-a5648fd3189b27f3d) | **Running (Opus)**, measuring publish delta. Critical path: 082d → 083 → 130 → 131-135. Then two passes + uac-r2 review. On merge: send field-mapping the sha (fm-032b branches from it). |
 
 ## Queued
 
-- **164c** ribbon (billing event Add line hides): unblocked, launch when a slot frees.
-- **165e** running (uac-r2 confirmed + (a) fault hides, (b) own submission linked elsewhere hides, (c) re-count). Then **165f** `sprk_document` binding (uac-r2 assigned to us; two passes; uac-r2 reviews).
-- **165b-3** part A next (approval completion; includes the origin check at completion), part B after uac-r2 on EB-D-208; then **165b-2** (totals + pending spend; ontology reviews FinanceBaseValues hunks). Serial (both edit InvoiceApprovalService). ontology filed the createdonbehalfby limit as DI-144 (#2632), 7 sites, one shared helper later; ours stays consistent.
-- **fm-032 option B (owner chose):** field-mapping maps Matter attorney/paralegal + allow-listed columns onto invoices with the matching access grant. Answered 2026-11-08: no ebilling reader of the invoice copies (approvers read the core); build on `work/ebilling-r1` after 082d merges (send them the sha), we merge; prefer a post-commit after-step (grant then columns) over the create transaction; Secure maps nothing; not on re-run/Add line/approval; re-file rule is uac-r2's. Their design note comes to us + uac-r2 before code.
-- **Task 130** firm projection (EB-D-202) with uac-r2's pin test. Deps 083 (082 partial).
+- **164c** ribbon (billing event Add line hides): unblocked; launch when a slot frees.
+- **165f** `sprk_document` binding (after 165e; two passes; uac-r2 reviews).
+- **165b-2** totals at approval and AP export (after 165b-3).
+- **165b-4** spend paths (after 165b-3): ontology-r1 conditions O1-O8 in the POML; step 1 is a design note to ontology-r1 BEFORE code.
+- **083** firm clause (after 082d), then **130** firm projection (EB-D-202, uac-r2 pin test).
+- **fm-032 option B:** field-mapping writes the 032b design note (after-step: grant then columns; no ebilling reader of invoice copies; Secure maps nothing) to us + uac-r2; implementation branches from work after 082d merges.
 - **`InvoiceReview` `launch.ts` optional `lineId`** before the master PR.
-- **Dev deploy batch** (after this wave merges): send uac-r2 the commit and checklist. Owner go needed for:
-  - the BFF deploy;
-  - 166 field-security apply plus forms;
-  - `sprk_sourceemaildocument` apply;
-  - the ribbons and web resource (096b);
-  - the forms script (165c read-only links);
-  - ONE owner question (uac-r2 bundle): a "BFF writer only" field-security profile (BFF app users write, default teams read; the sprk_createdbyperson pattern) on: submission `sprk_invoice`, `sprk_document`, `sprk_resubmissionof`; `sprk_invoice.sprk_billingexport`; approval portion `sprk_decidedby`, `sprk_decidedon`, `sprk_approvedamount`. Before the go: list every legitimate writer of each column; any person-identity writer moves to the BFF first or that column stays out.
+- **Dev deploy batch** (after this wave): send uac-r2 the commit and checklist. Owner go needed for: the BFF deploy; 166 field-security apply + forms; `sprk_sourceemaildocument` apply; 096b web resource then ribbon re-import + `-Verify`; the forms script (165c read-only links); ONE field-security question (uac-r2 bundle: a "BFF writer only" profile on submission `sprk_invoice`/`sprk_document`/`sprk_resubmissionof`, `sprk_invoice.sprk_billingexport`, approval portion `sprk_decidedby`/`sprk_decidedon`/`sprk_approvedamount`; list every legitimate writer per column first). Also: re-count invoices without a linked own submission (0 on 2026-11-08), a read-only count of Ontology Administrator holders (send uac-r2, private), then the 096b D3 role change (R1, R2, R4, then the privilege).
 
-  Also: re-count 0 invoices without a linked own submission, then the 096b D3 role change.
+## Open with peers
+
+- **uac-r2:** part A fix diff and part B diffs (165b-3); 165d diff; 165e/165f reviews. DEF-057 (#2631) is on their backlog.
+- **ontology-r1:** 165b-4 design note (before code). DI-144 (#2632) adopts our `WriterCreatedRecord`.
+- **field-mapping:** 032b design note; send them the 082d merge sha.
 
 ## Standing gates (unchanged)
 
@@ -50,9 +49,10 @@ The 164b and 092 wts are removed (deregistered; empty folders still held open by
 ## Next action
 
 On each notification:
-- **2b-3 fix done** → scoped Sonnet re-check → merge.
-- **165c pass 2** → fix if needed → merge after uac-r2.
-- **165b / 165d done** → one adversarial pass each.
-- **uac-r2 OK on 096b** → merge 096b → launch 164c.
+- **165d re-check** clean → send uac-r2 the diff → merge (verify the combined tip: build, full ArchTests, filtered unit) → remove the wt.
+- **165b-3 fix round** → (re-check if approach changed) → uac-r2 fix diff → launch part B (Opus) on the same branch.
+- **165e pass 1** → fix round → pass 2 → uac-r2 → merge → launch 165f.
+- **082d done** → pass 1 → fix → pass 2 → uac-r2 → merge → field-mapping sha → launch 083.
+- Free slot → 164c.
 
-Keep TASK-INDEX statuses current at each merge.
+Keep TASK-INDEX statuses current at each merge (165e row still says running; 165d row says review running).
