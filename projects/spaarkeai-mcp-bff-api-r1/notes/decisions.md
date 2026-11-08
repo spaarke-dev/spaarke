@@ -223,3 +223,17 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
   - Privileged or Potentially Privileged = flagged; a read fault or an unreadable record = flagged; None or null = not flagged.
   - The owner's ruling is pending.
 
+## 2026-11-08 — Owner ruling FR-04: option A widened; task 018 added; 022 depends on 018
+
+- **Ruling (owner, 2026-11-08): "A widened"**, as the ontology team proposed. A Decide item is privilege-flagged when either of these communications has `sprk_communication.sprk_privilegeclassification` = Privileged or Potentially Privileged:
+  - its subject, when the subject is a `sprk_communication`;
+  - any of its witness or evidence communications.
+- **Other rules in the ruling.**
+  - Derived at read time, as the caller (`IDataverseUserClient`, no app-only fallback), with one batched read per page, shaped like D-142's batched witness read.
+  - A read fault flags the item (fail closed). A communication the caller cannot read flags the item. None or null is not flagged.
+  - `sprk_signal.sprk_privilegeflagged` is not the source: nothing writes it (ontology DI-64).
+  - The helper lives in `Services/Signals/`, with a clear public method on an injectable type, so ontology DI-143 (#2630) can reuse it for the Decision Record snapshot. Its remarks document that reuse.
+  - Privilege never gates a read on its own (owner ruling 2026-07-16). The flag only reduces model-visible text, in task 022.
+- **Plan.** Task 018 (opus/high, FULL, deps 015) builds the derivation. 022 depends on 018 as a hard dependency; its hard-gate trigger now reads "do not start until 018 is done". Spec FR-04 is amended, with an Owner Clarifications row for 2026-11-08.
+- **Done-when split.** 018's test (h) asserts the flag is true on the summary of a Privileged communication subject seeded with a marker in its title and subject name. The test that the marker is absent from model-visible text belongs to 022, which does the reduction.
+

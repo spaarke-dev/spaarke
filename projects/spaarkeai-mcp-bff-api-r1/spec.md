@@ -4,6 +4,7 @@
 > **Created**: 2026-11-05
 > **Source**: design.md (owner-approved 2026-11-05, third review round; commit c39828a484, draft PR #2587)
 > **Amended**: 2026-11-07 — FR-10 (owner option C): design §8 B-4 (`ICallerContext`) is superseded by this clarification and deferred; see FR-10 and Owner Clarifications.
+> **Amended**: 2026-11-08 — FR-04 (owner ruling, option A widened): the privilege flag is derived from communications at read time; see FR-04 and Owner Clarifications.
 
 ## Executive Summary
 
@@ -151,7 +152,13 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
      - the description is ≤ 1,024 characters and phrased "use for / not for".
 
 4. **FR-04 — Privileged Work Items stay out of model-visible text** (owner, 2026-11-05; ADR-015 "minimum text").
-   - Every result the model may read (`content` and `structuredContent` of model-visible tools) reduces Work Items whose Signal or subject is privilege-flagged (`sprk_privilegeflagged`) to a neutral line: "N privileged items — open to review". There is no matter name, reason, evidence or party name.
+   - Every result the model may read (`content` and `structuredContent` of model-visible tools) reduces privilege-flagged Work Items to a neutral line: "N privileged items — open to review". There is no matter name, reason, evidence or party name.
+   - **Derivation rule** (owner ruling 2026-11-08, option A widened; task 018). A Decide item is privilege-flagged when either of these communications has `sprk_communication.sprk_privilegeclassification` = Privileged or Potentially Privileged:
+     - its subject, when the subject is a `sprk_communication`;
+     - any of its witness or evidence communications.
+   - The flag is derived at read time, as the caller (`IDataverseUserClient`, no app-only fallback), with one batched read per page. A read fault flags the item; a communication the caller cannot read flags the item (fail closed). None or null is not flagged.
+   - `sprk_signal.sprk_privilegeflagged` is not a source: no production code writes it (ontology DI-64). The helper lives in `Services/Signals/` so ontology DI-143 (#2630) can reuse it for the Decision Record snapshot.
+   - Privilege never gates a read on its own (owner ruling 2026-07-16): the flag only reduces model-visible text.
    - Full detail for those items reaches the widget only through **app-only** tools (FR-05, FR-06).
    - Acceptance: a test seeds a privileged Work Item with a unique marker string in its reason and matter name. **Negative:** the marker appears in neither `content` nor `structuredContent` of `spaarke_show_decisions`, and the count is still correct. Positive: the app-only page and plan results carry the item's detail.
 
@@ -479,6 +486,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 | Channel (spec interview) | Record that a decision came through Copilot? | No | `DecisionCommitService` unchanged; out of scope |
 | Naming (2026-11-06) | Names after the cross-project sweep? | Route `/mcp/legal-operations`; functions are tool groups and skills; skills `spaarke-{area}-{capability}` (core drops the area); widget `ui://spaarke/decisions.html` in `src/client/widgets/spaarke-decisions/`; capability in `Services/Signals/`; "Spaarke AI" kept; "Spaarke Copilot" retired | FR-01, FR-12, FR-16, FR-18; naming note §1 |
 | Coordination (2026-11-06) | Cross-project alignment? | Binding; recorded in the naming note §2 | Dependencies (sequencing, reviews) |
+| Privilege source (2026-11-08) | What makes a Work Item privilege-flagged, given that `sprk_signal.sprk_privilegeflagged` is never written (ontology DI-64)? | **Option A widened**, as the ontology team proposed: Privileged or Potentially Privileged `sprk_privilegeclassification` on the subject communication or on any witness or evidence communication, derived at read time as the caller, one batched read per page; a fault or an unreadable communication flags; None or null does not | FR-04 amended; task 018 added; 022 depends on 018; `notes/decisions.md` 2026-11-08 |
 | Caller context (2026-11-07) | Build `ICallerContext` (B-4) now, or let MCP tools use the request context? | **Option C: defer B-4.** MCP tools read the request `HttpContext` through `IHttpContextAccessor` (the 2.3.1 stateless transport runs them inside the request) and call the same decision services as REST, failing closed with `UserContextRequired` | FR-10 rewritten; design §8 B-4 superseded; task 010 becomes the MCP caller-path verification; task 012 cancelled; `notes/decisions.md` 2026-11-07 |
 
 ## Assumptions
@@ -487,7 +495,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 - **Console lookup**: the Console keeps its browser-side picker in v1. Switching it to the B-3 route is a follow-up. Affects FR-07 scope; SpaarkeAi stays untouched.
 - **Latency targets**: NFR-01's numbers (3 s / 1.5 s / 15 s p95, 30 s ceiling) are working targets. The owner set none. Affects tool design and the commit path.
 - **Page size**: page 1 carries at most 50 slim rows, which keeps it well under 64 KiB at 600 bytes per row. Affects FR-05.
-- **Privilege flag source**: a Work Item counts as privileged when the Signal or its subject carries `sprk_privilegeflagged`, the field the Decision Record writer already copies forward. Affects FR-04. Verify the exact source column in Phase A.
+- **Privilege flag source** (superseded 2026-11-08): the assumption that the Signal or its subject carries `sprk_privilegeflagged` did not hold, because nothing writes that column (ontology DI-64). FR-04 now states the owner's derivation rule.
 - **Connector client**: a public client with PKCE if the Developer Portal registration accepts one; otherwise one confidential client per stamp (A10). Affects FR-16; decided by T5.
 - **Telemetry sink**: the existing App Insights instance and dimensions; no new store. Affects NFR-05.
 - **Caller context is request-bound (v1 limitation, option C)**: decision capabilities run only inside an HTTP request. This holds while `/mcp/*` stays stateless with `PerSessionExecutionContext=false`, which task 010 pins with a test. Off-request callers (durable agents, queued continuations, Teams proactive) are out of v1. The user-token problem blocks them, not the deferred `ICallerContext`; `ComposeProfileDispatcher.cs:88/117-134` shows today's detached-context workaround. Affects FR-10 and any later off-request slice.

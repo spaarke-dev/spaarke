@@ -3,7 +3,7 @@
   <metadata>
     <title>spaarke_show_decisions and app-only paging tool</title>
     <phase>B MCP host and tools</phase>
-    <gate>after 015, 017 and 021</gate>
+    <gate>after 015, 017, 018 and 021</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; new tool classes and tests (.cs, .ts)</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>F</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Adds only its own tool files, parity fixture and tests; shares no file with 023, 024 or 030</parallel-reason>
-    <deps>015, 017, 021</deps>
+    <deps>015, 017, 018, 021</deps>
     <tags>bff-api, ai, endpoints, unit-test, integration-test</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -40,6 +40,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="015" status="pending">WorklistItemSummary, PrivilegeFlagged and the paged list</dependency>
+      <dependency task="018" status="pending">FR-04 privilege derivation (hard dependency): PrivilegeFlagged derived from communications as the caller</dependency>
       <dependency task="017" status="pending">DecisionResultMapper.ToToolError</dependency>
       <dependency task="021" status="pending">A10 auth, per-tool policies and the annotation guard</dependency>
     </dependencies>
@@ -101,10 +102,10 @@
   </steps>
 
   <escalation>
-    <trigger>HARD GATE (ontology review of 015, K1, binding, 2026-11-07): do NOT start until the FR-04 privilege-derivation task is done and its ruling is recorded in notes/decisions.md.
-      - `PrivilegeFlagged` currently reads the always-false `sprk_signal` column (ontology DI-64), so nothing would be reduced.
-      - The derivation lives in `Services/Signals/` so ontology DI-143 (#2630) can reuse it.
-      - Its done-when includes a test: a Privileged or Potentially Privileged communication subject has no SubjectName or Title in this tool's model-visible text.</trigger>
+    <trigger>HARD GATE (ontology review of 015, K1, binding, 2026-11-07; owner ruling FR-04 option A widened, 2026-11-08): do not start until 018 is done.
+      - 018 derives `PrivilegeFlagged` from communications as the caller (the `sprk_signal` column is never written, ontology DI-64).
+      - The derivation lives in `Services/Signals/` (`WorkItemPrivilege`) so ontology DI-143 (#2630) can reuse it.
+      - This task's done-when includes a test: a Privileged or Potentially Privileged communication subject has no SubjectName or Title in this tool's model-visible text (018 asserts only the flag).</trigger>
     <trigger>If no existing setting or builder gives the Console URL for a Work Item deep link, STOP and escalate rather than hard-coding a URL.</trigger>
     <trigger>If laneCountFilters.ts' partition cannot be mirrored exactly (e.g. depends on client-only state), STOP and escalate with the case.</trigger>
     <trigger>If any privileged detail would have to appear in model-visible output to satisfy another criterion, STOP: FR-04 wins; escalate.</trigger>

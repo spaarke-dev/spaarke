@@ -3,7 +3,8 @@
 > **Project**: Spaarke in Microsoft Copilot and Cowork — MCP server in the BFF (r1)
 > **Created**: 2026-11-06 (task-create, project-pipeline Step 3)
 > **Re-planned**: 2026-11-07 — owner option C defers `ICallerContext` (spec FR-10 amended; `notes/decisions.md` 2026-11-07): 010 becomes the MCP caller-path verification, 012 is cancelled, and 017 no longer waits on 012.
-> **Total tasks**: 28 (27 implementation + 1 wrap-up; 012 cancelled)
+> **Re-planned**: 2026-11-08 — owner ruling FR-04 option A widened (spec FR-04 amended; `notes/decisions.md` 2026-11-08): task 018 derives the privilege flag from communications; 022 depends on 018 (hard gate).
+> **Total tasks**: 29 (28 implementation + 1 wrap-up; 012 cancelled)
 > **Status tokens** (task-create Step 5): 🔲 `[open]` · 🔄 `[wip]` · ✅ `[done]` · ⚠️ `[escalated]` · 🟡 `[blocked]` · 🚫 `[cancelled]` · ⏸️ `[deferred]`. The bracketed token is mandatory in every status cell (FAILURE-MODES G-16). After any status change run `pwsh scripts/check-task-status-drift.ps1`.
 
 ## Task Registry
@@ -20,9 +21,10 @@
 | 014 | B-1 decision capability: commit | A | ✅ [done] | 013 | Group C | opus / high | FULL |
 | 016 | B-3 decision lookup search and REST route | A | ✅ [done] | 013 | Group C | opus / high | FULL |
 | 015 | B-5 slim summary, privilege flag and paging cursor | A | ✅ [done] | 013, 014 | Group D | sonnet / high | FULL |
+| 018 | FR-04 privilege derivation from communications (option A widened) | A | 🔲 [open] | 015 | Group D | opus / high | FULL |
 | 020 | MCP module, packages and /mcp/{area} host | B | 🔲 [open] | 003, 017 | Group D | sonnet / high | FULL |
 | 021 | A10 auth on /mcp, tool policies and route guard | B | 🔲 [open] | 020 | Group E (alone) | opus / high | FULL |
-| 022 | spaarke_show_decisions and app-only paging tool | B | 🔲 [open] | 015, 017, 021 | Group F | opus / high | FULL |
+| 022 | spaarke_show_decisions and app-only paging tool | B | 🔲 [open] | 015, 017, 018 (hard), 021 | Group F | opus / high | FULL |
 | 023 | spaarke_get_decision_plan and lookup search tools | B | 🔲 [open] | 016, 017, 021 | Group F | sonnet / high | FULL |
 | 024 | spaarke_complete_decision app-only write tool | B | 🔲 [open] | 014, 017, 021 | Group F | sonnet / high | FULL |
 | 010 | MCP caller-path verification (option C) | B | 🔲 [open] | 020, 021, 023, 024 | Group G | opus / high | FULL |
@@ -52,9 +54,9 @@ Rows are listed in execution order within each phase (017 runs before 013 in Pha
 
 ## Critical Path
 
-011 ✅ → 017 → 013 → 014 → 015 → 022 → 031 → 032 → 041 → 043 → 042 → 050 → 051 → 090
+011 ✅ → 017 → 013 → 014 → 015 → 018 → 022 → 031 → 032 → 041 → 043 → 042 → 050 → 051 → 090
 
-Parallel feeders (equally long, so any slip here moves the end date): 001 → 002 → 003 → 020 → 021 (must finish before 022/023/024/030); 014 → 024 → 010 → 025 → 041; 016 → 023 → 010; 024 → 032; 030 → 040 → 042.
+Parallel feeders (equally long, so any slip here moves the end date): 015 → 018 runs beside 020 → 021, so 018 adds no length while it finishes before 021; 001 → 002 → 003 → 020 → 021 (must finish before 022/023/024/030); 014 → 024 → 010 → 025 → 041; 016 → 023 → 010; 024 → 032; 030 → 040 → 042.
 
 ## High-Risk Items
 
@@ -63,7 +65,7 @@ Parallel feeders (equally long, so any slip here moves the end date): 001 → 00
 | R2 — A10 OAuth through the connector fails (T5) | 002, 003 | First live test; escalation trigger stops the project and proposes the ADR-028 follow-up |
 | Byte-for-byte commit invariants through B-1 | 011, 014 | Golden baselines first (011); 014 is opus, prescriptive, lists every invariant with before/after file:line, and leaves `DecisionCommitService.cs` unedited (option C); ontology review |
 | R10 — MCP tools must see the caller's request context (option C replaces the `ICallerContext` refactor) | 010, 013, 014, 021–024 | Decision services keep their `HttpContext`/`ClaimsPrincipal` parameters; tools read `IHttpContextAccessor` and fail closed with `UserContextRequired`; 010 proves accessor = request context and services = `RequestServices`, WhoAmI = 1 per MCP commit and plan-stamp continuity, and pins stateless + `PerSessionExecutionContext=false` (seeding proof); 010 blocks 025 |
-| R12 — privilege flag not in the list projection | 015, 022 | 015 adds the column (projection only); 022's marker-string negative test with a seeding proof |
+| R12 — privilege flag not in the list projection | 015, 018, 022 | 015 adds the slim-row flag; 018 derives it from communications as the caller, fail closed (owner ruling 2026-11-08; the `sprk_signal` column is never written, DI-64); 022's marker-string negative test with a seeding proof |
 | R1 — no widget in Chat through the connector | 003, 043 | T1 decides; FR-17 agent fallback; FR-14 text path in 022 |
 | R5 — `Microsoft.Extensions.AI` bump regresses AI | 020 | AI unit + integration suites before merge (NFR-08); escalation on any failure |
 | R3 — widget bundle over budget | 030, 031, 032 | CI size gate (fail above 3 MB); `decisionDraft.ts` re-render fallback via escalation |
@@ -82,9 +84,9 @@ Phase 0 + A (Wave 1 starts both):
       — goal-eligible: NO (003 is live owner testing; 014 is a high-risk invariant migration)
   Wave 4 (parallel, 2 agents): 015, 020 — prereq: 013, 014 (for 015); 003, 017 (for 020)
       — goal-eligible: NO (2-task wave)
-  Wave 5 (sequential): 021 — prereq: 020
-      — goal-eligible: NO (single-task wave; auth-tagged)
-  Wave 6 (parallel, 4 agents): 022, 023, 024, 030 — prereq: Wave 5 complete (+ 015 for 022, 016 for 023, 014 for 024, 003 for 030)
+  Wave 5 (parallel, 2 agents): 018, 021 — prereq: 015 (for 018); 020 (for 021)
+      — goal-eligible: NO (2-task wave; 021 is auth-tagged, 018 is privacy-sensitive)
+  Wave 6 (parallel, 4 agents): 022, 023, 024, 030 — prereq: Wave 5 complete (+ 015 and 018 for 022, 016 for 023, 014 for 024, 003 for 030)
       — goal-eligible: YES (see goal-condition below)
   Wave 7 (parallel, 3 agents): 010, 031, 040 — prereq: 020, 021, 023, 024 (010); 022, 030 (031); 003, 030 (040)
       — goal-eligible: NO (010 is auth-tagged and needs uac-r2 review)
@@ -131,9 +133,9 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 | A | 001, 011 ✅, 017 | none (001, 011); 011 ✅ (017) | 001: spike worktree + `notes/spikes/`; 011: `tests/integration/contract/Api/Signals/*` (done); 017: `Api/Signals/*Endpoints.cs`, new mapper | ✅ Yes |
 | B | 002, 013 | 001 ✅ (002); 011, 017 ✅ (013) | 002: notes only (owner-run); 013: `IDecisionCapability.cs`, `DecisionCapability.cs`, `SignalReadEndpoints.cs`, `DecisionPlanEndpoints.cs`, `SignalsModule.cs` | ✅ Yes |
 | C | 003, 014, 016 | 001, 002 ✅ (003); 013 ✅ (014, 016) | 003: `notes/phase0-results.md` (+ 043 status if cancelled); 014: `DecisionCapability.Commit.cs`, `IDecisionCapability.cs`, `DecisionCommitEndpoints.cs` (`DecisionCommitService.cs` not edited); 016: lookup service files, `SignalsModule.cs`, `DecisionPlanEndpoints.cs` | ✅ Yes |
-| D | 015, 020 | 013, 014 ✅ (015); 003, 017 ✅ (020) | 015: `SignalReadService.cs`, `WorklistItemSummary.cs`, capability files, `DecisionResultMapper.cs`; 020: csproj, `McpModule.cs`, `Api/Mcp/*`, `RateLimitingModule.cs`, `Program.cs`, `EndpointMappingExtensions.cs` | ✅ Yes |
-| E | 021 | 020 ✅ | `AuthorizationModule.cs`, `McpEndpoints.cs`, `McpToolAuthorization.cs`, `RouteAuthorizationGuardTests.cs` | — single task (auth) |
-| F | 022, 023, 024, 030 | Wave 5 ✅ (+ 015, 016, 014, 003 as listed) | 022: own tool files, parity fixture, jest parity test; 023/024: own tool files; 030: widget folder, csproj, widget resource, two CI workflows | ✅ Yes |
+| D | 015, 018, 020 | 013, 014 ✅ (015); 015 ✅ (018); 003, 017 ✅ (020) | 015: `SignalReadService.cs`, `WorklistItemSummary.cs`, capability files, `DecisionResultMapper.cs`; 018 (after 015): `WorkItemPrivilege.cs`, `SignalReadService.cs`, `DecideLanePaging.cs`, `DecisionCapability.cs`, `SignalsModule.cs`; 020: csproj, `McpModule.cs`, `Api/Mcp/*`, `RateLimitingModule.cs`, `Program.cs`, `EndpointMappingExtensions.cs` | ✅ Yes |
+| E | 021 (018 may run alongside) | 020 ✅ | `AuthorizationModule.cs`, `McpEndpoints.cs`, `McpToolAuthorization.cs`, `RouteAuthorizationGuardTests.cs` | — single task (auth) |
+| F | 022, 023, 024, 030 | Wave 5 ✅ (+ 015, 018, 016, 014, 003 as listed) | 022: own tool files, parity fixture, jest parity test; 023/024: own tool files; 030: widget folder, csproj, widget resource, two CI workflows | ✅ Yes |
 | G | 010, 031, 040 | 020, 021, 023, 024 ✅ (010); 022, 030 ✅ (031); 003, 030 ✅ (040) | 010: test files only (`tests/integration/{auth,data-mutation}/Mcp/*`); 031: shared-lib Worklist seams, widget lane files; 040: `src/solutions/CopilotPlugins/**`, `client-tests.yml` | ✅ Yes |
 | H | 025, 032 | 010, 022, 023, 024 ✅ (025); 023, 024, 031 ✅ (032) | 025: conformance host, `ci-tier1-blocking.yml`, `McpHostContractTests.cs`; 032: widget wizard files, DecisionWizard seams | ✅ Yes |
 | I | 041 | 025, 032 ✅ + deploy gate | dev BFF | ❌ No — live deploy, runs alone |
