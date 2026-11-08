@@ -9,7 +9,7 @@
 | **Mode** | Owner: "keep progressing on open tasks so we can complete the project" (earlier "proceed, parallel where possible"). At most 4 agents. Merge each finished branch after its reviews. One adversarial pass per change set; two for partner-readable/auth; a scoped Sonnet re-check when a fix changes the approach. FILTERED tests only. Every agent launch states a model. Never `--no-verify`. |
 | **Agent worktrees** | `isolation: worktree` starts on MASTER. Every brief names the base sha and says "create the task branch from `origin/work/ebilling-r1` at <sha>" and checks `git merge-base --is-ancestor`. |
 | **Public-repo rule** | Never put the mechanism of an open access gap in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Merged into work (2026-11-07/08)** | 096b (`1a316a2ca0`; 098 guard listing for `IsInvoiceCreate` on work `e14f95181c`); 165b item 1 (`b49465d972`); 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`); 164b (`01854564a3`). Each verified on the combined tip (build, full ArchTests, filtered unit). |
+| **Merged into work (2026-11-07/08)** | 165d (`66b7c31315`) and 165e (`7061729544`), verified together at `a3d1dfebad` (ArchTests 2142/0, filtered unit 14674/0); 096b (`1a316a2ca0`; 098 guard listing for `IsInvoiceCreate` on work `e14f95181c`); 165b item 1 (`b49465d972`); 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`); 164b (`01854564a3`). Each verified on the combined tip (build, full ArchTests, filtered unit). |
 | **Decisions** | EB-D-206 (amended), EB-D-207, **EB-D-208** (counted statuses need the writer-created approve record; writer = createdby in the BFF writer allow-list, app-only, createdonbehalfby empty; Paid has no own record in R1). |
 
 ## Agents / branches in flight
@@ -17,14 +17,12 @@
 | Item | Branch / worktree | State → next action |
 |---|---|---|
 | **165b-3** | `task/ebilling-165b3` @ `276c1201af` (wt agent-a2dcae0b9ac285d6e) | Part A built; uac-r2 APPROVED A (conditional on our pass). Opus pass: F1 (In Review + portion says Approved → "alreadyApproved"), F2 (decided-on from a user column), F3 adjustments control, K3/K4 guards. Fix round done `6e25f9194d` (F1 refuse + state read only from invoice status, F2 decided-on window, F3 D-42 control, K3 writer-record check in FinishAsync, K4 fixture ids; 22 completion tests). Re-check: no F; K2 confirmed (no BFF route Approved → In Review); AP export selecting Approved without the record is closed by B2; K (cosmetic): an approved-then-Cancelled invoice would show Unknown (no R1 route cancels). Fix diff sent to uac-r2. **Part B (Opus) running** on the same branch: B0 WriterCreatedRecord helper + copy guard, B1, B2, currency test, 503 check. Then **part B on the same branch**: B1 approval + move `AddWriterCreatedConditions` to `Services/Signals/WriterCreatedRecord` (ontology O2) holding the writer allow-list; B2 AP export (new code e.g. `invoice_approval_not_recorded`, batched `In` read); + uac-r2 notes (non-2-decimal currency fails closed test; client shows 503 as "try again"). One pass on part B, uac-r2 diff, merge. |
-| **165d** | `task/ebilling-165d` @ `cac4e6e25e` (wt agent-a087b7b20f22d544d) | Fix round done (create path both branches, node mapping, message, pin normalisation, option A at the person sites, Exempt = push only, K1: no generic batch-row writer). Full ArchTests 2142/0. Re-check done: holds (seeds 7/255 and 2/457 fail as expected; merge-tree clean). One F2: the update-path column refusal used the owner-create message at UpdateRecordActionCore ~:208 and the update handler ~:97. K1 notes sentence about the Office invoice quick create is wrong; K2 duplicate 098 guard key. **Sonnet fix round running** (3-arg message, `NotContain("owner")`, notes fix, drop dup hunk). Then send uac-r2 the diff, merge. |
-| **165e** | `task/ebilling-165e` @ `76d751eb5f` (wt agent-a88cf50c0d1bce1fc) | Built: reader 2 hides `own_submission_missing`, reader 1 withholds; 18 new tests, 59 fixtures moved to `InvoiceWorld.OwnedInvoice()`; dev re-count 0. Pass 1 (Opus): no F; K1 (an unlinked submission is decided by channel, not by its derived invoice) moved into 165f's scope; two K3 test notes. **uac-r2 APPROVED (conditional on pass 2 finding no F).** **Pass 2 (Opus, fresh reviewer) running.** Then merge, then **165f**. **Batch condition (uac-r2):** 165e and 165f ship to dev and master in the same batch; if 165f slips out of the batch, bring K1 into 165e first. POML status / index not yet updated. |
+| **165f** | `task/ebilling-165f` from `a3d1dfebad` (isolated wt) | **Implementing (Opus)**: document binding via `IsExistingDocumentSubmissionIdOf` in readers 1 and 2, plus 165e K1 (unlinked submission decided by its derived invoice, existence check). Then two passes, uac-r2. **Ships in the same batch as 165e** (uac-r2 condition). |
+| **164c** | `task/ebilling-164c` from `a3d1dfebad` (isolated wt) | **Implementing (Sonnet)**: billing-event ribbon shell, hides, script; dry run + -Verify read-only only; -Apply waits for Q6 and the owner go. |
 | **082d** | `task/ebilling-082d` @ `eb42e5c8db` (wt agent-a5648fd3189b27f3d) | Built from `ee0b173288`: `procedureSnapshot` v1 internal member in findings JSON, DR facts summary, ratchet (baseline 3 ontology files), golden "101 B2a" appended; unit 7701/0, Arch 2143/0, NFR-01 83 ms, publish +6.9 KB (41.5 MB). Pass 1 (Opus): F4 snapshot stale after a correction (101) or a line add (164), F3 ratchet baseline ADR citation, K1 DR exclude counts dropped, K2 doc wording, K3 ratchet limits noted. **Sonnet fix round running.** Then pass 2 (Opus, fresh reviewer), then uac-r2. Critical path: 082d → 083 → 130 → 131-135. Then two passes + uac-r2 review. On merge: send field-mapping the sha (fm-032b branches from it). |
 
 ## Queued
 
-- **164c** ribbon (billing event Add line hides): unblocked; launch when a slot frees.
-- **165f** `sprk_document` binding (after 165e; two passes; uac-r2 reviews).
 - **165b-2** totals at approval and AP export (after 165b-3).
 - **165b-4** spend paths (after 165b-3): ontology-r1 conditions O1-O8 in the POML; step 1 is a design note to ontology-r1 BEFORE code.
 - **083** firm clause (after 082d), then **130** firm projection (EB-D-202, uac-r2 pin test).
@@ -34,7 +32,7 @@
 
 ## Open with peers
 
-- **uac-r2:** part A fix diff and part B diffs (165b-3); 165d diff; 165e/165f reviews. DEF-057 (#2631) is on their backlog.
+- **uac-r2:** 165b-3 part A + fix APPROVED; part B diff next; 165f review. 165d and 165e approved and merged. DEF-057 (#2631) is on their backlog.
 - **ontology-r1:** 165b-4 design note (before code). DI-144 (#2632) adopts our `WriterCreatedRecord`.
 - **field-mapping:** 032b design note answered 2026-11-08 (E1 job, E2 yes, E3 fm→master first, E4 accepted with the admin-attention writer and no status write, E5 yes, E6 signed off with the condition that neither column joins external ReadableColumns or firm rendering). Still owed: the 082d merge sha. **uac-r2 condition for 032b-3 (our after-step 3a):** the job payload carries the core (table, id) from the persister's committed `stored` result; job gate 2 requires invoice core == payload core == submission core; must-fire test: re-point the invoice's or submission's core after enqueue → nothing read from the new core, nothing written. uac U3 (do invoice-level assignee columns grant at all) is open with fm and may drop the grant step.
 
@@ -49,10 +47,10 @@
 ## Next action
 
 On each notification:
-- **165d re-check** clean → send uac-r2 the diff → merge (verify the combined tip: build, full ArchTests, filtered unit) → remove the wt.
 - **165b-3 fix round** → (re-check if approach changed) → uac-r2 fix diff → launch part B (Opus) on the same branch.
-- **165e pass 1** → fix round → pass 2 → uac-r2 → merge → launch 165f.
+- **165f built** → pass 1 → fix → pass 2 → uac-r2 → merge.
+- **164c built** → one pass → merge (no -Apply).
 - **082d done** → pass 1 → fix → pass 2 → uac-r2 → merge → field-mapping sha → launch 083.
-- Free slot → 164c.
+- Free slot → 165b-2 after 165b-3 merges; 165b-4 design note after 165b-3 merges; 083 after 082d merges.
 
 Keep TASK-INDEX statuses current at each merge (165e row still says running; 165d row says review running).
