@@ -142,6 +142,31 @@ public sealed class InvoiceApprovalCompletionTests
         w.ApproveRecords.Should().ContainSingle();
     }
 
+    [Fact(DisplayName = "165b-3 C2 control (fix round F3): a real interruption with a Reduced line and a Percent adjustment line - the repeat completes and records the calculator's total")]
+    public async Task C2_Control_WithAdjustments_RepeatCompletesAndRecordsTheCalculatorTotal()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Reduced, 400m, approved: 300m);
+        w.AddLine(InvoiceLineStatus.Accepted, 600m, approved: 600m);
+        var adjustment = w.AddLine(InvoiceLineStatus.Accepted, 0m, InvoiceLineCostType.Adjustment);
+        adjustment["sprk_adjustmentmethod"] = new OptionSetValue((int)InvoiceAdjustmentMethod.Percent);
+        adjustment["sprk_adjustmentvalue"] = 10m;
+        adjustment["statecode"] = new OptionSetValue(0); // Active: the line read keeps an Adjustment line only when its statecode is Active
+
+        w.FaultsOnce["identity"] = new InvalidOperationException("dataverse down"); // the recorder's contact read: no record written
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        w.ApproveRecords.Should().BeEmpty();
+
+        var repeat = await w.ApproveAs(AliceUser);
+
+        // Billed 1,000; the Reduced line takes 100 off, so the fee base is 900 and 10% of it (90) is taken: 810 (D-42).
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved, repeat.Detail);
+        w.ApproveRecords.Should().ContainSingle();
+        w.Portion.GetAttributeValue<Money>("sprk_approvedamount").Value.Should().Be(810m);
+        w.ApproveRecords.Single().GetAttributeValue<string>("sprk_factsnapshot").Should().Contain("810");
+        w.Log.Entries.Should().NotContain(e => e.Message.StartsWith("Approval completion refusal", StringComparison.Ordinal));
+    }
+
     // ── C3: "complete" is decided from the writer-created approve record ──
 
     [Theory(DisplayName = "165b-3 C3 must fire: a portion that says Approved and links a record the writer identity did not create is not complete - the completion checks run (and refuse here)")]
@@ -156,7 +181,6 @@ public sealed class InvoiceApprovalCompletionTests
         // The same record, every column equal, but not the writer's own: created by another identity, or on the writer's behalf by one.
         var record = w.ApproveRecords.Single();
         w.H.Created.Remove(record);
-        record.Id = w.H.NewId;
         record["createdby"] = new EntityReference("systemuser", onBehalfOfTheWriter ? DecisionRecordWriterTests.WriterUser : BobUser);
         if (onBehalfOfTheWriter)
         {
@@ -185,6 +209,131 @@ public sealed class InvoiceApprovalCompletionTests
         repeat.DecisionRecordId.Should().Be(approved.DecisionRecordId);
         w.Writes.Should().Be(writes);
         w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "165b-3 C3 must fire (fix round F1): a portion that says Approved on an invoice that is not Approved, with no writer-created approve record, is refused (409 completion_refused), never answered as already approved; nothing is written")]
+    [InlineData(InvoiceStatusCodes.InReview)]
+    [InlineData(InvoiceStatusCodes.SentToAp)]
+    public async Task C3_PortionApproved_InvoiceNotApproved_NoRecord_IsRefused(int invoiceStatus)
+    {
+        var w = World();
+        w.Invoice["statuscode"] = new OptionSetValue(invoiceStatus);
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionApproved);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        AssertRefused(w, result, InvoiceApprovalCodes.CompletionStatusWithoutRecord, writesBefore: 0);
+        w.Invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(invoiceStatus);
+        w.Transitions.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "165b-3 C3 (fix round F1): the approval state does not report Approved from the portion's status alone; a real approval does")]
+    public async Task C3_TheState_DoesNotReportApprovedFromThePortionAlone()
+    {
+        var w = World();
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionApproved);
+        w.Portion["sprk_approvedamount"] = new Money(1000m);
+
+        var forged = await w.GetAs(AliceUser);
+
+        forged!.Status.Should().NotBe("Approved");
+        forged.ApprovedAmount.Should().BeNull();
+        forged.CanApprove.Should().BeFalse();
+
+        var real = World();
+        (await real.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        var state = await real.GetAs(AliceUser);
+        state!.Status.Should().Be("Approved");
+        state.ApprovedAmount.Should().Be(1000m);
+    }
+
+    [Fact(DisplayName = "165b-3 C3 must fire (fix round K4): a portion that links a different writer-created record (another invoice's) is not complete - the completion checks run (and refuse here)")]
+    public async Task C3_ALinkToAnotherInvoicesWriterRecord_IsNotComplete()
+    {
+        var other = World();
+        (await other.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        var othersRecord = other.ApproveRecords.Single();
+
+        var w = World();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        var own = w.ApproveRecords.Single();
+        own.Id.Should().NotBe(othersRecord.Id, "the setup: each created row has its own id");
+        w.H.Created.Remove(own);
+        w.H.Created.Add(othersRecord);
+        w.Portion["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", othersRecord.Id);
+        w.AddLine(InvoiceLineStatus.Flagged, 50m);
+        var writes = w.Writes;
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(InvoiceApprovalCodes.CompletionRefused);
+        w.Writes.Should().Be(writes);
+        w.Log.Entries.Should().ContainSingle(e => e.Message.StartsWith("Approval completion refusal", StringComparison.Ordinal))
+            .Which.Should().Be((LogLevel.Warning, $"Approval completion refusal ebilling.approve.lines_open on sprk_invoice {w.InvoiceId}"));
+    }
+
+    // ── F2 (fix round): the decision time is the portion's user-writable column ──
+
+    [Theory(DisplayName = "165b-3 F2 must fire: completion is refused (409 completion_refused, decided_on_invalid) when the portion's decision time is missing or later than now plus the lock duration; nothing is written")]
+    [InlineData("missing")]
+    [InlineData("future")]
+    public async Task F2_ADecidedOnThatIsMissingOrInTheFuture_IsRefused(string kind)
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        if (kind == "missing")
+        {
+            w.Portion.Attributes.Remove("sprk_decidedon");
+        }
+        else
+        {
+            w.Portion["sprk_decidedon"] = w.Clock.GetUtcNow().UtcDateTime + InvoiceApprovalService.LockDuration + TimeSpan.FromMinutes(1);
+        }
+
+        AssertRefused(w, await w.ApproveAs(AliceUser), InvoiceApprovalCodes.CompletionDecidedOnInvalid, writesBefore: 0);
+    }
+
+    [Fact(DisplayName = "165b-3 F2 control: a decision time in the past completes and writes one record")]
+    public async Task F2_Control_ADecidedOnInThePast_Completes()
+    {
+        var w = World();
+        AsIfTransitioned(w, Alice, 1000m);
+        w.Portion["sprk_decidedon"] = w.Clock.GetUtcNow().UtcDateTime.AddHours(-2);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved, result.Detail);
+        w.ApproveRecords.Should().ContainSingle();
+        w.Log.Entries.Should().NotContain(e => e.Message.StartsWith("Approval completion refusal", StringComparison.Ordinal));
+    }
+
+    // ── K3 (fix round): an "already recorded" answer for a decision with no writer-created record ──
+
+    [Fact(DisplayName = "165b-3 K3: the writer answering 'already recorded' for a decision with no writer-created record found is a refusal (record_not_writer_created), not a completion")]
+    public async Task K3_AlreadyRecordedWithNoWriterRecordFound_IsRefused()
+    {
+        var w = World();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+
+        // The record the writer will find is the writer's by createdby but created on its behalf by another identity: the completion's lookup
+        // (createdby and createdonbehalfby) does not count it, the writer's own "already recorded" lookup (createdby alone) does.
+        var record = w.ApproveRecords.Single();
+        w.H.Created.Remove(record);
+        record["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
+        record["createdonbehalfby"] = new EntityReference("systemuser", BobUser);
+        w.H.Seeded.Add(record);
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionPending);
+        w.Portion.Attributes.Remove("sprk_decisionrecord");
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Detail);
+        result.Code.Should().Be(InvoiceApprovalCodes.CompletionRefused);
+        w.H.Created.Should().NotContain(r => r.GetAttributeValue<string>("sprk_actioncode") == "approve-invoice", "no second record is written");
+        w.Portion.Contains("sprk_decisionrecord").Should().BeFalse("the record the writer named is not linked");
+        w.Log.Entries.Should().ContainSingle(e => e.Message.StartsWith("Approval completion refusal", StringComparison.Ordinal))
+            .Which.Should().Be((LogLevel.Warning, $"Approval completion refusal {InvoiceApprovalCodes.CompletionRecordNotWriterCreated} on sprk_invoice {w.InvoiceId}"));
     }
 
     // ── C4: a completion replayed after it finished writes no second record ──

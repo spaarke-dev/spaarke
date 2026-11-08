@@ -176,3 +176,63 @@ reached. Override decides a held submission and never approves. The approver's r
   `createdonbehalfby`. Completion's lookup applies both, and the writer is reached only after the completion checks pass. Not changed here.
 - K: field security on the invoice status and the portion's columns is an owner schema question, out of scope.
 - K: the D-72 Unreviewed rows are written by approve before its claim; completion does not write them again.
+
+## 6.1 165b-3 part A review fix round
+
+Branch `task/ebilling-165b3`. Wording stays neutral: approval completion decides only from server-written sources.
+
+**F1 — a portion that says Approved on an invoice that is not Approved.** `CompleteOrNoOpAsync` now reads the writer-created approve records first.
+When there are none and the invoice status is not Approved, the call is refused: 409 `ebilling.approve.completion_refused`, log reason
+`ebilling.approve.completion.status_without_record`, nothing written, one log line with the reason code, table and row id. Before this, the portion
+column alone made the call answer 200 `alreadyApproved`, and the invoice could then never be approved. The approval state (`GET .../approval`,
+and the state returned with an approve) no longer reports Approved from the portion column alone: it reports Approved (with the approved amount,
+decider and time) only when the invoice itself is Approved, Sent to AP or Paid; otherwise the status shows as Unknown and `canApprove` is false.
+The portion's record link in the state is unchanged (it is shown for every decided status, including Rejected and Returned).
+
+**F2 — the decision time.** Completion takes the decision time from the portion's `sprk_decidedon`, a user-writable column. `CheckCompletionAsync`
+now refuses (409 `completion_refused`, log reason `ebilling.approve.completion.decided_on_invalid`, nothing written) when it is missing or later
+than the service clock plus `LockDuration` (5 minutes, the skew tolerance between nodes). The clock is the service's `TimeProvider`. A time in
+the past completes. A repeat that already has the writer's record is unchanged (the record's stored set is used, not the time).
+
+**F3 — the C2 control with adjustments.** New control: a real interruption (the recorder's contact read faults after the transition) on an invoice
+with one Reduced line and one Percent adjustment line (10%); the repeat completes and the portion's amount and the record carry 810 (billed 1,000,
+less the 100 reduction, less 10% of the 900 fee base: D-42). `ApprovalWorld` now honours the requested `ColumnSet` for the line table (a line read
+returns only the columns it asks for). That was cheap: no existing test changed. Other tables still return whole rows, as their readers were written
+against.
+
+**K3 — a cheap guard.** On the completion path where no writer-created approve record was found, an `AlreadyRecorded` answer from `RecordAsync` means
+the record it names is not one the writer created under the completion's filter (`createdby` the writer, `createdonbehalfby` empty). It is refused:
+409 `completion_refused`, log reason `ebilling.approve.completion.record_not_writer_created`; the record is not linked and no Signal is closed
+against it. The portion's status may already have been written to Approved by that point (the portion step comes before the record step), so this
+refusal is not "nothing written"; a repeat meets the same refusal. Test: a record whose `createdby` is the writer and `createdonbehalfby` is another
+identity, which the writer's own lookup (DI-144, below) finds and the completion's lookup does not.
+
+**K4 — one id per created row.** `ApprovalWorld` now answers each create with its own id (before, the writer harness returned one shared id for
+every create). New C3 case: the portion links a different writer-created approve record (another invoice's) and this invoice has none of its own:
+not complete, the completion checks run and refuse. The existing C3 test no longer re-ids its record (it keeps the id the portion links).
+
+**Seeds (this round).** Without the F1 refusal, the 2 F1 must-fire cases fail (and the other 20 pass). Without the F2 refusal, the 2 F2 must-fire
+cases fail. Without the K3 refusal, the K3 case fails. Each file was restored byte-identical (compared with `cmp`) before the gates ran.
+
+**Known limits (added by this round).**
+
+- K2: an approver removed from the core record's approver roles between the interrupted approve and their repeat. The invoice is Approved, the
+  portion names that person as decider (status Pending or Approved) and no writer-created approve record exists. The repeat is refused at
+  completion (eligibility is checked again, live), and no one else can complete another person's claim. *Manual remedy for an administrator.*
+  State: invoice status Approved, portion `sprk_decidedby` set, no `sprk_decisionrecord` row with `sprk_actioncode` = `approve-invoice`,
+  regarding that invoice, created by the writer identity. Finding it: the log line `Approval completion refusal ebilling.approver.not_eligible
+  on sprk_invoice {id}`; or list Approved invoices whose portion has a decider and no linked approve record. What to do: (1) put the person back on
+  the core record's approver roles and ask them to repeat the approve, which completes it (one record); (2) if they cannot return, take the case to
+  the owner. R1 has no route that returns an Approved invoice to In Review, so any data repair is an owner decision under change control. Do not
+  edit the portion's status, amount or record link, and do not create a Decision Record by hand: completion decides only from server-written
+  sources, so either edit is refused or ignored.
+- K1: the amount check compares the portion's approved amount with the total `InvoiceTotalsCalculator` derives from the lines read at completion.
+  The lines and the invoice's billed total are not themselves verified until 165b-2 (stored totals equal the calculator over the lines) merges; the
+  completion path will call that check then (one shared method, not a copy).
+- K8: if the writer identity rotates (the ontology writer's application user changes), approve records created by the earlier identity stop counting
+  as writer-created. A completion on an invoice approved under the old identity would then find no record and run its checks again; the
+  F1 refusal applies to an invoice that is not Approved. Rotation needs a plan for the records of the earlier identity (owner/ontology-r1) before it
+  happens.
+- DI-144 (ontology-r1): `DecisionRecordWriter`'s own "already recorded" lookups filter `createdby` without `createdonbehalfby`. Part A does not change
+  that file; the K3 guard covers the completion path. For the lead to pass to ontology-r1.
+- K: the portion's record link in the approval state is the stored column as is (not checked against the writer's record).

@@ -139,6 +139,18 @@ public static class InvoiceApprovalCodes
     /// <summary>The log reason code of a <see cref="CompletionRefused"/>: the approved amount is not the total derived from the lines.</summary>
     public const string CompletionAmountMismatch = "ebilling.approve.completion.amount_mismatch";
 
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (165b-3 fix round, F1): the portion says Approved but the invoice is
+    /// not Approved and no writer-created approve record exists. Nothing is written.</summary>
+    public const string CompletionStatusWithoutRecord = "ebilling.approve.completion.status_without_record";
+
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (F2): the portion's decision time is missing or later than the server's
+    /// clock allows. The time is a user-writable column, so completion never takes a future or absent one.</summary>
+    public const string CompletionDecidedOnInvalid = "ebilling.approve.completion.decided_on_invalid";
+
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision no
+    /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
+    public const string CompletionRecordNotWriterCreated = "ebilling.approve.completion.record_not_writer_created";
+
     public const string TransitionRefused = "ebilling.approve.refused";
     public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
     public const string Busy = LineDecisionCodes.Busy;
@@ -715,6 +727,13 @@ public sealed class InvoiceApprovalService
             return Unavailable(invoiceId, "read", ex);
         }
 
+        // Task 165b-3 fix round (F1): the portion's status is a user-writable column. An invoice that is not Approved with no writer-created
+        // approve record is not an approved one, whatever the portion says: refused, never answered as "already approved". Nothing is written.
+        if (recorded.Count == 0 && InvoiceStatus(invoice) != InvoiceStatusCodes.Approved)
+        {
+            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionStatusWithoutRecord);
+        }
+
         Guid? recordId = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id is { } link && recorded.Contains(link) ? link : null;
         var complete = portionStatus == PortionApproved && recordId is not null;
 
@@ -785,13 +804,16 @@ public sealed class InvoiceApprovalService
         var amount = portion.GetAttributeValue<Money>(PortionAmount)?.Value ?? 0m;
         var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, decidedOn, signals.Set);
         _logger.LogInformation("Approve of invoice {InvoiceId}: completing the caller's interrupted approval.", invoiceId);
-        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct).ConfigureAwait(false);
+        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct,
+            refuseAlreadyRecorded: recorded.Count == 0).ConfigureAwait(false);
     }
 
-    /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.</summary>
+    /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
+    /// <paramref name="refuseAlreadyRecorded"/> (task 165b-3 fix round, K3): the completion found no writer-created record, so the writer's
+    /// "already recorded" answer names a record that is not one under the completion's filter; it is refused, not linked or closed against.</summary>
     private async Task<ApprovalResult> FinishAsync(
         Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct)
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false)
     {
         var amount = decision.Facts["approvedAmount"] is decimal d ? d : 0m;
         var decider = decision.Decider.SystemUserId ?? Guid.Empty;
@@ -825,6 +847,11 @@ public sealed class InvoiceApprovalService
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return Incomplete(invoiceId, decision.DecisionId, "record", (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
+        }
+
+        if (refuseAlreadyRecorded && recorded.AlreadyRecorded)
+        {
+            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionRecordNotWriterCreated);
         }
 
         // ── D-122: the stored set, closed as Acted by the record (a repeat: AlreadyClosedByThisRecord). A close that failed (a fault or a
@@ -1183,7 +1210,7 @@ public sealed class InvoiceApprovalService
 
     /// <summary>
     /// Task 165b-3: before completion writes the approve record, the approval's checks run again under the same locks (approval completion
-    /// decides only from server-written sources): the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
+    /// decides only from server-written sources): the portion's decision time is present and not in the future (F2), the caller is still an eligible approver, <see cref="CheckApprovableAsync"/> passes, no Clean
     /// line is undecided (approve accepts them in bulk before its claim, so a completion never has one), and the portion's approved amount equals
     /// the approved total <see cref="InvoiceTotalsCalculator"/> derives from the lines read now. Null when all pass. A read fault is Unavailable;
     /// any refusal is 409 <see cref="InvoiceApprovalCodes.CompletionRefused"/>, logged with the reason code, the table and the row id only.
@@ -1193,6 +1220,15 @@ public sealed class InvoiceApprovalService
         Entity invoice, Entity portion, (string Entity, Guid Id) core, Guid? callerContactId, CancellationToken ct)
     {
         var invoiceId = invoice.Id;
+
+        // F2: the decision time is the portion's user-writable column; the record takes it, so it must be present and not in the future
+        // (the tolerance is the lock duration, which covers clock skew between nodes).
+        if (portion.GetAttributeValue<DateTime?>(PortionDecidedOn) is not { } decidedOn
+            || new DateTimeOffset(DateTime.SpecifyKind(decidedOn, DateTimeKind.Utc)) > _time.GetUtcNow() + LockDuration)
+        {
+            return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionDecidedOnInvalid);
+        }
+
         var eligibility = await EligibleApproverAsync(invoiceId, core, callerContactId, ct).ConfigureAwait(false);
         if (eligibility.Refusal is { } notEligible)
         {
@@ -1405,6 +1441,14 @@ public sealed class InvoiceApprovalService
         bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded)
     {
         var portionStatus = portion is null ? null : StatusOf(portion);
+
+        // Task 165b-3 fix round (F1): the portion's status is a user-writable column, so the state never reports Approved from it alone.
+        // Approved needs the invoice itself to be Approved or past it; otherwise the portion's claim is shown as Unknown (and no decided facts).
+        if (portionStatus == PortionApproved && InvoiceStatus(invoice) is not (InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid))
+        {
+            portionStatus = null;
+        }
+
         var status = portion is null ? "None" : portionStatus switch
         {
             PortionPending => "Pending",
