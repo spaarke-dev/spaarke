@@ -157,9 +157,11 @@ public sealed record InvoiceSubmissionRerunResult(
 /// <para><b>The supersedes link (EB-D-206, task 095d-2b-3).</b> The persister links no predecessor for a submission with no firm (095c-3). Once
 /// the firm is set, the invoice update above also carries <see cref="InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn"/> when the
 /// persister's own rule (<see cref="InvoiceSubmissionPersister.FindSupersededInvoiceAsync"/>, called, not copied) finds a predecessor with the
-/// re-run's two narrowings: only invoices created before this one are candidates, and a predecessor another invoice already supersedes is not
-/// linked. Only for a New submission, an outcome that is not an automatic rejection, an invoice with no link yet, and a submission with its
-/// firm. The predecessor's row is never written (D-43: a peer reference). A read fault is a retry, and nothing is written.</para>
+/// re-run's narrowings: only invoices created before this one are candidates, the predecessor's Return to Firm was decided before this invoice
+/// was created (its Decision Record's decided-on; no record, no link), and a predecessor another invoice already supersedes is not linked
+/// (re-checked inside the commit under a lock on the predecessor, <see cref="SupersedesLockKey"/>). Only for a New submission, an outcome that
+/// is not an automatic rejection, an invoice with no link yet, and a submission with its firm. The predecessor's row is never written (D-43: a
+/// peer reference). A read fault is a retry, and nothing is written.</para>
 /// <para><b>Fail closed.</b> A refused, failed or partial re-run writes nothing, so the marker, the firm markers and the hold all stay
 /// (uac-r2 condition 2). Refusals (facts missing, stored rows inconsistent, findings unreadable, no or a foreign stored decision, a firm or
 /// marker mismatch, a line this submission does not own, a core record that differs, over the transaction ceiling) are logged
@@ -468,7 +470,7 @@ public sealed partial class InvoiceSubmissionRerun
         }
 
         // EB-D-206 (task 095d-2b-3): the automatic supersedes link the persister wrote none of for want of a firm (095c-3), found by the
-        // persister's own rule with the re-run's two narrowings and set on this commit's invoice update (never after the commit). Only for a New
+        // persister's own rule with the re-run's narrowings (a, b, c) and set on this commit's invoice update (never after the commit). Only for a New
         // submission (a Correction's target is explicit, 097c), an outcome that is not an automatic rejection (the persister links none; it is
         // held below), an invoice that names no predecessor yet, and a submission with its firm. A read fault is a retry: nothing is written.
         Guid? supersedes = null;
@@ -772,6 +774,7 @@ public sealed partial class InvoiceSubmissionRerun
                 return second;
             }
 
+            string? predecessorKey = null;
             try
             {
                 // K1: inside the locks, the invoice still has exactly the fee and expense rows the plan was built from. A row attached or
@@ -779,6 +782,24 @@ public sealed partial class InvoiceSubmissionRerun
                 if (!(await LineIdsAsync(plan.InvoiceId, ct).ConfigureAwait(false)).SetEquals(plan.LineIds))
                 {
                     return Transient(plan.SubmissionId, InvoiceSubmissionRerunStatus.Changed, InvoiceSubmissionRerunCodes.Changed, "lines", null);
+                }
+
+                // EB-D-206 (amended): two re-runs racing for one predecessor. The commit conditions on this invoice's version, not on the
+                // predecessor's, so the link is re-checked under a lock keyed on the PREDECESSOR: the second run then sees the first one's link
+                // and re-evaluates (Changed), and narrowing (b) drops its link. Nothing is ever reverted after a commit.
+                if (plan.Supersedes is { } toLink)
+                {
+                    var key = SupersedesLockKey(toLink);
+                    if (await AcquireAsync(key, owner, plan.SubmissionId, ct).ConfigureAwait(false) is { } third)
+                    {
+                        return third;
+                    }
+
+                    predecessorKey = key;
+                    if (await SupersededSinceReadAsync(plan, toLink, ct).ConfigureAwait(false) is { } recheck)
+                    {
+                        return recheck;
+                    }
                 }
 
                 await _entities.ExecuteTransactionAsync(plan.Requests, ct).ConfigureAwait(false);
@@ -797,6 +818,11 @@ public sealed partial class InvoiceSubmissionRerun
             }
             finally
             {
+                if (predecessorKey is not null)
+                {
+                    await ReleaseAsync(predecessorKey, owner, plan.SubmissionId).ConfigureAwait(false);
+                }
+
                 await ReleaseAsync(lineKey, owner, plan.SubmissionId).ConfigureAwait(false);
             }
         }
@@ -817,6 +843,47 @@ public sealed partial class InvoiceSubmissionRerun
         return new InvoiceSubmissionRerunResult(
             InvoiceSubmissionRerunStatus.Completed, InvoiceSubmissionRerunCodes.Completed, false, plan.SubmissionId, plan.Kind, plan.ReasonCode,
             plan.ResetLines, plan.RecodedLines, plan.ReviewDetail, StateCommitted);
+    }
+
+    /// <summary>
+    /// EB-D-206 (amended): the lock the commit takes on the predecessor it links (<see cref="CommitAsync"/>), so two re-runs that decided the
+    /// same predecessor commit one after the other and the second re-checks narrowing (b) inside it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order, and why it cannot deadlock.</b> It is taken AFTER the invoice's decision lock and its line lock, and released first (in
+    /// <c>finally</c>). Every lock here is a try-acquire (<see cref="IIdempotencyService.TryAcquireProcessingLockAsync"/>): a held key answers
+    /// Busy at once and the job retries, so no holder ever waits for another key, and a wait-for cycle cannot form. The order is still fixed
+    /// (this invoice's keys, then the predecessor's), so no two runs take the same keys in opposite orders. The persister takes no such lock:
+    /// its create-time link is written in its own create transaction, and it neither holds nor waits for a key of this kind, so it can neither
+    /// block a re-run here nor be blocked by one.</para>
+    /// <para><b>Known limit.</b> The persister's create-time link is not serialised against this lock: a firm submission created while a
+    /// re-run holds the key can link the same predecessor in the same window. Nothing reads the successor as unique (EB-D-206).</para>
+    /// </remarks>
+    internal static string SupersedesLockKey(Guid predecessorId) => $"ebilling-supersedes:{predecessorId:N}";
+
+    /// <summary>
+    /// EB-D-206 (amended), inside the predecessor lock and before the transaction: whether another invoice took the predecessor since this
+    /// run's read (<see cref="SubmissionCommitGate.SupersededByAnotherAsync"/>, this invoice excluded). Taken: Changed, so the run evaluates
+    /// again and narrowing (b) drops the link. A read fault is the lookup's retry (<see cref="InvoiceSubmissionRerunCodes.SupersedesReadFailed"/>);
+    /// nothing is sent either way. Null: commit.
+    /// </summary>
+    private async Task<InvoiceSubmissionRerunResult?> SupersededSinceReadAsync(Plan plan, Guid predecessor, CancellationToken ct)
+    {
+        try
+        {
+            if (!await SubmissionCommitGate.SupersededByAnotherAsync(_entities, predecessor, ct, except: plan.InvoiceId).ConfigureAwait(false))
+            {
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Transient(plan.SubmissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.SupersedesReadFailed, "supersedes-recheck", ex);
+        }
+
+        _logger.LogInformation("Re-run of submission {SubmissionId}: invoice {PreviousId} was superseded by another invoice since the read; nothing was written.",
+            plan.SubmissionId, predecessor);
+        return Transient(plan.SubmissionId, InvoiceSubmissionRerunStatus.Changed, InvoiceSubmissionRerunCodes.Changed, "supersedes", null);
     }
 
     private async Task<InvoiceSubmissionRerunResult?> AcquireAsync(string key, string owner, Guid submissionId, CancellationToken ct)

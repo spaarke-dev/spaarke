@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using System.Net.Http;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -15,8 +16,10 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 
 /// <summary>
 /// ebilling-r1 task 095d-2b-3 (EB-D-206): the post-Set-firm re-run writes the automatic supersedes link in its own commit, by the persister's
-/// rule (<see cref="InvoiceSubmissionPersister.FindSupersededInvoiceAsync"/>, task 104, EB-D-174) with the re-run's two narrowings: (a) only
-/// invoices created before this one, and (b) never a predecessor another invoice already supersedes. Over the same in-memory world as the commit.
+/// rule (<see cref="InvoiceSubmissionPersister.FindSupersededInvoiceAsync"/>, task 104, EB-D-174) with the re-run's narrowings: (a) only
+/// invoices created before this one, (c) only a predecessor whose Return was decided before this invoice was created (amended EB-D-206), and
+/// (b) never a predecessor another invoice already supersedes, re-checked under a lock on the predecessor in the commit. Over the same in-memory
+/// world as the commit.
 /// </summary>
 public sealed partial class InvoiceSubmissionRerunTests
 {
@@ -269,6 +272,174 @@ public sealed partial class InvoiceSubmissionRerunTests
         world.Row(InvoiceId).GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn).Should().BeNull();
     }
 
+    // ── L3 tie (K3): equal created on, the id in Dataverse's uniqueidentifier order decides ──
+
+    [Theory(DisplayName = "095d-2b-3 L3 tie SEEDED (EB-D-206 a): with the same created on, a candidate is before this invoice only if its id sorts first in Dataverse's uniqueidentifier order (SqlGuid), not Guid.CompareTo")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task L3_ASameSecondCandidate_IsOrderedByTheSqlGuid(bool sortsFirst)
+    {
+        var candidate = TieId(sortsFirst);
+        new SqlGuid(candidate).CompareTo(new SqlGuid(InvoiceId)).Should().Be(sortsFirst ? -1 : 1, "the setup: the SqlGuid order");
+        Math.Sign(candidate.CompareTo(InvoiceId)).Should().Be(sortsFirst ? 1 : -1, "the setup: Guid.CompareTo disagrees, so only the SqlGuid order can pass");
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(candidate, InvoiceStatusCodes.ReturnedToFirm, World.InvoiceCreatedOn, returnedOn: World.InvoiceCreatedOn.AddSeconds(-1));
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+
+        if (sortsFirst)
+        {
+            SupersedesIn(world.Applied.Single()[1])!.Id.Should().Be(candidate);
+        }
+        else
+        {
+            SupersedesIn(world.Applied.Single()[1]).Should().BeNull("an invoice after this one in Dataverse's order is never its predecessor");
+        }
+    }
+
+    /// <summary>A copy of <see cref="InvoiceId"/> one step before (or after) it in SqlGuid order (byte 10 first), and the other way in
+    /// Guid.CompareTo order (byte 3 first).</summary>
+    private static Guid TieId(bool sortsFirst)
+    {
+        var bytes = InvoiceId.ToByteArray();
+        bytes[10] = (byte)(sortsFirst ? bytes[10] - 1 : bytes[10] + 1);
+        bytes[3] = (byte)(sortsFirst ? bytes[3] + 1 : bytes[3] - 1);
+        return new Guid(bytes);
+    }
+
+    // ── L9: narrowing (c), amended EB-D-206 ──
+
+    public enum ReturnedWhen
+    {
+        BeforeThisInvoice,
+        SameSecond,
+        AfterThisInvoice,
+    }
+
+    [Theory(DisplayName = "095d-2b-3 L9 SEEDED (EB-D-206 c): a predecessor counts only if its Return to Firm was decided BEFORE this invoice was created; returned in the same second or later - no link")]
+    [InlineData(ReturnedWhen.BeforeThisInvoice)]
+    [InlineData(ReturnedWhen.SameSecond)]
+    [InlineData(ReturnedWhen.AfterThisInvoice)]
+    public async Task L9_OnlyAPredecessorReturnedBeforeThisInvoice_IsLinked(ReturnedWhen when)
+    {
+        var world = await World.SeedAsync();
+        var returnedOn = when switch
+        {
+            ReturnedWhen.BeforeThisInvoice => World.InvoiceCreatedOn.AddSeconds(-1),
+            ReturnedWhen.SameSecond => World.InvoiceCreatedOn,
+            _ => World.InvoiceCreatedOn.AddDays(1),
+        };
+        // Created long before this invoice, but still In Review when this invoice was sent unless returned before it.
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice, returnedOn: returnedOn);
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed, "the re-run still commits");
+
+        world.ReturnRecordQueries.Should().ContainSingle("the Return time is read once, for the predecessor found");
+        if (when == ReturnedWhen.BeforeThisInvoice)
+        {
+            SupersedesIn(world.Applied.Single()[1])!.Id.Should().Be(Predecessor);
+        }
+        else
+        {
+            SupersedesIn(world.Applied.Single()[1]).Should().BeNull("the predecessor was still In Review when this invoice was sent");
+            world.Row(InvoiceId).GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn).Should().BeNull();
+            var entry = world.Logger.Entries.Should().ContainSingle(e => e.Message.Contains("returned to the firm only after this invoice was created")).Subject;
+            entry.Message.Should().Contain(SubmissionId.ToString()).And.Contain(Predecessor.ToString());
+        }
+    }
+
+    [Fact(DisplayName = "095d-2b-3 L9 (EB-D-206 c): a Returned predecessor with no Return decision record is not linked, and the log names ids only")]
+    public async Task L9_NoReturnRecord_IsNotLinked_AndLogsIdsOnly()
+    {
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice, returnRecord: false);
+        var number = world.Row(SubmissionId).GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn);
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed, "the re-run still commits");
+
+        SupersedesIn(world.Applied.Single()[1]).Should().BeNull();
+        var entry = world.Logger.Entries.Should().ContainSingle(e => e.Message.Contains("has no Return decision record")).Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(SubmissionId.ToString()).And.Contain(Predecessor.ToString());
+        entry.Message.Should().NotContain(number!).And.NotContain(Firm.ToString()).And.NotContain(InvoiceId.ToString());
+    }
+
+    [Fact(DisplayName = "095d-2b-3 L9 (EB-D-206 c): a fault reading the Return record is the lookup's retry - Failed, nothing sent, nothing written")]
+    public async Task L9_AReturnRecordReadFault_IsARetry_AndNothingIsWritten()
+    {
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice);
+        var before = world.Snapshot();
+        world.QueryFault = q => IsReturnRecordQuery(q) ? new HttpRequestException("dataverse down") : null;
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Failed);
+        result.Code.Should().Be(InvoiceSubmissionRerunCodes.SupersedesReadFailed);
+        result.Permanent.Should().BeFalse();
+        world.PredecessorQueries.Should().ContainSingle("the fault is in the Return read, after the predecessor was found");
+        world.Attempts.Should().Be(0, "nothing is sent");
+        world.Snapshot().Should().Equal(before);
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.RerunPending);
+    }
+
+    // ── L10 (K2): the commit re-checks (b) under a lock on the predecessor ──
+
+    [Fact(DisplayName = "095d-2b-3 L10 SEEDED (EB-D-206, amended): another re-run takes the predecessor before this commit - the re-check under the predecessor lock answers Changed, and the re-evaluation writes no link")]
+    public async Task L10_APredecessorTakenBeforeTheCommit_IsChanged_AndTheReEvaluationDoesNotLink()
+    {
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice);
+        var predecessorKey = InvoiceSubmissionRerun.SupersedesLockKey(Predecessor);
+        world.OnAcquire = key =>
+        {
+            if (key == predecessorKey && world.Locks.Acquired.Count(k => k == predecessorKey) == 1)
+            {
+                // The racing re-run committed its link just before this one took the key; this invoice's own row did not move.
+                world.AddEarlierInvoice(NewerEarlier, InvoiceStatusCodes.InReview, AfterThisInvoice, supersedes: Predecessor);
+            }
+        };
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        world.Attempts.Should().Be(1, "the first commit is refused by the re-check before anything is sent");
+        world.Locks.Acquired.Take(3).Should().Equal(
+            new[] { SubmissionOverrideService.LockKey(InvoiceId), InvoiceLineDecisionService.LockKeyFor(InvoiceId), predecessorKey },
+            "the predecessor lock is taken after the invoice's own locks");
+        world.Locks.Released.Should().BeEquivalentTo(world.Locks.Acquired, "every lock taken is released");
+        world.Logger.Entries.Should().Contain(e => e.Message.Contains("superseded by another invoice since the read") && e.Message.Contains(Predecessor.ToString()));
+        world.PredecessorQueries.Should().HaveCount(2, "the re-evaluation reads the predecessor again");
+        SupersedesIn(world.Applied.Single()[1]).Should().BeNull("narrowing (b) drops the link on the re-evaluation");
+        world.Row(InvoiceId).GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn).Should().BeNull();
+        world.Row(NewerEarlier).GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn).Id.Should().Be(Predecessor);
+    }
+
+    [Fact(DisplayName = "095d-2b-3 L10 (EB-D-206, amended): a fault in the commit's re-check is the lookup's retry - nothing sent, every lock released")]
+    public async Task L10_ARecheckFault_IsARetry_AndNothingIsSent()
+    {
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice);
+        var before = world.Snapshot();
+        world.QueryFault = q => q.EntityName == "sprk_invoice"
+            && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoiceid" && c.Operator == ConditionOperator.NotEqual)
+            ? new HttpRequestException("dataverse down")
+            : null;
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Failed);
+        result.Code.Should().Be(InvoiceSubmissionRerunCodes.SupersedesReadFailed);
+        world.Attempts.Should().Be(0);
+        world.Snapshot().Should().Equal(before);
+        world.Locks.Acquired.Should().Contain(InvoiceSubmissionRerun.SupersedesLockKey(Predecessor));
+        world.Locks.Released.Should().BeEquivalentTo(world.Locks.Acquired);
+    }
+
+    private static bool IsReturnRecordQuery(QueryExpression q) =>
+        q.EntityName == "sprk_decisionrecord" && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_regardinginvoice")
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_actioncode" && c.Values.Contains(InvoiceRejectReturnService.ReturnActionCode));
+
     private static bool IsPredecessorQuery(QueryExpression q) =>
         q.EntityName == "sprk_invoice" && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.InvoiceVendorOrg)
         && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceReviewService.InvInvoiceNumber);
@@ -291,10 +462,19 @@ public sealed partial class InvoiceSubmissionRerunTests
         /// <summary>Runs as each transaction is sent, before its version checks.</summary>
         public Action<IReadOnlyList<OrganizationRequest>>? BeforeCommit { get; set; }
 
+        /// <summary>Runs as each processing lock is taken (fix round: the predecessor lock).</summary>
+        public Action<string>? OnAcquire { get; set; }
+
+        /// <summary>The Return-time reads the re-run sent (narrowing c).</summary>
+        public List<QueryExpression> ReturnRecordQueries { get; } = [];
+
         /// <summary>Another invoice of this firm with this submission's firm invoice number, filed under the seeded invoice's core record
-        /// (or another one). Every invoice has its approval row except an automatic rejection (<paramref name="approval"/> false).</summary>
+        /// (or another one). Every invoice has its approval row except an automatic rejection (<paramref name="approval"/> false). A Returned
+        /// to Firm one also has its Return decision record (unless <paramref name="returnRecord"/> is false), decided at
+        /// <paramref name="returnedOn"/> (default: a day after it was created).</summary>
         public void AddEarlierInvoice(
-            Guid id, int status, DateTime createdOn, bool approval = true, bool otherCore = false, Guid? supersedes = null)
+            Guid id, int status, DateTime createdOn, bool approval = true, bool otherCore = false, Guid? supersedes = null,
+            DateTime? returnedOn = null, bool returnRecord = true)
         {
             var row = new Entity("sprk_invoice", id)
             {
@@ -325,6 +505,19 @@ public sealed partial class InvoiceSubmissionRerunTests
             }
 
             _rows[id] = row;
+            if (status == InvoiceStatusCodes.ReturnedToFirm && returnRecord)
+            {
+                // The Return's Decision Record, as BillingDecisionRecorder files it: under the invoice, code return-to-firm.
+                var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
+                {
+                    ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", id),
+                    ["sprk_actioncode"] = InvoiceRejectReturnService.ReturnActionCode,
+                    ["sprk_decidedon"] = returnedOn ?? createdOn.AddDays(1),
+                    ["createdon"] = (returnedOn ?? createdOn.AddDays(1)).AddSeconds(2),
+                };
+                _rows[record.Id] = record;
+            }
+
             if (approval)
             {
                 var approvalRow = new Entity(InvoiceSubmissionPersister.ApprovalEntity, Guid.NewGuid())
@@ -335,12 +528,18 @@ public sealed partial class InvoiceSubmissionRerunTests
             }
         }
 
-        /// <summary>The predecessor lookup: recorded, faulted when told, and ordered as Dataverse orders it (created on, then id).</summary>
+        /// <summary>The predecessor lookup: recorded, faulted when told, and ordered as Dataverse orders it (created on, then the id as a
+        /// uniqueidentifier, <see cref="SqlGuid"/>, not <see cref="Guid.CompareTo(Guid)"/>).</summary>
         private IEnumerable<Entity> Observe(QueryExpression query, IEnumerable<Entity> rows)
         {
             if (QueryFault?.Invoke(query) is { } fault)
             {
                 throw fault;
+            }
+
+            if (IsReturnRecordQuery(query))
+            {
+                ReturnRecordQueries.Add(query);
             }
 
             if (!IsPredecessorQuery(query))
@@ -352,7 +551,7 @@ public sealed partial class InvoiceSubmissionRerunTests
             IOrderedEnumerable<Entity>? ordered = null;
             foreach (var order in query.Orders)
             {
-                object? Key(Entity e) => order.AttributeName == "sprk_invoiceid" ? e.Id : e.Contains(order.AttributeName) ? e[order.AttributeName] : null;
+                object? Key(Entity e) => order.AttributeName == "sprk_invoiceid" ? new SqlGuid(e.Id) : e.Contains(order.AttributeName) ? e[order.AttributeName] : null;
                 ordered = ordered is null
                     ? (order.OrderType == OrderType.Descending ? rows.OrderByDescending(Key) : rows.OrderBy(Key))
                     : (order.OrderType == OrderType.Descending ? ordered.ThenByDescending(Key) : ordered.ThenBy(Key));

@@ -864,6 +864,7 @@ public sealed partial class InvoiceSubmissionRerunTests
                     }
 
                     Locks.Acquired.Add(key);
+                    OnAcquire?.Invoke(key); // 095d-2b-3 fix round: another writer acting while this run holds the key
                     return true;
                 });
             locks.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -917,7 +918,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         {
             if (condition.AttributeName == $"{row.LogicalName}id")
             {
-                return condition.Values.Contains(row.Id);
+                return condition.Operator == ConditionOperator.NotEqual ? !condition.Values.Contains(row.Id) : condition.Values.Contains(row.Id);
             }
 
             if (condition.Operator == ConditionOperator.BeginsWith)

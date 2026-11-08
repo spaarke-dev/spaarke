@@ -1137,9 +1137,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// refuses a supersedes link across core records), else no link. Read app-only: a firm resubmitting must not be able to learn, from a
     /// refusal, that an invoice it cannot read exists. Throws on a read fault (the caller retries).
     /// <para>Task 095d-2b-3 (EB-D-206): the one rule for both callers, the persister at create time (<paramref name="rerun"/> null) and the
-    /// post-Set-firm re-run (<see cref="InvoiceSubmissionRerun"/>), which passes <paramref name="rerun"/> for its two narrowings: (a) only
-    /// invoices created before this one are candidates, and (b) a predecessor another invoice already supersedes
-    /// (<see cref="SubmissionCommitGate.SupersededByAnotherAsync"/>) is not linked.</para>
+    /// post-Set-firm re-run (<see cref="InvoiceSubmissionRerun"/>), which passes <paramref name="rerun"/> for its narrowings: (a) only
+    /// invoices created before this one are candidates, (c) the predecessor's Return to Firm was decided before this invoice was created
+    /// (<see cref="ReturnDecidedOnAsync"/>; amended EB-D-206), and (b) a predecessor another invoice already supersedes
+    /// (<see cref="SubmissionCommitGate.SupersededByAnotherAsync"/>) is not linked. At create time (c) holds by construction (the invoice is
+    /// new, so any Return already happened), so the persister pays none of these reads.</para>
     /// </summary>
     internal static async Task<Guid?> FindSupersededInvoiceAsync(
         IGenericEntityService entities, ILogger logger, Guid submissionId, Guid invoiceId, SubmissionSnapshot submission, InvoiceCoreRecord core,
@@ -1193,6 +1195,28 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return null;
         }
 
+        // EB-D-206 (c), amended, the re-run only: the status is read at re-run time, so a predecessor that was still In Review when this invoice
+        // was sent, and returned only later, would otherwise be shown as replaced by it. It counts only if its Return was decided before.
+        if (rerun is not null)
+        {
+            var returnedAt = await ReturnDecidedOnAsync(entities, previous.Id, ct).ConfigureAwait(false);
+            if (returnedAt is null)
+            {
+                logger.LogWarning(
+                    "Invoice submission {SubmissionId}: the Returned to Firm invoice {PreviousId} for its firm and invoice number has no Return decision record; no supersedes link",
+                    submissionId, previous.Id);
+                return null;
+            }
+
+            if (!ReturnedBefore(returnedAt.Value, rerun.InvoiceCreatedOn))
+            {
+                logger.LogInformation(
+                    "Invoice submission {SubmissionId}: the invoice {PreviousId} for its firm and invoice number was returned to the firm only after this invoice was created; no supersedes link",
+                    submissionId, previous.Id);
+                return null;
+            }
+        }
+
         // EB-D-206 (b), the re-run only: a predecessor already superseded by another invoice keeps that one link.
         if (rerun is not null && await SubmissionCommitGate.SupersededByAnotherAsync(entities, previous.Id, ct).ConfigureAwait(false))
         {
@@ -1220,6 +1244,44 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         return byTime != 0
             ? byTime < 0
             : new System.Data.SqlTypes.SqlGuid(candidate.Id).CompareTo(new System.Data.SqlTypes.SqlGuid(invoiceId)) < 0;
+    }
+
+    /// <summary>EB-D-206 (c), amended: whether a Return decided at <paramref name="returnedAt"/> came before the invoice created at
+    /// <paramref name="createdOn"/>. Strictly before: the Return's decided-on is cut to the second (<see cref="InvoiceRejectReturnService"/>),
+    /// so a Return in the same second as the create is not known to precede it, and gives no link.</summary>
+    private static bool ReturnedBefore(DateTime returnedAt, DateTime createdOn) => returnedAt.CompareTo(createdOn) < 0;
+
+    /// <summary>
+    /// EB-D-206 (c), amended: when the Return to Firm of <paramref name="invoiceId"/> was decided, from its Decision Record (D-75: one record
+    /// per invoice decision, filed under the invoice). Both Return routes record <c>return-to-firm</c> under the invoice through
+    /// <see cref="BillingDecisionRecorder"/>: Return of the invoice (<see cref="InvoiceRejectReturnService.ReturnActionCode"/>, decided-on from
+    /// the server's clock, before the status moves) and Return of a blocked submission (<see cref="SubmissionOverrideService.ReturnActionCode"/>,
+    /// the writer's clock). The record's own <c>sprk_decidedon</c> (written by <see cref="Signals.DecisionRecordWriter"/>, never by a caller's
+    /// value), else its <c>createdon</c>. The latest such record answers (a second one could only come from a concurrent pair), so a later
+    /// Return is never hidden by an earlier row. Null: no record. Read app-only; a fault, or a record with neither time, throws (the caller
+    /// retries).
+    /// </summary>
+    private static async Task<DateTime?> ReturnDecidedOnAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_decidedon", "createdon"),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("sprk_regardinginvoice", ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, InvoiceRejectReturnService.ReturnActionCode);
+        query.AddOrder("sprk_decidedon", OrderType.Descending);
+        query.AddOrder("createdon", OrderType.Descending);
+
+        if ((await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault() is not { } record)
+        {
+            return null;
+        }
+
+        return record.GetAttributeValue<DateTime?>("sprk_decidedon") ?? record.GetAttributeValue<DateTime?>("createdon")
+            ?? throw new InvalidOperationException($"The Return decision record {record.Id} has no decided-on or created-on time.");
     }
 
     private static int? StatusOfInvoice(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
