@@ -374,7 +374,10 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     /// design notes/task-032b-design.md §3, §7). The sync-mode script's display-copy table is held to this set by a test.
     /// <para>
     /// <c>sprk_invoice</c>'s four attorney and paralegal columns, filled by the seeded "Matter to Invoice (Attorney Matrix)"
-    /// profile. <c>sprk_assignedto1/2</c> are not listed: no profile maps them, and the invoice step never writes them.
+    /// profile. <c>sprk_assignedto1/2</c> are not listed: no seeded profile maps them. They are plain data, not display
+    /// copies: Office quick-create writes the invoice's Assigned To to <c>sprk_assignedto1</c>
+    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>). With the invoice out of the registry, that column no longer
+    /// targets people (Daily Briefing, notifications); whether it should is an open owner decision (UAC-r2, 2026-11-08).
     /// </para>
     /// </summary>
     internal static IReadOnlyDictionary<string, IReadOnlySet<string>> DisplayCopyColumns { get; } =
