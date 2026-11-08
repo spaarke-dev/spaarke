@@ -1051,8 +1051,8 @@ internal static class ExternalInvoiceVisibility
     internal const string InvoiceFirmColumn = Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg;
 
     /// <summary>Absent or null: <c>null</c> (not set); a non-empty GUID string: that id; anything else
-    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.</summary>
-    private static Guid? LinkOf(IReadOnlyDictionary<string, JsonElement> row, string column)
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>. Also read by <see cref="InvoiceLinks"/> (task 130-0b).</summary>
+    internal static Guid? LinkOf(IReadOnlyDictionary<string, JsonElement> row, string column)
     {
         if (!row.TryGetValue(column, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             return null;
