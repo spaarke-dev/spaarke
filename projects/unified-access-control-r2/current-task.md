@@ -30,10 +30,14 @@
 - ebilling: 085 pass 2 fix diff; 130-0 diff (before merge); 130-0b shape before coding. Tell-me items: ribbon source removal reaching master; dev batch SHA (165e/f etc.) for the gate; 2b-2; the batch checklist + commit; field-security owner question.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration; A10, B-4, 021 later. Every deploy = master + spike until they say Phase 0 is done.
 
+## Owner answers (2026-11-08, desktop session)
+- **fm 060:** the owner ruled (option (a) for the no-record part; record-anchored messages unchanged). fm was told; uac-r2 reviews fm's shape before coding and owns the role and share side. Detail is in the private handoff. One sub-point is still open with the owner (private handoff).
+- **#2270 + #2278:** owner-team source = (a), a customer-BU column on `sprk_dataverseenvironment`. Next: design the column and the owner rule, then the backfill (#2278).
+- **ebilling 130 firmless partner:** keep the firm match; no firm → no invoices; a fault fails closed. Check this in the 130-0 review.
+
 ## Owner items outstanding
-- **fm 060 messaging-privacy question** (confirmed on dev 11-08; two owner rulings conflict; options and detail in the private message to fm and in the owner report, not here). Awaiting the owner's pick; then tell fm.
 - **#2635** (BFF identity gets Decision Record read via a SpaarkeMaster role in env setup; ontology says the live test is enough, I recommend the grant) — linked to: prod-named SysAdmin app users on dev (BFF identities read Decision Records only via SysAdmin).
-- **#2270 + #2278** (moved from External Access R4 to uac-r2 by the owner, 11-08; hand-off comments on both): foreign-environment contact owner + contact owner backfill. Both wait on the owner-team source for a foreign environment: (a) customer-BU column on sprk_dataverseenvironment (my recommendation) or (b) default team of the new systemuser's BU. R4 keeps #2578, #2269 (comes to me for review), #2499.
+- R4 keeps #2578, #2269 (comes to me for review), #2499. My move notice to `spa-r4` was HELD (different permission mode), so it doesn't know my new address yet.
 - Report card `sprk_assigned*` registry (FR-24); G-8 for customer envs; #2590; SyncMode -Apply review; the field-security bundle (via ebilling); optional retire of the task-154 control row.
 - Older: column auditing on writer-only lookups, AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
