@@ -770,25 +770,41 @@ The specialist roster is versioned content (§6), so the same files can later be
 
 The practice lead uploads the template folder tree by drag-and-drop. Site owners can't create SharePoint templates without an admin `[Cited]`.
 
+**Standard (2026-11-08, owner-directed; POC Act 7): organised by document type.** Every type folder has the same shape, so users learn one habit: open the folder for the document's type and attach the file at the top.
+
 ```
-Legal Knowledge/                       (was "Legal Playbooks"; OD-35; proven in the POC kit)
-├── Playbooks/<practice>/              legal playbook .md (published master copy) + one Word copy .docx
-│   └── Archive/                       superseded versions, moved here, never deleted
-├── Precedents/<practice>/             model forms, counterparty samples (.docx, .pdf), negotiated examples
-├── Grounding/
-│   ├── Normative/<practice>/          policies, dated references, checklists
-│   ├── Format/<practice>/             templates and house formats
-│   └── Samples/<practice>/            synthetic factual samples (demo and eval only)
-└── Accelerators/                      skill folders and plugin .zip for the group
+Legal Knowledge/
+├── Start here – Quick card.docx       the user steps (contract / other document) and the one-time setup
+├── README.txt
+├── Shared templates/                  house formats used by several types (for example the legal memo)
+└── <Document type>/                   display name, for example NDA, Legal Hold Notice
+    ├── <playbook>.docx                THE playbook to attach (Word copy, four columns). Nothing else at this level
+    ├── Playbook master/               the .md master: the Word copy is generated from it; Cowork skills read it
+    ├── Policies/                      the customer's policies and standards for this type
+    ├── Precedents/                    signed or approved examples
+    ├── Templates/                     house forms for this type
+    └── Archive/                       superseded playbooks: moved here, never deleted; never attached
 ```
 
-- **Practice folders** use the practice's display name, as in the POC kit (`Playbooks/NDA/`). They cover non-contract work too, for example `Employment` or `Litigation – Complaint Response`. The lower-case practice id (`nda`) is used only in skill names and `topics.yaml`.
+- **The same subfolders in every type, created even when empty.** Empty folders still show where things belong.
+- **Synthetic test material is never in `Legal Knowledge/`.** In the POC it is in `Shared Documents/POC Workspace/` (Matters, Inbox, Samples, Test variants).
+- **Who maintains what:**
+  - Spaarke ships the playbook (master and Word copy) and the quick card.
+  - The customer supplies Policies, Precedents and Templates.
+  - The library owner moves superseded playbooks to Archive.
+- **Contract and non-contract types share the shape.** A non-contract master omits `Side` (`playbook_parse(require_side=False)`, X14). The POC's second type is the legal hold notice.
+- **What users attach vs. what they never touch** (POC Act 7):
+  - users attach only the Word copy at the top of a type folder, for any review;
+  - the master is build and Cowork input;
+  - *creating* a playbook from precedents (Copilot `Create playbook`) is a library-owner task for contracts, not part of a review.
+- **Lower-case type ids** (`nda`, `lh`) are used only in topic ids, skill names and `topics.yaml`.
+- *The 11-05 function-first tree (`Playbooks/<practice>/`, `Grounding/Normative|Format|Samples/`, `Precedents/<practice>/`) is superseded. The old → new map is in the runbook.*
 - **Naming** (library note §4.2): `<Owner> <Family> – <Side or role>[ – <Context>] v<major.minor>`, for example `Acme NDA – Mutual v1.1`. The document Title equals the file name, because Word names a saved playbook after the Title.
 - **Two setups, one tree** (OD-40):
   - **personal:** OneDrive `Documents/Legal Knowledge/`;
   - **team:** SharePoint `<site>/Shared Documents/Legal Knowledge/`, seeded once by the library owner. Members' profiles point to it, with the personal tree as fallback.
 
-To give the group the skills, the practice lead shares the plugin with named users in Cowork, the admin deploys it to the group (T-14), or members copy the skill folders. The library is where the group's playbooks are kept and versioned. Attorneys get **Read** only on `Legal Knowledge/Playbooks/<practice>/` (§5.3).
+To give the group the skills, the practice lead shares the plugin with named users in Cowork, the admin deploys it to the group (T-14), or members copy the skill folders. The library is where the group's playbooks are kept and versioned. Attorneys get **Read** only on each `Legal Knowledge/<Document type>/` folder (§5.3).
 
 ### 5.10 Component protocol (summary of `notes/component-protocol.md` v0.2)
 

@@ -30,12 +30,13 @@ POC = os.path.dirname(HERE)
 REPO = os.path.abspath(os.path.join(POC, "..", "..", "..", ".."))
 ACC = os.path.join(REPO, "src", "accelerators")
 KIT = os.path.join(POC, "kit-held", "Act 7 - Document-type library")
-OUT = os.path.join(KIT, "out")
+OUT = os.environ.get("KIT_OUT") or os.path.join(tempfile.gettempdir(), "act7-library")  # short: MAX_PATH
 sys.path[:0] = [os.path.join(ACC, "build"), os.path.join(ACC, "core", "engines")]
 import build_accelerator as b  # noqa: E402
 import playbook_parse as pp  # noqa: E402
 import render_word_playbook as rw  # noqa: E402
 
+TYPE_SUBFOLDERS = ("Playbook master", "Policies", "Precedents", "Templates", "Archive")
 NDA_NAME = "Spaarke NDA – Mutual v1.2"
 LH_NAME = "Spaarke Legal Hold Notice – Employee Custodians v1.0"
 LK = os.path.join(OUT, "Legal Knowledge")
@@ -294,19 +295,52 @@ def write_requirements(path):
     d.save(path)
 
 
+CONTRACT_STEPS = [
+    "Open the contract in Word.",
+    "Open Copilot and start a new chat.",
+    "Click the paperclip, then Attach from Cloud.",
+    "Go to Acme Company › Documents › Legal Knowledge › the folder for the contract type (for example NDA). "
+    "Choose the playbook at the top of the folder.",
+    "Type: Review this against the attached playbook. Then send.",
+    "Copilot shows the playbook's name. Click Run review. Don't click Save.",
+    "Open each topic marked Needs review or Not acceptable. Click Apply on the edits you agree with.",
+]
+OTHER_STEPS = [
+    "Open the document in Word.",
+    "Open Copilot and start a new chat.",
+    "Click the paperclip, then Attach from Cloud.",
+    "Go to Acme Company › Documents › Legal Knowledge › the folder for the document type (for example Legal Hold "
+    "Notice). Choose the playbook at the top of the folder.",
+    "Type: Review this against the attached playbook. Then send.",
+    "Follow Copilot's lead. If it shows the playbook's name, click Run review (don't click Save). If it asks where "
+    "to put the results, choose In chat.",
+    "Read each item marked Needs review, Not acceptable or Gap. Make the changes you agree with.",
+]
+CUSTOM_INSTRUCTION = (
+    "I'm an in-house lawyer at Acme Company. For legal document reviews:\n"
+    "- Use the playbook for the document's type from Acme Company › Documents › Legal Knowledge (the file at the "
+    "top of that type's folder). Never use files in an Archive folder.\n"
+    "- If I ask for a review without attaching a playbook, ask me to attach the playbook for the document type "
+    "before you review.\n"
+    "- Each type's policies are in its Policies folder.\n"
+    "- Mark results as drafts for attorney review. Never send email on my behalf.")
+
+
 def write_quick_card(path):
     d = base_doc("Start here – Quick card")
-    d.add_paragraph("Legal Knowledge — quick card (Word)", style="Title")
-    d.add_paragraph("One habit for every document type. Version 1.0, 2026-11-07. Owner: Legal Knowledge "
-                    "(POC: Spaarke). Results are drafts for attorney review.")
-    d.add_heading("The habit: three steps", level=1)
-    for s in ("Open your document in Word.",
-              "In Copilot, attach the playbook for its document type: paperclip › Attach from Cloud › Acme Company › "
-              "Documents › Legal Knowledge › [document type folder] › the playbook file at the top of the folder.",
-              "Type: Review this against the attached playbook."):
-        d.add_paragraph(s, style="List Number")
-    d.add_paragraph("You don't need a slash command or to know which Copilot skill to use. Copilot reads the "
-                    "playbook and picks the review.")
+    d.add_paragraph("Start here: reviewing a document with Copilot", style="Title")
+    d.add_paragraph("Quick card v1.1, 2026-11-08. Owner: Legal Knowledge (POC: Spaarke). Results are drafts for "
+                    "attorney review.")
+    d.add_heading("How to review a contract", level=1)
+    for i, s in enumerate(CONTRACT_STEPS, 1):
+        d.add_paragraph(f"{i}. {s}")
+    d.add_paragraph("Before signing: type / and choose Check execution readiness.")
+    d.add_heading("How to review another legal document", level=1)
+    d.add_paragraph("For example a legal hold notice.")
+    for i, s in enumerate(OTHER_STEPS, 1):
+        d.add_paragraph(f"{i}. {s}")
+    d.add_paragraph("To check a document against an Acme policy: type / and choose Identify regulatory gaps, choose "
+                    "Something else, name the policy and attach it from the type's Policies folder.")
     d.add_heading("Document types", level=1)
     t = d.add_table(rows=1, cols=3)
     t.style = "Table Grid"
@@ -321,27 +355,233 @@ def write_quick_card(path):
             c.text = v
     d.add_paragraph("No folder for your document type? Ask the Legal Knowledge owner. Don't use another type's "
                     "playbook.")
-    d.add_heading("Optional next steps", level=1)
-    for s in ("Check against a policy: type / and choose Identify regulatory gaps. When it offers laws to test "
-              "against, choose Something else and name the policy, then attach it from the type's Policies folder. "
-              "Attach the playbook as well if the policy refers to it.",
-              "Contracts only, before signature: type / and choose Check execution readiness."):
-        d.add_paragraph(s, style="List Bullet")
     d.add_heading("Good to know", level=1)
-    for s in ("Attach the playbook each time rather than saving it in Copilot. A saved playbook is a copy that does "
-              "not update when Legal Knowledge does. If you saved one, check that the version in its name matches "
-              "the file in the folder.",
-              "Edits arrive as suggestions. Nothing changes in your document until you click Apply; Apply edits with "
-              "comments keeps the reasons.",
-              "Ratings: Acceptable, Needs review, Not acceptable. Read every Needs review and Not acceptable item "
-              "before you act on it."):
+    for s in ("Attach the playbook each time. Don't save it in Copilot: a saved copy doesn't update when Legal "
+              "Knowledge does.",
+              "Nothing changes in your document until you click Apply."):
         d.add_paragraph(s, style="List Bullet")
+    d.add_heading("One-time setup", level=1)
+    d.add_paragraph("In Copilot: Settings › Personalization › Customize Copilot. Paste this text and click Save "
+                    "customization:")
+    for line in CUSTOM_INSTRUCTION.split("\n"):
+        d.add_paragraph(line).paragraph_format.left_indent = Pt(18)
+    d.save(path)
+
+
+def lh_master_text():
+    """The legal hold playbook as a Markdown master (no Side: not a contract; X14)."""
+    out = [f"# Playbook: {LH_NAME}", " | ".join(f"{k.capitalize()}: {v}" for k, v in LH_META.items()), "", LH_INTRO, ""]
+    for t in LH_TOPICS:
+        out.append(f"## topic: {t['id']}")
+        out.append(f"Preferred: {t['preferred']}")
+        out.append(f"Fallback: {t['fallback'] or 'n/a'}")
+        out.append(f"Prohibited / escalate: {t['escalate'] or 'n/a'}")
+        if t["if_missing"]:
+            out.append(f"If missing: {t['if_missing']}")
+        if t["model_language"]:
+            out.append(f'Model language: "{t["model_language"]}"')
+        out.append(f"Priority: {t['priority']}")
+        out.append("")
+    return "\n".join(out)
+
+
+def numbered_doc(path, title, intro, sections):
+    """A policy-style document: sections of (heading, [(id, text)])."""
+    d = base_doc(title)
+    d.add_paragraph(title, style="Title")
+    for line in intro:
+        d.add_paragraph(line)
+    for heading, items in sections:
+        d.add_heading(heading, level=1)
+        for rid, text in items:
+            p = d.add_paragraph()
+            if rid:
+                p.add_run(f"{rid} ").bold = True
+            p.add_run(text)
+    d.save(path)
+
+
+POLICY_NAME = "Acme Records Retention and Legal Hold Policy v1.0"
+
+
+def write_policy(path):
+    numbered_doc(path, POLICY_NAME, [
+        "Owner: Acme Legal Department. Effective: January 1, 2026. Applies to: all Acme employees and contractors, "
+        "and all Acme systems and devices. Status: in force. (Synthetic POC document.)"], [
+        ("1 Definitions", [
+            ("RLH-1.1", "\"Legal hold\" means a written instruction from the Legal Department to preserve "
+                        "information relevant to actual or reasonably anticipated litigation, a government "
+                        "investigation or an audit."),
+            ("RLH-1.2", "\"Custodian\" means a person who receives a legal hold notice because they may hold "
+                        "relevant information.")]),
+        ("2 Retention schedule", [
+            ("RLH-2.1", "Email in Acme mailboxes is kept for three (3) years and then deleted automatically."),
+            ("RLH-2.2", "Teams chat messages are kept for one (1) year and then deleted automatically."),
+            ("RLH-2.3", "Files in OneDrive and SharePoint are kept for seven (7) years."),
+            ("RLH-2.4", "Text messages on phones are not captured by Acme systems. Employees must not turn on "
+                        "auto-delete for business messages."),
+            ("RLH-2.5", "Paper records follow the departmental schedules in Appendix A.")]),
+        ("3 Legal holds", [
+            ("RLH-3.1", "The Legal Department issues a written legal hold notice within five (5) business days after "
+                        "it learns that litigation, a government investigation or an audit is reasonably "
+                        "anticipated."),
+            ("RLH-3.2", "Each notice uses the approved Acme Legal Hold Notice Template and is reviewed by a Legal "
+                        "Department attorney before it is issued."),
+            ("RLH-3.3", "Each custodian must acknowledge the notice in writing within five (5) business days. Legal "
+                        "escalates custodians who have not acknowledged to their manager."),
+            ("RLH-3.4", "IT places a technical hold on each custodian's mailbox, Teams chats and OneDrive within two "
+                        "(2) business days after the notice is issued."),
+            ("RLH-3.5", "A legal hold overrides the retention schedule in section 2 for the information it covers."),
+            ("RLH-3.6", "Legal sends a reminder to every custodian at least every six (6) months while a hold is in "
+                        "effect."),
+            ("RLH-3.7", "HR notifies Legal before a custodian leaves Acme or changes role. IT does not wipe, reissue "
+                        "or delete a custodian's devices or accounts without Legal's written approval."),
+            ("RLH-3.8", "Only the Legal Department releases a hold, in writing."),
+            ("RLH-3.9", "Hold notices state what to preserve and how. They contain no assessment of the merits, "
+                        "legal strategy or settlement.")]),
+        ("4 Compliance", [
+            ("RLH-4.1", "Failure to comply with a legal hold may lead to disciplinary action, up to and including "
+                        "termination of employment.")]),
+    ])
+
+
+def write_template(path):
+    d = base_doc("Acme Legal Hold Notice Template v1.0")
+    d.add_paragraph("Acme Legal Hold Notice Template v1.0", style="Title")
+    d.add_paragraph("Approved template (Policy RLH-3.2). Replace every [bracketed] item; keep all sections.")
+    body = [("PRIVILEGED & CONFIDENTIAL — ATTORNEY-CLIENT COMMUNICATION", True), ("LEGAL HOLD NOTICE", True),
+            ("To: [custodians, or \"the people listed at the end of this notice\"]", False),
+            ("From: Acme Company, Inc., Legal Department", False), ("Date: [date]", False),
+            ("Re: Legal hold — [matter name]", False),
+            ("1. Why you are receiving this notice", True),
+            ("[Describe the claim or investigation in two or three sentences: who, what, when. Facts only.] Acme "
+             "therefore must preserve information relevant to this matter.", False),
+            ("2. What to preserve", True),
+            ("Preserve all information relating to [subject matter, in plain language].", False),
+            ("This hold covers information from [start date, no later than the start of the relationship or events "
+             "in dispute] to the present, and applies to information created or received after the date of this "
+             "notice.", False),
+            ("This includes email, Teams and other chat messages, text and instant messages (including on personal "
+             "phones used for work), voicemail, documents on network drives, OneDrive and SharePoint, business "
+             "systems, and paper files and notebooks.", False),
+            ("3. What to do", True),
+            ("Do not delete, discard, alter or overwrite any of this information, and do not move it or forward it "
+             "to personal accounts. Keep it as it is, including drafts and duplicates.", False),
+            ("Turn off any automatic deletion you control, such as mailbox clean-up rules or auto-delete settings for "
+             "messages on your phone. Legal and IT are placing technical holds on company systems; do not rely on "
+             "them alone.", False),
+            ("This hold overrides Acme's Records Retention Schedule and any routine destruction practice.", False),
+            ("4. Other people", True),
+            ("If you know of anyone else, including former employees, contractors or vendors, who may have relevant "
+             "information, tell Legal. If you plan to leave Acme or change roles, tell Legal first so that your "
+             "devices and accounts can be preserved.", False),
+            ("5. How long the hold lasts", True),
+            ("This hold remains in effect until Legal tells you in writing that it has been released.", False),
+            ("6. Why it matters", True),
+            ("If relevant information is lost, a court can impose sanctions on Acme, and failure to comply with this "
+             "notice may lead to disciplinary action.", False),
+            ("7. Questions and confirmation", True),
+            ("If you have questions, contact [attorney name, title, email, phone].", False),
+            ("Please confirm by [date, within 5 business days] that you have read this notice and will comply, by "
+             "replying to this email.", False)]
+    for text, bold in body:
+        d.add_paragraph().add_run(text).bold = bold
+    d.save(path)
+
+
+PRECEDENT = [
+    ("1. Why you are receiving this notice", None),
+    ("On February 24, 2025, Kestrel Freight Corp. (\"Kestrel\") filed a complaint against Acme in the Superior Court "
+     "of Delaware alleging unpaid invoices under the Freight Services Agreement dated June 1, 2022. Acme therefore "
+     "must preserve information relevant to this matter.", ""),
+    ("2. What to preserve", None),
+    ("Preserve all information relating to the Kestrel relationship, including the Freight Services Agreement and "
+     "its negotiation, shipment records, invoices, disputes about charges, payments, and communications with "
+     "Kestrel and internal discussions about any of these.", ""),
+    ("This hold covers information from January 1, 2022 to the present, and applies to information created or "
+     "received after the date of this notice.", ""),
+    ("This includes email, Teams and other chat messages, text and instant messages (including on personal phones "
+     "used for work), voicemail, documents on network drives, OneDrive and SharePoint, the transportation management "
+     "system, and paper files and notebooks.", ""),
+    ("3. What to do", None),
+    ("Do not delete, discard, alter or overwrite any of this information, and do not move it or forward it to "
+     "personal accounts. Keep it as it is, including drafts and duplicates.", ""),
+    ("Turn off any automatic deletion you control, such as mailbox clean-up rules or auto-delete settings for "
+     "messages on your phone. Legal and IT are placing technical holds on company systems; do not rely on them "
+     "alone.", ""),
+    ("This hold overrides Acme's Records Retention Schedule and any routine destruction practice.", ""),
+    ("4. Other people", None),
+    ("If you know of anyone else, including former employees, contractors or vendors, who may have relevant "
+     "information, tell Legal. If you plan to leave Acme or change roles, tell Legal first so that your devices and "
+     "accounts can be preserved.", ""),
+    ("5. How long the hold lasts", None),
+    ("This hold remains in effect until Legal tells you in writing that it has been released.", ""),
+    ("6. Why it matters", None),
+    ("If relevant information is lost, a court can impose sanctions on Acme, and failure to comply with this notice "
+     "may lead to disciplinary action.", ""),
+    ("7. Questions and confirmation", None),
+    ("If you have questions, contact Dana Whitfield, Senior Counsel, at dana.whitfield@acme.example or "
+     "(555) 010-4471.", ""),
+    ("Please confirm by March 7, 2025 that you have read this notice and will comply, by replying to this email.", ""),
+    ("Recipients: L. Moreau, P. Singh, D. Hart, A. Kowalski.", None),
+]
+
+
+def write_precedent(path):
+    head = [(t.replace("November 9, 2026", "February 28, 2025").replace("Harbor Point Logistics, LLC",
+             "Kestrel Freight Corp.").replace("Supply Chain Operations, Procurement and Finance team members",
+             "Transportation and Accounts Payable team members"), b_) for t, b_ in HEAD]
+    d = base_doc("Legal Hold Notice – Kestrel Freight (2025-02-28)")
+    for text, bold in head:
+        d.add_paragraph().add_run(text).bold = bold
+    for text, tag in PRECEDENT:
+        if tag is None and text[:2].rstrip(".").isdigit():
+            d.add_paragraph().add_run(text).bold = True
+        else:
+            d.add_paragraph(text)
+    d.save(path)
+
+
+def write_demand_letter(path):
+    d = base_doc("Harbor Point – Demand letter (2026-10-20)")
+    for text, bold in [
+        ("CALLOWAY & REYES LLP", True), ("1201 Market Street, Suite 900, Wilmington, Delaware 19801", False),
+        ("October 20, 2026", False),
+        ("BY EMAIL AND OVERNIGHT COURIER", True),
+        ("General Counsel, Acme Company, Inc., 400 Harbor Boulevard, Newark, Delaware 19711", False),
+        ("Re: Harbor Point Logistics, LLC — Warehousing and Distribution Services Agreement dated March 1, 2024",
+         True),
+        ("Dear Counsel:", False),
+        ("We represent Harbor Point Logistics, LLC (\"Harbor Point\") in connection with the Warehousing and "
+         "Distribution Services Agreement between Harbor Point and Acme Company, Inc. (\"Acme\") dated March 1, 2024 "
+         "(the \"Agreement\").", False),
+        ("On September 15, 2026, Acme gave notice terminating the Agreement effective October 15, 2026. Section 12.2 "
+         "of the Agreement provides for a minimum term of thirty-six (36) months, ending February 28, 2027, and "
+         "requires Acme to pay an early termination fee if it terminates without cause before then. Acme has not "
+         "paid the fee.", False),
+        ("Harbor Point also has reason to believe that Acme has continued to use Harbor Point's shipment-routing data "
+         "and route-optimization outputs after termination, in breach of Section 9 (Confidentiality and Use of Data) "
+         "of the Agreement.", False),
+        ("Harbor Point demands that Acme (a) pay the early termination fee and Harbor Point's damages, which we "
+         "presently estimate at not less than $2,400,000, and (b) certify in writing that it has stopped using and "
+         "has returned or destroyed all Harbor Point data. Unless this matter is resolved within thirty (30) days, "
+         "Harbor Point intends to file suit in the Superior Court of the State of Delaware.", False),
+        ("Preservation demand. Acme must preserve all documents and electronically stored information relating to "
+         "the Agreement, its negotiation and performance, its termination, and Acme's use of Harbor Point data, from "
+         "January 1, 2024 to the present. This includes email, Teams and other chat messages, text messages on "
+         "company and personal devices used for business, and data in Acme's warehouse management and "
+         "transportation management systems.", False),
+        ("Nothing in this letter waives any of Harbor Point's rights or remedies, all of which are reserved.", False),
+        ("Very truly yours,", False), ("Elena Reyes, Partner, Calloway & Reyes LLP", False)]:
+        d.add_paragraph().add_run(text).bold = bold
     d.save(path)
 
 
 def main():
-    for p in (os.path.join(LK, "NDA", "Playbook master"), os.path.join(LK, "Legal Hold Notice"),
-              os.path.join(WS, "Matters", "Harbor Point Logistics"), os.path.join(WS, "Test variants")):
+    for typ in ("NDA", "Legal Hold Notice"):  # the standard skeleton for every document type (design §5.9)
+        for sub in TYPE_SUBFOLDERS:
+            os.makedirs(os.path.join(LK, typ, sub), exist_ok=True)
+    for p in (os.path.join(WS, "Matters", "Harbor Point Logistics"), os.path.join(WS, "Test variants")):
         os.makedirs(p, exist_ok=True)
 
     # NDA v1.2: master + Word copy (X2b)
@@ -357,12 +597,23 @@ def main():
     problems = rw.check_table(nda_docx, pb, cat)
     assert not problems, problems
 
-    # Legal hold notice playbook: table (primary) + requirement-list variant
-    lh_docx = os.path.join(LK, "Legal Hold Notice", f"{LH_NAME}.docx")
-    rw.render_table(LH_PLAYBOOK, LH_CATALOGUE, lh_docx)
-    problems = rw.check_table(lh_docx, LH_PLAYBOOK, LH_CATALOGUE)
+    # Legal hold notice playbook: master (no Side) -> parsed -> Word copy, as for NDA; + requirement-list variant
+    lh = os.path.join(LK, "Legal Hold Notice")
+    lh_text = lh_master_text()
+    with open(os.path.join(lh, "Playbook master", f"{LH_NAME}.md"), "w", encoding="utf-8") as f:
+        f.write(lh_text)
+    lh_pb = pp.parse(lh_text, {t["id"]: set() for t in LH_TOPICS}, require_side=False)
+    assert [t["id"] for t in lh_pb["topics"]] == [t["id"] for t in LH_TOPICS] and not lh_pb["silent_topics"]
+    lh_docx = os.path.join(lh, f"{LH_NAME}.docx")
+    rw.render_table(lh_pb, LH_CATALOGUE, lh_docx)
+    problems = rw.check_table(lh_docx, lh_pb, LH_CATALOGUE)
     assert not problems, problems
     write_requirements(os.path.join(WS, "Test variants", f"{LH_NAME} (requirements).docx"))
+    write_policy(os.path.join(lh, "Policies", f"{POLICY_NAME}.docx"))
+    write_template(os.path.join(lh, "Templates", "Acme Legal Hold Notice Template v1.0.docx"))
+    write_precedent(os.path.join(lh, "Precedents", "Legal Hold Notice – Kestrel Freight (2025-02-28).docx"))
+    write_demand_letter(os.path.join(WS, "Matters", "Harbor Point Logistics",
+                                     "Harbor Point – Demand letter (2026-10-20).docx"))
 
     # Drafts + answer key
     m = os.path.join(WS, "Matters", "Harbor Point Logistics")
@@ -384,17 +635,36 @@ def main():
               "", "W2 (NDA playbook on draft A): pass = Copilot says the playbook does not fit a legal hold notice, or "
               "rates the NDA topics Not relevant and makes no NDA edits. Fail = NDA positions applied to the notice.",
               "W3 (no playbook): record whether Copilot asks for a standard or improvises; improvised findings are "
-              "scored against this key for interest only."]
+              "scored against this key for interest only.",
+              "", "W5 (draft A against the Acme Records Retention and Legal Hold Policy v1.0). Expected findings:",
+              "- RLH-3.1 gap: the notice is dated November 9, 2026, 15 business days after the October 20 demand "
+              "letter (limit 5).",
+              "- RLH-3.3 gap: acknowledgment has no deadline and asks only for receipt.",
+              "- RLH-2.2 / 2.4 / 3.4: nothing on automatic deletion (Teams chats auto-delete after 1 year; texts).",
+              "- RLH-3.8 conflict: fixed expiry on March 31, 2027 instead of a written release.",
+              "- RLH-3.9 conflict: comment on the merits (\"without merit … negotiating tactic\").",
+              "- RLH-3.2 partial: does not follow the approved template (missing sections).",
+              "- RLH-3.7: departures not mentioned (an HR/IT process duty; Cannot determine or Partial is acceptable).",
+              "- Addressed: RLH-3.5 (overrides the retention schedule), RLH-4.1 (consequences)."]
     with open(os.path.join(POC, "answer-key", "legal-hold-answer-key.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
     write_quick_card(os.path.join(LK, "Start here – Quick card.docx"))
     with open(os.path.join(LK, "README.txt"), "w", encoding="utf-8") as f:
         f.write("Legal Knowledge - POC kit (synthetic). All companies, people and deals are fictional.\n"
-                "Organised by document type (2026-11-07, make_doctype_library.py): one folder per type, with the "
-                "playbook to attach at the top of the folder and supporting material in subfolders (Playbook "
-                "master, Policies, Precedents, Samples, Templates, Archive). Start with 'Start here – Quick "
-                "card.docx'. Test material (Inbox, Matters) is in Shared Documents/POC Workspace.\n")
+                "Organised by document type (design §5.9; make_doctype_library.py, 2026-11-08): one folder per type, "
+                "with only the playbook to attach at the top and the same subfolders in every type (Playbook "
+                "master, Policies, Precedents, Templates, Archive). Start with 'Start here – Quick card.docx'. "
+                "Test material (Inbox, Matters, Samples) is in Shared Documents/POC Workspace.\n")
+    with open(os.path.join(POC, "user-steps.md"), "w", encoding="utf-8") as f:
+        f.write("# User steps (generated by kit-src/make_doctype_library.py; edit there)\n\n"
+                "The same text is in the library's quick card.\n\n## How to review a contract\n\n"
+                + "\n".join(f"{i}. {s}" for i, s in enumerate(CONTRACT_STEPS, 1))
+                + "\n\nBefore signing: type / and choose Check execution readiness.\n\n"
+                "## How to review another legal document\n\nFor example a legal hold notice.\n\n"
+                + "\n".join(f"{i}. {s}" for i, s in enumerate(OTHER_STEPS, 1))
+                + "\n\n## One-time setup: Copilot custom instruction\n\nCopilot › Settings › Personalization › "
+                "Customize Copilot. Paste and save:\n\n```\n" + CUSTOM_INSTRUCTION + "\n```\n")
     for root, _, files in os.walk(OUT):
         for fn in files:
             print(os.path.relpath(os.path.join(root, fn), OUT))

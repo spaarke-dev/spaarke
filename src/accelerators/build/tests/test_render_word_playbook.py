@@ -88,6 +88,13 @@ class WordTableTests(unittest.TestCase):
         instr = rw.instruction_paragraphs(pb["topics"][0], "none")
         self.assertEqual(instr, ["Keep it.", "If missing: Add the clause from the Example Text.",
                                  f"{rw.FALLBACK_LABEL}: Accept less.", "Escalate if: Nothing at all."])
+        # non-contract type (X14): Side may be omitted only when the caller says so
+        no_side = text.replace(" | Side: mutual", "")
+        with self.assertRaises(playbook_parse.FormatError):
+            playbook_parse.parse(no_side, sides)
+        nc = playbook_parse.parse(no_side, {tid: set()}, require_side=False)
+        self.assertNotIn("side", nc["meta"])
+        self.assertEqual(nc["silent_topics"], [])
         pref, esc, missing = playbook_import.split_instructions(" ".join(instr))
         self.assertEqual((pref, missing), ("Keep it.", "Add the clause from the Example Text."))
         self.assertEqual(esc, "Nothing at all.")

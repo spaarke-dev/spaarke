@@ -420,3 +420,19 @@ Write a quick card, test whether one habit works for both, and fold the results 
   playbook, W1c clean draft, W4 NDA v1.2 retest).
 
 Results: pending.
+
+**Act 7 update (2026-11-08, owner review of the setup).**
+- **Folder standard** written into design §5.9, with the same subfolders in every type.
+  - Legal Hold Notice now has the full skeleton.
+  - NDA `Samples/` moved to `POC Workspace/Samples/NDA`.
+- **Realistic Legal Hold material:**
+  - Acme Records Retention and Legal Hold Policy v1.0 (Policies);
+  - Acme Legal Hold Notice Template v1.0 (Templates);
+  - Kestrel Freight notice, 2025 (Precedents);
+  - Harbor Point demand letter of 2026-10-20 with a preservation demand (matter folder).
+  - The playbook now has a master (`Playbook master/`) and is rendered from it.
+- **Quick card v1.1** = two step lists (contract / other document) plus the one-time custom instruction.
+  `user-steps.md` holds the same text.
+- **Owner's Copilot custom instruction found stale:** it named "Spaarke NDA – Mutual v1.0" at
+  `Legal Knowledge/Playbooks/NDA/`. A generic replacement is in the quick card, and W3 tests whether Word follows it.
+- **Script:** W0 now tests the step lists; W5 is an optional policy check, with its key in `answer-key/`.

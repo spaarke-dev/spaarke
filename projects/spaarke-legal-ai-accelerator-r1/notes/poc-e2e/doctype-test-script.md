@@ -5,6 +5,20 @@ words") work for a contract **and** a non-contract? And does the NDA v1.2 Word c
 Background: `results.md` Act 7. Kit: `kit-src/make_doctype_library.py`. Answer keys: `answer-key/` (Claude scores;
 don't open them).
 
+## Before you start: the one-time setup (2 minutes)
+
+Replace your Copilot custom instruction. The current one names "Spaarke NDA – Mutual v1.0" in a folder that no
+longer exists. Go to Copilot › Settings › Personalization › Customize Copilot, delete the old text, paste the text
+below, and click **Save customization**. The same text is in the quick card and in `user-steps.md`.
+
+```
+I'm an in-house lawyer at Acme Company. For legal document reviews:
+- Use the playbook for the document's type from Acme Company › Documents › Legal Knowledge (the file at the top of that type's folder). Never use files in an Archive folder.
+- If I ask for a review without attaching a playbook, ask me to attach the playbook for the document type before you review.
+- Each type's policies are in its Policies folder.
+- Mark results as drafts for attorney review. Never send email on my behalf.
+```
+
 ## Rules for every test
 
 - Start a **new Copilot chat** for each test.
@@ -18,26 +32,31 @@ don't open them).
 
 ```
 Documents/
-├── Legal Knowledge/
+├── Legal Knowledge/                               (design §5.9: the same shape for every document type)
 │   ├── Start here – Quick card.docx
+│   ├── Shared templates/
 │   ├── NDA/
 │   │   ├── Spaarke NDA – Mutual v1.2.docx        ← the playbook to attach
-│   │   └── Playbook master/ · Policies/ · Precedents/ · Samples/ · Templates/ · Archive/
-│   ├── Legal Hold Notice/
-│   │   └── Spaarke Legal Hold Notice – Employee Custodians v1.0.docx   ← the playbook to attach
-│   └── Shared templates/
+│   │   └── Playbook master/ · Policies/ · Precedents/ · Templates/ · Archive/
+│   └── Legal Hold Notice/
+│       ├── Spaarke Legal Hold Notice – Employee Custodians v1.0.docx   ← the playbook to attach
+│       └── Playbook master/ · Policies/ (Acme Records Retention and Legal Hold Policy) ·
+│           Precedents/ (Kestrel Freight notice, 2025) · Templates/ (Acme notice template) · Archive/
 └── POC Workspace/                                 (test material, not knowledge)
-    ├── Matters/Brightwater Systems/ · Matters/Harbor Point Logistics/
-    ├── Inbox/NDA batch/
-    └── Test variants/
+    ├── Matters/Harbor Point Logistics/            demand letter (2026-10-20), draft A, draft B
+    ├── Matters/Brightwater Systems/ · Inbox/NDA batch/ · Samples/NDA/ · Test variants/
 ```
 
-## W0: the quick card (2 minutes)
+The story: Harbor Point's lawyers sent Acme a demand letter on October 20, 2026, with a preservation demand. A
+paralegal drafted the hold notice (draft A). You are the attorney who reviews it before it goes out.
+
+## W0: the user steps (3 minutes)
 
 | Step | Do | Capture |
 |---|---|---|
-| W0.1 | Open `Legal Knowledge/Start here – Quick card.docx` and read it | — |
-| W0.2 | Could you do W1a from the card alone, without this script? Is anything unclear? | One line |
+| W0.1 | Open `Legal Knowledge/Start here – Quick card.docx`. Read only the two step lists | — |
+| W0.2 | For each list: is any step unclear, or would a lawyer new to Copilot get stuck? Would they know which list to use? | One line per list |
+| W0.3 | For W1a and W4 below, **follow the quick card's steps** rather than this script where they differ, and note any step that didn't match what you saw | — |
 
 ## W1a: a non-contract with its playbook (the key test)
 
@@ -70,7 +89,14 @@ Documents/
 | Step | Do | Capture |
 |---|---|---|
 | W3.1 | Same document (draft A). New chat. Attach nothing. Type: *Review this.* | `W3-result.png` |
-| W3.2 | One line: did it ask for a playbook or standard, or review on its own? If on its own, did it catch the expiry date, the "clean up drafts" line or the missing auto-delete instruction? | One line |
+| W3.2 | One line: did it ask you to attach the playbook (as the custom instruction says), or review on its own? If on its own, did it catch the expiry date, the "clean up drafts" line or the missing auto-delete instruction? This tests whether Word's Copilot follows the custom instruction | One line |
+
+## W5 (optional): check the notice against Acme's policy
+
+| Step | Do | Capture |
+|---|---|---|
+| W5.1 | Same document (draft A). New chat. `/` **Identify regulatory gaps** → **In chat** → **Something else**: *Acme Records Retention and Legal Hold Policy v1.0. I will attach it.* Attach it from `Legal Knowledge/Legal Hold Notice/Policies/` | `W5-result.png` (or save the report as in G1) |
+| W5.2 | Does it find the policy points the draft misses (issued too late after the October 20 letter; no acknowledgment deadline; nothing on auto-delete; a merits comment)? | One line |
 
 ## W1c (optional): the clean draft
 
@@ -92,10 +118,11 @@ Documents/
 
 | Test | Answer |
 |---|---|
-| W0 (card usable alone?) | |
+| W0 (steps clear? which list to use?) | |
 | W1a (route; ratings) | |
 | W1b (route; result) | |
 | W2 (warned, or applied the NDA playbook?) | |
 | W3 (asked, or improvised?) | |
 | W1c (false positives) | |
 | W4 (fallback in Rules? non-solicit; reverse engineering; compelled disclosure) | |
+| W5 (policy points found) | |

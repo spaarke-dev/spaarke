@@ -52,7 +52,9 @@ class FormatError(Exception):
     pass
 
 
-def parse(text, catalogue_ids, side_filter=None):
+def parse(text, catalogue_ids, side_filter=None, require_side=True):
+    """require_side=False for a non-contract document type (no parties' sides, backlog X14): Side may be omitted,
+    and silent topics are then computed over the whole catalogue."""
     errors, lines = [], text.splitlines()
     title, meta, topics, cur, field = None, {}, [], None, None
     intro = []  # free text between the header and the first topic (scope / introduction)
@@ -109,7 +111,7 @@ def parse(text, catalogue_ids, side_filter=None):
 
     if title is None:
         errors.append("missing '# Playbook: <name>' title")
-    for k in ("version", "side"):
+    for k in ("version", "side") if require_side else ("version",):
         if k not in meta:
             errors.append(f"header is missing {k!r}")
     if meta.get("side") and meta["side"].lower() not in SIDES:
@@ -133,13 +135,14 @@ def parse(text, catalogue_ids, side_filter=None):
                 t[f] = None
     if errors:
         raise FormatError(errors)
-    side = meta["side"].lower()
+    side = meta["side"].lower() if meta.get("side") else None
     for_side = side_filter or side
-    relevant = {i for i, sides in catalogue_ids.items() if for_side in sides}
+    relevant = {i for i, sides in catalogue_ids.items() if for_side is None or for_side in sides}
     silent = sorted(relevant - seen)
     for t in topics:
         t.pop("line", None)
-    meta["side"] = side
+    if side:
+        meta["side"] = side
     return {"title": title, "meta": meta, "intro": " ".join(intro), "topics": topics, "silent_topics": silent}
 
 
