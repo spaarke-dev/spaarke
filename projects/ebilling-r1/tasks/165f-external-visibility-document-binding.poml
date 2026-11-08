@@ -4,7 +4,7 @@
     <title>External invoice visibility counts a submission's document link only when it is the submission's own document (follows 165c and 165e)</title>
     <phase>4 Review (165 family)</phase>
     <gate>165e merged into work (both edit ExternalInvoiceVisibility). uac-r2 assigned this to ebilling on 2026-11-07 and reviews it.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Partner-readable visibility (ExternalAccess); two adversarial passes.</rigor-reason>
     <model-tier>opus</model-tier>

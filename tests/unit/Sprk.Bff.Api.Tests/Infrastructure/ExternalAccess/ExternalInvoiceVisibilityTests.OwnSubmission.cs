@@ -78,7 +78,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Reader1_AnAgreeingLink_OrNoLink_IsDecidedAsBefore(string caller, string shape)
     {
         var readable = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
-        var submission = Guid.NewGuid();
+        // Task 165f: the Internal row naming a document is the one derived from it, as the confirm route creates it.
+        var submission = shape == "unlinked-internal" ? InvoiceWorld.SubmissionFor(readable) : Guid.NewGuid();
         var view = shape switch
         {
             "agreeing-link" => SubmissionView(submission, InvoiceWorld.SpaChannel,
@@ -140,7 +141,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Reader2_TheOwnSubmissionsDocument_StillDecidesTheInvoice(string caller)
     {
         var invoice = _world.NewInvoice();
-        _world.Submission(invoice, _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter()));
+        _world.Submission(invoice, _world.Document(_world.OwnDocumentOf(invoice), permission: Restricted, matter: CleanMatter()));
 
         var decision = await DecideLogged(caller, invoice);
 
@@ -239,6 +240,24 @@ public sealed partial class ExternalInvoiceVisibilityTests
                     .Where(e => level(e.Level)
                         && e.Values.TryGetValue("EventCode", out var code) && Equals(code, ExternalInvoiceVisibility.OwnSubmissionMissingEvent))
                     .Select(e => (e.Values.TryGetValue("SubmissionId", out var s) ? (Guid?)s : null, (Guid)e.Values["InvoiceId"]!))
+                    .ToList();
+            }
+        }
+
+        /// <summary>Task 165f: the (submission, document) pairs of the document-link-not-own event, at any level.</summary>
+        public IReadOnlyList<(Guid Submission, Guid Document)> DocumentNotOwn => DocumentNotOwnWhere(_ => true);
+
+        /// <summary>Task 165f: the same, logged at <paramref name="level"/>.</summary>
+        public IReadOnlyList<(Guid Submission, Guid Document)> DocumentNotOwnAt(LogLevel level) => DocumentNotOwnWhere(l => l == level);
+
+        private IReadOnlyList<(Guid Submission, Guid Document)> DocumentNotOwnWhere(Func<LogLevel, bool> level)
+        {
+            lock (Entries)
+            {
+                return Entries
+                    .Where(e => level(e.Level)
+                        && e.Values.TryGetValue("EventCode", out var code) && Equals(code, ExternalInvoiceVisibility.DocumentLinkNotOwnEvent))
+                    .Select(e => ((Guid)e.Values["SubmissionId"]!, (Guid)e.Values["DocumentId"]!))
                     .ToList();
             }
         }

@@ -21,6 +21,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>, read with the other submissions linked to
 /// it in the same batch): an invoice whose own submission is not found among them is hidden
 /// (<see cref="InvoiceHiddenReason.OwnSubmissionMissing"/>), whatever its other columns and files say.</para>
+/// <para><b>Own document (task 165f).</b> A submission's <c>sprk_document</c> is a source only when it is the submission's own document
+/// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf"/>, the persister's rule;
+/// no copy). Any other link contributes nothing: the submission, or its invoice, is decided as if the link were empty.</para>
 /// <para><b>Composition, not a copy (ADR-013, root §11).</b> Rules 2–4 are task 188's <see cref="ExternalDocumentNarrowing"/>
 /// with its opt-in marker-aware rule 2 (<see cref="InvoiceVisibilityReaders.DecideSources"/>, bound by
 /// <see cref="ExternalDataService"/>, the only app-only seam allowed to call the core decision); the roots term is
@@ -37,7 +40,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// approvals, external identifiers, corrections, Decision Records, Signals, Stored Files) to its invoice, directly or through
 /// its invoice line, read app-only, and hides it with its invoice. A submission row is decided by
 /// <see cref="DecideSubmissionsAsync"/> (review round 5), so one with no invoice is decided by its own source, as on the routes.</para>
-/// <para><b>Cost.</b> One Stored File read and one submission read per 50 invoices; one source read per 50 sources; the 188 decision (one read per hop
+/// <para><b>Cost.</b> One Stored File read and one submission read per 50 invoices; one invoice existence read per 50 submissions with
+/// no invoice link (the submission decision only); one source read per 50 sources; the 188 decision (one read per hop
 /// level, at most three, plus the communication and thread reads); one live-parent walk; one effective-flag read per root type
 /// (at most three). Logs carry counts only (ADR-015).</para>
 /// <para><b>Component Justification (CLAUDE.md §11):</b> (1) Existing — <see cref="ExternalDocumentNarrowing"/> decides
@@ -115,22 +119,24 @@ internal static class ExternalInvoiceVisibility
     /// </summary>
     internal static Task<InvoiceVisibilityResult> DecideAsync(
         IReadOnlyCollection<Guid> invoiceIds, InvoiceVisibilityReaders readers, CancellationToken ct) =>
-        DecideAsync(invoiceIds, readers, NoneLogged, NoneReported, ct);
+        DecideAsync(invoiceIds, readers, NoneLogged, NoDocumentLogged, NoneReported, ct);
 
     /// <summary>
     /// <see cref="DecideAsync(IReadOnlyCollection{Guid}, InvoiceVisibilityReaders, CancellationToken)"/> within one submission decision
     /// (<see cref="DecideSubmissionsAsync"/>): <paramref name="loggedNotOwn"/> holds the (submission, invoice) pairs that call already logged
     /// as <see cref="InvoiceLinkNotOwnEvent"/>, so the same pair is logged once at Warning per call (task 165c);
-    /// <paramref name="ownMissingReported"/> holds the invoices whose <see cref="OwnSubmissionMissingEvent"/> that call logs at Warning with
-    /// its submission, so this read logs them at Debug (task 165e).
+    /// <paramref name="loggedDocumentNotOwn"/> holds the (submission, document) pairs that call already logged as
+    /// <see cref="DocumentLinkNotOwnEvent"/> (task 165f, the same split); <paramref name="ownMissingReported"/> holds the invoices whose
+    /// <see cref="OwnSubmissionMissingEvent"/> that call logs at Warning with its submission, so this read logs them at Debug (task 165e).
     /// </summary>
     internal static async Task<InvoiceVisibilityResult> DecideAsync(
         IReadOnlyCollection<Guid> invoiceIds, InvoiceVisibilityReaders readers, IReadOnlySet<(Guid Submission, Guid Invoice)> loggedNotOwn,
-        IReadOnlySet<Guid> ownMissingReported, CancellationToken ct)
+        IReadOnlySet<(Guid Submission, Guid Document)> loggedDocumentNotOwn, IReadOnlySet<Guid> ownMissingReported, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(invoiceIds);
         ArgumentNullException.ThrowIfNull(readers);
         ArgumentNullException.ThrowIfNull(loggedNotOwn);
+        ArgumentNullException.ThrowIfNull(loggedDocumentNotOwn);
         ArgumentNullException.ThrowIfNull(ownMissingReported);
         var asked = invoiceIds.Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
         var hidden = new Dictionary<Guid, InvoiceHiddenReason>();
@@ -164,7 +170,8 @@ internal static class ExternalInvoiceVisibility
         var sourcesOf = new Dictionary<Guid, List<Guid>>();
         var invoicePdfs = await ReadStoredFileSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, ct).ConfigureAwait(false);
         var internalWithoutDocument = await ReadSubmissionSourcesAsync(
-            open, readers.Query, sourcesOf, hidden, cost, readers.Logger, loggedNotOwn, ownMissingReported, ct).ConfigureAwait(false);
+            open, readers.Query, sourcesOf, hidden, cost, readers.Logger, loggedNotOwn, loggedDocumentNotOwn, ownMissingReported, ct)
+            .ConfigureAwait(false);
         foreach (var invoiceId in internalWithoutDocument.Where(id => !invoicePdfs.Contains(id)))
             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
 
@@ -318,6 +325,12 @@ internal static class ExternalInvoiceVisibility
     /// <item>a submission WITH an invoice is decided by the invoice predicate (<see cref="DecideAsync"/>), as before; since task 165e that
     /// predicate hides an invoice whose own submission it does not find (<see cref="InvoiceHiddenReason.OwnSubmissionMissing"/>, logged
     /// here at Warning with the submission id);</item>
+    /// <item>task 165f (165e K1): one with no invoice link whose own invoice
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceIdFor"/>) exists, read app-only, is decided by
+    /// that invoice's verdict, as a linked one is;</item>
+    /// <item>task 165f: an Internal submission's document link counts only when it is the submission's own document
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf"/>); any other link is
+    /// logged at Warning (<see cref="DocumentLinkNotOwnEvent"/>) and the submission is decided as if it had none;</item>
     /// <item>one WITHOUT an invoice (Received, Processing, or a terminal outcome that produced none) is decided by its own
     /// source, by channel (the shared <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum):
     /// Spa is visible (never a document source, rule 1); Internal with a document is decided by that document through
@@ -371,19 +384,45 @@ internal static class ExternalInvoiceVisibility
             page.Remove(notOwn);
         }
 
+        // Task 165f: an Internal submission's document link counts only when it is the submission's own document (the one rule,
+        // InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf; no copy). Any other link contributes nothing: the submission is decided
+        // as if it had no document. Each pair is logged once at Warning here; the invoice read below logs a pair already logged at Debug.
+        var loggedDocumentNotOwn = new HashSet<(Guid Submission, Guid Document)>();
+        var documentNotOwn = new HashSet<Guid>();
+        foreach (var submission in page.Where(s => s.ChannelValue == (int)Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Internal
+                     && DocumentOf(s) is { } document
+                     && !Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(document, s.SubmissionId)))
+        {
+            documentNotOwn.Add(submission.SubmissionId);
+            if (loggedDocumentNotOwn.Add((submission.SubmissionId, submission.DocumentId!.Value)))
+                LogDocumentLinkNotOwn(readers.Logger, LogLevel.Warning, submission.SubmissionId, submission.DocumentId!.Value);
+        }
+
+        // Task 165f (165e K1): a submission with no invoice link whose own invoice (InvoiceIdFor, as InvoiceKeysOf names it) exists takes
+        // that invoice's verdict, as a linked one does. One existence read per chunk, app-only; a read fault THROWS (every asked submission
+        // withheld). One whose invoice does not exist yet (Received, Processing) is decided by channel below.
+        var derivedOf = page.Where(s => InvoiceOf(s) is null).ToDictionary(
+            s => s.SubmissionId, s => Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceIdFor(s.SubmissionId));
+        var existing = derivedOf.Count == 0
+            ? new HashSet<Guid>()
+            : await ReadExistingInvoicesAsync(derivedOf.Values.Distinct().ToList(), readers.Query, ct).ConfigureAwait(false);
+        var decidingInvoice = page.ToDictionary(
+            s => s.SubmissionId,
+            s => InvoiceOf(s) ?? (derivedOf.TryGetValue(s.SubmissionId, out var derived) && existing.Contains(derived) ? derived : (Guid?)null));
+
         // (1) With an invoice: THE invoice predicate, one call for the page. Every invoice left is its submission's own, so task 165e's
         //     "own submission not found" is logged here at Warning with the submission, and the invoice read logs it at Debug.
-        var invoiceIds = page.Select(s => InvoiceOf(s)).OfType<Guid>().Distinct().ToList();
+        var invoiceIds = decidingInvoice.Values.OfType<Guid>().Distinct().ToList();
         var invoices = invoiceIds.Count == 0
             ? null
-            : await DecideAsync(invoiceIds, readers, loggedNotOwn, invoiceIds.ToHashSet(), ct).ConfigureAwait(false);
+            : await DecideAsync(invoiceIds, readers, loggedNotOwn, loggedDocumentNotOwn, invoiceIds.ToHashSet(), ct).ConfigureAwait(false);
         var cost = invoices?.Cost ?? new InvoiceVisibilityCost();
 
         // (2) Without an invoice: by channel; an Internal submission's own document is decided with the rest of the page.
         var decidedBy = new Dictionary<Guid, Guid>();
         foreach (var submission in page)
         {
-            if (InvoiceOf(submission) is { } invoiceId)
+            if (decidingInvoice[submission.SubmissionId] is { } invoiceId)
             {
                 if (invoices!.HiddenReason(invoiceId) is { } reason)
                 {
@@ -407,10 +446,10 @@ internal static class ExternalInvoiceVisibility
                 case Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Spa:
                     break; // never a document source: visible
                 case Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Internal:
-                    if (submission.DocumentId is { } document && document != Guid.Empty)
+                    if (submission.DocumentId is { } document && document != Guid.Empty && !documentNotOwn.Contains(submission.SubmissionId))
                         decidedBy[submission.SubmissionId] = document;
                     else
-                        withheld[submission.SubmissionId] = InvoiceHiddenReason.SourceLinkUnreadable; // no source to decide by yet
+                        withheld[submission.SubmissionId] = InvoiceHiddenReason.SourceLinkUnreadable; // no own source to decide by yet
                     break;
                 default:
                     // Defined but not handled above: a channel added to the enum later is unknown here until decided.
@@ -434,6 +473,10 @@ internal static class ExternalInvoiceVisibility
 
         static Guid? InvoiceOf(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s) =>
             s.InvoiceId is { } id && id != Guid.Empty ? id : null;
+
+        // A document link that is a GUID (not blank, Guid.Empty or ExternalDocumentNarrowing.UnreadableLink).
+        static Guid? DocumentOf(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s) =>
+            s.DocumentId is { } id && id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink ? id : null;
 
         // The invoices whose firm hold withholds the submission: its linked invoice (when a GUID) and the one its pipeline creates for it.
         static IEnumerable<Guid> InvoiceKeysOf(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s)
@@ -542,11 +585,16 @@ internal static class ExternalInvoiceVisibility
     /// Task 165e: an invoice whose submissions were read whole and none of them is its own is hidden
     /// (<see cref="InvoiceHiddenReason.OwnSubmissionMissing"/>) and logged with its id: at Information, or at Debug when the submission
     /// decision of the same call logs it at Warning (<paramref name="ownMissingReported"/>).
+    /// Task 165f: an own Internal submission's document link that is not its own document
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf"/>) is no source; the
+    /// invoice is decided as if the link were empty, and the pair is logged at Information, or at Debug when the submission decision of the
+    /// same call already logged it (<paramref name="loggedDocumentNotOwn"/>).
     /// </summary>
     private static async Task<HashSet<Guid>> ReadSubmissionSourcesAsync(
         IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query, Dictionary<Guid, List<Guid>> sourcesOf,
         Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, ILogger logger,
-        IReadOnlySet<(Guid Submission, Guid Invoice)> loggedNotOwn, IReadOnlySet<Guid> ownMissingReported, CancellationToken ct)
+        IReadOnlySet<(Guid Submission, Guid Invoice)> loggedNotOwn, IReadOnlySet<(Guid Submission, Guid Document)> loggedDocumentNotOwn,
+        IReadOnlySet<Guid> ownMissingReported, CancellationToken ct)
     {
         var internalWithoutDocument = new HashSet<Guid>();
         var withOwn = new HashSet<Guid>();
@@ -591,6 +639,15 @@ internal static class ExternalInvoiceVisibility
                             break;
                         case { } source when source == ExternalDocumentNarrowing.UnreadableLink:
                             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
+                            break;
+                        case { } source when !Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService
+                            .IsExistingDocumentSubmissionIdOf(source, submissionId):
+                            // Task 165f: not the submission's own document. It contributes nothing; the invoice is decided as if the link
+                            // were empty (its InvoicePdf decides, and with none it is hidden).
+                            LogDocumentLinkNotOwn(
+                                logger, loggedDocumentNotOwn.Contains((submissionId, source)) ? LogLevel.Debug : LogLevel.Information,
+                                submissionId, source);
+                            internalWithoutDocument.Add(invoiceId);
                             break;
                         case { } source:
                             AddSource(sourcesOf, invoiceId, source);
@@ -689,8 +746,46 @@ internal static class ExternalInvoiceVisibility
     private static void LogOwnSubmissionMissing(ILogger logger, LogLevel level, Guid submissionId, Guid invoiceId) =>
         logger.Log(level, "{EventCode}: submission {SubmissionId}, invoice {InvoiceId}", OwnSubmissionMissingEvent, submissionId, invoiceId);
 
+    /// <summary>Task 165f: the event a submission whose document link is not its own document logs (this code and the two ids only).</summary>
+    internal const string DocumentLinkNotOwnEvent = "ebilling.visibility.document_link_not_own";
+
+    private static void LogDocumentLinkNotOwn(ILogger logger, LogLevel level, Guid submissionId, Guid documentId) =>
+        logger.Log(level, "{EventCode}: submission {SubmissionId}, document {DocumentId}", DocumentLinkNotOwnEvent, submissionId, documentId);
+
     /// <summary>No pair logged yet: an invoice decision outside a submission decision.</summary>
     private static readonly IReadOnlySet<(Guid Submission, Guid Invoice)> NoneLogged = new HashSet<(Guid Submission, Guid Invoice)>();
+
+    /// <summary>No (submission, document) pair logged yet: an invoice decision outside a submission decision.</summary>
+    private static readonly IReadOnlySet<(Guid Submission, Guid Document)> NoDocumentLogged = new HashSet<(Guid Submission, Guid Document)>();
+
+    /// <summary>
+    /// Task 165f (165e K1): which of <paramref name="invoiceIds"/> exist, read BY ID app-only (one read per chunk, the invoice key only). A
+    /// row the filter cannot have produced counts every invoice of its chunk as existing, so those are decided by the invoice predicate
+    /// (fail closed). A failed read THROWS.
+    /// </summary>
+    private static async Task<HashSet<Guid>> ReadExistingInvoicesAsync(
+        IReadOnlyList<Guid> invoiceIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+    {
+        var found = new HashSet<Guid>();
+        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(invoiceIds, (chunk, c) => query(InvoiceSet,
+            $"$select={InvoiceIdField}" +
+            $"&$filter={string.Join(" or ", chunk.Select(id => $"{InvoiceIdField} eq {id:D}"))}&$top={chunk.Length}", c), ct)
+            .ConfigureAwait(false);
+        foreach (var (chunk, rows) in chunks)
+        {
+            var inChunk = chunk.ToHashSet();
+            var ids = rows.Select(row => LinkOf(row, InvoiceIdField)).ToList();
+            if (ids.Any(id => id is not { } i || !inChunk.Contains(i)))
+            {
+                found.UnionWith(chunk);
+                continue;
+            }
+
+            found.UnionWith(ids.OfType<Guid>());
+        }
+
+        return found;
+    }
 
     /// <summary>No invoice reported by a submission decision: an invoice decision outside one.</summary>
     private static readonly IReadOnlySet<Guid> NoneReported = new HashSet<Guid>();

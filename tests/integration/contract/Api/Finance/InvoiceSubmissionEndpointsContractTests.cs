@@ -1214,7 +1214,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task External_list_withholds_a_returned_submission_with_no_firm(string kind)
     {
         var document = _world.Document(Guid.NewGuid(), permission: StandardPermission);
-        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, document);
+        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, document, id: Guid.NewGuid());
         WithoutFirm(blank);
         var control = kind == "spa" ? SubmissionRow("INV-CONTROL", Spa) : SubmissionRow("INV-CONTROL", Internal, document);
 
@@ -1346,7 +1346,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         string number, int? channel, Guid? document = null, Guid? invoice = null,
         InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received, Guid? id = null)
     {
-        var row = new Entity("sprk_invoicesubmission", id ?? Guid.NewGuid())
+        // Task 165f: a row naming a document is, by default, the submission derived from it (as the confirm route creates it).
+        var row = new Entity("sprk_invoicesubmission",
+            id ?? (document is { } own ? InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(own) : Guid.NewGuid()))
         {
             ["sprk_trackingnumber"] = number,
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),

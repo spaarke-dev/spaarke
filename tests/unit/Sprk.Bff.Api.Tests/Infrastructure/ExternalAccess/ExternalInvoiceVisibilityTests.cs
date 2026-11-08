@@ -684,9 +684,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
     {
         // The legacy confirm shape (no Stored File): the submission's own document is the only source.
         var marked = _world.NewInvoice();
-        _world.Submission(marked, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter()));
+        _world.Submission(marked, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter(), id: _world.OwnDocumentOf(marked)));
         var unmarked = _world.NewInvoice();
-        _world.Submission(unmarked, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter()));
+        _world.Submission(unmarked, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter(), id: _world.OwnDocumentOf(unmarked)));
 
         await ShouldBeVisible(caller, marked);
         await ShouldBeHidden(caller, unmarked, InvoiceHiddenReason.SourceHidden);
@@ -975,8 +975,6 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Submission_DecidedBeforeItsInvoiceExists_AndAfter_DiffersOnlyForAnInternalEmptyLink(
         string caller, string source, bool visibleBefore, bool visibleAfter)
     {
-        var submission = Guid.NewGuid();
-        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         var communication = FirmCommunication();
         var readable = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
         var isolated = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
@@ -990,6 +988,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
             "confirm-legacy-isolated-document" or "from-document-isolated-document" => (InvoiceWorld.InternalChannel, isolated),
             _ => throw new ArgumentOutOfRangeException(nameof(source)),
         };
+        // Task 165f: a submission naming a document is the one derived from it, as the confirm and from-document routes create it.
+        var submission = document is { } named ? InvoiceWorld.SubmissionFor(named) : Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
 
         var before = await DecideSubmissions(caller, SubmissionView(submission, channel, document));
 
@@ -1049,8 +1050,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallersAtEveryStatusWithoutAnInvoice))]
     public async Task NoInvoice_AnIsolatedSubmissionDocument_IsWithheld_AtEveryStatus(string caller, InvoiceSubmissionStatus status)
     {
-        var submission = Guid.NewGuid();
         var isolated = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
+        var submission = InvoiceWorld.SubmissionFor(isolated);
 
         var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, isolated, status: status));
 
@@ -1061,10 +1062,10 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task NoInvoice_ASubmissionDocumentUnderARestrictedRoot_IsWithheld(string caller)
     {
-        var submission = Guid.NewGuid();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: matter);
+        var submission = InvoiceWorld.SubmissionFor(document);
 
         var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, document));
 
@@ -1080,14 +1081,15 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel));
 
         decision.IsVisible(submission).Should().BeTrue(decision.HiddenSummary());
-        _world.Urls.Should().BeEmpty("a Spa submission is decided without a read");
+        // Task 165f (165e K1): the only read is whether its own invoice exists yet (it does not, so the channel decides).
+        _world.Urls.Should().ContainSingle().Which.Should().Contain("/sprk_invoices?", "a Spa submission is decided without a source read");
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task NoInvoice_Internal_AReadableSubmissionDocument_IsVisible(string caller)
     {
-        var submission = Guid.NewGuid();
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var submission = InvoiceWorld.SubmissionFor(document);
 
         var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, document));
 
@@ -1097,12 +1099,14 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task NoInvoice_Internal_ASubmissionsOwnEml_HonoursTheMarker(string caller)
     {
-        var marked = Guid.NewGuid();
-        var unmarked = Guid.NewGuid();
+        var markedEml = _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter());
+        var unmarkedEml = _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter());
+        var marked = InvoiceWorld.SubmissionFor(markedEml);
+        var unmarked = InvoiceWorld.SubmissionFor(unmarkedEml);
 
         var decision = await DecideSubmissions(caller,
-            SubmissionView(marked, InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter())),
-            SubmissionView(unmarked, InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter())));
+            SubmissionView(marked, InvoiceWorld.InternalChannel, markedEml),
+            SubmissionView(unmarked, InvoiceWorld.InternalChannel, unmarkedEml));
 
         decision.IsVisible(marked).Should().BeTrue(decision.HiddenSummary());
         decision.IsVisible(unmarked).Should().BeFalse();
@@ -1128,7 +1132,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task NoFirm_Internal_WithAReadableDocument_IsWithheld_ItWouldOtherwiseDeferToTheDocument(string caller)
     {
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
-        var withFirm = Guid.NewGuid();
+        var withFirm = InvoiceWorld.SubmissionFor(document);
         var blank = Guid.NewGuid();
 
         var decision = await DecideSubmissions(caller,
@@ -1155,7 +1159,10 @@ public sealed partial class ExternalInvoiceVisibilityTests
         decision.IsVisible(blank).Should().BeFalse();
         decision.HiddenSummary().Should().Be(NoFirmCode);
         decision.IsVisible(withFirm).Should().BeTrue(decision.HiddenSummary());
-        _world.Urls.Should().BeEmpty("neither is decided by a read: a Spa row is visible and a firmless row is withheld first");
+        // Task 165f (165e K1): the one read is whether the Spa row's own invoice exists yet; the firmless row is withheld before it.
+        _world.Urls.Should().ContainSingle().Which.Should().Contain("/sprk_invoices?", "neither is decided by a source read");
+        _world.Urls.Single().Should().Contain(InvoiceSubmissionPersister.InvoiceIdFor(withFirm).ToString())
+            .And.NotContain(InvoiceSubmissionPersister.InvoiceIdFor(blank).ToString(), "a firmless row is withheld first");
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
@@ -1212,7 +1219,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
             _ => throw new ArgumentOutOfRangeException(nameof(source)),
         };
         var (channel, document) = shape;
-        var blank = _world.PendingSubmission(document, channel, noFirm: true);
+        var blank = _world.PendingSubmission(document, channel, noFirm: true, id: Guid.NewGuid());
         var withFirm = _world.PendingSubmission(document, channel);
 
         var hidden = await _world.NewService(_identity.Object)
@@ -1251,11 +1258,11 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task AFailedRead_WithholdsEveryAskedSubmission_AndSaysFaulted(string caller, string faultingSet)
     {
         var spa = Guid.NewGuid();
-        var internalWithDocument = Guid.NewGuid();
         var withInvoice = Guid.NewGuid();
         var invoice = InvoiceSubmissionPersister.InvoiceIdFor(withInvoice);
         _world.SpaUpload(invoice, withInvoice);
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var internalWithDocument = InvoiceWorld.SubmissionFor(document);
         _world.Faults[faultingSet] = HttpStatusCode.ServiceUnavailable;
 
         var decision = await DecideSubmissions(caller,
@@ -1298,7 +1305,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         for (var i = 0; i < 30; i++)
         {
             var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
-            page.Add(SubmissionView(Guid.NewGuid(), InvoiceWorld.InternalChannel, document));
+            page.Add(SubmissionView(InvoiceWorld.SubmissionFor(document), InvoiceWorld.InternalChannel, document));
         }
 
         for (var i = 0; i < 10; i++)
@@ -1314,6 +1321,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Reads("sprk_documents").Should().HaveCount(1, "one source read for the page's submission documents");
         _world.Reads("sprk_storedfiles").Should().HaveCount(1);
         _world.Reads("sprk_invoicesubmissions").Should().HaveCount(1);
+        _world.Reads("sprk_invoices").Should().HaveCount(1, "task 165f: one existence read for the own invoices of the page's unlinked submissions");
         decision.Cost.SourceReads.Should().Be(1);
     }
 
@@ -1347,9 +1355,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
         services.AddHttpClient<ExternalDataService>().ConfigurePrimaryHttpMessageHandler(() => _world);
         await using var provider = services.BuildServiceProvider();
         await using var scope = provider.CreateAsyncScope();
-        var withheld = Guid.NewGuid();
         var spa = Guid.NewGuid();
         var isolated = _world.Document(Guid.NewGuid(), permission: Restricted);
+        var withheld = InvoiceWorld.SubmissionFor(isolated);
 
         var seam = scope.ServiceProvider.GetRequiredService<ExternalInvoiceSubmissionHiding>();
         var decision = await seam(Caller("contact"),
@@ -1758,17 +1766,40 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         });
 
     private readonly Dictionary<Guid, Guid> _ownSubmissionOf = new();
+    private readonly Dictionary<Guid, Guid> _ownDocumentOf = new();
+
+    /// <summary>
+    /// Task 165f: the submission id the intake derives for <paramref name="document"/>
+    /// (<see cref="InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Guid)"/>): the one submission that document is its own document for.
+    /// </summary>
+    public static Guid SubmissionFor(Guid document) => InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document);
 
     /// <summary>
     /// Task 165c: an invoice id as the persister derives it (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> of a new submission id).
     /// The first submission seeded on it without an explicit id is that submission (its own submission); any later one only points at it.
+    /// Task 165f: that submission id is derived from a reserved document id (<see cref="OwnDocumentOf"/>), as the confirm route derives it,
+    /// so a test can seed the own submission's own document.
     /// </summary>
     public Guid NewInvoice()
     {
-        var submission = Guid.NewGuid();
+        var document = Guid.NewGuid();
+        var submission = SubmissionFor(document);
         var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
-        lock (_ownSubmissionOf) _ownSubmissionOf[invoice] = submission;
+        lock (_ownSubmissionOf)
+        {
+            _ownSubmissionOf[invoice] = submission;
+            _ownDocumentOf[invoice] = document;
+        }
+
         return invoice;
+    }
+
+    /// <summary>Task 165f: the document id <paramref name="invoice"/>'s own submission is derived from (<see cref="NewInvoice"/>), or a new id
+    /// for an invoice it did not make (a document that is no submission's own).</summary>
+    public Guid OwnDocumentOf(Guid invoice)
+    {
+        lock (_ownSubmissionOf)
+            return _ownDocumentOf.TryGetValue(invoice, out var document) ? document : Guid.NewGuid();
     }
 
     /// <summary>
@@ -1857,8 +1888,8 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     /// <summary>The .eml a from-email submission creates (095): its own Restricted narrowing, linked to its communication, and
     /// the submission marker (<paramref name="marked"/>; an unmarked one differs only there).</summary>
-    public Guid SubmissionEml(bool marked, Guid communication, Guid? matter = null) =>
-        Document(Guid.NewGuid(), permission: RestrictedPermission, eml: true, marker: marked, communication: communication,
+    public Guid SubmissionEml(bool marked, Guid communication, Guid? matter = null, Guid? id = null) =>
+        Document(id ?? Guid.NewGuid(), permission: RestrictedPermission, eml: true, marker: marked, communication: communication,
             matter: matter);
 
     /// <summary>
@@ -1929,10 +1960,11 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             SetStoredFile(id, column, null);
     }
 
-    /// <summary>A document recorded as <paramref name="invoice"/>'s source ONLY on a submission (no Stored File).</summary>
+    /// <summary>A document recorded as <paramref name="invoice"/>'s source ONLY on a submission (no Stored File): its own submission's own
+    /// document (task 165f) when <see cref="NewInvoice"/> made the invoice.</summary>
     public Guid SubmissionSource(Guid invoice, object? permission = null, Guid? matter = null)
     {
-        var document = Document(Guid.NewGuid(), permission, matter: matter);
+        var document = Document(OwnDocumentOf(invoice), permission, matter: matter);
         Submission(invoice, document);
         return document;
     }
@@ -1968,6 +2000,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public Guid FamilyRow(string table, Guid? invoice, Guid? line = null)
     {
         var family = ExternalInvoiceVisibility.FamilyTables[table];
+        var ownDocument = invoice is { } i ? OwnDocumentOf(i) : Guid.NewGuid(); // read before the own submission is taken
         var id = table == "sprk_invoicesubmission" ? NextSubmissionId(invoice) : Guid.NewGuid();
         var row = new Dictionary<string, object?> { [family.IdColumn] = id.ToString() };
         if (family.InvoiceLink is { } invoiceLink) row[invoiceLink] = invoice?.ToString();
@@ -1975,10 +2008,10 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         // A submission row always carries its firm (ebilling-098: one with none is withheld first).
         if (table == "sprk_invoicesubmission")
             row["_sprk_vendororg_value"] = Firm.ToString();
-        // A confirm-route submission: Internal, naming a clean document.
+        // A confirm-route submission: Internal, naming a clean document (task 165f: its own document when it is the invoice's own submission).
         if (table == "sprk_invoicesubmission" && invoice is not null)
         {
-            row["_sprk_document_value"] = Document(Guid.NewGuid()).ToString();
+            row["_sprk_document_value"] = Document(id == SubmissionFor(ownDocument) ? ownDocument : Guid.NewGuid()).ToString();
             row["sprk_channel"] = InternalChannel;
         }
 
@@ -1990,10 +2023,11 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     }
 
     /// <summary>Review round 5: a submission with NO invoice yet (Received, Processing, or a terminal outcome that produced none),
-    /// naming <paramref name="document"/> on the raw <paramref name="channel"/>; returns its id.</summary>
-    public Guid PendingSubmission(Guid? document, object? channel, bool noFirm = false)
+    /// naming <paramref name="document"/> on the raw <paramref name="channel"/>; returns its id (<paramref name="id"/> when given; otherwise
+    /// the id derived from the document, task 165f, or a new id when there is none).</summary>
+    public Guid PendingSubmission(Guid? document, object? channel, bool noFirm = false, Guid? id = null)
     {
-        var submission = Guid.NewGuid();
+        var submission = id ?? (document is { } d ? SubmissionFor(d) : Guid.NewGuid());
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
         {
             ["sprk_invoicesubmissionid"] = submission.ToString(),

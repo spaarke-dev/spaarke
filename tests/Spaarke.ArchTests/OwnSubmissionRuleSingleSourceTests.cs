@@ -23,6 +23,12 @@ namespace Spaarke.ArchTests;
 /// to another method that compares it, a comparison through a field or property, and a comparison through a second local copied from the
 /// first. The baseline is empty. Controls: <see cref="TheDetector_FiresOnAComparison"/>, <see cref="TheDetector_FiresOnALocalAndEquals"/>,
 /// <see cref="TheDetector_StaysQuietOnADerivation"/> and <see cref="TheDetector_StaysQuietOnALocalThatIsNotCompared"/>.
+/// <para>Task 165f: the same scan, with the same mechanics and blind spots, holds the own-document rule
+/// (<c>InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId)</c>, a document is a source only for the
+/// submission derived from it): outside <c>InvoiceSubmissionService.cs</c>, which defines the rule and the derivation, no source compares
+/// <c>ExistingDocumentSubmissionIdFor(...)</c> or a local assigned from it. The baseline is empty. Controls:
+/// <see cref="TheDetector_FiresOnADocumentComparison"/>, <see cref="TheDetector_StaysQuietOnADocumentDerivation"/> and
+/// <see cref="TheDocumentRulesFile_Exists_AndDefinesTheRule"/>.</para>
 /// </remarks>
 public class OwnSubmissionRuleSingleSourceTests
 {
@@ -32,11 +38,21 @@ public class OwnSubmissionRuleSingleSourceTests
         "Services/Finance/Submission/InvoiceSubmissionPersister.cs",
     ];
 
-    private static readonly Regex Call = new(@"\bInvoiceIdFor\s*\(", RegexOptions.Compiled);
+    /// <summary>The own-submission rule's derivation (<c>InvoiceSubmissionPersister.InvoiceIdFor</c>).</summary>
+    internal const string InvoiceDerivation = "InvoiceIdFor";
+
+    /// <summary>Task 165f: the own-document rule's derivation (<c>InvoiceSubmissionService.ExistingDocumentSubmissionIdFor</c>), compared
+    /// only by <c>InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf</c>, in the file that defines both.</summary>
+    internal const string DocumentDerivation = "ExistingDocumentSubmissionIdFor";
+
+    private static readonly string[] DocumentExempt = ["Services/Finance/Submission/InvoiceSubmissionService.cs"];
+
+    // `InvoiceIdFor(` (or the derivation named): a call of it.
+    private static Regex CallOf(string derivation) => new(@"\b" + Regex.Escape(derivation) + @"\s*\(");
 
     // `x = InvoiceIdFor(` / `var x = Qualifier.InvoiceIdFor(` / `Guid x = ...`: the identifier a derived id is held in.
-    private static readonly Regex Assigned =
-        new(@"\b(?<name>[A-Za-z_]\w*)\s*=\s*[\w.]*\bInvoiceIdFor\s*\(", RegexOptions.Compiled);
+    private static Regex AssignedFrom(string derivation) =>
+        new(@"\b(?<name>[A-Za-z_]\w*)\s*=\s*[\w.]*\b" + Regex.Escape(derivation) + @"\s*\(");
 
     // String and character literals, blanked before scanning so a brace or a name inside one cannot move the block depth or match.
     private static readonly Regex Literal = new("\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)+'", RegexOptions.Compiled);
@@ -51,12 +67,18 @@ public class OwnSubmissionRuleSingleSourceTests
     /// <c>InvoiceIdFor(...)</c> call as an operand of <c>==</c>, <c>!=</c> or <c>Equals</c>, or a local assigned from one and, within its
     /// block, an operand of the same (other than against <c>Guid.Empty</c>, <c>default</c> or <c>null</c>). Line comments and literals are
     /// ignored. A local that is only written, passed on or returned is not a comparison.</summary>
-    internal static IReadOnlyList<int> ComparisonLines(string code)
+    internal static IReadOnlyList<int> ComparisonLines(string code) => ComparisonLines(code, InvoiceDerivation);
+
+    /// <summary>Task 165f: <see cref="ComparisonLines(string)"/> for the derivation named (<see cref="DocumentDerivation"/>), with the same
+    /// mechanics and the same blind spots.</summary>
+    internal static IReadOnlyList<int> ComparisonLines(string code, string derivation)
     {
+        var call = CallOf(derivation);
+        var assignedFrom = AssignedFrom(derivation);
         var text = SourceScan.CodeText(code.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'));
         text = Literal.Replace(text, m => Regex.Replace(m.Value, @"[^\n]", " "));
         var found = new SortedSet<int>();
-        foreach (Match match in Call.Matches(text))
+        foreach (Match match in call.Matches(text))
         {
             var open = match.Index + match.Length - 1;
             if (IsComparedBefore(text, match.Index) || IsComparedAfter(text, open) || IsEqualsArgument(text, match.Index)
@@ -64,7 +86,7 @@ public class OwnSubmissionRuleSingleSourceTests
                 found.Add(SourceScan.LineOf(text, match.Index));
         }
 
-        foreach (Match assigned in Assigned.Matches(text))
+        foreach (Match assigned in assignedFrom.Matches(text))
         {
             var name = assigned.Groups["name"].Value;
             var scopeStart = assigned.Index + assigned.Length;
@@ -203,6 +225,65 @@ public class OwnSubmissionRuleSingleSourceTests
     {
         foreach (var file in Exempt)
             Assert.True(File.Exists(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", file)), file);
+    }
+
+    [Fact(DisplayName = "165f: no server source outside InvoiceSubmissionService compares ExistingDocumentSubmissionIdFor(...), or a local assigned from it, with ==, != or Equals (use InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf)")]
+    public void NoServerSource_ComparesADerivedDocumentSubmissionId_OutsideTheRule()
+    {
+        var copies = SourceScan.ServerSourceFiles()
+            .Where(f => !DocumentExempt.Contains(RelativeToBff(f), StringComparer.Ordinal))
+            .SelectMany(f => ComparisonLines(File.ReadAllText(f), DocumentDerivation).Select(line => $"{SourceScan.Relative(f)}:{line}"))
+            .ToList();
+
+        Assert.True(copies.Count == 0,
+            "compares ExistingDocumentSubmissionIdFor(...) or a local holding it (a second copy of the own-document rule); call "
+            + "InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId): " + string.Join(", ", copies));
+    }
+
+    [Fact(DisplayName = "165f control: the own-document rule's file exists and still defines the rule and the derivation")]
+    public void TheDocumentRulesFile_Exists_AndDefinesTheRule()
+    {
+        var file = Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", DocumentExempt[0]);
+        Assert.True(File.Exists(file), DocumentExempt[0]);
+        var code = File.ReadAllText(file);
+        Assert.Contains("static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)", code, StringComparison.Ordinal);
+        Assert.Contains($"static Guid {DocumentDerivation}(Guid documentId, int generation)", code, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "165f control (must fire): ExistingDocumentSubmissionIdFor compared directly, through a local, or with Equals")]
+    public void TheDetector_FiresOnADocumentComparison()
+    {
+        const string code = """
+            void A(Guid documentId, Guid submissionId, Guid other)
+            {
+                if (submissionId != InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId)) return;
+                var own = ExistingDocumentSubmissionIdFor(documentId, 2) == submissionId;
+                var expected = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId);
+                var same = other == expected;
+                var eq = submissionId.Equals(ExistingDocumentSubmissionIdFor(documentId));
+            }
+            """;
+
+        Assert.Equal(new[] { 3, 4, 6, 7 }, ComparisonLines(code, DocumentDerivation));
+        Assert.Empty(ComparisonLines(code));
+    }
+
+    [Fact(DisplayName = "165f control (must not fire): deriving, passing or guarding a document submission id, the shared rule, and a comment")]
+    public void TheDetector_StaysQuietOnADocumentDerivation()
+    {
+        const string code = """
+            void A(Guid documentId, Guid submissionId)
+            {
+                var confirmSubmissionId = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId);
+                var confirmed = Get(confirmSubmissionId);
+                if (confirmSubmissionId == Guid.Empty) return;
+                var row = Get(ExistingDocumentSubmissionIdFor(documentId, 2));
+                var own = InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId);
+                // a note: ExistingDocumentSubmissionIdFor(documentId) == submissionId
+            }
+            """;
+
+        Assert.Empty(ComparisonLines(code, DocumentDerivation));
     }
 
     [Fact(DisplayName = "165c control (must fire): a comparison on either side, == or !=, qualified or not, across a line break")]
