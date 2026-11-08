@@ -149,6 +149,13 @@ public static class FinanceModule
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
+        // Firm-visible outcome projection (ebilling-r1 task 130a, FR-38, D-66, EB-D-202): read-only, no caller check (its callers establish that the
+        // invoice may be shown). Concrete (ADR-010: no interface, one implementation). Scoped: it holds the singleton generic Dataverse client. It takes
+        // the clause reader as a delegate resolved lazily, as ExternalInvoiceHiding is, so it does not hold RuleSetService's nine dependencies.
+        // Unconditional (flag rule above); the routes (130b) carry the kill switch.
+        services.AddScoped<FirmClauseReader>(sp => (policyVersionId, invoiceId, ct) =>
+            sp.GetRequiredService<RuleSetService>().GetFirmClauseAsync(policyVersionId, invoiceId, ct));
+        services.AddScoped<FirmFindingsProjection>();
         // Add line (ebilling-r1 task 164, EB-D-188): a reviewer-typed Fee or Expense line. Concrete (ADR-010), scoped: it holds the scoped CodeSetResolver,
         // IInvoiceResolutionService, BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above); the route carries the kill switch.
         services.AddScoped<InvoiceLineAddService>();
