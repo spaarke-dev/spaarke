@@ -228,7 +228,7 @@ internal sealed class TaskActionCore
                 {
                     await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
                         .ApplyResolverPairAsync(
-                            entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, cancellationToken)
+                            entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, ct: cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

@@ -30,6 +30,7 @@
 
 import {
   applyResolverFields,
+  nullRecordNumberWhenTargetHasNone,
   resolveRecordNumberFieldName,
   resolveRecordDisplayNameFieldName,
   _resetRecordNumberFieldCacheForTests,
@@ -860,5 +861,43 @@ describe('applyResolverFields — SRFR-052 display-name resolution', () => {
     expect(payload['sprk_regardingrecordname']).toBe('Picker Fallback');
     expect(result.displayName).toBe('Picker Fallback');
     expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('has null/empty "sprk_mattername"'));
+  });
+});
+
+describe('nullRecordNumberWhenTargetHasNone (045c review round 3)', () => {
+  const pairHost: INavPropEntry[] = [
+    {
+      columnName: 'sprk_regardingrecordtype',
+      navPropName: 'sprk_RegardingRecordType',
+      referencedEntity: 'sprk_recordtype_ref',
+    },
+  ];
+  const noPairHost: INavPropEntry[] = [
+    { columnName: 'sprk_regardingmatter', navPropName: 'sprk_RegardingMatter', referencedEntity: 'sprk_matter' },
+  ];
+
+  it('nulls the number when the payload carries none and the host has the pair', () => {
+    const payload: Record<string, unknown> = { sprk_regardingrecordid: 'x' };
+    nullRecordNumberWhenTargetHasNone(payload, pairHost);
+    expect('sprk_regardingrecordnumber' in payload).toBe(true);
+    expect(payload['sprk_regardingrecordnumber']).toBeNull();
+  });
+
+  it('keeps a number the payload already carries', () => {
+    const payload: Record<string, unknown> = { sprk_regardingrecordnumber: 'MAT-2' };
+    nullRecordNumberWhenTargetHasNone(payload, pairHost);
+    expect(payload['sprk_regardingrecordnumber']).toBe('MAT-2');
+  });
+
+  it('adds no key to a host without the pair', () => {
+    const payload: Record<string, unknown> = {};
+    nullRecordNumberWhenTargetHasNone(payload, noPairHost);
+    expect('sprk_regardingrecordnumber' in payload).toBe(false);
+  });
+
+  it('adds no key when the host has no nav-props at all (discovery failed)', () => {
+    const payload: Record<string, unknown> = {};
+    nullRecordNumberWhenTargetHasNone(payload, []);
+    expect('sprk_regardingrecordnumber' in payload).toBe(false);
   });
 });
