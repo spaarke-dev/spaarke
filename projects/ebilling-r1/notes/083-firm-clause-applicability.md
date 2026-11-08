@@ -50,3 +50,15 @@ Before-change proof: the new tests do not compile against the old code (`FirmCla
 - ArchTests (full): 2159 passed, 0 failed. The first full run failed one test, `InvoiceMoneyColumnsAppOnlyWriteGuardTests` C1 (the service now names `sprk_vendororg`); `RuleSetService` is added to its `Readers` list with the reason (it reads the invoice's firm app-only and writes nothing).
 - Filtered unit (`RuleSet|Finance|Procedure`): 6916 passed, 0 failed, 4 skipped. `RuleSetServiceTests`: 165 passed.
 - Publish size (Release, framework-dependent linux-x64, `git archive` trees, `Compress-Archive -CompressionLevel Optimal`, 191 files each side): task parent `d58e3a3554` 40,471,966 B to tip 40,473,712 B (**+1,746 B**). No package changed, so no CVE delta. Not measured against a fresh master build here (the 082d notes give the project branch's own delta from master).
+
+
+## Fix round 1
+
+Done: F1 (downstream POMLs 130, 134, 135 require the label `FirmClauseText.FirmFacingName`, never `sprk_ruleset.sprk_name`), F2 (own-submission test seeds the foreign applied submission first, so a "first linked submission" reader fails it), F3 (the fault-log test now sees exceptions: none at Information or above, and no secret or id in any message or exception text), K1 (135 criteria restated against the resolver), K2 (superseded pointers on the old `invoiceFirmId` contract in 076 and rule-set-scope-design), K5 (130 cost constraint: about 6 reads per call, so a per-invoice overload).
+
+Known limits:
+
+- K3: a Retired set's flag can't be changed after retirement.
+- K4: a policy deactivated after judging hides its clause (fails closed); a Procedure rename changes the label.
+- K6: a snapshot dropped by the size cap, or nulled by a later correction, shows no clauses.
+- K7: `ReadOwnSubmissionAsync` relies on id derivation without the `NamesInvoice` cross-check.

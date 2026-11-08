@@ -49,14 +49,14 @@ public sealed class RuleSetServiceTests
 
     internal enum Write { Create, Update, BulkUpdate, Delete }
 
-    private sealed class ListLogger(List<(LogLevel Level, string Message)> sink) : ILogger<RuleSetService>
+    private sealed class ListLogger(List<(LogLevel Level, string Message, Exception? Exception)> sink) : ILogger<RuleSetService>
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            sink.Add((logLevel, formatter(state, exception)));
+            sink.Add((logLevel, formatter(state, exception), exception));
     }
 
     internal sealed class Harness
@@ -83,7 +83,7 @@ public sealed class RuleSetServiceTests
 
         /// <summary>Runs at the start of every bulk update (after the cancellation check): a test uses it to disconnect the caller mid-write.</summary>
         public Action<string>? OnBulk;
-        public readonly List<(LogLevel Level, string Message)> Logs = new();
+        public readonly List<(LogLevel Level, string Message, Exception? Exception)> Logs = new();
         public Func<Entity, bool>? FailCreateWhen;
 
         /// <summary>Runs at the start of every create, before the duplicate-key check: a test uses it to run a concurrent edit.</summary>
@@ -2943,8 +2943,13 @@ public sealed class RuleSetServiceTests
 
         var noSubmission = Guid.NewGuid();
         h.Seed(new Entity("sprk_invoice", noSubmission) { ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId) });
-        var foreign = h.Invoice(FindingsWith(SnapshotOf(DisplacedOn(version))));
-        h.AddSubmission(foreign, Guid.NewGuid(), snapshot); // linked to the invoice, but its id does not derive the invoice's: never the invoice's snapshot
+        // The foreign submission (it applied the version) is seeded FIRST, so a reader that takes "the first submission linked to the invoice"
+        // would return text; only the own submission (its id derives the invoice's id; it displaced the version) is the invoice's snapshot.
+        var ownSubmission = Guid.NewGuid();
+        var foreign = InvoiceSubmissionPersister.InvoiceIdFor(ownSubmission);
+        h.Seed(new Entity("sprk_invoice", foreign) { ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId) });
+        h.AddSubmission(foreign, Guid.NewGuid(), snapshot);
+        h.AddSubmission(foreign, ownSubmission, FindingsWith(SnapshotOf(DisplacedOn(version))));
         var service = h.Service();
 
         (await service.GetFirmClauseAsync(version, noSubmission, default)).Should().Be(FirmClauseText.None);
@@ -2992,7 +2997,13 @@ public sealed class RuleSetServiceTests
 
         shown.Should().Be(FirmClauseText.None);
         h.Logs.Should().Contain(l => l.Level == LogLevel.Warning, "a fault is logged");
-        h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => secrets.All(s => !l.Message.Contains(s)));
+        h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => l.Exception == null,
+            "an exception object carries the fault text (ids and names) to the log sink; only its type name may be logged");
+        // The Debug detail entry carries the exception by design (the service documents it); it is below the Information threshold.
+        h.Logs.Should().OnlyContain(l => secrets.All(s => !l.Message.Contains(s)),
+            "no id or name appears in any entry's message");
+        h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => secrets.All(s => l.Exception == null || !l.Exception.ToString().Contains(s)),
+            "no id or name appears in the exception text of an entry at Information or above");
     }
 
     [Fact(DisplayName = "083: a caller's own cancellation is not turned into a clause answer")]

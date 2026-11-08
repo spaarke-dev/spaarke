@@ -72,7 +72,7 @@
 
   <steps mode="directional">
     <step order="0">Read 076's model (rule set scope, flag, current version, effective dates), 070's describer entries and 130's firm helper; npm install --legacy-peer-deps --no-audit --no-fund in src/client/external-spa.</step>
-    <step order="1">Service: select rule sets (client default plus caller firms', visible, Published), their in-force versions, describe each body, shape parameters for display (names and values from the rule body; units from the type schema), attach clause quote and section reference via 076's helper. Group by rule set (name, version, scope label "All firms" or the firm name, effective from / to).</step>
+    <step order="1">Service: select rule sets (client default plus caller firms', visible, Published), their in-force versions, describe each body, shape parameters for display (names and values from the rule body; units from the type schema), attach clause quote and section reference via GetFirmClauseAsync (task 083). Group by rule set (the label FirmClauseText.FirmFacingName from GetFirmClauseAsync, never sprk_ruleset.sprk_name; version, scope label "All firms" or the firm name, effective from / to).</step>
     <step order="2">Route GET /api/v1/external/ebilling/billing-guidelines (directional) on the external group.</step>
     <step order="3">Widget: one SectionCard per rule set, rules in an Accordion (description, parameters, clause quote, section, effective dates); empty state "No published billing guidelines"; register in widgetRegistry.ts for the ciam plane.</step>
     <step order="4">Tests: service (other firm's set excluded; flag-off excluded; Draft and superseded versions excluded; describer refusal marked; no document field in any DTO); auth (401; 403 workforce or no-firm principal; 503 when off; 200); widget vitest (grouping, empty state, phone width).</step>
@@ -139,8 +139,8 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">The response contains only client-default rule sets and rule sets assigned to the caller's firm(s), all with "visible to firms" on; another firm's set and any flag-off set never appear (negative tests).</criterion>
-    <criterion testable="true">Only Published versions in force today appear; Draft, Rejected and superseded versions do not.</criterion>
+    <criterion testable="true">The general view contains only clauses of Published Procedures that apply to all records or to the caller's firm (resolver, today, no record), with visible-to-firms on. Another firm's Procedure and any flag-off set never appear (negative tests).</criterion>
+    <criterion testable="true">Only rules the resolver returns in force today appear (per-record: that record, gated by `ComposeForCiamContactAsync` and `Contains`). Draft, Rejected, superseded, displaced and excluded rules do not.</criterion>
     <criterion testable="true">Each rule carries describer text (or the refusal marker), parameters, clause quote, section reference and effective dates; no DTO field carries a document link, container id or drive item id.</criterion>
     <criterion testable="true">401 unauthenticated; 403 with a stable code for a workforce or no-firm principal; 503 ebilling.disabled when off; 200 for a firm user.</criterion>
     <criterion testable="true">The widget renders rule sets grouped as cards, shows the empty state when the list is empty, and is hidden when the flag is off.</criterion>
