@@ -35,6 +35,9 @@ public sealed class InvoiceLinksTests
             .Select(r => $"NOT COVERED: {r.Table}.{r.Column}")
             .ToList();
         problems.AddRange(tables.Values.Where(t => t.EntitySet is null).Select(t => $"NO READ SHAPE: {t.LogicalName}"));
+        // A root is redacted, never hidden; a child is hidden. Each table must be classed as what it is.
+        problems.AddRange(tables.Values.Where(t => t.IsRoot != SecureChildLineage.IsRoot(t.LogicalName))
+            .Select(t => $"WRONG CLASS: {t.LogicalName} IsRoot={t.IsRoot}"));
         return problems.Order(StringComparer.Ordinal).ToList();
     }
 
@@ -85,6 +88,32 @@ public sealed class InvoiceLinksTests
         InvoiceLinks.Tables[table].EntitySet.Should().Be(entitySet);
         InvoiceLinks.Tables[table].IdColumn.Should().Be(table + "id");
         InvoiceLinks.LinkColumnsOf(table).Should().BeEquivalentTo(columns.Split(','));
+    }
+
+    [Fact(DisplayName = "130-0b a root with an invoice link is classed as a root (its link is redacted, the row is never hidden); a child is not")]
+    public void ARootWithAnInvoiceLink_IsARoot_AndAChildIsNot()
+    {
+        InvoiceLinks.Tables["sprk_workassignment"].IsRoot.Should().BeTrue();
+        InvoiceLinks.Tables["sprk_workassignment"].EntitySet.Should().Be("sprk_workassignments");
+        InvoiceLinks.LinkColumnsOf("sprk_workassignment").Should().Equal("sprk_regardinginvoice");
+        InvoiceLinks.IsRootWithInvoiceLink("sprk_workassignment").Should().BeTrue();
+        InvoiceLinks.IsRootWithInvoiceLink("sprk_todo").Should().BeFalse();
+        InvoiceLinks.IsRootWithInvoiceLink("sprk_matter").Should().BeFalse("a root with no invoice link is not listed");
+        InvoiceLinks.Tables.Values.Where(t => !t.IsRoot).Should().NotContain(t => SecureChildLineage.IsRoot(t.LogicalName));
+    }
+
+    [Fact(DisplayName = "130-0b guard must fire: a seeded invoice edge on a root is classed as a root, and a table misclassed is reported")]
+    public void Guard_ClassesARootWithASeededInvoiceEdge()
+    {
+        var seeded = RecordFamilyEdges.All.Append(Edge("sprk_matter", "sprk_regardinginvoice", Invoice)).ToList();
+
+        var rebuilt = InvoiceLinks.Build(seeded, SecureChildLineage.Children);
+        rebuilt["sprk_matter"].IsRoot.Should().BeTrue();
+        rebuilt["sprk_matter"].EntitySet.Should().Be("sprk_matters");
+        Uncovered(seeded, SecureChildLineage.Children, rebuilt).Should().BeEmpty();
+
+        var misclassed = rebuilt.ToDictionary(kv => kv.Key, kv => kv.Key == "sprk_matter" ? kv.Value with { IsRoot = false } : kv.Value);
+        Uncovered(seeded, SecureChildLineage.Children, misclassed).Should().Equal("WRONG CLASS: sprk_matter IsRoot=False");
     }
 
     // ── The read ─────────────────────────────────────────────────────────────────────────────────────────────────

@@ -10,7 +10,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// (<see cref="ExternalInvoiceVisibility.FamilyTables"/>, which stays closed): to-dos, events, documents, communications, analyses, memos
 /// and every other table with an edge to <c>sprk_invoice</c>. A row is hidden when ANY linked invoice is not visible (each invoice gets
 /// the full invoice decision), and is decided by its invoice even when it is also filed under a shared matter. Both the assistant
-/// tools and the external routes call this; neither keeps its own table-to-column list.
+/// tools and the external routes call this; neither keeps its own table-to-column list. A ROOT (<see cref="LinkedTable.IsRoot"/>: a work
+/// assignment, matter or project) is never hidden by an invoice link: a root is decided by its grant, and its invoice link is shown only
+/// when that invoice is visible (otherwise every form of the link is blanked; uac-r2 ruling 2026-11-08).
 /// </summary>
 /// <remarks>
 /// <para><b>Derived, never hand-written.</b> A table's invoice link columns are every edge to <c>sprk_invoice</c> in the edge registry
@@ -31,9 +33,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// </remarks>
 internal static class InvoiceLinks
 {
-    /// <summary>How a table that links to an invoice is read: its entity set and id column (null when unknown: the read throws), and
-    /// its invoice link columns (logical names).</summary>
-    internal sealed record LinkedTable(string LogicalName, string? EntitySet, string IdColumn, IReadOnlyList<string> LinkColumns)
+    /// <summary>How a table that links to an invoice is read: its entity set and id column (null when unknown: the read throws), its
+    /// invoice link columns (logical names), and whether it is a ROOT (uac-r2 ruling 2026-11-08: a root is decided by its grant and is never
+    /// hidden by an invoice link; its invoice link is shown only when that invoice is visible, otherwise blanked). A child row is hidden.</summary>
+    internal sealed record LinkedTable(
+        string LogicalName, string? EntitySet, string IdColumn, IReadOnlyList<string> LinkColumns, bool IsRoot = false)
     {
         /// <summary>The Web API value columns of <see cref="LinkColumns"/> (<c>_col_value</c>).</summary>
         internal IReadOnlyList<string> ValueColumns => LinkColumns.Select(c => $"_{c}_value").ToArray();
@@ -45,6 +49,9 @@ internal static class InvoiceLinks
 
     /// <summary>True when <paramref name="table"/> has at least one invoice link.</summary>
     internal static bool HasInvoiceLink(string? table) => table is not null && Tables.ContainsKey(table);
+
+    /// <summary>True when <paramref name="table"/> is a root with an invoice link (its link is redacted, the row is never hidden).</summary>
+    internal static bool IsRootWithInvoiceLink(string? table) => table is not null && Tables.TryGetValue(table, out var linked) && linked.IsRoot;
 
     /// <summary>The invoice link columns of <paramref name="table"/> (logical names); empty when it has none.</summary>
     internal static IReadOnlyList<string> LinkColumnsOf(string? table) =>
@@ -80,8 +87,8 @@ internal static class InvoiceLinks
             kv => kv.Key,
             kv =>
             {
-                var (entitySet, idColumn) = ReadShapeOf(kv.Key, lineage);
-                return new LinkedTable(kv.Key, entitySet, idColumn, kv.Value.ToArray());
+                var (entitySet, idColumn, isRoot) = ReadShapeOf(kv.Key, lineage);
+                return new LinkedTable(kv.Key, entitySet, idColumn, kv.Value.ToArray(), isRoot);
             },
             StringComparer.OrdinalIgnoreCase);
     }
@@ -132,17 +139,17 @@ internal static class InvoiceLinks
     private static bool IsInvoice(string? table) =>
         string.Equals(table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase);
 
-    private static (string? EntitySet, string IdColumn) ReadShapeOf(
+    /// <summary>The read shape of <paramref name="table"/> and whether it is a root (one of the grant roots, <see cref="ExternalGrantRoot"/>).
+    /// A table neither a known child nor a root has no shape (its read throws).</summary>
+    private static (string? EntitySet, string IdColumn, bool IsRoot) ReadShapeOf(
         string table, IReadOnlyDictionary<string, SecureChildLineage.Table> lineage)
     {
-        if (lineage.TryGetValue(table, out var child))
-            return (child.EntitySet, child.IdColumn);
         foreach (var root in Enum.GetValues<ExternalGrantRootType>())
         {
             if (string.Equals(ExternalGrantRoot.LogicalNameFor(root), table, StringComparison.OrdinalIgnoreCase))
-                return (ExternalGrantRoot.BindFor(root).EntitySet, table + "id");
+                return (ExternalGrantRoot.BindFor(root).EntitySet, table + "id", true);
         }
 
-        return (null, table + "id");
+        return lineage.TryGetValue(table, out var child) ? (child.EntitySet, child.IdColumn, false) : (null, table + "id", false);
     }
 }
