@@ -348,6 +348,35 @@ public sealed partial class InvoiceSubmissionRerunTests
         }
     }
 
+    [Fact(DisplayName = "095d-2b-3 L9 SEEDED (EB-D-206 c): the LATEST Return decides - a predecessor Returned before this invoice and again after it is not linked")]
+    public async Task L9_TheLatestReturnDecides_AnEarlierReturnDoesNotHideALaterOne()
+    {
+        var world = await World.SeedAsync();
+        world.AddEarlierInvoice(
+            Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice,
+            returnedOn: World.InvoiceCreatedOn.AddDays(-1), alsoReturnedOn: World.InvoiceCreatedOn.AddDays(1)); // the earlier one is stored first
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed, "the re-run still commits");
+
+        SupersedesIn(world.Applied.Single()[1]).Should().BeNull("the latest Return came after this invoice was created");
+        world.Logger.Entries.Should().ContainSingle(e => e.Message.Contains("returned to the firm only after this invoice was created"));
+    }
+
+    [Fact(DisplayName = "095d-2b-3 L9 SEEDED (EB-D-206 c): the create time is cut to the second before the comparison - a Return in the same second as a create at +0.9 s is not linked")]
+    public async Task L9_ACreateWithMilliseconds_IsComparedAtTheSecond()
+    {
+        var world = await World.SeedAsync();
+        // The Return is stored cut to the second (10:00:00.000); this invoice was created at 10:00:00.900, so the Return is not known to precede it.
+        var createdOn = World.InvoiceCreatedOn.AddMilliseconds(900);
+        world.Row(InvoiceId)["createdon"] = createdOn;
+        world.AddEarlierInvoice(Predecessor, InvoiceStatusCodes.ReturnedToFirm, BeforeThisInvoice, returnedOn: World.InvoiceCreatedOn);
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed, "the re-run still commits");
+
+        SupersedesIn(world.Applied.Single()[1]).Should().BeNull("the Return is in the same second as the create");
+        world.Logger.Entries.Should().ContainSingle(e => e.Message.Contains("returned to the firm only after this invoice was created"));
+    }
+
     [Fact(DisplayName = "095d-2b-3 L9 (EB-D-206 c): a Returned predecessor with no Return decision record is not linked, and the log names ids only")]
     public async Task L9_NoReturnRecord_IsNotLinked_AndLogsIdsOnly()
     {
@@ -471,10 +500,11 @@ public sealed partial class InvoiceSubmissionRerunTests
         /// <summary>Another invoice of this firm with this submission's firm invoice number, filed under the seeded invoice's core record
         /// (or another one). Every invoice has its approval row except an automatic rejection (<paramref name="approval"/> false). A Returned
         /// to Firm one also has its Return decision record (unless <paramref name="returnRecord"/> is false), decided at
-        /// <paramref name="returnedOn"/> (default: a day after it was created).</summary>
+        /// <paramref name="returnedOn"/> (default: a day after it was created), and a second Return record when
+        /// <paramref name="alsoReturnedOn"/> is given.</summary>
         public void AddEarlierInvoice(
             Guid id, int status, DateTime createdOn, bool approval = true, bool otherCore = false, Guid? supersedes = null,
-            DateTime? returnedOn = null, bool returnRecord = true)
+            DateTime? returnedOn = null, bool returnRecord = true, DateTime? alsoReturnedOn = null)
         {
             var row = new Entity("sprk_invoice", id)
             {
@@ -516,6 +546,17 @@ public sealed partial class InvoiceSubmissionRerunTests
                     ["createdon"] = (returnedOn ?? createdOn.AddDays(1)).AddSeconds(2),
                 };
                 _rows[record.Id] = record;
+                if (alsoReturnedOn is { } second)
+                {
+                    var secondRecord = new Entity("sprk_decisionrecord", Guid.NewGuid())
+                    {
+                        ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", id),
+                        ["sprk_actioncode"] = InvoiceRejectReturnService.ReturnActionCode,
+                        ["sprk_decidedon"] = second,
+                        ["createdon"] = second.AddSeconds(2),
+                    };
+                    _rows[secondRecord.Id] = secondRecord;
+                }
             }
 
             if (approval)
@@ -540,6 +581,18 @@ public sealed partial class InvoiceSubmissionRerunTests
             if (IsReturnRecordQuery(query))
             {
                 ReturnRecordQueries.Add(query);
+
+                // As Dataverse answers it: the query's own order, then its TopCount (the latest Return decides).
+                IOrderedEnumerable<Entity>? orderedRecords = null;
+                foreach (var order in query.Orders)
+                {
+                    object? RecordKey(Entity e) => e.Contains(order.AttributeName) ? e[order.AttributeName] : null;
+                    orderedRecords = orderedRecords is null
+                        ? (order.OrderType == OrderType.Descending ? rows.OrderByDescending(RecordKey) : rows.OrderBy(RecordKey))
+                        : (order.OrderType == OrderType.Descending ? orderedRecords.ThenByDescending(RecordKey) : orderedRecords.ThenBy(RecordKey));
+                }
+
+                return (orderedRecords ?? rows).Take(query.TopCount ?? int.MaxValue).ToList();
             }
 
             if (!IsPredecessorQuery(query))

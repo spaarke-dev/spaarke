@@ -1247,9 +1247,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>EB-D-206 (c), amended: whether a Return decided at <paramref name="returnedAt"/> came before the invoice created at
-    /// <paramref name="createdOn"/>. Strictly before: the Return's decided-on is cut to the second (<see cref="InvoiceRejectReturnService"/>),
-    /// so a Return in the same second as the create is not known to precede it, and gives no link.</summary>
-    private static bool ReturnedBefore(DateTime returnedAt, DateTime createdOn) => returnedAt.CompareTo(createdOn) < 0;
+    /// <paramref name="createdOn"/>. Strictly before, at whole seconds: the Return's decided-on is cut to the second
+    /// (<see cref="InvoiceRejectReturnService"/>), so the create time is cut to the second too, and a Return in the same second as the create
+    /// (whatever the create's fraction) is not known to precede it and gives no link.</summary>
+    private static bool ReturnedBefore(DateTime returnedAt, DateTime createdOn) =>
+        returnedAt.CompareTo(createdOn.AddTicks(-(createdOn.Ticks % TimeSpan.TicksPerSecond))) < 0;
 
     /// <summary>
     /// EB-D-206 (c), amended: when the Return to Firm of <paramref name="invoiceId"/> was decided, from its Decision Record (D-75: one record
