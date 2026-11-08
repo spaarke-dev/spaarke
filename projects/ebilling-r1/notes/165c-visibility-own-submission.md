@@ -140,3 +140,74 @@ file or as a different local in another file; a name inside a string.
 Seed: the :126 comparison of `InvoiceSubmissionRerun.Signals.cs` put back as it was; `NoServerSource_ComparesADerivedInvoiceId_OutsideTheRule` failed naming `InvoiceSubmissionRerun.Signals.cs:126`; restored.
 
 rework: none task 165c
+
+## 8. Task 165e — decides only from the invoice's own submission, failing closed
+
+Task 165e (scope confirmed by uac-r2 2026-11-07, with additions (a)-(c)). Rigor FULL. Branch `task/ebilling-165e` from `work/ebilling-r1` at
+`e6f413514f`.
+
+### 8.1 What changed
+
+`ExternalInvoiceVisibility` only; no schema, field-security, endpoint, DI registration, package or client change. No new query: the
+submissions linked to the asked invoices are read in the same batch as before (one read per 50 invoices).
+
+| Site | Change |
+|---|---|
+| Reader 2 (`ReadSubmissionSourcesAsync`, inside `DecideAsync`) | An invoice whose submissions were read whole, and none of which is its own (`InvoiceBlockedHold.IsOwnSubmission`, the one rule; no copy), is hidden with the new reason `OwnSubmissionMissing` (`own_submission_missing`). A row whose id cannot be read keeps its 165c reason (`source_link_unreadable`) and is not reported as missing, since it may be the own row. A chunk the read could not use (truncated, or a row the filter cannot produce) has already hidden its invoices and reports nothing more |
+| `ReadRowsOfInvoicesAsync` | Also returns the invoices whose chunk was read whole (used only by the reader 2 check above) |
+| Reader 1 (`DecideSubmissionsAsync`) | Unchanged decision order. A submission that takes its invoice's verdict is withheld with `own_submission_missing` when the invoice read gives that reason (every invoice reader 1 asks is its submission's own, after the 165c withhold) |
+| `InvoiceHiddenReason`, `CodeOf` | `OwnSubmissionMissing` / `own_submission_missing` |
+
+An own submission linked to another invoice (criterion (b)) is not among the rows linked to its invoice, so that invoice is hidden by the
+same check; the submission itself stays withheld by 165c (`invoice_link_not_own`). An own submission that is found but cannot be read
+(its id, or its channel) hides the invoice through the existing checks. A read fault throws, and the caller-aware seams
+(`HideInvoicesForAsync`, `HideSubmissionsForAsync`) hide every asked invoice or withhold every asked submission, as before (criterion (a)).
+Internal systemusers are not decided by this predicate (unchanged; no read).
+
+**Event.** `ebilling.visibility.own_submission_missing` (`ExternalInvoiceVisibility.OwnSubmissionMissingEvent`), ids only, with 165c's level
+split: reader 1 logs (submission, invoice) at Warning; reader 2 logs the invoice id at Information, or at Debug when reader 1 of the same call
+reports it. Reader 1 passes the invoices it asks to the invoice decision (a fifth `DecideAsync` argument) so reader 2 knows to log at Debug.
+Reader 1 logs only when `own_submission_missing` is the invoice's recorded reason; an invoice already hidden by its Stored Files keeps
+that reason, and reader 2 then logs the missing own submission at Information, so it is never logged at Debug alone.
+
+**Escalation check (POML trigger).** Not fired. The only server writer of `sprk_invoice` rows is `InvoiceSubmissionPersister` (through
+`InvoiceLifecycleService.BuildInvoiceCreateRequest`), which creates the invoice under `InvoiceIdFor(submissionId)` and links that submission
+to it in the same transaction, for both channels and for a Correction (a Correction is a new submission with `sprk_resubmissionof`, and its
+invoice derives from that new submission). The re-run updates an existing invoice. The client creates no invoice (task 052).
+
+### 8.2 Tests
+
+New, `ExternalInvoiceVisibilityTests.OwnSubmissionRequired.cs` (18 cases):
+
+- Must fire: `NoOwnSubmission_HidesTheInvoice` (no submission, or only another submission; a sourceless InvoicePdf that would show it
+  otherwise; contact and flagged systemuser); `AnUnreadableOwnSubmission_HidesTheInvoice` (its id, or its channel, cannot be read).
+- Must not fire: `AnInvoiceWithItsOwnSubmission_IsShown` (no event; an internal systemuser still sees an invoice without one).
+- (a): `Reader2_TheOwnSubmissionReadFaults_HidesTheInvoice`, `Reader1_TheOwnSubmissionReadFaults_WithholdsTheSubmission` (both faulted).
+- (b): `AnOwnSubmissionLinkedToAnotherInvoice_HidesTheInvoice` (control: the other invoice, with its own submission, stays visible).
+- Reader 1 and the event: `Reader1_TheInvoicesOwnSubmissionNotFound_IsWithheld_OneWarningPerPair`,
+  `Reader1_AnInvoiceHiddenForAnotherReason_StillLogsTheMissingOwnSubmission`, `TheOwnMissingEvent_CarriesOnlyItsCodeAndTheId`.
+
+Fixtures (same reason as 165c section 2: shapes the persister never writes). `InvoiceWorld.OwnedInvoice()` (new) seeds an invoice with its
+own submission on the Spa channel and no document, so the Stored Files still decide it; the 44 tests that seeded a bare `Guid.NewGuid()`
+invoice for the Stored File rules use it, and the taint-closure case uses it for every table but the submission table (whose family row is
+the own submission). `InvoiceSubmissionRerunTests.Job.PartnerDecisionAsync` answers the submission read with the submission itself (Spa,
+never a source). No expectation changed.
+
+Seed: the check dropped from reader 2 (applied, the visibility tests run, restored byte-identical by hash, rebuilt): 8 fail (must fire x4,
+(b), the two reader 1 cases, the event case).
+
+### 8.3 Dev count (criterion (c))
+
+Read-only on spaarkedev1 (2026-11-08, Dataverse MCP): 6 invoices (2 of them Corrections, 5 Internal and 1 Spa submission), 10 submissions
+(6 linked, 4 not yet linked). Each of the 6 invoices has its own submission linked to it (`InvoiceIdFor` recomputed for every linked
+submission); none of the 4 unlinked submissions derives an existing invoice. Invoices that become hidden: **0**. Re-count at the dev deploy.
+
+### 8.4 Gates
+
+Filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission`): 12038 passed, 0 failed, 4 skipped. Before the fixture
+updates it had 59 failures, all fixtures with no own submission (section 8.2). BFF build: 0 warnings, 0 errors. ArchTests: 2132 passed, 0
+failed (`OwnSubmissionRuleSingleSourceTests` included; no derived-id comparison added). No package, endpoint or registration added.
+
+Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
+
+rework: none task 165e
