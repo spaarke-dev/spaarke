@@ -39,7 +39,7 @@
 
 - **uac-r2:** 165b-3 part B fix diff (F1 only); 082d review; 165f pass-2 result. DEF-057 (#2631) on their backlog.
 - **ontology-r1:** 165b-4 design note (before code); DI-144 (#2632) adopts `WriterCreatedRecord`; DEF-058 (#2634, filed with ebilling-r1 label; hand off when they accept): only the billing recorder writes billing action codes.
-- **field-mapping:** owed the 082d merge sha; payload shape (committed core) sent.
+- **field-mapping:** 082d sha sent. fm-032b round 2 design note comes to us + uac-r2 together (nothing built before). If U3 = (c), they may switch to the inline option (mapping reads/gates before the persister transaction, values in the create payload); our checks: gate fault refuses before any write, no second sprk_invoice write path, resolver for ownership columns, `procedureSnapshot` never mapped.
 
 ## Standing gates (unchanged)
 
