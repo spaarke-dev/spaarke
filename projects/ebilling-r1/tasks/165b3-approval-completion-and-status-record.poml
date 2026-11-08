@@ -4,7 +4,7 @@
     <title>Invoice integrity, part 165b-3: approval completion decides only from server-written sources; counted statuses need the approve record (EB-D-200)</title>
     <phase>4 Review (165 family)</phase>
     <gate>165b item 1 merged into work. Part A built (276c1201af). Part B: uac-r2 agreed EB-D-208 (writer-identity condition); B1 approval and the writer allow-list, B2 AP export run here; the spend paths moved to task 165b-4 (ontology-r1).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The approval write path and the counted-status readers (.cs); integrity of the approve Decision Record.</rigor-reason>
     <model-tier>opus</model-tier>
