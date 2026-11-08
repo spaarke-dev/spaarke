@@ -25,7 +25,7 @@
 - 2026-11-06 20669df6a9: checked after uac-r2's before-notice; POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
 - 2026-11-05 0f6618094b: content OK; the owner held it and it shipped inside 20669df6a9.
 - 2026-11-05 0f53e053bf, 2026-11-04 909754869f, 2026-11-03 d763dc120e: content OK; each carried the owner-checks condition above.
-- Dev BFF deploys run through uac-r2 (`spaarke-wt-unified-access-control-r2-20`): requests, peer OKs and after-notices go there; the owner gives the go per build in its session (`docs/procedures/dev-bff-deploy-coordination.md`).
+- Dev BFF deploys run through uac-r2 (Claude Desktop session `uac-r2` since 2026-11-08; the VS Code session `-r2-20` is retiring; a held message means the owner approves it there): requests, peer OKs and after-notices go there; the owner gives the go per build in its session (`docs/procedures/dev-bff-deploy-coordination.md`).
 
 ## Submit Invoice (task 133): state
 - Already-submitted banner (#2533) shows nothing until ebilling 095a is on dev (404 → today's form). Backfill for older submissions (incl. 0d67bcc9 and INV-792345.3/.4) is ebilling's, with the owner's OK.
@@ -34,7 +34,7 @@
 - **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
 ## Peers (SendMessage by session name)
-- uac-r2 `spaarke-wt-unified-access-control-r2-20` (dev BFF deploys, roles); ebilling `spaarke-wt-ebilling-r1-7b` / `-c7`; field-mapping `spaarke-wt-field-mapping-server-write-pa-69`; ontology `spaarke-wt-spaarke-ontology-platform-r1-38`.
+- uac-r2 `uac-r2` (Desktop; dev BFF deploys, roles); ebilling `spaarke-wt-ebilling-r1-7b` / `-c7`; field-mapping `spaarke-wt-field-mapping-server-write-pa-69`; ontology `spaarke-wt-spaarke-ontology-platform-r1-38`.
 
 ## Gotchas (this session)
 - Use `git commit -F <file>`; git under the Bash tool hangs, so use PowerShell.
