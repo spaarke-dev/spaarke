@@ -1547,7 +1547,7 @@ internal sealed class StubExternalDataService : ExternalDataService
         var raw = _accessor.HttpContext?.Request.Headers.TryGetValue("X-Test-DocProject", out var v) == true ? v.ToString() : null;
         // A single-root document (no other root link), so the every-root rule has nothing further to refuse.
         return Guid.TryParse(raw, out var projectId)
-            ? Task.FromResult(new DocumentScopeRead(projectId, "external-doc.bin", default))
+            ? Task.FromResult(new DocumentScopeRead(projectId, "external-doc.bin", ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.NoLinks))
             : Task.FromResult(DocumentScopeRead.Absent);
     }
 }

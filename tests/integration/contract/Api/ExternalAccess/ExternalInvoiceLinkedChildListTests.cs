@@ -180,8 +180,8 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         body.Truncated.Should().BeFalse("no firm is a decided answer (hide all), not a read failure");
     }
 
-    [Fact(DisplayName = "130-0 fix2 (must fire): a fault deciding one invoice, with the caller's firms known, hides that invoice's row; a row with no invoice stays")]
-    public async Task TheFilter_APerInvoiceFault_HidesThatRow()
+    [Fact(DisplayName = "130-0 fix2 (must fire): a decision that could not be read (the ask faulted for the invoice) hides that invoice's row and says truncated; a row with no invoice stays")]
+    public async Task TheFilter_AFaultedDecision_HidesThatRow_AndSaysTruncated()
     {
         ExternalInvoiceHiding faultOnOne = (_, _, _) => Task.FromResult(InvoiceVisibilityResult.ReadFailed(new[] { _other }));
 
@@ -238,6 +238,55 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
 
         body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("No invoice");
         body.Truncated.Should().BeTrue();
+    }
+
+    // ebilling-r1 task 130-0 fix round 3: the FetchXML overload of ExternalDataService.InvoiceLinksOf reads an absent attribute as "no
+    // link" (FetchXML omits a null attribute). That is sound only while every FetchXML caller asks for every link column of the table;
+    // this pins it for every registered child module with invoice links.
+    [Fact(DisplayName = "130-0 fix3 FetchXML pin: every child module with invoice links projects every registry link column in the FetchXML it executes")]
+    public async Task EveryFetchXmlChildModule_ProjectsEveryRegistryLinkColumn()
+    {
+        var registry = Registry();
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = new[] { CallerProjectAccess.FromLevel(Guid.NewGuid(), ExternalAccessLevel.FullAccess) },
+            MatterAccess = new Dictionary<Guid, AccessRights> { [Matter] = AccessRights.Read },
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [Guid.NewGuid()] = AccessRights.Read },
+        };
+        var children = registry.Modules
+            .Where(m => InvoiceLinks.HasInvoiceLink(m.RecordEntity)
+                && !InvoiceLinks.IsRootWithInvoiceLink(m.RecordEntity)
+                && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(m.RecordEntity))
+            .ToList();
+        children.Should().NotBeEmpty("the pin is not vacuous");
+        children.Select(m => m.RecordEntity).Should().Contain("sprk_document");
+
+        foreach (var module in children)
+        {
+            string? executed = null;
+            var data = _fixture.Data.NewService();
+            var idColumn = InvoiceLinks.Tables[module.RecordEntity].IdColumn;
+            await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+                new FetchRequestDto(
+                    module.RecordEntity, $"<fetch><entity name='{module.RecordEntity}'><attribute name='{idColumn}'/></entity></fetch>", PagingCookie: null),
+                caller, registry, new FetchXmlEntityExtractor(),
+                (request, _) =>
+                {
+                    executed = request.FetchXml;
+                    return Task.FromResult(new FetchResponseDto(Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null));
+                },
+                data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
+                data.GetLiveParentRootsAsync, _hiding.Seam);
+
+            executed.Should().NotBeNull($"the {module.Name} module executes the fetch for a caller with a grant on every root");
+            var named = System.Xml.Linq.XDocument.Parse(executed!).Descendants("attribute")
+                .Select(a => (string?)a.Attribute("name")).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+            named.Should().Contain(InvoiceLinks.LinkColumnsOf(module.RecordEntity),
+                $"the {module.Name} module's FetchXML must name every invoice link column, or a hidden link would read as no link");
+        }
     }
 
     // =====================================================================
@@ -595,6 +644,29 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         visible.Select(r => r.Item1).Should().Equal("own");
         truncated.Should().BeFalse("an unreadable link is an answer (hide), not a read failure");
         _hiding.Calls.Should().ContainSingle().Which.Should().Equal(_own);
+    }
+
+    [Fact(DisplayName = "130-0 fix3 absent link (must fire / must not fire): an absent link column reads as unreadable (hidden); a selected explicit null is no link")]
+    public async Task TheFilter_AnAbsentLinkColumn_HidesTheRow_AndASelectedNullIsVisible()
+    {
+        var absent = new Dictionary<string, System.Text.Json.JsonElement>();
+        var selectedNull = new Dictionary<string, System.Text.Json.JsonElement>
+        {
+            ["_sprk_regardinginvoice_value"] = System.Text.Json.JsonDocument.Parse("null").RootElement,
+        };
+        var absentLinks = ExternalDataService.InvoiceLinksOf("sprk_todo", absent);
+        var nullLinks = ExternalDataService.InvoiceLinksOf("sprk_todo", selectedNull);
+
+        var (visible, _) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            CallerOn(Matter), new[] { ("absent", absentLinks), ("null", nullLinks) },
+            r => r.Item2, _hiding.Seam, NullLogger.Instance, "test", CancellationToken.None);
+
+        absentLinks.Should().Equal(ExternalDocumentNarrowing.UnreadableLink);
+        nullLinks.Should().BeEmpty();
+        ExternalDataService.InvoiceLinksOf("sprk_todo", (IReadOnlyDictionary<string, System.Text.Json.JsonElement>?)null)
+            .Should().Equal(new[] { ExternalDocumentNarrowing.UnreadableLink }, "a row that was never read has no link columns either");
+        visible.Select(r => r.Item1).Should().Equal("null");
+        _hiding.Calls.Should().BeEmpty("neither row names an invoice to decide");
     }
 
     // =====================================================================

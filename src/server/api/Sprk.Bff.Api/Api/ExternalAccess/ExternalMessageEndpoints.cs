@@ -859,7 +859,7 @@ public static class ExternalMessageEndpoints
             }
 
             var decision = await hideInvoices(principal, new[] { id }, ct).ConfigureAwait(false);
-            if (!decision.IsVisible(id) && decision.Faulted)
+            if (!decision.IsVisible(id) && decision.IsFaultedFor(id)) // fix round 3 (Q2): this invoice's own failed decision too
             {
                 logger.LogWarning(
                     "[EXT-MESSAGES] Invoice {RecordId}: the (a') read failed for a caller who reaches it; answered as unavailable.", id);

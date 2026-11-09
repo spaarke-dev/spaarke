@@ -1417,6 +1417,14 @@ internal sealed class InvoiceVisibilityResult
     internal bool IsVisible(Guid invoiceId) =>
         invoiceId != Guid.Empty && _asked.Contains(invoiceId) && !_hidden.ContainsKey(invoiceId);
 
+    /// <summary>
+    /// Task 130-0 fix round 3 (Q2): whether the decision for <paramref name="invoiceId"/> could not be made: the whole read failed
+    /// (<see cref="Faulted"/>), or this invoice's own decision failed (<see cref="InvoiceHiddenReason.ReadFailed"/>). A single-record
+    /// read answers the retryable unavailable response for it, never the refusal; a decided "not visible" is not a fault.
+    /// </summary>
+    internal bool IsFaultedFor(Guid invoiceId) =>
+        Faulted || (!IsVisible(invoiceId) && _hidden.TryGetValue(invoiceId, out var reason) && reason == InvoiceHiddenReason.ReadFailed);
+
     /// <summary>Why <paramref name="invoiceId"/> is not visible; <c>null</c> only when it was asked and is visible.</summary>
     internal InvoiceHiddenReason? HiddenReason(Guid invoiceId) =>
         IsVisible(invoiceId) ? null : _hidden.TryGetValue(invoiceId, out var reason) ? reason : InvoiceHiddenReason.SourceNotFound;

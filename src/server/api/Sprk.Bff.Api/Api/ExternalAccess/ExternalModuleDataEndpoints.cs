@@ -574,6 +574,8 @@ public static class ExternalModuleDataEndpoints
                 // of the table's invoice link is blanked; the regarding pair and its resolver columns only when the pair names the
                 // hidden invoice (a pair that names another record is left alone). An annotation is matched by its column.
                 var hidden = new HashSet<string>(RootInvoiceLinkRedaction.LinkFormsOf(table), StringComparer.OrdinalIgnoreCase);
+                // Invariant: the RegardingForms are stripped ONLY when the regarding pair names a hidden invoice; a pair that names any
+                // other record is returned as read.
                 if (LinkValueOf(row, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn) is { } pairRaw
                     && RootLinkIdOf(pairRaw) is { } pairId && hiddenLinks.Any(l => l.Invoice == pairId))
                     hidden.UnionWith(RootInvoiceLinkRedaction.RegardingForms);

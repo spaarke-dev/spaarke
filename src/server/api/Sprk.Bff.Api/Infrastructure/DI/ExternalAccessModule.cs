@@ -534,9 +534,8 @@ public static class ExternalAccessModule
             RequireReadOnSecureRoots = true,
             // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work
             // assignment, so it is also reached through its work assignment, and that work assignment joins the secure-roots rule
-            // (RootLinks only maps the typed root names; sprk_regardingworkassignment is named here). Projected server-side with the
-            // other rule attributes, never a readable column.
-            AdditionalRootLookups = new[] { new RootLookup("sprk_regardingworkassignment", ExternalGrantRootType.WorkAssignment) },
+            // through the scope dimension below (RootLinks types sprk_regardingworkassignment as a work assignment root; the registry
+            // refuses a module whose root dimension RootLinks does not type). Projected server-side with the other rule attributes.
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },

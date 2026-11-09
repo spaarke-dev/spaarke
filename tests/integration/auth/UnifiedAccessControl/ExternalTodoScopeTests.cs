@@ -217,8 +217,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "a nonexistent to-do denies cleanly rather than erroring unhandled");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a nonexistent to-do is refused exactly as a to-do outside the caller's set (one uniform refusal)");
         _fixture.Data.UpdateCallCount.Should().Be(0);
     }
 

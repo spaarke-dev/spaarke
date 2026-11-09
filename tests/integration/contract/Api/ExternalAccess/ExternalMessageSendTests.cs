@@ -326,6 +326,11 @@ public class ExternalMessageSendTests
             }
         }
 
+        // Task 130-0 fix round 3: the read selects every invoice link column, so a link that is not set comes back as an explicit null
+        // (an absent column would read as an unread link, which is never visible).
+        foreach (var column in InvoiceLinks.LinkColumnsOf("sprk_communication"))
+            result.TryAdd($"_{column}_value", El<object?>(null));
+
         return result;
     }
 

@@ -19,11 +19,24 @@ internal sealed class InvoiceHidingStub
     private readonly ExternalInvoiceHiding? _real;
     private readonly List<Guid[]> _calls = new();
 
+    private readonly HashSet<Guid> _perInvoiceFault = new();
+
     private InvoiceHidingStub(IEnumerable<Guid> hidden, bool fault, ExternalInvoiceHiding? real = null)
     {
         _hidden = hidden.ToHashSet();
         _fault = fault;
         _real = real;
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 3: the decision was read but could not be made for exactly <paramref name="invoices"/> (a per-invoice
+    /// <see cref="InvoiceHiddenReason.ReadFailed"/> with the result not faulted as a whole); every other asked invoice is visible.
+    /// </summary>
+    public static InvoiceHidingStub PerInvoiceFault(params Guid[] invoices)
+    {
+        var stub = new InvoiceHidingStub(Array.Empty<Guid>(), fault: false);
+        stub._perInvoiceFault.UnionWith(invoices);
+        return stub;
     }
 
     /// <summary>
@@ -56,6 +69,8 @@ internal sealed class InvoiceHidingStub
         if (_fault)
             return Task.FromResult(InvoiceVisibilityResult.ReadFailed(asked));
         var hidden = asked.Where(_hidden.Contains).Distinct().ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden);
+        foreach (var id in asked.Where(_perInvoiceFault.Contains).Distinct())
+            hidden[id] = InvoiceHiddenReason.ReadFailed;
         return Task.FromResult(new InvoiceVisibilityResult(asked, hidden, faulted: false));
     };
 }

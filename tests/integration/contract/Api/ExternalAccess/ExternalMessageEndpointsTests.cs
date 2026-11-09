@@ -61,6 +61,9 @@ public class ExternalMessageEndpointsTests
     private readonly Dictionary<(string Entity, Guid Id), IReadOnlyDictionary<string, object?>> _records = new();
     private string? _lastOData;
 
+    // ebilling-r1 task 130-0 fix round 3: columns the thread read's answer never carries even when selected (a masked column).
+    private readonly HashSet<string> _omittedColumns = new(StringComparer.Ordinal);
+
     // The secure-flag read (owner option B) runs through the REAL ExternalDataService over this fake Web API, which answers
     // the root-set query through $select and omits a null flag.
     private readonly ExternalRootEventReadTests.FakeDataverse _roots = new();
@@ -148,7 +151,8 @@ public class ExternalMessageEndpointsTests
             // Each row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
             .Returns<string, string?, CancellationToken>((_, odata, _) =>
                 Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
-                    AppOnlySelectProjection.WithOpenThread(rows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+                    AppOnlySelectProjection.WithOpenThread(rows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata,
+                    _omittedColumns)));
 
     // Owner decision D7: the thread read shows a row only when its thread reads Open. These cases are not about D7, so every
     // row sits in one Open thread (SetupMessages seeds the lookup).
@@ -987,8 +991,9 @@ public class ExternalMessageEndpointsTests
             .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
 
         body.Truncated.Should().Be(fault, "a fault must not read as 'there are no more messages'");
-        body.Value.Select(m => m.SprkCommunicationid).Should().BeEquivalentTo(
-            fault ? new[] { plain.ToString("D") } : new[] { about.ToString("D"), plain.ToString("D") });
+        // Oldest first is the route's documented order, so the order is asserted (plain is older than the invoice message).
+        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(
+            fault ? new[] { plain.ToString("D") } : new[] { plain.ToString("D"), about.ToString("D") });
     }
 
     // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice whose core record is a work assignment is reached through it.
@@ -1016,6 +1021,49 @@ public class ExternalMessageEndpointsTests
             .Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+    }
+
+    // ebilling-r1 task 130-0 fix round 3 (Q2): an invoice thread whose invoice decision faulted for this invoice alone is the 503, not
+    // the refusal; a decided hidden invoice is the uniform refusal.
+    [Fact(DisplayName = "130-0 fix3 Q2 invoice thread (must fire / must not fire): a fault deciding this invoice is the 503; a decided hidden invoice is the uniform refusal")]
+    public async Task Task130_0_Q2_APerInvoiceFault_OnAnInvoiceThread_IsThe503_AndAHiddenInvoiceIsTheRefusal()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        AddInvoiceUnder(invoice, matter);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        _invoiceHiding = InvoiceHidingStub.PerInvoiceFault(invoice);
+        var problem = (await Get("invoices", invoice, Ciam(matter: matter))).Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+
+        _invoiceHiding = InvoiceHidingStub.Hiding(invoice);
+        ShouldBeTheSameAnswer(
+            await Get("invoices", invoice, Ciam(matter: matter)),
+            await Get("invoices", Guid.NewGuid(), Ciam(matter: matter)));
+    }
+
+    // ebilling-r1 task 130-0 fix round 3: a link column the read did not carry is not "no link". The thread read selects every invoice
+    // link column of a communication (the select is the registry's), so the only way a row reaches the filter without one is a column
+    // the read never returned; that message is withheld, and a selected explicit null is no link.
+    [Fact(DisplayName = "130-0 fix3 thread (must fire / must not fire): the select carries every communication invoice link column; a row whose link column was not returned is withheld; a selected null is shown")]
+    public async Task Task130_0_Fix3_ARowWhoseLinkColumnWasNotReturned_IsWithheld_AndASelectedNullIsShown()
+    {
+        var matter = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        var shown = Guid.NewGuid();
+        SetupMessages(MessageRow(shown, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        // Must not fire: nothing seeded for the link column, the read selects it, the answer carries an explicit null.
+        Messages(await Get("matters", matter, Ciam(matter: matter))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(shown.ToString("D"));
+        foreach (var column in InvoiceLinks.LinkColumnsOf("sprk_communication"))
+            _lastOData.Should().Contain($"_{column}_value", "the thread read selects every invoice link column of a communication");
+
+        // Must fire: the column is selected but never returned (masked).
+        _omittedColumns.Add("_sprk_regardinginvoice_value");
+        Messages(await Get("matters", matter, Ciam(matter: matter))).Should().BeEmpty("a link the read did not return is never 'no link'");
     }
 
     [Fact]

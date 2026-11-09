@@ -115,6 +115,20 @@ public sealed class ExternalInvoiceLinkedTodoUpdateTests : IClassFixture<Externa
         Writes().Should().BeEmpty();
     }
 
+    // ebilling-r1 task 130-0 fix round 3: uniform refusal for single to-do routes. A to-do id that does not exist answers exactly as one
+    // outside the caller's set: same status, same body, nothing written.
+    [Fact(DisplayName = "130-0 fix3 to-do PATCH (must fire): a missing to-do id is the same 403, with the same body, as one outside the caller's set")]
+    public async Task AMissingTodoId_IsTheSameRefusal_AsATodoOutsideTheCallersSet()
+    {
+        var reference = await RefusalForATodoOutsideTheCallersSet();
+
+        using var response = await Patch(Guid.NewGuid().ToString());
+
+        (await Summarise(response)).Should().Be(reference);
+        Writes().Should().BeEmpty("nothing was written");
+        _hiding.Calls.Should().BeEmpty("a missing to-do asks no invoice decision");
+    }
+
     private async Task<string> RefusalForATodoOutsideTheCallersSet()
     {
         var elsewhere = _fixture.Data.AddTodo("matters", Guid.NewGuid(), "Another record's");
@@ -279,10 +293,43 @@ public sealed class ExternalInvoiceLinkedDeleteTests : IClassFixture<ExternalDel
         {
             ["_sprk_createdbycontact_value"] = CallerContact.ToString(),
             ["_sprk_matter_value"] = Matter.ToString(),
+            ["_sprk_invoice_value"] = null, // a selected lookup that is not set: the Web API answers an explicit null
             ["_sprk_relatedinvoice_value"] = related.ToString(),
         })).RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
 
         ParseDeleteTarget(DeletableKind.Document, row).InvoiceLinks.Should().Equal(related);
+    }
+
+    // ebilling-r1 task 130-0 fix round 3: a link column the read did not carry is not "no link". The target's links then include the
+    // never-visible sentinel, so the delete is refused.
+    [Fact(DisplayName = "130-0 fix3 delete target (must fire): a row read without an invoice link column is refused, and kept; a selected explicit null is no link")]
+    public async Task ARowReadWithoutALinkColumn_IsRefused_AndASelectedNullIsNotALink()
+    {
+        var row = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["_sprk_createdbycontact_value"] = CallerContact.ToString(),
+            ["_sprk_matter_value"] = Matter.ToString(),
+            ["_sprk_invoice_value"] = null, // selected, not set
+        })).RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+
+        // sprk_relatedinvoice was not read: the read cannot say there is no link.
+        var parsed = ParseDeleteTarget(DeletableKind.Document, row);
+        parsed.InvoiceLinks.Should().Equal(ExternalDocumentNarrowing.UnreadableLink);
+
+        var id = SeedLinkedTo("documents");
+        _fixture.Data.Targets[(DeletableKind.Document, id)] = _fixture.Data.Targets[(DeletableKind.Document, id)] with { InvoiceLinks = parsed.InvoiceLinks };
+
+        using var refused = await Delete("documents", id);
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+
+        var allNull = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["_sprk_invoice_value"] = null,
+            ["_sprk_relatedinvoice_value"] = null,
+        })).RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        ParseDeleteTarget(DeletableKind.Document, allNull).InvoiceLinks.Should().BeEmpty("a selected explicit null is no link");
     }
 
     [Fact(DisplayName = "130-0 fix2 F1 document delete (must fire): a document whose related invoice is another firm's is refused, and kept")]

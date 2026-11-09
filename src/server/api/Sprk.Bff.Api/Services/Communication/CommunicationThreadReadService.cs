@@ -549,8 +549,14 @@ public sealed class CommunicationThreadReadService
         // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
         // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.
         // Task 187 (owner round 99, D-123): and the row's other parent lookups, whose LIVE roots the rule takes in (RootsOf).
+        // Task 130-0 fix round 3: and every invoice link column of the table, by name from the registry (InvoiceLinks). The row's
+        // invoices are read from this select (ExternalDataService.InvoiceLinksOf), where a column that was not read is "not read",
+        // never "no link"; so the select must carry all of them.
         regardingValues = regardingValues.Concat(RootStampColumns)
             .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalMultiRootRule.LiveParentSelect(CommunicationTable))
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.Tables.TryGetValue(CommunicationTable, out var invoiceLinked)
+                ? invoiceLinked.ValueColumns
+                : Array.Empty<string>())
             .Distinct();
         var columns = new List<string> { PkField };
         if (includeContent)

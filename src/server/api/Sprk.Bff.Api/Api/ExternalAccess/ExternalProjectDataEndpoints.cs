@@ -120,8 +120,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get a single Secure Project by ID")
             .Produces<ExternalProjectDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/documents
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
@@ -580,12 +579,17 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            return DenyProject();
 
+        // Fix round 3: a project in the caller's set that is no longer there gets the same response, body included.
         var project = await dataService.GetProjectByIdAsync(id, ct);
-        return project is null ? Results.NotFound() : Results.Ok(project);
+        return project is null ? DenyProject() : Results.Ok(project);
     }
+
+    /// <summary>The ONE refusal of the single-project read: no Read on it, or it is not there.</summary>
+    private static IResult DenyProject() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "You do not have access to this project");
 
     // -------------------------------------------------------------------------------------------
     // Documents on every core record (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
@@ -1380,7 +1384,8 @@ public static class ExternalProjectDataEndpoints
         logger.LogInformation(
             "[EXT-INVOICE-DOCS] Invoice {InvoiceId} hidden by the (a') predicate ({Reasons}); denied like a missing invoice.",
             invoiceId, decision.HiddenSummary());
-        return (false, decision.Faulted);
+        // Fix round 3 (Q2): this invoice's own failed decision is a fault too, not only a whole failed read.
+        return (false, decision.IsFaultedFor(invoiceId));
     }
 
     /// <summary>
@@ -1562,10 +1567,10 @@ public static class ExternalProjectDataEndpoints
     /// <c>sprk_relatedinvoice</c>; <see cref="InvoiceLinks"/>) is visible to the caller (<paramref name="hideInvoices"/>, the
     /// caller-aware seam). A document of an invoice the caller may not see, no seam and a faulted decision all give the same
     /// refusal, decided last, so the answer cannot tell why.</para>
-    /// <para>Task 130-0 fix round 2 (fault ruling): a document that passes every other check but whose invoice decision
-    /// faulted (the caller's firms could not be read, or no seam is configured) is not refused: <c>InvoiceFaulted</c> is
-    /// set and the route answers the invoice-unreadable 503. A per-invoice read failure with the firms known still hides
-    /// the document (the same refusal).</para>
+    /// <para>Task 130-0 fix round 2 (fault ruling) and round 3 (Q2): a document that passes every other check but whose invoice
+    /// decision could not be made (the caller's firms could not be read, no seam is configured, or a linked invoice's own decision
+    /// failed) is not refused: <c>InvoiceFaulted</c> is set and the route answers the invoice-unreadable 503. A linked invoice that is
+    /// decided not visible keeps the refusal.</para>
     /// </summary>
     private static async Task<(bool Readable, bool InvoiceFaulted)> IsDocumentReadableUnderAsync(
         ExternalDataService.DocumentScopeRead document, Guid documentId, Guid routeParentId, CallerPrincipal caller,
@@ -1586,11 +1591,12 @@ public static class ExternalProjectDataEndpoints
             return (false, false);
         // Task 130-0 fix round 1: the same refusal for a document whose invoice the caller may not see.
         // Fix round 2: a faulted decision is the 503, not the refusal.
-        var (visible, faulted) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
-            caller, new[] { document },
-            d => ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, d.Roots.Row),
+        // Fix round 3 (Q2): a decision that could not be made, whether the caller's firms or this document's own invoice decision,
+        // is the 503; only a decided "not visible" is the refusal.
+        var state = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+            caller, ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, document.Roots.Row),
             hideInvoices, logger, "document", ct);
-        return (visible.Count == 1, visible.Count == 0 && faulted);
+        return (state == ExternalDataService.InvoiceLinkedRowState.Visible, state == ExternalDataService.InvoiceLinkedRowState.Faulted);
     }
 
     /// <summary>
@@ -2481,9 +2487,9 @@ public static class ExternalProjectDataEndpoints
         // "unreadable" (see its remarks) — both land in the deny paths below, which is the point.
         var (rootKind, rootId, todoName) = await dataService.GetTodoRootAsync(id, ct);
 
+        // Fix round 3: a to-do that is not there gets the same response, body included, as one the caller may not change.
         if (todoName is null)
-            return Results.Problem(statusCode: 404, title: "Not Found",
-                detail: "To-do not found");
+            return DenyTodoWrite();
 
         // Scope on whichever of the three A-9 root sets the to-do is parented to. Owner decision
         // 2026-08-24: matter and work assignment get the same functionality as project.

@@ -970,6 +970,36 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
     }
 
+    // Task 130-0 fix round 3 (Q2): the invoice's own failed decision (the result not faulted as a whole) is the 503 on every invoice
+    // document route for a caller who reaches the invoice; a decided hidden invoice keeps the uniform 403 (covered above).
+    [Fact(DisplayName = "130-0 fix3 Q2 documents (must fire): a fault deciding this invoice, with the firms known, is the 503 on every invoice document route")]
+    public async Task Task130_0_Q2_APerInvoiceFault_IsThe503_OnEveryInvoiceDocumentRoute()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = CiamOn(matter: MatterM);
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.PerInvoiceFault(RecordA);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var faulted = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+
+        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
+        foreach (var response in faulted)
+            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "130-0 fix2 K1 (fail closed by type): a list row whose invoice links were never set is hidden, and the list says truncated")]
     public async Task Task130_0_ARowWhoseLinksWereNeverSet_IsHidden()
     {
@@ -2421,8 +2451,19 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             var row = Documents.SingleOrDefault(d => d.Id == documentId);
             return Task.FromResult(row is null
                 ? DocumentScopeRead.Absent
-                : new DocumentScopeRead(ParentOf(row, parentKind), row.Name, default));
+                : new DocumentScopeRead(ParentOf(row, parentKind), row.Name, NoLinks));
         }
+
+        /// <summary>
+        /// Task 130-0 fix round 3: the roots of a document read that selected every invoice link column and found none set (an explicit
+        /// null each, as the Web API answers a selected lookup that is not set). A <c>default</c> would carry no row, which reads as an
+        /// unread link (never visible).
+        /// </summary>
+        public static DocumentRootLinks NoLinks { get; } = new DocumentRootLinks(null, null, null, null, null, null)
+        {
+            Row = InvoiceLinks.LinkColumnsOf("sprk_document").ToDictionary(
+                c => $"_{c}_value", _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
+        };
 
         // The real seam's body without the transport: build the payload, stamp it (task 030), store it.
         public override Task<ExternalDocumentDto> CreateDocumentAsync(

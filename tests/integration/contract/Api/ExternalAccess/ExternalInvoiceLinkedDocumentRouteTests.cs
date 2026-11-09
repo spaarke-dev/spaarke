@@ -153,6 +153,66 @@ public sealed class ExternalInvoiceLinkedDocumentRouteTests : IClassFixture<Exte
         _hiding.Calls.Should().BeEmpty();
     }
 
+    // ebilling-r1 task 130-0 fix round 3: a link column the read did not carry is not "no link": the document is refused as not under the
+    // record (the read's own $select is not the boundary). A selected explicit null is no link and is served (above).
+    [Theory(DisplayName = "130-0 fix3 absent link (must fire): a document read that did not return a registry link column is refused, before any pointer is resolved")]
+    [InlineData("_sprk_invoice_value", "content")]
+    [InlineData("_sprk_relatedinvoice_value", "content")]
+    [InlineData("_sprk_invoice_value", "versions")]
+    [InlineData("_sprk_relatedinvoice_value", "versions")]
+    public async Task ADocumentReadWithoutALinkColumn_IsRefused(string maskedColumn, string route)
+    {
+        var reference = await RefusalOf(route);
+        _fixture.ResetCalls();
+        var id = _fixture.Data.AddDocument("matters", Matter, "No invoice, but the link was not returned");
+        _fixture.Data.MaskedColumns.Add(maskedColumn);
+
+        using var response = await Get(id, route);
+
+        (await Summarise(response)).Should().Be(reference);
+        _fixture.PointerResolutions.Should().Be(0);
+    }
+
+    // ebilling-r1 task 130-0 fix round 3 (Q2): a SINGLE invoice-linked read whose decision faults answers the 503, never a refusal;
+    // a decided hidden invoice keeps the route's uniform refusal.
+    [Theory(DisplayName = "130-0 fix3 Q2 single document (must fire): a fault deciding the document's invoice, with the firms known, is the invoice-unreadable 503, not the refusal")]
+    [MemberData(nameof(LinksAndRoutes))]
+    public async Task APerInvoiceFault_OnAnInvoiceLinkedDocument_IsThe503(string link, string route)
+    {
+        var stub = InvoiceHidingStub.PerInvoiceFault(_other);
+        _fixture.InvoiceHiding = stub;
+        var id = _fixture.Data.AddDocument("matters", Matter, "Undecidable invoice", (link, _other));
+
+        using var response = await Get(id, route);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        using var problem = JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        stub.Calls.Should().ContainSingle().Which.Should().Equal(_other);
+        _fixture.PointerResolutions.Should().Be(0, "nothing is served while the invoice decision is unknown");
+        _fixture.FileReads.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "130-0 fix3 Q2 single document (must not fire): a DECIDED hidden invoice keeps the uniform refusal; a decided visible one is served")]
+    [MemberData(nameof(LinksAndRoutes))]
+    public async Task ADecidedHiddenInvoice_OnADocument_KeepsTheUniformRefusal(string link, string route)
+    {
+        var reference = await RefusalOf(route);
+        _fixture.ResetCalls();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(_other);
+        var hidden = _fixture.Data.AddDocument("matters", Matter, "Decided hidden", (link, _other));
+        var visible = _fixture.Data.AddDocument("matters", Matter, "Decided visible", (link, _own));
+
+        using (var response = await Get(hidden, route))
+            (await Summarise(response)).Should().Be(reference);
+        _fixture.PointerResolutions.Should().Be(0);
+
+        using (var response = await Get(visible, route))
+            response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
     private async Task<string> RefusalOf(string route)
     {
         var elsewhere = _fixture.Data.AddDocument("matters", OtherMatter, "Another record's");

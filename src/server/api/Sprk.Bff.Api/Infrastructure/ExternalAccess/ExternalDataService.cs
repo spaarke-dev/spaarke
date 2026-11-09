@@ -393,8 +393,8 @@ public class ExternalDataService
     /// <remarks>
     /// <b>Invoice</b> (owner decision 2026-10-11, task 031 option A "inherit"): an invoice is not a root in the caller's
     /// accessible set, so its documents take the caller's rights on the invoice's PARENT records — the union over its
-    /// <c>sprk_matter</c> and <c>sprk_project</c> (<see cref="GetInvoiceParentsAsync"/>; the endpoint's rights arm), the
-    /// same "any accessible parent" rule the invoices module and the message routes apply.
+    /// <c>sprk_matter</c>, <c>sprk_project</c> and <c>sprk_regardingworkassignment</c> (<see cref="GetInvoiceParentsAsync"/>; the
+    /// endpoint's rights arm), the same "any accessible parent" rule the invoices module and the message routes apply.
     /// </remarks>
     public enum DocumentParentKind
     {
@@ -1939,19 +1939,24 @@ public class ExternalDataService
 
     /// <summary>
     /// Task 130-0 fix round 1: the invoices one Web API row of <paramref name="table"/> links to, through every invoice link
-    /// column of that table (<see cref="InvoiceLinks.LinkColumnsOf"/>, read as <c>_col_value</c>). Absent or JSON null is "no link";
-    /// a value that is not a GUID reads as <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible: fail closed).
+    /// column of that table (<see cref="InvoiceLinks.LinkColumnsOf"/>, read as <c>_col_value</c>). An explicit JSON null is "no link": the
+    /// Web API returns a selected lookup that is not set as null. A column that is ABSENT from the row was not read, so it reads as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible): the read's own <c>$select</c> is not the boundary. A value
+    /// that is not a GUID reads the same way (fail closed). A table with no invoice link reads as an empty list whatever the row holds.
     /// </summary>
     internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, JsonElement>? row)
     {
         var links = new List<Guid>();
         foreach (var column in InvoiceLinks.LinkColumnsOf(table))
         {
-            if (row is null || !row.TryGetValue($"_{column}_value", out var value)
-                || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            if (row is null || !row.TryGetValue($"_{column}_value", out var value))
             {
+                links.Add(ExternalDocumentNarrowing.UnreadableLink); // not read: never "no link"
                 continue;
             }
+
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                continue;
 
             links.Add(value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id) && id != Guid.Empty
                 ? id
@@ -1964,6 +1969,9 @@ public class ExternalDataService
     /// <summary>
     /// Task 130-0 fix round 1: <see cref="InvoiceLinksOf(string, IReadOnlyDictionary{string, JsonElement})"/> for a FetchXML (module)
     /// row, keyed by logical name. A present value that is not a lookup id reads as <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.
+    /// Unlike the Web API overload, an absent attribute IS "no link" here: FetchXML omits a null attribute. The attribute list of every
+    /// caller must therefore carry <see cref="InvoiceLinks.LinkColumnsOf"/> of the table (pinned by
+    /// <c>ExternalInvoiceLinkedChildListTests.EveryFetchXmlChildModule_ProjectsEveryRegistryLinkColumn</c>).
     /// </summary>
     internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, object?> row)
     {
@@ -2011,42 +2019,7 @@ public class ExternalDataService
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(invoiceLinksOf);
         var links = rows.Select(invoiceLinksOf).ToList();
-        var asked = links
-            .SelectMany(l => l)
-            .Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
-            .Distinct()
-            .ToList();
-        InvoiceVisibilityResult? decision = null;
-        var faulted = false;
-        if (asked.Count > 0)
-        {
-            if (hideInvoices is null)
-            {
-                logger.LogError(
-                    "[EXT-INVOICE-LINKED] {Surface}: no invoice predicate is configured; every row linked to one of {Count} invoice(s) is hidden (fail closed).",
-                    surface, asked.Count);
-                faulted = true;
-            }
-            else
-            {
-                try
-                {
-                    decision = await hideInvoices(caller, asked, ct).ConfigureAwait(false);
-                    faulted = decision.Faulted;
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex,
-                        "[EXT-INVOICE-LINKED] {Surface}: the invoice decision for {Count} invoice(s) failed; every invoice-linked row is hidden (fail closed).",
-                        surface, asked.Count);
-                    faulted = true;
-                }
-            }
-        }
+        var (decision, faulted) = await AskInvoiceDecisionAsync(caller, links, hideInvoices, logger, surface, ct).ConfigureAwait(false);
 
         var visible = rows
             .Where((_, i) => links[i].Count == 0 || (!faulted && decision is not null && links[i].All(decision.IsVisible)))
@@ -2059,6 +2032,101 @@ public class ExternalDataService
         }
 
         return (visible, faulted && visible.Count != rows.Count);
+    }
+
+    /// <summary>
+    /// The one question to the caller-aware seam for <paramref name="links"/> (the invoices of one or more rows): every distinct usable
+    /// invoice in ONE call; none usable means no call. <c>Faulted</c> when no seam is configured, the seam throws, or the decision says
+    /// it failed (<see cref="InvoiceVisibilityResult.Faulted"/>). Shared by the page filter and the single-record decision.
+    /// </summary>
+    private static async Task<(InvoiceVisibilityResult? Decision, bool Faulted)> AskInvoiceDecisionAsync(
+        CallerPrincipal caller, IEnumerable<IReadOnlyList<Guid>> links, ExternalInvoiceHiding? hideInvoices, ILogger logger,
+        string surface, CancellationToken ct)
+    {
+        var asked = links
+            .SelectMany(l => l)
+            .Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
+            .Distinct()
+            .ToList();
+        if (asked.Count == 0)
+            return (null, false);
+
+        if (hideInvoices is null)
+        {
+            logger.LogError(
+                "[EXT-INVOICE-LINKED] {Surface}: no invoice predicate is configured; every row linked to one of {Count} invoice(s) is hidden (fail closed).",
+                surface, asked.Count);
+            return (null, true);
+        }
+
+        try
+        {
+            var decision = await hideInvoices(caller, asked, ct).ConfigureAwait(false);
+            return (decision, decision.Faulted);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-INVOICE-LINKED] {Surface}: the invoice decision for {Count} invoice(s) failed; every invoice-linked row is hidden (fail closed).",
+                surface, asked.Count);
+            return (null, true);
+        }
+    }
+
+    /// <summary>What a SINGLE invoice-linked record read is told about its invoices (task 130-0 fix round 3, Q2).</summary>
+    internal enum InvoiceLinkedRowState
+    {
+        /// <summary>No invoice link, or every linked invoice is visible to the caller.</summary>
+        Visible,
+
+        /// <summary>A linked invoice is decided not visible (or its link cannot be read): the route's uniform refusal.</summary>
+        Hidden,
+
+        /// <summary>The decision could not be made (the caller's firms, or a linked invoice's own decision, could not be read): the
+        /// route's retryable unavailable answer, never the refusal.</summary>
+        Faulted,
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 3 (Q2): the decision for ONE record (a single-record read) that links to <paramref name="links"/>. A
+    /// record with no link is <see cref="InvoiceLinkedRowState.Visible"/> and asks nothing. Otherwise the linked invoices are put to
+    /// <paramref name="hideInvoices"/> in one call: all visible is Visible; a decision that could not be made (no seam, a throw, a whole
+    /// failed read, or a linked invoice whose own decision failed) is <see cref="InvoiceLinkedRowState.Faulted"/> unless another linked
+    /// invoice is decidedly not visible (or a link cannot be read), which is <see cref="InvoiceLinkedRowState.Hidden"/>: that answer does
+    /// not depend on the fault. Collections keep hiding a row in every such case (<see cref="HideInvoiceLinkedRowsAsync{T}"/>).
+    /// </summary>
+    internal static async Task<InvoiceLinkedRowState> DecideInvoiceLinkedRowAsync(
+        CallerPrincipal caller, IReadOnlyList<Guid> links, ExternalInvoiceHiding? hideInvoices, ILogger logger, string surface,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(links);
+        if (links.Count == 0)
+            return InvoiceLinkedRowState.Visible;
+
+        var (decision, faulted) = await AskInvoiceDecisionAsync(caller, new[] { links }, hideInvoices, logger, surface, ct)
+            .ConfigureAwait(false);
+        if (faulted)
+            return InvoiceLinkedRowState.Faulted;
+        if (decision is not null && links.All(decision.IsVisible))
+            return InvoiceLinkedRowState.Visible;
+
+        var anyDecidedHidden = links.Any(link =>
+            link == ExternalDocumentNarrowing.UnreadableLink || link == Guid.Empty
+            || decision is null || (!decision.IsVisible(link) && !decision.IsFaultedFor(link)));
+        if (!anyDecidedHidden)
+        {
+            logger.LogWarning(
+                "[EXT-INVOICE-LINKED] {Surface}: a linked invoice's own decision failed ({Reasons}); answered as unavailable.",
+                surface, decision?.HiddenSummary() ?? "");
+            return InvoiceLinkedRowState.Faulted;
+        }
+
+        return InvoiceLinkedRowState.Hidden;
     }
 
     /// <summary>

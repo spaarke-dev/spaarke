@@ -647,12 +647,15 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         });
         foreach (var other in new[] { "sprk_project", "sprk_matter", "sprk_workassignment" })
             Registry().FindByEntity(other)!.AdditionalRootLookups.Should().BeEmpty($"{other} keeps its rule");
-        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): the invoice's work assignment is a root of the rule; RootLinks types only
-        // the sprk_workassignment dimension, so the invoice's sprk_regardingworkassignment is declared as a root lookup.
-        Registry().FindByEntity("sprk_invoice")!.AdditionalRootLookups.Should().BeEquivalentTo(new[]
-        {
-            new RootLookup("sprk_regardingworkassignment", ExternalGrantRootType.WorkAssignment),
-        });
+        // ebilling-r1 task 130-0 fix round 3: the invoice's work assignment (D-28) is a root of the rule through its scope dimension,
+        // which RootLinks types; it is no longer also declared as an extra root lookup, and is projected once.
+        var invoices = Registry().FindByEntity("sprk_invoice")!;
+        invoices.AdditionalRootLookups.Should().BeEmpty();
+        invoices.RootRuleAttributes.Should().Contain(new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment" });
+        invoices.RootRuleAttributes.Count(a => a == "sprk_regardingworkassignment").Should().Be(1);
+        var workAssignment = Guid.NewGuid();
+        invoices.RootLinks(new Dictionary<string, object?> { ["sprk_regardingworkassignment"] = workAssignment })
+            .Should().ContainSingle(l => l.Root == ExternalGrantRootType.WorkAssignment).Which.LookupValue.Should().Be(workAssignment.ToString());
     }
 
     [Fact]
@@ -961,8 +964,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         var module = Registry().FindByEntity("sprk_invoice")!;
 
         module.RequireReadOnSecureRoots.Should().BeTrue("D2: an invoice behind a secure root's wall is withheld");
-        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work assignment (a dimension and a root lookup, so listed twice;
-        // every reader of the list projects it distinct).
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work assignment (a scope dimension; since fix round 3 listed once).
         module.RootRuleAttributes.Distinct(StringComparer.OrdinalIgnoreCase).Should().BeEquivalentTo(
             new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_regardingagreement" });
     }

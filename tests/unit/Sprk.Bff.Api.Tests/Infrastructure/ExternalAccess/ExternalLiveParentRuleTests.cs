@@ -182,7 +182,9 @@ public sealed class ExternalLiveParentRuleTests
     [Fact]
     public async Task AMessageWhoseLiveParentIsUnderSecureX_IsWithheld_FromAnMOnlyReader()
     {
-        var plain = new MessageRootLookups(null, M.ToString(), null);
+        // Task 130-0 fix round 3: the row of a read that selected the invoice link and found it unset carries an explicit null; an absent
+        // key would read as an unread link (never visible).
+        var plain = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement<object?>(null) });
         var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
 
         // ebilling-r1 task 098: the carrier regards an invoice; the (a') predicate hides nothing here (this is the root rule).
