@@ -139,8 +139,16 @@ public sealed class InvoiceLinksTests
             if (Fault is { } fault)
                 throw fault;
             var asked = Seeded.Keys.Where(id => odata.Contains(id.ToString("D"), StringComparison.Ordinal));
+            // Fix round 3d: the Web API answers a selected column that is not set as an explicit null (an absent column was not read).
+            var selected = odata.Split("$select=", 2)[1].Split('&')[0].Split(',');
             IReadOnlyList<Dictionary<string, JsonElement>> rows = asked
-                .Select(id => Seeded[id].ToDictionary(kv => kv.Key, kv => JsonSerializer.SerializeToElement(kv.Value)))
+                .Select(id =>
+                {
+                    var row = Seeded[id].ToDictionary(kv => kv.Key, kv => JsonSerializer.SerializeToElement(kv.Value));
+                    foreach (var column in selected)
+                        row.TryAdd(column, JsonSerializer.SerializeToElement<object?>(null));
+                    return row;
+                })
                 .ToList();
             return Task.FromResult(rows);
         };
