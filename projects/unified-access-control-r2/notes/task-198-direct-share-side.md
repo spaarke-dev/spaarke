@@ -299,6 +299,80 @@ No follow-up job is needed.
 - Fail-first: HEAD (`e75cabb0c5`) synchronizer, `DirectThreadAccessService` and `ThreadResolver`, with the two new helpers spliced in unchanged so the tests compile (old `CannotBe…` and old caller logic). Filter `DirectThreadAccessServiceTests|SecureOwnerTeamNameMatchTests|ThreadResolverTests|SecureChildShareMirrorTests`: 6 of 283 fail (the 3 synchronizer-level must-fire tests, 4 cases, and both caller-level cases); 277 pass. After the fix: 283/283.
 - Scoped filter (`ExternalAccess|.Access.|Communication|SecureChild|RecordOwnership|DirectMessageOwnerTeam`): 8932 pass, 0 fail, 2 skipped. ArchTests (same five classes): 191/191. BFF build: 0 warnings, 0 errors.
 
+## §7 Part C — durable re-grant, backstop, unfile
+
+**Rules:**
+- The audience of a message owned by the Direct-message owner team is exactly its thread's participants: the thread's user owner and its systemuser sharees. They hold Read on the message and on the content rows the Direct team owns (attachment, participant, email review log, document). Nobody else holds a direct user share on the message (team shares are untouched).
+- Every unknown grants nothing and leaves a durable trace that the share job retries until the grant lands. The unknowns are: a faulted grant or share read; the Direct team refused or faulted; the Secure check undecided; an unconfirmed revoke; a capped or faulted content-row read; a user-flag read fault; a participant the flag read does not return. The trace is the Dataverse row itself (a Direct-team-owned message that lacks a share), which the job lists, plus the job's carry. No owner-writable marker is used.
+- Secure true: nothing is granted here; the synchronizer decides. Secure unknown: nothing is granted; retried.
+- The Restricted bar applies to every grant path (the live grant, the re-file step and the job): `InternalShareEndpoints.IsBarredOnRestricted(isExternal, restricted)` against the message's own `sprk_accesspermission` or the value it inherits through its filing (the same predicate and inherited rule as Part D). Restricted undecidable: a user flagged external is barred.
+- K3: the Direct-team identity matches only a resolved, non-empty id equal to a non-empty owner (`DirectMessageParticipantShares.Matches`). A refusal carries no id and never matches, including owner `Guid.Empty`. The one Direct-team check (`IsDirectOwnerTeamAsync`) is shared by the live grant, the re-file step and the job.
+- Idempotent: a participant who already holds the Read bit is not granted again, so a run after a complete one writes nothing.
+
+**How the audience is re-derived without an owner-writable column:**
+1. Direct-team ownership: only the BFF assigns it (fm 054a). The team is memberless, so no user writes through it.
+2. The thread is the message's own `sprk_communicationthread` lookup. On a Direct-team-owned message, a participant holds Read only, so no participant can repoint it.
+3. The participants are the thread's user owner plus its POA systemuser sharees, read with the strict share read. A fault grants and revokes nothing.
+4. `sprk_threadtype` (must be Direct) and `sprk_isdefaultthread` (must not be the per-user master thread) only narrow. A thread that fails either grants nothing and revokes nothing.
+
+**Where:**
+- `Services/Access/DirectMessageParticipantShares.cs` (new, internal): the one reconcile of one message (grant the missing, revoke non-participants on the message with a strict read-back), the K3 helper, and the one Direct-team check.
+- `Services/Access/RestrictedFilingShareBar.cs`: new `EligibleForGrantAsync`. `TargetIsRestrictedAsync` gains `includeOwnValue`; Part D's call is unchanged (false).
+- `Services/Communication/Access/DirectThreadAccessService.cs`: the live grant now clears its participants through `EligibleForGrantAsync` before writing. The two "TODO Part C" unknown branches now log that the share job retries. Its private Direct check delegates to the shared one. New optional ctor params: `DataverseWebApiClient? webApi`, `CoreAncestorResolver? coreAncestors` (both already registered singletons).
+- `Services/Access/SecureChildReconciler.cs`: `AfterRefileCoreAsync` runs the reconcile after the Part D bar, on every communication re-file. A message that is now Direct-team-owned (an unfile or a secure exit back to the Direct team) has its participants granted and the anchor-record grantees revoked. Any other message is left as it is. New optional ctor param: `DirectMessageOwnerTeam? directMessageOwnerTeam` (an already-registered singleton).
+- `Services/Access/SecureChildShareReconciliationJob.cs` (the existing 2-minute ADR-036 `IScheduledJob`): a Direct pass after `ReconcileAllAsync`.
+  - Each run reconciles: the carried ids; then the Direct-team-owned messages changed since the watermark, plus the messages whose content rows changed since then (500 per table); then a rolling id-ordered sweep slice of 100.
+  - Each run handles at most 200 messages. A capped run logs a warning and carries the rest (carry cap 1000; an overflow holds the watermark).
+  - The watermark moves only after a clean listing. The sweep cursor resets after a full pass.
+  - The Direct team is resolved by id. NotConfigured means the pass is skipped (Ok). Any other refusal or fault: nothing is listed or granted, the carry is kept, and the run reports not Ok.
+  - The heartbeat gains the direct fields, and `ResultJson` gains a `directMessages` object. The run's `Success` is false while any Direct message is incomplete.
+  - The services are resolved with `GetService`; a missing one reports "unavailable".
+- Writes: the host job has no report-only switch (it always writes), so none was added. No new app setting.
+
+**§11:**
+- `DirectMessageParticipantShares`:
+  1. *Existing:* the live grant (`DirectThreadAccessService.GrantDirectTeamMessageAsync`), the synchronizer (Secure only) and the Part D bar (removes only).
+  2. *Extension:* the live grant runs inside a send with the join in hand, while the re-grant must re-derive the audience from Dataverse with no join and must also revoke. One class shared by the re-file step and the job keeps them identical. The Direct check and K3 helper moved there, and the live grant calls them. No DI registration: callers construct it from what they hold.
+  3. *Cost of doing nothing:* every unknown branch of Part B ends with participants who are never granted, and an unfile leaves the anchor grantees reading a Direct message (Q1 ruling).
+- `RestrictedFilingShareBar.EligibleForGrantAsync`:
+  1. *Existing:* `RemoveBarredSharesAsync` (removes after the fact).
+  2. *Extension:* it is the same predicate, user read and lineage walk, applied before a grant. It lives in the same class.
+  3. *Cost of doing nothing:* ruling 6 (no grant to a barred user) has no check on the grant paths.
+- The job's Direct pass:
+  1. *Existing:* `SecureChildShareReconciliationJob`.
+  2. *Extension:* extended rather than replaced. `MembershipReconcileJob` was rejected: it is a Service Bus handler for ACS membership; an enqueue can itself fail, and it dead-letters after max attempts, so it is not "until it lands".
+  3. *Cost of doing nothing:* no retry of any unknown, and no backstop for content rows created after the grant.
+- The optional ctor params: pure extension of existing classes with already-registered singletons. Optional so the test compositions compile; the host container injects them.
+
+**Decisions:**
+- The durable trace is the row, not a queue: a queue entry can be lost at enqueue, while the row cannot.
+- The job re-reads each listed message's owner and compares it by id with the resolved team, so a message re-owned between listing and reconcile is left alone.
+- Revoke enforcement runs in the job too. On the message row, the audience is exactly the participants, which also catches a share added by hand. It applies only to direct systemuser shares; team shares are untouched. Content rows are only granted, never revoked.
+- One Secure answer per team per instance (one instance per job run or per re-file call).
+- Content rows: 250 per table, as in Part B/D. A capped read leaves the message incomplete, so it is retried.
+
+**Tests:**
+- New `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs` (21), over the real job, the real reconciler, the real `DirectMessageOwnerTeam` and `SecureChildShareWorld`:
+  - K3 (2): a null-id refusal never matches, including owner `Guid.Empty`; a refused lookup answers unknown for a team and "no" for an empty owner.
+  - Must-fire: the backstop grants message + 4 content rows; a missing content-row share is the only write; a failed grant is retried and lands, and the third run writes nothing; Direct lookup fault → recovers → granted; Direct refusal → clears (after the cache lifetime) → granted; Secure unknown → known ordinary → granted; a capped run (201 messages) says so and carries 1, which the next run grants; unfile from an ordinary record revokes the anchor grantee and keeps the participants; a secure exit back to the Direct team leaves exactly the participants.
+  - Must-not-fire: a non-participant is never granted; an external participant under a Restricted inherited filing (event under a Restricted matter, two runs) and under the message's own Restricted value is never granted; a Secure-owned message (the Direct lookup itself naming the Secure team) is never granted.
+  - AC6 pins: the per-user master thread, a record-anchored thread, user-owned messages (pre-054a Direct and unfiled inbound email), a re-file to an ordinary record, and a user-owned re-file are all unchanged; no Direct team configured → not-configured, no writes.
+- `DirectThreadAccessServiceTests` (+2, live path): an external participant is not granted when Restricted is undecidable; a user-flag fault grants nothing. `DirectTeamSut` now passes a user directory with the test users internal (the Part B assertions are unchanged).
+- Test doubles: `UserFlagDirectoryDouble` (shared, moved out of `RestrictedFilingShareBarTests`); `DirectMessageOwnerTeamDouble.Lookup(TimeProvider?)` and `WithoutUsersInDirectUnit()`; `SecureChildShareWorld.ReconcilerOver(..., directMessageOwnerTeam)`.
+- Fail-first, on commit `2d991e661d` with the four call sites disabled (the re-file step, the job pass, the live bar assignment, K3 reverted to `TeamId == owner`): 16 of the 23 new tests fail, and the 7 pins and must-not-fire-only tests pass. Restored: 71/71 (`DirectMessageParticipantShares|DirectThreadAccess|RestrictedFilingShareBar`).
+- Counts: see §7.1.
+
+### §7.1 Part C counts
+
+| Run | Before (`2ca6340051`) | After (`2d991e661d`) |
+|---|---|---|
+| Scoped filter `DirectMessageOwnerTeam\|DirectThreadAccess\|RestrictedFilingShareBar\|SecureChild\|SecureOwnerTeamNameMatch\|ThreadResolver\|ChildAccessPermission\|MembershipReconcile` | 2884/2884 | 2886/2886 (+2 live-path tests) |
+| The same filter plus `DirectMessageParticipantShares` (the job tests are in that class and in `SecureChildShareMirrorTests`) | — | 2907/2907 |
+| `tests/Spaarke.ArchTests` (full) | 2119/2119 (brief) | 2119/2119 |
+| BFF build | 0 warnings | 0 warnings, 0 errors |
+
+The brief's baseline of 2870 was measured at an earlier tip. 2884 was re-measured at `2ca6340051` in a detached worktree.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
@@ -312,4 +386,10 @@ No follow-up job is needed.
 - **Q4:** yes, by id (§2c).
 - **Q5:** `NotConfigured` = not Direct; everything else unknown (§3b).
 
-**Pending upstream:** Part C (re-grant queue: unfile, secure exit, content rows created after the grant, the unknown branch) and Part E (Gate Decision Records, ontology-owned).
+**Part C open (coordinator):**
+- **C-a:** a secure exit to an ORDINARY record (not back to the Direct team) is not re-granted to the participants. Re-deriving them there would trust the message's thread lookup on a row the record team's members can write. Only an unfile or a secure exit back to the Direct team is covered.
+- **C-b (rule 6 vs AC6):** the record-anchored anchor-grantee grant path does not apply the Restricted bar. Adding it changes record-anchored behaviour (AC6), so it is left for a ruling. Part D removes a barred share on filing and on the job's Restricted pass.
+- **C-c (residual):** a writer of a FILED message could change its thread lookup before an unfile; after the unfile, that thread's participants are granted. This sits in fm's owner rule area (who may write a filed message's thread lookup).
+- **C-d (throughput):** roughly 6–10 reads per message; at most 200 messages per run (2-minute schedule). A large backlog drains over several runs, each logged.
+
+**Pending upstream:** Part E (Gate Decision Records, ontology-owned).
