@@ -14,21 +14,17 @@
 
 ## Exact next action
 
-1. Wait for the agents below. Act on each notification.
-2. **130-0 fix1 done**: adversarial pass 2 (Opus, adversarial-reviewer) over `64cdfbe304..task/ebilling-130-0-fix1`. It must check the census (every external reader of todo/event/document: through the seam or a one-line reason) per uac-r2. Then send the diff to uac-r2 (private).
-3. **130-0b done**: two adversarial passes (tenant isolation). Its base is `64cdfbe304`, not fix1: merge fix1 into it (or both into work) before pass 2 so the review sees the combined seam. Then send the diff to uac-r2.
-4. **Merge 130-0 + fix1 + 130-0b into work together**, verify the tip, mark TASK-INDEX 130-0 and 130-0b ✅, and remove worktrees `agent-ab27afb0265db7790` and the agents' worktrees.
-5. **130b done**: two adversarial passes over 130a+130b, the diff to uac-r2, merge both. Then 130c (FR-18).
-
-**Merge note (uac-r2):** 130-0 fix1 and 130b fix1 both edit `WorkforceRoleCeilingGate.cs`. 130-0 defines `ReadInvoiceSubmissionsWithInvoice` (submission + invoice, for both GET `/invoice-submissions` routes); 130b adds `BillingEventTable` + `ReadInvoiceOutcome` (invoice + billingevent) and the submission-outcome set. On the second merge into work: one definition per set, reuse `InvoiceTable`/`BillingEventTable`, no duplicates; uac-r2 reviews both gate hunks together. Workforce role on dev already holds Read on invoice, billingevent and submission (checked read-only).
+1. **DEF-059 (owner typed in THIS session, 2026-11-09):** "review the options and implement the one that is the best solution without unnecessarily adding more roles -- but if the only way to meet the requirement and stay within our access control is to create a new role that is acceptable." ontology-r1 proposed C (new role, one privilege: org-wide Read on `sprk_decisionrecord`) vs A (nothing; safe while System Administrator stays on the BFF identity). FIRST check (read-only) whether the BFF identity already holds a Spaarke role held by NO human and NOT by the writer identity; if yes, adding the one org Read privilege there beats a new role. Implement via SpaarkeMaster solution source + `Import-SolutionScoped.ps1` only; uac-r2 notices before and after; tell ontology-r1 and provisioning-r1 (stamps). Update DEF-059 (#2635) notes + issue.
+2. When 130-0b fix1 sends the shared redaction-set sha, relay it to 130-0 fix2 to merge (exact sha only).
+3. Then per agent table below; check `git worktree list` for a leftover reviewer worktree `...scratchpadv2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if listed.
 
 ## Agents in flight (2026-11-09)
 
 | Work | Branch / base | Next |
 |---|---|---|
-| 130-0 fix round 2 (Opus) | `task/ebilling-130-0-fix2` → ff to `task/ebilling-130-0-fix1` (from `4102b719b9`) | F1 writes, F2 truncated, F3 test, K1 DTO required / Read-before-seam, K2 msg cols, **K3 in scope** (invoice rights via work-assignment parent, D-28; `ExternalAccessModule.cs` one ScopeDimension + RootLinks/LiveParents, uac-r2 approved; secure-WA and deleted-WA tests), create-shape pin test, plus heads-up: root redaction number/type columns, link-column filters, descendants. Then scoped Sonnet re-check, diff to uac-r2. |
-| 130-0b fix round 1 (Opus) | `task/ebilling-130-0b-f1` → ff to `task/ebilling-130-0b` (from `0acfebe470`; steps 1-3 done) | Pass 1 F1s: `sprk_regardingrecordnumber` not blanked (derive from `CreateTimeFieldMapping.RegardingPairAndResolverColumns`); read_query WHERE/ORDER BY probe on blanked root link (refuse pre-read); descendants (analysisoutput, eventlog, fileversion, parentdocument) via new registry helper; K2 blank record type when target is hidden invoice; K5 test. Rulings asked of uac-r2: R1 row-cap warning, R2 root text columns. Then pass 2 over combined seam (after merging 130-0 fix), diff to uac-r2. |
-| 130b fix round 2 scoped re-check (Sonnet) | `7a962ffd9d..origin/task/ebilling-130b-fix1` (`d303a11e5d`) | fix2 done: InvoiceDecided, null status → Unavailable, ceiling + decisionrecord/signal, citations flag-gated (4 fields), firm reasons independent (`items[].firmReasons`). Then diff to uac-r2 (incl. gate hunk), merge 130a+130b, 130c. |
+| 130-0 fix round 2 (Opus) | `task/ebilling-130-0-fix2` → ff `task/ebilling-130-0-fix1` (from `4102b719b9`) | F1 writes, F2 truncated, F3, K1s, K2, K3 (WA parent + `ExternalAccessModule.cs` ScopeDimension/RootLinks/LiveParents, uac-r2 approved), create-shape pin, REST heads-up (number/type cols, link-col filters, descendants). Must MERGE 130-0b's shared redaction-set commit (sha to relay) and use it. Then Sonnet re-check, diff to uac-r2. |
+| 130-0b fix round 1 (Opus) | `task/ebilling-130-0b-f1` → ff `task/ebilling-130-0b` (from `0acfebe470`) | uac-r2 rulings: F1-1 shared derived redaction set FIRST (own commit, sha to lead), F1-2 column-name refusal incl. record type, neutral text; F1-3 descendants + guard; K2; R1 row cap on visible rows + fixed note; R2 design statement + census line (sent). Then pass 2 over combined seam, diff to uac-r2. |
+| 130b small fix (Sonnet) | `task/ebilling-130b-fix3` → ff `task/ebilling-130b-fix1` (from `d303a11e5d`) | Re-check passed except F2 (accepted-without-invoice Warning+code on undecided path, route test) and K4 (reason order). Then diff to uac-r2 (incl. gate hunk), merge 130a+130b, 130c. |
 
 **Merge plan for the 130 batch:** merge 130-0 fix (incl. 130-0b helper `446a40bb4e`), 130-0b head, 130b fix1 into work; expect conflicts in the 130-0 notes file (combine both sections by hand) and `WorkforceRoleCeilingGate.cs` (adjacent sets; remove `ReadInvoiceSubmissions` if unused); after merge replace fix1's `InvoiceLinkedChildAttributes` (`ExternalModuleDataEndpoints.cs` ~:502) with 130-0b's `ExternalInvoiceVisibility.IsInvoiceLinkedChildTable`. Verify tip, TASK-INDEX 130-0/130-0b/130a/130b ✅, remove agent worktrees.
 
@@ -45,7 +41,7 @@
 
 1. Typed go for task **166** dev apply (field security incl. invoice totals + forms), with uac-r2 before/after notices, `Import-SolutionScoped.ps1` only.
 2. OK to run `FinanceBaseValuesSeamTests` live (creates and sweeps `zz-025b-` rows on dev).
-3. DEF-059 (#2635): BFF identity Decision Record read via a SpaarkeMaster role (uac-r2 yes, ontology-r1 no).
+3. DEF-059 (#2635): ANSWERED 2026-11-09 (see Exact next action 1).
 4. DEF-061: schema change `sprk_publishedon` on `sprk_procedureversion`.
 
 ## Owed to peers
