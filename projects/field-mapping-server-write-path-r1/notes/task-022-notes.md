@@ -298,3 +298,50 @@ The mapping engine (`CreateTimeFieldMapping.ApplyFillOnly` / `ApplyCopyOverwrite
 **Scope of the gate.** For a secure source the gate decides on the owner the child holds when the push reaches it, and a child the push would re-file is never written (UAC-r2 (a)), so that owner is the one the written row keeps. An ordinary source's re-file re-derives the owner in the write as before (`ReparentAsync`, with the secure-exit check on the caller).
 
 rework: fix-round-4 task 022 (push gate: the mapping-source rule on the push apply and preview, stable codes, client wording; copy-path sweep; the gate a required parameter; a secure source's push never changes a child's filing)
+
+## Fix round 5 (review F1, F4)
+
+Branch `task/fm-022-5`, from `85c70c4431`.
+
+**F1: the push preview and the apply asked the gate with different payloads.**
+
+- Before:
+  - On a reparentable child (an event or communication), the apply first refused any lookup rule whose planned bind key normalises to a lookup other than the one the rule names (#2091 r4), and only then asked `FieldMappingPushSourceGate`.
+  - The preview's `Plan` used the binds as planned. A secure matter's push with one such rule, whose bind named another matter on the child's filing lookup, put that bind in the preview's payload. The gate answered `field_mapping.push.secure_source_refile_not_allowed`, so the child was hidden and the client left it out of the apply.
+  - The apply itself would have refused only that rule and written the child's other fields.
+- After:
+  - The check is one helper, `FieldMappingPushLookups.ConfineToNamedColumn(targetEntity, lookupBinds)`, moved verbatim from `ApplyMappingsToChildRecordsAsync`: the same predicate, the same refusal text, and binds keyed by rule instance.
+  - The apply calls it where the inline block was, so its behaviour is unchanged. The preview's `Plan` calls it before applying any rule, so both ask the gate with the same payload.
+  - It is idempotent (a refused plan has no bind key) and returns any other table's binds unchanged. Calling it inside both methods, rather than once in the endpoint, keeps the two in step for every caller, including the tests that drive the apply directly.
+  - Gate semantics are unchanged.
+
+**F4 (doc only).**
+
+- `FieldMappingPushFamily.PreviewAsync` summary: the gate reads app-only. It reads the source's gate columns once and, for a secure source only, each asked child's owner and the filing columns the payload writes. Nothing it reads is returned.
+- `PushFieldMappingsError.ReasonCode` remarks: the full set the entry can carry. A grep of `field_mapping.push.` finds only the gate's three codes: `secure_source_not_isolated`, `secure_source_undetermined` and `secure_source_refile_not_allowed`.
+
+**Tests (`FieldMappingPushFamilyContractTests`).**
+
+- Must fire: `Preview_FromASecureSource_ARuleWhoseBindIsAnotherFilingLookup_IsRefusedPerRule_AndTheChildIsListedAsTheApplyWritesIt`.
+  - Setup: a secure matter; an event the Secure team owns, filed under that matter; a text rule; and a lookup rule on `sprk_regardingproject` bound through `sprk_RegardingMatter@odata.bind` to another matter.
+  - The preview returns no error and lists the child with the text change only.
+  - Parity: `ApplyMappingsToChildRecordsAsync` over the same gate, rules and binds writes exactly `{ sprk_clientreference }` (1 updated, 0 failed).
+- Must not fire: `Preview_FromASecureSource_ALookupRuleWritingTheColumnItNames_KeepsItsBind_AndARefileIsStillReturnedWithTheCode`. With the same bind on a rule naming `sprk_regardingmatter`, the bind is kept and the child is still returned with the re-file code. The existing round-4 test `Preview_FromASecureSource_ReturnsAChildItWouldRefileWithTheRefileCode_AndListsTheOneAlreadyFiledThere` also still passes.
+
+**Evidence.**
+
+- Fail-then-pass, with HEAD's preview (`Plan` on the unconfined binds) and the new tests: `FieldMappingPushFamilyContractTests` **1 failed / 29 passed** of 30. The failure is the must-fire case: `preview.Errors` was not empty, because the child came back with the re-file code. The must-not-fire case passed.
+- With the change: **30 / 30**. Family, `RefileWriterBindShapeTests` and `FieldMappingPushSourceGateTests` together: **106 / 106**.
+- Filtered BFF run (the round-4 filter: FieldMapping, PushCopyParity, MappingWriteGates, RecordCreation, ChildRecord, RegardingPair, RefileWriterBindShape, MappingSourceRule, GenericUpdatePath, AppOnlyWriter, SecureRootCreateRoute, OfficeQuickCreate, SecureRootInheritanceWriter, AssignedAccessWriterTrigger, RefilePathRestamp, WriterOnlyTables, CoreRecordPairUpdateWriter, DocumentAccessPermissionPushTarget, SecureChildOwnershipAiTool): **4394 passed, 0 failed**, 3 skipped (4397).
+- BFF build (`--no-incremental`): 0 warnings, 0 errors. BFF test-project build (`--no-incremental`): 0 warnings, 0 errors.
+- `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): no vulnerable packages.
+- No TypeScript was touched, so jest was not run.
+
+**Known limits the reviewer raised (stay unfixed).**
+
+- K1: when the Secure Record owner team is missing, the gate reads it as undetermined, and the words suggest a retry rather than naming the setup (see round 4's known limits).
+- K2: the isolation owner is the single Secure Record owner team.
+- K3: the Project wizard's follow-on Event and Work Assignment creates still map in the browser (owned by tasks 023 and 024). The wizard's lock also reads an empty secure flag as not secure.
+- K4: adapter defaults are not re-applied after the strip (unverified).
+
+rework: fix-round-5 task 022 (F1 the push preview confines lookup binds to the column each rule names with the apply's helper, so preview and apply ask the source gate with one payload; F4 preview app-only read comment and the full ReasonCode set)
