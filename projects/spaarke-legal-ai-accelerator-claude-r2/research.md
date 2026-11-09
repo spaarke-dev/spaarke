@@ -154,6 +154,7 @@ After converting, the placeholder OAuth ID must be replaced with a real Entra ap
   shared parts (skills, engines, playbooks, gates) to the r1 session rather than editing them. Claude-only packaging
   (a new build target, Claude manifests, Claude trial runs) can live in r2.
 - **Sessions (2026-11-08):** r1 is owned by the Claude Desktop session `acclerator-r1`; send r1 proposals there.
+  `spaarkeai-mcp-bff-api-r1` (the `/mcp/legal-operations` server for v2 connected mode) is owned by `mcp-r1`.
   r1 has taken on Python 3.11 compatibility and the no-top-level-`bin/` zip rule (its `current-task.md`).
 - **r1 shared-code changes to build against** (on `work/spaarke-legal-ai-accelerator-r1`, reported 2026-11-08):
   - `playbook_parse.py`: optional "If missing" field; `parse(..., require_side=False)` for non-contract document types;
