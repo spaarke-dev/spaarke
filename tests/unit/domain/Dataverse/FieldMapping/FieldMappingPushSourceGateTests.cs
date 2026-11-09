@@ -186,6 +186,98 @@ public class FieldMappingPushSourceGateTests
             Times.Once);
     }
 
+    // ───────────────────────── a secure source never changes a child's filing (UAC-r2 (a)) ─────────────────────────
+
+    private static readonly Guid OtherMatterId = Guid.Parse("02200000-0000-4000-8000-0000000000f2");
+    private const string FilingColumn = "sprk_regardingmatter";
+    private const string FilingBind = "sprk_RegardingMatter@odata.bind";
+
+    [Fact]
+    public void TheFilingColumnsOfAPush_AreTheRegistrysFilingLookups()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            [FilingBind] = $"/sprk_matters({OtherMatterId:D})",
+            ["sprk_target"] = "a value",
+        };
+
+        var filing = FieldMappingPushSourceGate.FilingWrites(Target, payload);
+
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.IsFilingLookup(Target, FilingColumn).Should().BeTrue();
+        filing.Keys.Should().Equal(FilingColumn);
+    }
+
+    public static TheoryData<object?, Guid?, bool> FilingChanges => new()
+    {
+        { $"/sprk_matters({OtherMatterId:D})", MatterId, true },
+        { $"/sprk_matters({MatterId:D})", MatterId, false },
+        { MatterId, MatterId, false },
+        { $"/sprk_matters({OtherMatterId:D})", null, true },
+        { null, MatterId, true },
+        { null, null, false },
+        { "not a bind", MatterId, true },
+        { "not a bind", null, true },
+    };
+
+    [Theory]
+    [MemberData(nameof(FilingChanges))]
+    public void APushedValue_ChangesTheFiling_UnlessItNamesWhatTheChildHolds(object? pushed, Guid? held, bool changes) =>
+        FieldMappingPushSourceGate.ChangesFiling(pushed, held).Should().Be(changes);
+
+    [Fact]
+    public async Task ASecureSource_PushingADifferentFiling_IntoAChildItsIsolationOwnerOwns_IsRefusedWithTheRefileCode()
+    {
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), filedUnderMatter: MatterId);
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [FilingBind] = $"/sprk_matters({OtherMatterId:D})", ["sprk_target"] = "x" },
+            CancellationToken.None);
+
+        refusal.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        FieldMappingPushSourceGate.MessageFor(refusal!).Should().Be(FieldMappingPushSourceGate.RefileNotAllowedMessage);
+    }
+
+    [Fact]
+    public async Task ASecureSource_ClearingAFilingTheChildHolds_IsRefusedWithTheRefileCode()
+    {
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), filedUnderMatter: MatterId);
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [FilingBind] = null }, CancellationToken.None);
+
+        refusal.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    [Fact]
+    public async Task ASecureSource_PushingTheFilingTheChildHolds_GoesOnToTheOwnerQuestion()
+    {
+        var isolated = new World(SecureMatter(), new EntityReference("team", SecureTeam), filedUnderMatter: MatterId);
+        var notIsolated = new World(SecureMatter(), new EntityReference("team", OrdinaryTeam), filedUnderMatter: MatterId);
+        var payload = new Dictionary<string, object?> { [FilingBind] = $"/sprk_matters({MatterId:D})" };
+
+        (await isolated.Gate().RefusalForChildAsync(Target, ChildId, payload, CancellationToken.None))
+            .Should().BeNull("an equal value is no change, and the child is owned by the source's isolation owner");
+        (await notIsolated.Gate().RefusalForChildAsync(Target, ChildId, payload, CancellationToken.None))
+            .Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+    }
+
+    [Fact]
+    public async Task AnOrdinarySource_PushingADifferentFiling_IsAllowed_AndReadsNoChild()
+    {
+        var source = new Entity("sprk_matter", MatterId)
+        {
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+        };
+        var world = new World(source, new EntityReference("team", OrdinaryTeam), filedUnderMatter: MatterId);
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [FilingBind] = $"/sprk_matters({OtherMatterId:D})" }, CancellationToken.None);
+
+        refusal.Should().BeNull();
+        world.Entities.Verify(e => e.RetrieveAsync(Target, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ───────────────────────── fixtures ─────────────────────────
 
     /// <summary>A secure matter as Dataverse holds one: flagged, owned by the Secure Record owner team.</summary>
@@ -202,7 +294,7 @@ public class FieldMappingPushSourceGateTests
 
         public List<Dictionary<string, object?>> Writes { get; } = [];
 
-        public World(Entity source, EntityReference? childOwner)
+        public World(Entity source, EntityReference? childOwner, Guid? filedUnderMatter = null)
         {
             Entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(source);
@@ -212,6 +304,8 @@ public class FieldMappingPushSourceGateTests
                     var row = new Entity(table, id);
                     if (childOwner is not null)
                         row["ownerid"] = childOwner;
+                    if (filedUnderMatter is { } matter)
+                        row[FilingColumn] = new EntityReference("sprk_matter", matter);
                     return row;
                 });
             Writer.Setup(w => w.UpdateExistingRecordFieldsAsync(
@@ -221,16 +315,17 @@ public class FieldMappingPushSourceGateTests
                 .Returns(Task.CompletedTask);
         }
 
+        public FieldMappingPushSourceGate Gate(Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>>? secureTeam = null) =>
+            new(Entities.Object, "sprk_matter", MatterId,
+                secureTeam ?? (_ => Task.FromResult<(Guid? TeamId, string? Refusal)>((SecureTeam, null))));
+
         public Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> PushAsync(
             Dictionary<string, object?>? sourceValues = null,
             Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>>? secureTeam = null,
             Guid[]? children = null)
         {
-            var gate = new FieldMappingPushSourceGate(
-                Entities.Object, "sprk_matter", MatterId,
-                secureTeam ?? (_ => Task.FromResult<(Guid? TeamId, string? Refusal)>((SecureTeam, null))));
             return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
-                gate,
+                Gate(secureTeam),
                 Writer.Object,
                 new StampWorld().Restamper,
                 [Rule()],

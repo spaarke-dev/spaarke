@@ -530,6 +530,60 @@ public class FieldMappingPushFamilyContractTests
         skipped.Error.Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
     }
 
+    /// <summary>
+    /// UAC-r2 (a) on the preview: a secure source's push that would change a child's filing lists no value for that child and
+    /// returns it with the re-file code; a child already filed under the pushed record is listed (both are owned by the
+    /// source's isolation owner).
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ReturnsAChildItWouldRefileWithTheRefileCode_AndListsTheOneAlreadyFiledThere()
+    {
+        var secureTeam = Guid.NewGuid();
+        var otherMatter = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.AddRange([ChildA, ChildB]);
+        dataverse.AttributeNames.Add("sprk_regardingmatter");
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", id == ChildB ? otherMatter : MatterId),
+            });
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var rule = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = "sprk_lookupsource", SourceFieldType = "Lookup", TargetField = "sprk_regardingmatter",
+            TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+        };
+        var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
+            "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
+
+        var response = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, [rule], new Dictionary<string, object?> { ["sprk_lookupsource"] = otherMatter },
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+                {
+                    [rule] = new("sprk_RegardingMatter@odata.bind", $"/sprk_matters({otherMatter:D})", null),
+                },
+                0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA, ChildB]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        response.Changes!.Select(c => c.RecordId).Should().Equal([ChildB], "the child already filed under the pushed record is listed");
+        var skipped = response.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        skipped.Error.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedMessage);
+    }
+
     /// <summary>Each child's owner as the app-only read returns it (task 022 fix round 4).</summary>
     private static void ArrangeChildOwner(World world, Microsoft.Xrm.Sdk.EntityReference owner) =>
         world.Host.Entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))

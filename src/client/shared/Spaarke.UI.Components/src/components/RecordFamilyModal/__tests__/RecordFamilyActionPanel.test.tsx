@@ -28,6 +28,7 @@ import {
   pushFieldMappings,
   PushRequestError,
   SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+  SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
   SECURE_SOURCE_UNDETERMINED_REASON_CODE,
 } from '../recordFamilyPushService';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -379,6 +380,54 @@ describe('RecordFamilyActionPanel', () => {
     expect(screen.queryByText('server text')).toBeNull();
   });
 
+  // UAC-r2 (a): a push from a secure source never changes what a record is filed under; such a record is not written at all.
+  it("says, on the preview, that a record's filing can't be changed by a push from a secure record, and does not list it", async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [
+            { recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+          ],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        "1 record is not listed because its filing can't be changed by a push from a secure record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('shows the re-file wording, never a generic error, for a record the apply did not write', async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        "This record's filing can't be changed by a push from a secure record, so nothing was copied to it."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+  });
+
   it.each([403, 404, 500])('shows one fixed text, and no cause, when the preview answers %i', async status => {
     const { fetchFn, sent } = pushServer({
       previewStatus: status,
@@ -702,20 +751,24 @@ describe('recordFamilyPushService', () => {
       errors: [
         { recordId: EVENT_A, error: 'server text A', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE },
         { recordId: EVENT_B, error: 'server text B', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE },
+        { recordId: EVENT_A, error: 'server text R', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
         { recordId: INVOICE_A, error: 'server text C' },
         { recordId: MATTER, error: 'server text D', reasonCode: 'constructor' },
       ],
     });
 
+    expect(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).toBe('field_mapping.push.secure_source_refile_not_allowed');
     expect(parsed.errors.map(e => e.reasonCode)).toEqual([
       SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
       SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+      SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
       undefined,
       'constructor',
     ]);
     expect(parsed.errors.map(pushErrorText)).toEqual([
       "Some fields weren't copied to this record because the source record is secure.",
       "Fields weren't copied to this record because it could not be checked whether the source record is secure. Try again later.",
+      "This record's filing can't be changed by a push from a secure record, so nothing was copied to it.",
       'server text C',
       'server text D',
     ]);

@@ -69,12 +69,20 @@ export const SECURE_SOURCE_NOT_ISOLATED_REASON_CODE = 'field_mapping.push.secure
 /** Whether the source is secure, or the child's owner, could not be checked: the child is not written. */
 export const SECURE_SOURCE_UNDETERMINED_REASON_CODE = 'field_mapping.push.secure_source_undetermined';
 
+/**
+ * A push from a secure source never changes what a child is filed under: a child whose pushed values would change its filing
+ * is not written at all (`FieldMappingPushSourceGate.RefileNotAllowedReasonCode`).
+ */
+export const SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE = 'field_mapping.push.secure_source_refile_not_allowed';
+
 /** The per-record wording of each mapping-source code (never a generic error). */
 const SOURCE_RULE_TEXT: Readonly<Record<string, string>> = {
   [SECURE_SOURCE_NOT_ISOLATED_REASON_CODE]:
     "Some fields weren't copied to this record because the source record is secure.",
   [SECURE_SOURCE_UNDETERMINED_REASON_CODE]:
     "Fields weren't copied to this record because it could not be checked whether the source record is secure. Try again later.",
+  [SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE]:
+    "This record's filing can't be changed by a push from a secure record, so nothing was copied to it.",
 };
 
 /** True when the entry is a child the mapping-source rule kept the push from writing. */
@@ -95,6 +103,14 @@ export function sourceRuleSkipText(errors: readonly IPushError[]): string[] {
   const lines: string[] = [];
   const notIsolated = errors.filter(e => e.reasonCode === SECURE_SOURCE_NOT_ISOLATED_REASON_CODE).length;
   const undetermined = errors.filter(e => e.reasonCode === SECURE_SOURCE_UNDETERMINED_REASON_CODE).length;
+  const refile = errors.filter(e => e.reasonCode === SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).length;
+  if (refile > 0) {
+    lines.push(
+      refile === 1
+        ? "1 record is not listed because its filing can't be changed by a push from a secure record."
+        : `${refile} records are not listed because their filing can't be changed by a push from a secure record.`
+    );
+  }
   if (notIsolated > 0) {
     lines.push(
       notIsolated === 1

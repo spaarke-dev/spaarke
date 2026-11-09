@@ -1441,9 +1441,10 @@ public static class FieldMappingEndpoints
                 if (updatePayload.Count > 0)
                 {
                     // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a
-                    // row owned by that source's isolation owner (MappingSourceCopyGate, the one predicate). A child that is not,
-                    // or whose answer cannot be told, is not written at all; its entry carries the stable code.
-                    if (await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, ct) is { } sourceRefusal)
+                    // row owned by that source's isolation owner (MappingSourceCopyGate, the one predicate), and a push from a
+                    // secure source never changes a child's filing (UAC-r2 (a)). A child either refuses, or whose answer cannot
+                    // be told, is not written at all; its entry carries the stable code.
+                    if (await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, updatePayload, ct) is { } sourceRefusal)
                     {
                         failed++;
                         errors.Add(new PushFieldMappingsError

@@ -19,6 +19,10 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// read app-only as the push reads its children (the update planner's reader). The Secure Record owner team is resolved at most
 /// once per push (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>, the resolution the create's owner check
 /// uses).</para>
+/// <para><b>Filing (UAC-r2 (a)).</b> A push from a secure source never changes what a child is filed under: a child whose
+/// pushed values would change any filing column (<see cref="FilingWrites"/>, from the registry) is not written at all
+/// (<see cref="RefileNotAllowedReasonCode"/>). A pushed value equal to the child's current filing is no change; that child goes
+/// on to the owner question. A source that is not secure is unchanged, its re-files included.</para>
 /// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, or
 /// an answer the gate cannot tell is <see cref="UndeterminedReasonCode"/>: the child is not written. Cancellation is rethrown.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <see cref="MappingSourceCopyGate"/> (the predicate, reused as is)
@@ -34,6 +38,13 @@ internal sealed class FieldMappingPushSourceGate
 
     /// <summary>Whether the source is secure, or the child's owner, could not be told: nothing was written to it.</summary>
     internal const string UndeterminedReasonCode = "field_mapping.push.secure_source_undetermined";
+
+    /// <summary>A secure source's push would change what the child is filed under: nothing was written to it (UAC-r2 (a)).</summary>
+    internal const string RefileNotAllowedReasonCode = "field_mapping.push.secure_source_refile_not_allowed";
+
+    /// <summary>The per-child text of <see cref="RefileNotAllowedReasonCode"/>. Names no record.</summary>
+    internal const string RefileNotAllowedMessage =
+        "This record's filing can't be changed by a push from a secure record, so nothing was written to it.";
 
     /// <summary>The per-child text of <see cref="NotIsolatedReasonCode"/>. Names no record.</summary>
     internal const string NotIsolatedMessage =
@@ -80,14 +91,77 @@ internal sealed class FieldMappingPushSourceGate
             ct => SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(entities, configuration, ct), logger);
 
     /// <summary>The fixed per-child text of a reason code this gate gives.</summary>
-    internal static string MessageFor(string reasonCode) =>
-        reasonCode == NotIsolatedReasonCode ? NotIsolatedMessage : UndeterminedMessage;
+    internal static string MessageFor(string reasonCode) => reasonCode switch
+    {
+        NotIsolatedReasonCode => NotIsolatedMessage,
+        RefileNotAllowedReasonCode => RefileNotAllowedMessage,
+        _ => UndeterminedMessage,
+    };
+
+    /// <summary>
+    /// The filing columns <paramref name="payload"/> writes on <paramref name="targetEntity"/> (logical column → the value it
+    /// writes). A filing column is one the create's registry predicate names
+    /// (<see cref="RecordCreationService.IsFilingLookup(string, string)"/>: lineage, ownership-parent and root filing lookups)
+    /// or the regarding pair (<see cref="SecureRootInheritance.PairIdColumn"/>, <see cref="SecureRootInheritance.PairTypeColumn"/>).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> FilingWrites(string targetEntity, IReadOnlyDictionary<string, object?> payload)
+    {
+        var filing = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in payload)
+        {
+            var column = SecureRootInheritance.NormalizeColumn(key);
+            if (string.Equals(column, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase)
+                || RecordCreationService.IsFilingLookup(targetEntity, column))
+            {
+                filing[column] = value;
+            }
+        }
+
+        return filing;
+    }
+
+    /// <summary>
+    /// Whether writing <paramref name="pushed"/> changes a filing column that holds <paramref name="held"/>. A clear changes it
+    /// unless it holds nothing; a value changes it unless it names the record it holds. A value that names no record is a change.
+    /// </summary>
+    internal static bool ChangesFiling(object? pushed, Guid? held) =>
+        pushed is null ? held is not null : IdOf(pushed) is not { } id || id != held;
+
+    /// <summary>The id a pushed value names: a bind path <c>/{set}({id})</c>, a bare id, or a GUID text.</summary>
+    private static Guid? IdOf(object? value) => value switch
+    {
+        Guid id when id != Guid.Empty => id,
+        string text when Guid.TryParse(BindId(text), out var id) && id != Guid.Empty => id,
+        _ => null,
+    };
+
+    private static string BindId(string text)
+    {
+        var open = text.LastIndexOf('(');
+        var close = text.LastIndexOf(')');
+        return open >= 0 && close > open ? text[(open + 1)..close] : text.Trim();
+    }
+
+    /// <summary>The id the child holds in a filing column (a lookup, or the pair id's text); <c>null</c> when it holds none.</summary>
+    private static Guid? HeldId(Entity child, string column) =>
+        child.Attributes.TryGetValue(column, out var held) ? held switch
+        {
+            EntityReference reference when reference.Id != Guid.Empty => reference.Id,
+            _ => IdOf(held),
+        } : null;
 
     /// <summary>
     /// <c>null</c> when values copied from the source may be written into the child; otherwise the reason code
-    /// (<see cref="NotIsolatedReasonCode"/> or <see cref="UndeterminedReasonCode"/>) and nothing may be written to it.
+    /// (<see cref="NotIsolatedReasonCode"/>, <see cref="RefileNotAllowedReasonCode"/> or <see cref="UndeterminedReasonCode"/>)
+    /// and nothing may be written to it.
     /// </summary>
-    internal async Task<string?> RefusalForChildAsync(string targetEntity, Guid childId, CancellationToken ct)
+    /// <param name="targetEntity">The child's table.</param>
+    /// <param name="childId">The child.</param>
+    /// <param name="payload">What the push would write to the child (Web API keys), as the rules built it.</param>
+    /// <param name="ct">Cancellation.</param>
+    internal async Task<string?> RefusalForChildAsync(
+        string targetEntity, Guid childId, IReadOnlyDictionary<string, object?> payload, CancellationToken ct)
     {
         try
         {
@@ -102,9 +176,24 @@ internal sealed class FieldMappingPushSourceGate
             if (unowned.Verdict == MappingSourceCopyVerdict.Unknown)
                 return Undetermined(targetEntity, childId, unowned.Reason, unowned.Fault);
 
-            // A secure source: the child's own owner decides.
-            var child = await _entities.RetrieveAsync(targetEntity, childId, [OwnerColumn], ct).ConfigureAwait(false);
-            var owner = child?.GetAttributeValue<EntityReference>(OwnerColumn);
+            // A secure source: the child's filing and its own owner decide, read together.
+            var filing = FilingWrites(targetEntity, payload);
+            var child = await _entities.RetrieveAsync(targetEntity, childId, [OwnerColumn, .. filing.Keys], ct).ConfigureAwait(false);
+            if (child is null)
+                return Undetermined(targetEntity, childId, "the child did not come back", null);
+
+            // UAC-r2 (a): a push from a secure source never changes a child's filing. A value equal to what the child is filed
+            // under is no change.
+            if (filing.FirstOrDefault(f => ChangesFiling(f.Value, HeldId(child, f.Key))) is { Key: { } moved })
+            {
+                _logger.LogInformation(
+                    "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the push from the secure source {Source} {SourceId} would change the "
+                    + "filing column {Column}; nothing was written to it ({Code}).",
+                    targetEntity, childId, _sourceTable, _sourceId, moved, RefileNotAllowedReasonCode);
+                return RefileNotAllowedReasonCode;
+            }
+
+            var owner = child.GetAttributeValue<EntityReference>(OwnerColumn);
             if (owner is null || owner.Id == Guid.Empty)
                 return Undetermined(targetEntity, childId, "the child's owner did not come back", null);
 
