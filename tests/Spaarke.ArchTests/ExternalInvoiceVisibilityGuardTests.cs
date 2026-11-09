@@ -95,8 +95,6 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::IsInvoiceCreate"] =
             "Whether a chat create names sprk_invoice, so the create is refused (ebilling-r1 task 096b); reads no row.",
         // ── parts of the predicate's application (inputs and the decision's consequence) ──
-        [$"{typeof(ExternalMessageEndpoints).FullName}::RegardingInvoicesOf"] =
-            "Extracts a message page's regarding invoice ids FOR the predicate (SecureRootsFilter → RegardingInvoicesVisibleAsync).",
         [$"{typeof(ExternalMessageEndpoints).FullName}::RightsFromGate"] =
             "Turns the record gate's answer into rights; the gate (EvaluateRecordGateAsync) applied the predicate first.",
         [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceFamilyKeyAttributes"] =

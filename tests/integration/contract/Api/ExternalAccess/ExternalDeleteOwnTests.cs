@@ -971,11 +971,12 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [InlineData(DeletableKind.Document, "sprk_documents",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value,_sprk_relatedinvoice_value")]
     [InlineData(DeletableKind.Todo, "sprk_todos",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
     [InlineData(DeletableKind.Event, "sprk_events",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
+    // ebilling-r1 task 130-0 fix round 2 (F1): and every invoice link column the table has (InvoiceLinks), not already selected.
     public void DeleteTargetUrl_SelectsBothStampsAndEveryParentLookup(DeletableKind kind, string entitySet, string select)
     {
         BuildDeleteTargetUrl("https://org.test/api/data/v9.2", kind, RecordA)

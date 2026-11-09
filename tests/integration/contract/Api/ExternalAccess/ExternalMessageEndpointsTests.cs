@@ -751,8 +751,10 @@ public class ExternalMessageEndpointsTests
         messages.Should().HaveCount(1);
         _lastOData.Should().Contain($"_sprk_regardinginvoice_value eq {invoice}");
         // Task 187 D4: plus the invoice's agreement, whose live roots join the gate's rule.
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work assignment, a parent the gate decides through.
         _recordReads.Should().ContainSingle()
-            .Which.Select.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project", "sprk_regardingagreement" });
+            .Which.Select.Should().BeEquivalentTo(
+                new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_regardingagreement" });
     }
 
     // ── outside the accessible set → 403, and nothing is read ──────────────────────────────────────
@@ -985,7 +987,7 @@ public class ExternalMessageEndpointsTests
             .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
 
         body.Truncated.Should().Be(fault, "a fault must not read as 'there are no more messages'");
-        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(
+        body.Value.Select(m => m.SprkCommunicationid).Should().BeEquivalentTo(
             fault ? new[] { plain.ToString("D") } : new[] { about.ToString("D"), plain.ToString("D") });
     }
 

@@ -278,6 +278,51 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
             row[key].Should().BeNull();
     }
 
+    [Fact(DisplayName = "130-0 fix2 root (must fire): every form of the root redaction set, annotations included, is blanked when the regarding pair names the hidden invoice")]
+    public async Task RootRead_EveryFormOfTheRedactionSet_IsBlanked_WhenThePairNamesTheHiddenInvoice()
+    {
+        var row = RowWithEveryRedactionForm(link: _other, pair: _other);
+
+        var result = (await Redact(row)).Should().ContainSingle().Subject;
+
+        result["sprk_name"].Should().Be("WA");
+        foreach (var key in row.Keys.Where(k => k != "sprk_name"))
+            result[key].Should().BeNull($"{key} is a form of the root redaction set and the pair names the hidden invoice");
+    }
+
+    [Fact(DisplayName = "130-0 fix2 root (must not fire): when the regarding pair names another record, only the link forms are blanked")]
+    public async Task RootRead_ThePairNamingAnotherRecord_KeepsEveryRegardingForm()
+    {
+        var matter = Guid.NewGuid();
+        var row = RowWithEveryRedactionForm(link: _other, pair: matter);
+
+        var result = (await Redact(row)).Should().ContainSingle().Subject;
+
+        foreach (var key in row.Keys.Where(k => k != "sprk_name"))
+        {
+            if (RootInvoiceLinkRedaction.LinkFormsOf("sprk_workassignment").Contains(RootInvoiceLinkRedaction.ColumnOf(key)))
+                result[key].Should().BeNull($"{key} is a form of the hidden invoice link");
+            else
+                result[key].Should().Be(matter.ToString(), $"{key} names a matter, not the hidden invoice");
+        }
+    }
+
+    /// <summary>A work assignment row carrying every form of <see cref="RootInvoiceLinkRedaction.ColumnsOf"/>, each with an annotation:
+    /// the link forms name <paramref name="link"/>, the regarding forms <paramref name="pair"/>.</summary>
+    private static Dictionary<string, object?> RowWithEveryRedactionForm(Guid link, Guid pair)
+    {
+        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["sprk_name"] = "WA" };
+        var linkForms = RootInvoiceLinkRedaction.LinkFormsOf("sprk_workassignment");
+        linkForms.Should().NotBeEmpty("the work assignment is a root with an invoice link");
+        foreach (var form in RootInvoiceLinkRedaction.ColumnsOf("sprk_workassignment"))
+        {
+            var value = (linkForms.Contains(form) ? link : pair).ToString();
+            row[form] = value;
+            row[form + "@OData.Community.Display.V1.FormattedValue"] = value;
+        }
+        return row;
+    }
+
     [Fact(DisplayName = "130-0 fix1 root (must not fire): a work assignment with no invoice link is unchanged and asks nothing")]
     public async Task RootRead_WithNoInvoiceLink_IsUnchanged()
     {
@@ -301,7 +346,7 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
 
         row["sprk_name"].Should().Be("WA");
         row["sprk_regardinginvoice"].Should().BeNull("another firm's invoice is never named on a root read");
-        foreach (var column in Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns)
+        foreach (var column in RootInvoiceLinkRedaction.RegardingColumns)
             row[column].Should().BeNull($"{column} names the hidden invoice (its number among them)");
     }
 

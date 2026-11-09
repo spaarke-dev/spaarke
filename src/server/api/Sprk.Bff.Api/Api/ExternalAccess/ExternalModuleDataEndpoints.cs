@@ -568,18 +568,18 @@ public static class ExternalModuleDataEndpoints
             .Select((row, i) =>
             {
                 var hiddenLinks = links[i].Where(l => !Shown(l.Invoice)).ToList();
-                var hidden = hiddenLinks.Select(l => l.Column).ToList();
-                if (hidden.Count == 0)
+                if (hiddenLinks.Count == 0)
                     return row;
-                // Task 130-0 fix round 2 (130-0b review): when the polymorphic regarding pair names a hidden invoice, its resolver
-                // columns (id, type, name, URL and number; CreateTimeFieldMapping.RegardingPairAndResolverColumns) name it too, so
-                // they are blanked with the link. A pair that names another record is left alone.
+                // Task 130-0 fix round 2: the forms come from THE root redaction set (RootInvoiceLinkRedaction, 130-0b). Every form
+                // of the table's invoice link is blanked; the regarding pair and its resolver columns only when the pair names the
+                // hidden invoice (a pair that names another record is left alone). An annotation is matched by its column.
+                var hidden = new HashSet<string>(RootInvoiceLinkRedaction.LinkFormsOf(table), StringComparer.OrdinalIgnoreCase);
                 if (LinkValueOf(row, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn) is { } pairRaw
                     && RootLinkIdOf(pairRaw) is { } pairId && hiddenLinks.Any(l => l.Invoice == pairId))
-                    hidden.AddRange(Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns);
+                    hidden.UnionWith(RootInvoiceLinkRedaction.RegardingForms);
                 blanked += hiddenLinks.Count;
                 var copy = row.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
-                foreach (var key in row.Keys.Where(k => hidden.Any(column => IsFormOfLink(k, column))))
+                foreach (var key in row.Keys.Where(k => hidden.Contains(RootInvoiceLinkRedaction.ColumnOf(k))))
                     copy[key] = null;
                 return (IReadOnlyDictionary<string, object?>)copy;
             })
@@ -597,13 +597,6 @@ public static class ExternalModuleDataEndpoints
             row.TryGetValue(column, out var raw) && raw is not null ? raw
             : row.TryGetValue($"_{column}_value", out var value) && value is not null ? value
             : null;
-
-        static bool IsFormOfLink(string key, string column) =>
-            string.Equals(key, column, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(key, $"_{column}_value", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(key, column + "name", StringComparison.OrdinalIgnoreCase)
-            || key.StartsWith(column + "@", StringComparison.OrdinalIgnoreCase)
-            || key.StartsWith($"_{column}_value@", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>A root link value as the module reads project it: a GUID, an entity reference, a GUID string, or a

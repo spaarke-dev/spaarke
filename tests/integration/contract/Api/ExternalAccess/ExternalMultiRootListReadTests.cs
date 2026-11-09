@@ -645,8 +645,14 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             new RootLookup("sprk_relatedmatter", ExternalGrantRootType.Matter),
             new RootLookup("sprk_relatedworkassignment", ExternalGrantRootType.WorkAssignment),
         });
-        foreach (var other in new[] { "sprk_invoice", "sprk_project", "sprk_matter", "sprk_workassignment" })
+        foreach (var other in new[] { "sprk_project", "sprk_matter", "sprk_workassignment" })
             Registry().FindByEntity(other)!.AdditionalRootLookups.Should().BeEmpty($"{other} keeps its rule");
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): the invoice's work assignment is a root of the rule; RootLinks types only
+        // the sprk_workassignment dimension, so the invoice's sprk_regardingworkassignment is declared as a root lookup.
+        Registry().FindByEntity("sprk_invoice")!.AdditionalRootLookups.Should().BeEquivalentTo(new[]
+        {
+            new RootLookup("sprk_regardingworkassignment", ExternalGrantRootType.WorkAssignment),
+        });
     }
 
     [Fact]
@@ -955,7 +961,10 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         var module = Registry().FindByEntity("sprk_invoice")!;
 
         module.RequireReadOnSecureRoots.Should().BeTrue("D2: an invoice behind a secure root's wall is withheld");
-        module.RootRuleAttributes.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project", "sprk_regardingagreement" });
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work assignment (a dimension and a root lookup, so listed twice;
+        // every reader of the list projects it distinct).
+        module.RootRuleAttributes.Distinct(StringComparer.OrdinalIgnoreCase).Should().BeEquivalentTo(
+            new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_regardingagreement" });
     }
 
     [Fact]
