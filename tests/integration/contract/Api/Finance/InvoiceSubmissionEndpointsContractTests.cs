@@ -74,6 +74,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private readonly List<InvoiceSubmissionView[]> _submissionDecisions = new();
     private readonly List<Guid[]> _invoiceDecisions = new(); // task 130-0 fix round 1: each call of the caller-aware invoice seam
     private bool _registerSubmissionHiding = true;
+    // Task 130-0 fix round 3b: when set, replaces the real invoice decision (a test of how a decision's per-invoice fault is read).
+    private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub? _invoiceDecisionOverride;
     private HttpClient _client = null!;
 
     public InvoiceSubmissionEndpointsContractTests()
@@ -133,6 +135,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, invoiceIds, ct) =>
         {
             lock (_invoiceDecisions) _invoiceDecisions.Add(invoiceIds.ToArray());
+            if (_invoiceDecisionOverride is { } overridden)
+                return overridden.Seam(caller, invoiceIds, ct);
             return _world.NewService(SubmissionIdentity.Object).HideInvoicesForAsync(caller, invoiceIds, _world.RootFlags, _world.CallerFirms, ct);
         });
 
@@ -1587,6 +1591,34 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         ListReturns(SubmissionRow("INV-OWN-FIRM", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id));
         await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-OWN-FIRM");
+    }
+
+    // Task 130-0 fix round 3b: one notion of a fault. A decision that failed for one invoice alone (not for the whole result) is the
+    // same retryable 503 as a whole-result fault, on the read and the list; a decided hidden invoice stays the refusal / absent row.
+    [Fact(DisplayName = "130-0 fix3b submission read and list (must fire): an invoice decision that failed for the submission's invoice alone is the retryable 503")]
+    public async Task Task130_0_fix3b_a_per_invoice_decision_fault_is_the_503_on_the_read_and_the_list()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        _invoiceDecisionOverride = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.PerInvoiceFault(invoice);
+
+        _h.Submission = StoredSubmissionWithInvoice(id, invoice);
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}"), "trackingNumber");
+
+        ListReturns(SubmissionRow("INV-OWN-FIRM", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id));
+        await ShouldBeRetryable503Async(await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-OWN-FIRM");
+    }
+
+    [Fact(DisplayName = "130-0 fix3b submission read and list (must not fire): an invoice decided hidden is the same 404 as a missing one and an absent row, not the 503")]
+    public async Task Task130_0_fix3b_a_decided_hidden_invoice_is_not_the_503()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        _invoiceDecisionOverride = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(invoice);
+
+        await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, invoice), "its invoice is decided hidden");
+        (await ListBodyAsync(
+                SubmissionRow("INV-HIDDEN", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id),
+                SubmissionRow("INV-PENDING", Spa)))
+            .Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
     }
 
     // ── Without an invoice: the submission's own source decides (review round 4b), on BOTH routes ──

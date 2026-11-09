@@ -193,6 +193,22 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         truncated.Should().BeTrue();
     }
 
+    [Theory(DisplayName = "130-0 fix3b (must fire / must not fire): a decision that failed for one invoice alone says truncated; a decided hidden invoice does not")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TheFilter_APerInvoiceFault_HidesThatRow_AndSaysTruncated(bool fault)
+    {
+        var stub = fault ? InvoiceHidingStub.PerInvoiceFault(_other) : InvoiceHidingStub.Hiding(_other);
+
+        var (visible, truncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            CallerOn(Matter),
+            new[] { ("affected", (IReadOnlyList<Guid>)new[] { _other }), ("own", (IReadOnlyList<Guid>)new[] { _own }), ("plain", Array.Empty<Guid>()) },
+            r => r.Item2, stub.Seam, NullLogger.Instance, "test", CancellationToken.None);
+
+        visible.Select(r => r.Item1).Should().Equal("own", "plain");
+        truncated.Should().Be(fault, "a fault for one invoice must not read as 'there are no more rows'");
+    }
+
     [Fact(DisplayName = "130-0 fix1: a page with no invoice-linked row asks no invoice decision")]
     public async Task Lists_WithNoInvoiceLink_AskNothing()
     {

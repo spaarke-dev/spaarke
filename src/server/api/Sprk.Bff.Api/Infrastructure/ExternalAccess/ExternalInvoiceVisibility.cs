@@ -1425,6 +1425,14 @@ internal sealed class InvoiceVisibilityResult
     internal bool IsFaultedFor(Guid invoiceId) =>
         Faulted || (!IsVisible(invoiceId) && _hidden.TryGetValue(invoiceId, out var reason) && reason == InvoiceHiddenReason.ReadFailed);
 
+    /// <summary>
+    /// Task 130-0 fix round 3b: whether ANY decision in this result could not be made: the whole read failed
+    /// (<see cref="Faulted"/>), or some invoice's own decision failed (<see cref="InvoiceHiddenReason.ReadFailed"/>). The one notion
+    /// of "a fault" for a list (<c>Truncated</c>) and a single read (the retryable unavailable answer); <see cref="IsFaultedFor"/> is the
+    /// per-invoice form of it.
+    /// </summary>
+    internal bool AnyFaulted => Faulted || _hidden.Values.Any(reason => reason == InvoiceHiddenReason.ReadFailed);
+
     /// <summary>Why <paramref name="invoiceId"/> is not visible; <c>null</c> only when it was asked and is visible.</summary>
     internal InvoiceHiddenReason? HiddenReason(Guid invoiceId) =>
         IsVisible(invoiceId) ? null : _hidden.TryGetValue(invoiceId, out var reason) ? reason : InvoiceHiddenReason.SourceNotFound;

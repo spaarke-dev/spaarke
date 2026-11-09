@@ -710,7 +710,11 @@ public class ExternalDataServiceTests
     private static string DocumentRowJson(string id, string typeJson)
     {
         var typeProps = typeJson.Length == 0 ? "" : "," + typeJson;
-        return $"{{\"sprk_documentid\":\"{id}\",\"sprk_documentname\":\"Doc {id}\",\"_sprk_project_value\":\"{DocumentRoot}\"{typeProps}}}";
+        // Task 130-0 fix round 3b: the Web API returns every selected root link, an unset one as an explicit null; a root link
+        // column that is absent from a row reads as unreadable.
+        var otherRoots = string.Concat(ExternalDataService.DocumentRootLinks.SelectColumns
+            .Where(c => c != "_sprk_project_value").Select(c => $",\"{c}\":null"));
+        return $"{{\"sprk_documentid\":\"{id}\",\"sprk_documentname\":\"Doc {id}\",\"_sprk_project_value\":\"{DocumentRoot}\"{otherRoots}{typeProps}}}";
     }
 
     private static HttpResponseMessage DocumentsOnly(string url, string body) =>

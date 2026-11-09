@@ -154,15 +154,30 @@ public class ExternalDataService
         [JsonPropertyName("sprk_documenttype")] public int? SprkDocumenttype { get; set; }
         [JsonPropertyName("sprk_documenttype@OData.Community.Display.V1.FormattedValue")] public string? SprkDocumenttypeLabel { get; set; }
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
-        [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
-        // Fix round for task 039: the other root links, read so the list can withhold a document also filed to a root the
+        // Fix round for task 039: the root links, read so the list can withhold a document also filed to a root the
         // caller cannot read (ExternalMultiRootRule). The typed column and its related twin, per root, are the roots in
         // DocumentLinkFields (the one declaration; pinned by test). Never mapped onto the wire DTO.
-        [JsonPropertyName("_sprk_relatedproject_value")] public string? SprkRelatedprojectValue { get; set; }
-        [JsonPropertyName("_sprk_matter_value")] public string? SprkMatterValue { get; set; }
-        [JsonPropertyName("_sprk_relatedmatter_value")] public string? SprkRelatedmatterValue { get; set; }
-        [JsonPropertyName("_sprk_workassignment_value")] public string? SprkWorkassignmentValue { get; set; }
-        [JsonPropertyName("_sprk_relatedworkassignment_value")] public string? SprkRelatedworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3b: each setter records that its column was PRESENT in the row (an explicit JSON null included),
+        // so a column the read did not return is told apart from one that came back empty (see RootLinkOf).
+        private readonly HashSet<string> _rootColumnsRead = new(StringComparer.Ordinal);
+        private string? _project, _relatedProject, _matter, _relatedMatter, _workAssignment, _relatedWorkAssignment;
+
+        [JsonPropertyName("_sprk_project_value")]
+        public string? SprkProjectidValue { get => _project; set { _project = value; _rootColumnsRead.Add("_sprk_project_value"); } }
+        [JsonPropertyName("_sprk_relatedproject_value")]
+        public string? SprkRelatedprojectValue { get => _relatedProject; set { _relatedProject = value; _rootColumnsRead.Add("_sprk_relatedproject_value"); } }
+        [JsonPropertyName("_sprk_matter_value")]
+        public string? SprkMatterValue { get => _matter; set { _matter = value; _rootColumnsRead.Add("_sprk_matter_value"); } }
+        [JsonPropertyName("_sprk_relatedmatter_value")]
+        public string? SprkRelatedmatterValue { get => _relatedMatter; set { _relatedMatter = value; _rootColumnsRead.Add("_sprk_relatedmatter_value"); } }
+        [JsonPropertyName("_sprk_workassignment_value")]
+        public string? SprkWorkassignmentValue { get => _workAssignment; set { _workAssignment = value; _rootColumnsRead.Add("_sprk_workassignment_value"); } }
+        [JsonPropertyName("_sprk_relatedworkassignment_value")]
+        public string? SprkRelatedworkassignmentValue { get => _relatedWorkAssignment; set { _relatedWorkAssignment = value; _rootColumnsRead.Add("_sprk_relatedworkassignment_value"); } }
+
+        /// <summary>A root link as read: its value, or <see cref="DocumentRootLinks.Unreadable"/> when the column was not in the row.</summary>
+        internal string? RootLinkOf(string column, string? value) =>
+            _rootColumnsRead.Contains(column) ? value : DocumentRootLinks.Unreadable;
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
@@ -536,14 +551,21 @@ public class ExternalDataService
     private static string LiveParentSelectSuffix(string childTable) =>
         string.Concat(ExternalMultiRootRule.LiveParentSelect(childTable).Select(c => "," + c));
 
-    private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
-        new(
-            row.SprkProjectidValue, row.SprkRelatedprojectValue,
-            row.SprkMatterValue, row.SprkRelatedmatterValue,
-            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue)
+    /// <summary>
+    /// The root links of one list row. A root link column that is ABSENT from the row was not read, so it is treated as unreadable
+    /// (<see cref="DocumentRootLinks.Unreadable"/>, which the multi-root rule withholds); an explicit null is "not filed there".
+    /// </summary>
+    private static DocumentRootLinks DocumentLinksOf(DocumentRow row)
+    {
+        var columns = DocumentRootLinks.SelectColumns;
+        return new(
+            row.RootLinkOf(columns[0], row.SprkProjectidValue), row.RootLinkOf(columns[1], row.SprkRelatedprojectValue),
+            row.RootLinkOf(columns[2], row.SprkMatterValue), row.RootLinkOf(columns[3], row.SprkRelatedmatterValue),
+            row.RootLinkOf(columns[4], row.SprkWorkassignmentValue), row.RootLinkOf(columns[5], row.SprkRelatedworkassignmentValue))
         {
             Row = row.Extra,
         };
+    }
 
     /// <summary>
     /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
@@ -552,14 +574,20 @@ public class ExternalDataService
     /// single-document route (download, versions), so one document is not readable on one path and hidden on another.
     /// </summary>
     /// <remarks>
-    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). A value that is null or blank
-    /// is "not filed to this root"; a value that is not a GUID reads as unreadable (fail closed).
+    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). An explicit null (or a blank value)
+    /// is "not filed to this root"; a column that is ABSENT from a Web API row was not read and a value that is not a GUID cannot
+    /// be read: both are <see cref="Unreadable"/> (fail closed). Every Web API read that feeds this type selects all six
+    /// columns (<see cref="SelectColumns"/>; pinned by test). No FetchXML path feeds it: the module (FetchXML) reads take their
+    /// root links from <c>ExternalModuleDescriptor.RootLinks</c>.
     /// </remarks>
     public readonly record struct DocumentRootLinks(
         string? Project, string? RelatedProject,
         string? Matter, string? RelatedMatter,
         string? WorkAssignment, string? RelatedWorkAssignment)
     {
+        /// <summary>The link value the multi-root rule withholds: not a GUID, so it counts as a root the caller cannot read.</summary>
+        internal const string Unreadable = "malformed";
+
         /// <summary>The <c>_..._value</c> select columns of the six links, in the order of this record's members.</summary>
         internal static readonly IReadOnlyList<string> SelectColumns = new[]
         {
@@ -611,7 +639,10 @@ public class ExternalDataService
         public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags, LiveParentRoots? live = null) =>
             ExternalMultiRootRule.ChildRowReadable(caller, flags, RuleInput(live));
 
-        /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
+        /// <summary>
+        /// The links a single-row read returned. A column that is absent from the row was not read, and a present value that is not
+        /// a JSON string cannot be read: both are <see cref="Unreadable"/>. An explicit JSON null is "not filed there".
+        /// </summary>
         internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
             Raw(row, SelectColumns[0]), Raw(row, SelectColumns[1]),
             Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
@@ -622,12 +653,12 @@ public class ExternalDataService
 
         private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
         {
-            if (!row.TryGetValue(column, out var value)) return null;
+            if (!row.TryGetValue(column, out var value)) return Unreadable; // not read: never "not filed there"
             return value.ValueKind switch
             {
                 JsonValueKind.Null or JsonValueKind.Undefined => null,
                 JsonValueKind.String => value.GetString(),
-                _ => "malformed", // not a GUID: the multi-root rule withholds it (fail closed)
+                _ => Unreadable, // not a GUID: the multi-root rule withholds it (fail closed)
             };
         }
     }
@@ -2031,7 +2062,11 @@ public class ExternalDataService
                 surface, rows.Count - visible.Count, rows.Count, faulted, decision?.HiddenSummary() ?? "");
         }
 
-        return (visible, faulted && visible.Count != rows.Count);
+        // Task 130-0 fix round 3b: a row dropped for an invoice whose decision could not be made (the whole read, or that invoice's own
+        // decision) says Truncated; a row dropped for a decided "not visible" does not.
+        var droppedForFault = faulted || (decision is not null && rows.Where((_, i) => links[i].Count > 0
+            && !links[i].All(decision.IsVisible) && links[i].Any(decision.IsFaultedFor)).Any());
+        return (visible, droppedForFault && visible.Count != rows.Count);
     }
 
     /// <summary>

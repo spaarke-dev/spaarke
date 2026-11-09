@@ -1103,6 +1103,25 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         body.Truncated.Should().BeTrue("rows were dropped because a read failed");
     }
 
+    // Task 130-0 fix round 3b: one notion of a fault. A decision that failed for one invoice alone drops that row and says truncated;
+    // a row decided hidden is dropped without it, and the other row is listed either way.
+    [Theory(DisplayName = "130-0 fix3b module list (must fire / must not fire): a per-invoice decision fault says truncated; a decided hidden invoice does not")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InvoicesModuleFetch_APerInvoiceDecisionFault_DropsThatRow_AndSaysTruncated(bool fault)
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var affected = InvoiceRow("Affected", project: RecordA);
+        var other = InvoiceRow("Other", project: RecordA);
+        var affectedId = (Guid)affected["sprk_invoiceid"]!;
+        var stub = fault ? InvoiceHidingStub.PerInvoiceFault(affectedId) : InvoiceHidingStub.Hiding(affectedId);
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new[] { affected, other }, stub.Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Other");
+        body.Truncated.Should().Be(fault, "a fault for one invoice must not read as 'there are no more rows'");
+    }
+
     [Fact]
     public async Task InvoicesModuleFetch_NoPredicate_HidesEveryRow_AndSaysTruncated_FailClosed()
     {

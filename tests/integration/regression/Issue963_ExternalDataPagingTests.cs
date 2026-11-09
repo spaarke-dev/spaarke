@@ -82,10 +82,14 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             switch (read)
             {
                 case "documents":
-                    _dataverse.Add("sprk_documents", new JsonObject
+                    var document = new JsonObject
                     {
                         ["sprk_documentid"] = id, ["sprk_documentname"] = $"Doc {i}", ["_sprk_project_value"] = Root.ToString(),
-                    });
+                    };
+                    // The Web API returns every selected root link, an unset one as an explicit null (task 130-0 fix round 3b).
+                    foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns)
+                        document.TryAdd(column, null);
+                    _dataverse.Add("sprk_documents", document);
                     break;
                 case "todos":
                     _dataverse.Add("sprk_todos", new JsonObject

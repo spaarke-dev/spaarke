@@ -145,8 +145,7 @@ public static class ExternalModuleDataEndpoints
             .Produces<IReadOnlyDictionary<string, object?>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /metadata/{entity} — projected entity metadata (schema; no record data). App-only passthrough.
         data.MapGet("/metadata/{entityLogicalName}", GetMetadataAsync)
@@ -562,7 +561,8 @@ public static class ExternalModuleDataEndpoints
                 table, asked.Count);
         }
 
-        bool Shown(Guid invoice) => decision is { Faulted: false } && decision.IsVisible(invoice);
+        // Fix round 3b: a decision with any fault (a whole-read fault or one invoice's own failed decision) blanks every link (fail closed).
+        bool Shown(Guid invoice) => decision is { AnyFaulted: false } && decision.IsVisible(invoice);
         var blanked = 0;
         var result = rows
             .Select((row, i) =>
@@ -654,7 +654,8 @@ public static class ExternalModuleDataEndpoints
                 module.Name, rows.Count - visible.Count, rows.Count, decision.HiddenSummary());
         }
 
-        return (visible, decision.Faulted && visible.Count != rows.Count);
+        // Task 130-0 fix round 3b: one notion of a fault (a whole-read fault or any invoice's own failed decision).
+        return (visible, decision.AnyFaulted && visible.Count != rows.Count);
     }
 
     private static async Task<IResult> GetScopedRecordAsync(
@@ -774,11 +775,14 @@ public static class ExternalModuleDataEndpoints
                 .ConfigureAwait(false);
             return Results.Ok(redacted[0]);
         }
-        catch (RecordNotFoundException ex)
+        catch (RecordNotFoundException)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound, title: "Not Found", detail: ex.Message,
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_RECORD_NOT_FOUND" });
+            // Task 130-0 fix round 3b: a record that is in the caller's set but no longer exists answers exactly as a record
+            // outside the set does (the Tier-2 gate above): one status and one body for every refusal on this route.
+            logger.LogInformation(
+                "[EXT-MODULE] Record read refused for module={Module} {Entity} {RecordId}: the record is not available.",
+                module.Name, entityLogicalName, id);
+            return ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

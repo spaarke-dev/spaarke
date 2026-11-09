@@ -66,6 +66,37 @@ public sealed class ExternalModuleRootTypingTests
         registry.FindByEntity(Entity).Should().NotBeNull();
     }
 
+    // Fix round 3b: the check used to return early for a table outside the lineage map, so a secure-roots module on such a table was not
+    // checked at all (and every row read would throw). It is refused at registration.
+    [Fact(DisplayName = "130-0 fix3b root typing (must fire): a secure-roots module on a table outside the lineage map is refused at registration")]
+    public void ASecureRootsModuleOnATableOutsideTheLineageMap_IsRefused()
+    {
+        var act = () => new ExternalModuleRegistry().Register(OutsideTheLineage(secureRoots: true));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*sprk_gridconfiguration*not a child table*");
+    }
+
+    [Fact(DisplayName = "130-0 fix3b root typing (must not fire): a module without the rule on a table outside the lineage map registers")]
+    public void AModuleWithoutTheRuleOnATableOutsideTheLineageMap_Registers()
+    {
+        var registry = new ExternalModuleRegistry();
+
+        var act = () => registry.Register(OutsideTheLineage(secureRoots: false));
+
+        act.Should().NotThrow();
+        registry.FindByEntity("sprk_gridconfiguration").Should().NotBeNull();
+    }
+
+    private static ExternalModuleDescriptor OutsideTheLineage(bool secureRoots) => new()
+    {
+        Name = "config-test",
+        RecordEntity = "sprk_gridconfiguration",
+        RequireReadOnSecureRoots = secureRoots,
+        ScopeDimensions = new[] { new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = _ => new HashSet<Guid>() } },
+        PrimaryNameAttribute = "sprk_name",
+        ReadableColumns = new HashSet<string> { "sprk_gridconfigurationid", "sprk_name", "sprk_matter" },
+    };
+
     [Fact(DisplayName = "130-0 fix3 root typing (must not fire): the production modules register, and RootLinks types the invoice's work assignment once")]
     public void TheProductionRegistry_Builds_AndTypesTheInvoicesWorkAssignmentDimension()
     {

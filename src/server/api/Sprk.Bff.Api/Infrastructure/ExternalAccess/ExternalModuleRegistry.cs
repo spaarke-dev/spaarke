@@ -564,10 +564,17 @@ public sealed class ExternalModuleRegistry
     /// </summary>
     private static void ValidateRootDimensionsAreTyped(ExternalModuleDescriptor descriptor)
     {
-        if (!descriptor.RequireReadOnSecureRoots
-            || !Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(descriptor.RecordEntity, out var lineage))
-        {
+        if (!descriptor.RequireReadOnSecureRoots)
             return;
+
+        // Fix round 3b: a secure-roots module on a table the lineage map does not know has no root lookups to check, and the rule
+        // cannot be applied to it at all (ChildRowRoots.Of refuses such a table, ExternalMultiRootRule.cs LineageChild). That is
+        // refused here, at registration, rather than on the first row read.
+        if (!Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(descriptor.RecordEntity, out var lineage))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' requires Read on secure roots, but '{descriptor.RecordEntity}' is not a child table " +
+                "of the lineage map (SecureChildLineage), so the rule has no root lookups to apply to its rows.");
         }
 
         var probe = Guid.NewGuid();

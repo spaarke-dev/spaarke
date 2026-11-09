@@ -338,7 +338,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         var decision = await hideSubmissions(principal, views, ct).ConfigureAwait(false);
-        if (decision.Faulted)
+        if (decision.AnyFaulted)
         {
             // EB-D-169: the decision could not be read. A retryable 503 for the whole page; no row is shown.
             throw InvoiceSubmissionService.ReadUnavailable();
@@ -366,7 +366,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         var invoiceDecision = await hideInvoices(principal, invoices, ct).ConfigureAwait(false);
-        if (invoiceDecision.Faulted)
+        if (invoiceDecision.AnyFaulted) // task 130-0 fix round 3b: a whole-read fault or any invoice's own failed decision
         {
             // As the submission decision above: a retryable 503 for the whole page; no row is shown.
             throw InvoiceSubmissionService.ReadUnavailable();

@@ -996,6 +996,31 @@ public class ExternalMessageEndpointsTests
             fault ? new[] { plain.ToString("D") } : new[] { plain.ToString("D"), about.ToString("D") });
     }
 
+    // ebilling-r1 task 130-0 fix round 3b: one notion of a fault. A decision that failed for one invoice alone (the result not faulted
+    // as a whole) drops that invoice's message and says truncated; a message whose invoice is decided hidden is dropped without it.
+    [Theory(DisplayName = "130-0 fix3b thread (must fire / must not fire): a per-invoice decision fault says truncated; a decided hidden invoice does not")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Task130_0_Fix3b_APerInvoiceDecisionFault_OnAMattersThread_SaysTruncated(bool fault)
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var about = Guid.NewGuid();
+        var aboutRow = MessageRow(about, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        aboutRow["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _invoiceHiding = fault ? InvoiceHidingStub.PerInvoiceFault(invoice) : InvoiceHidingStub.Hiding(invoice);
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), aboutRow);
+
+        var body = (await Get("matters", matter, Ciam(matter: matter)))
+            .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
+
+        body.Truncated.Should().Be(fault, "a fault for one invoice must not read as 'there are no more messages'");
+        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(new[] { plain.ToString("D") });
+    }
+
     // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice whose core record is a work assignment is reached through it.
     [Fact(DisplayName = "130-0 fix2 K3 thread (must not fire / must fire / fault): an invoice reached only through its work assignment")]
     public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ItsThreadIsReadThroughIt()

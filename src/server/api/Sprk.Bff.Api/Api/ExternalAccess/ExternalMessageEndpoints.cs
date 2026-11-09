@@ -589,8 +589,8 @@ public static class ExternalMessageEndpoints
 
         // Task 130-0 fix round 2 (F2): a decision that could not be made (faulted, or no predicate) withholds every message regarding
         // an asked invoice; the read reports it as Truncated, so a fault never reads as "there are no more messages".
-        if (invoiceFault is not null && asked.Count > 0 && (decision is null || decision.Faulted))
-            invoiceFault.Value = true;
+        if (invoiceFault is not null && asked.Count > 0 && (decision is null || decision.AnyFaulted))
+            invoiceFault.Value = true; // task 130-0 fix round 3b: a whole-read fault or one invoice's own failed decision
 
         return row => RegardingInvoicesOf(row).All(id =>
             IsAuthorized(id)

@@ -1807,6 +1807,10 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["_sprk_matter_value"] = rawMatter ?? matter?.ToString(),
             ["_sprk_project_value"] = project?.ToString(),
         };
+        // Task 130-0 fix round 3b: the Web API answers a selected lookup that is not set as an explicit null, and a root link column that
+        // is absent from a row reads as unreadable, so every root link column is seeded (null unless set above).
+        foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns)
+            row.TryAdd(column, null);
         if (extra is { } e) row[e.Column] = e.Value;
         Seed("sprk_documents", row);
         Filed("sprk_document", id, parent is { } p ? new[] { ("sprk_parentdocument", "sprk_document", p) } : Array.Empty<(string, string, Guid)>());
