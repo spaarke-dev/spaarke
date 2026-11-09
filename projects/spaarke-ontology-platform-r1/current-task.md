@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-11-09 (by context-handoff, before moving this project's main session from VS Code to the Claude Desktop
 > session **`ontology-r1`**). State only: history is in git log, task `<completion>` blocks and `notes/handoff-history/2026-11.md`
 > (the previous checkpoint is archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions:
-> [`notes/decisions.md`](notes/decisions.md) (D-1..D-214). Deferred work: one self-contained GitHub issue per item, label
+> [`notes/decisions.md`](notes/decisions.md) (D-1..D-215). Deferred work: one self-contained GitHub issue per item, label
 > `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-146**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -30,6 +30,10 @@
 
 **spaarkeai-mcp-bff-api-r1 (desktop `mcp-r1`)**
 - FR-04 ruled (D-212). Their 018 (`WorkItemPrivilege`) reviewed OK; it reaches master only with their project PR #2587 (not soon). They ping on merge; then DI-143 #2630 builds on `WorkItemPrivilege.SourcesOf` + `FlaggedAsync`. Next from them: reviews of 022–024.
+
+**uac-r2 (`uac-r2`)**
+- **D-215 (owner, 2026-11-09):** gate Decision Records of Direct messages follow the message's internal participants (shared at write, kept on ordinary filing, re-owned on unfile back to Direct). uac 198 Part E edits `GateDecisionRecordSharing.cs` after fm 054a lands `sprk_directrecipient` and 198's R2 rework; the 7 conditions + unfile-back case were sent privately by message. **We review the diff + one independent review before merge.** Waiting for their SHA.
+- Move notice to `spa-r4` expired undelivered (permission-mode mismatch); owner told.
 
 **Ours, after the critical path:** DI-144 #2632 (writer lookups also require `createdonbehalfby` empty); DI-145 #2639 (environment identity ids in source/tests/notes, public-repo hygiene); F-R3-1 footer fix (on docs only; needs docs→master + dev deploy); `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`; five stale `DecisionRecordWriter.cs` comments wait for ebilling 074; close #2212 when ebilling `f0884a175f` reaches master.
 

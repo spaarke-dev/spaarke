@@ -740,3 +740,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 - **Owner confirmation:** while testing Create budget on a matter, the owner also closed that row's other open items (including 17 billing "Submission integrity" items) through the decision panel's add-on option, and called it "a good feature; no changes necessary". No change to the commit route's row-level resolution.
 - **Note:** D-207 (held PRs #2580/#2579) still moves billing items out of the Console decision route into Invoice Review once ebilling 112 is on dev; until then a row decision can close billing items with the row.
+
+## D-215 — Gate Decision Records of Direct messages follow the message's participants (owner, 2026-11-09, asked directly; uac-r2 task 198 Part E)
+
+- **Context:** the owner approved Direct 1:1 messages being owned by a dedicated Direct-message owner team (fm 054a) and ruled that participants keep their message shares after filing (except secure targets, and Restricted targets for external users). Under D-169 as built, a team-owned message's gate Decision Records got no participant share, and filing revoked every share.
+- **Ruling (1):** a gate Decision Record of a message owned by the Direct-message owner team is shared Read with the message's internal participants who can read the message now. It is never more visible than its message; an unknown or unreadable case grants nothing. Every other team-owned communication keeps D-169's behaviour.
+- **Ruling (2), amends D-169 for Direct messages only:** on filing to an ordinary record the record is re-owned to the record's team as before and keeps Read for those participants (recomputed, not carried over). A secure target stays with the Secure mirror. External users never get a Decision Record share (D-169 internal only).
+- **Added with uac-r2 (ontology agreed):** unfiling a message back to Direct re-owns its gate Decision Records to the Direct-message owner team, recomputes the participant shares and revokes every other share, so the record team keeps no access the message no longer gives.
+- **Revoke side:** no path removes an internal participant's Read on a Direct message (uac-r2, 198 design), so no revoke-side mirror is built. If uac-r2's rework adds one, it adds the mirror.
+- **Implementation:** uac-r2 (198 Part E) edits `Services/Signals/GateDecisionRecordSharing.cs` after fm 054a's recipient column lands; ontology reviews the diff, plus one independent review, before merge. D-123's secure wall is unchanged.
