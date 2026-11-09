@@ -184,6 +184,46 @@ New surface:
 - After: the same filter gives 8920 pass, 0 fail, 2 skipped. ArchTests (`SecureRecordOwnerRoleSetParity`, `RouteAuthorizationGuard`, `RecordOwnerAssignmentCensus`, `PoaShareClientSingletonGuard`, `DocumentAccessPermissionWriterGuard`): 191/191. BFF build: 0 warnings, 0 errors.
 - A full unconfined run of `Sprk.Bff.Api.Tests` on this machine hung in an HTTP contract test after about 35 minutes, and was stopped. Its web-host contract failures (Office, Insights and others) do not touch this change; the filtered suites above are the evidence.
 
+### §6.1 K1 — Secure settings that name nothing (fm's review of the twin)
+
+**Rule:** Secure settings that are PRESENT but name a unit or team Dataverse does not find, or a read that faults, never answer "cannot be Secure". On the grant path (and the thread-owner move) that is "unknown", and the caller fails closed.
+
+**Settings present** = `SecureRecord:BusinessUnitName` or `SecureRecord:OwnerTeamName` is set and not blank (`SecureChildShareSynchronizer.SecureSettingsConfigured`). A value equal to the compiled default still counts as present. `appsettings.template.json` sets both, so an environment deployed from the template counts as configured.
+
+**`CannotBeSecureOwnerTeamAsync`** (when the `teamid` + `name eq` read finds no row):
+- Settings present: `true` only when a non-default Owner team carries the configured team name (`name eq` + `teamtype` Owner + `isdefault eq false`, one read). No team carries it → `false`.
+  - The unit setting is not read here. The real Secure team must carry the configured team name, so a team without it is not the Secure team, whichever unit is configured.
+  - The first version of this fix resolved the whole Secure team (unit included) at this point. That broke task 149 F7 (`SecureChildShareMirrorTests.ShareUser_OnAnOrdinaryRecord_IsNotRefused_WhenTheSecureRecordTeamCannotBeResolved`): an ordinary record's share was refused while the Secure unit was ambiguous, and the unit was read. The narrower proof keeps F7.
+  - A unit setting that finds nothing is caught by `IsSecureOwnerTeamAsync` (unknown → fail closed) for the real Secure team, whose name matches.
+  - Residual edge: a team setting that is wrong but happens to name some other existing Owner team. No name-based check can detect that.
+- Settings absent (compiled defaults): unchanged, by-id read; the team exists → `true`, not found → `false`.
+- Any fault → `false` (cancellation propagates). Before this, a fault propagated.
+
+**New `IsSecureOwnerTeamAsync`** (`true` / `false` / `null` + reason): `CannotBe…` first, then `ResolveSecureOwnerTeamAsync` and an id compare. When the resolver finds no team: settings absent → `false`; settings present → `null`.
+- A fault in the resolution propagates (the callers' catch grants nothing).
+- §11: (1) *Existing:* `DirectThreadAccessService` and `ThreadResolver` each composed `CannotBe…` + resolve + compare by hand. (2) *Extension:* it IS that composition, moved beside the two helpers it composes; both copies now call it. (3) *Cost of doing nothing:* each copy must re-implement "present but not found = unknown", and both copies already read "no team" as "not Secure".
+
+**Callers changed:**
+- `DirectThreadAccessService.ReadMessageOwnershipAsync`: `null` → no grant (TODO Part C: re-grant queue).
+- `ThreadResolver.ThreadOwnerMayBeSecureAsync`: `null` → "may be Secure", so the thread is not moved. This file belongs to communication task 129; the edit is the one call, and its doc already says it uses DirectThreadAccessService's detection.
+- The synchronizer's scoped run (`:1250`) is unchanged: with wrong settings it answers NotApplicable, and it grants nothing.
+
+**Settings absent — the behaviour kept (item 2):** the compiled defaults ('Secure Record' / 'Secure Record Owners') are looked up. When the environment has no unit or team by those names, no team is the Secure team, a team-owned message is ordinary, and its participants are granted, as before.
+
+**Item 3 — `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync` (`:359`, not found → `(null, false)`):** left unchanged (it is also fm's file).
+- Grant path: its only route to a participant grant is through `ResolveSecureOwnerTeamAsync` → `IsSecureOwnerTeamAsync`, which is now fail closed.
+- Direct callers: `RecordOwnershipResolver` (filing owner), `SecureChildReconciler` (re-file guards; with no Secure team the mirror grants nothing), `DocumentContainerRelocator` (container placement), `TodoAssigneeOwnerReconciliationJob` (owner), `DecisionParameterSources` (budget currency), `SecureRootInheritance.Cascade`. None of them writes a participant share.
+- Filing does NOT fully fail closed today: `:359` documents the fail-open edge (before guide §4.3 step 4, a child filed to a secure record can land on the Secure unit's default team). That edge was accepted by the task-144 verifier and is not changed here.
+- **Not fixed, needs an owner decision:** other consumers read `ResolveSecureOwnerTeamAsync`'s "no team" as "no record is secure". `BillingFactLoader.SecureRootsAsync:723` decides whether Duplicate shows prior detail (a disclosure). `SignalSuppressionService.ResolveSecureTeamAsync:296` partitions signals. Making the resolver itself refuse when settings are present would close them all, but would also turn every reconcile, re-file and secure-create into a refusal in any environment that sets the keys without a Secure unit. That is a global contract change, so it is not done here.
+
+**Tests:**
+- `SecureOwnerTeamNameMatchTests` gains 10 and replaces 1:
+  - Item 4: the test "a setting that names no team rules out the Secure team" asserted the fail-open answer. It is replaced by `WrongSecureSettings_DoNotRuleOutTheRealSecureTeam_AndIsSecureIsUnknown` (3 cases: wrong team, wrong unit, both).
+  - Added: wrong settings do not rule out an ordinary team either; a wrong unit setting with the right team name rules an ordinary team out by name with no unit read, while the real Secure team is unknown; a read fault → not ruled out; `IsSecureOwnerTeamAsync` fault propagates; correct settings + an ordinary team → ruled out and not Secure, the Secure team → Secure; settings absent + no Secure unit → an ordinary team is ruled out and not Secure; the `SecureSettingsConfigured` truth table.
+- `DirectThreadAccessServiceTests` gains `ASecureMessage_WithSecureSettingsThatFindNothing_GrantsNothing` (2 cases) and the must-not-fire `AnOrdinaryTeamMessage_WithCorrectSecureSettings_KeepsTheParticipantGrant`.
+- Fail-first: HEAD (`e75cabb0c5`) synchronizer, `DirectThreadAccessService` and `ThreadResolver`, with the two new helpers spliced in unchanged so the tests compile (old `CannotBe…` and old caller logic). Filter `DirectThreadAccessServiceTests|SecureOwnerTeamNameMatchTests|ThreadResolverTests|SecureChildShareMirrorTests`: 6 of 283 fail (the 3 synchronizer-level must-fire tests, 4 cases, and both caller-level cases); 277 pass. After the fix: 283/283.
+- Scoped filter (`ExternalAccess|.Access.|Communication|SecureChild|RecordOwnership|DirectMessageOwnerTeam`): 8932 pass, 0 fail, 2 skipped. ArchTests (same five classes): 191/191. BFF build: 0 warnings, 0 errors.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
