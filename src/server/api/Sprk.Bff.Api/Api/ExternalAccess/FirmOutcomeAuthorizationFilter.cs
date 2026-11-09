@@ -68,12 +68,12 @@ internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid Subject
 /// by the (a') predicate (<see cref="ExternalInvoiceHiding"/> / <see cref="ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync"/>,
 /// the same decisions every other external invoice read applies). A submission's invoice, once it exists, must ALSO pass the invoice rule. A
 /// caller of several firms sees each of its firms' items; another firm's item is refused even on a shared matter.</para>
-/// <para><b>One 403 for every refusal.</b> No firm, a firm read that faults or comes back unreadable (logged as a system failure; owner ruling
-/// 2026-11-08), another firm's item, no core access, a hidden item, a systemuser and an id that does not exist all answer the SAME 403
-/// <see cref="FirmOutcomeErrors.Forbidden"/> with the same body, so the status says nothing about which. <b>Not-found is 403 too, not 404:</b> an
-/// id that does not exist has no firm, so the firm check can never pass for it, and a 404 for it beside a 403 for another firm's item would let a
-/// caller learn which ids exist. A read that cannot decide (the invoice or submission, or the visibility decision, faulted) is a retryable 503
-/// <see cref="FirmOutcomeErrors.Unavailable"/> (EB-D-169), never a 200 and never a denial that blames the caller.</para>
+/// <para><b>One 403 for every refusal.</b> No firm (a decided empty set), another firm's item, no core access, a hidden item, a systemuser and an
+/// id that does not exist all answer the SAME 403 <see cref="FirmOutcomeErrors.Forbidden"/> with the same body, so the status says nothing about
+/// which. <b>Not-found is 403 too, not 404:</b> an id that does not exist has no firm, so the firm check can never pass for it, and a 404 for it
+/// beside a 403 for another firm's item would let a caller learn which ids exist. A read that cannot decide (the caller's firms, the invoice or
+/// submission, or the visibility decision, faulted or came back unreadable) is a retryable 503 <see cref="FirmOutcomeErrors.Unavailable"/>
+/// (EB-D-169), never a 200 and never a denial that blames the caller. The firm read is decided before any item is read.</para>
 /// <para><b>Order.</b> The group's workforce ceiling (id-independent), then principal, systemuser, firms, record read, firm, core record, visibility
 /// (a submission: then its invoice's); the kill switch after this filter. App-only reads (ADR-028 A1/A3), no OBO; no principal denies.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: 044's <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/> (its
@@ -139,8 +139,15 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return FirmOutcomeErrors.Forbidden();
         }
 
+        // Unknown is not "no firm": a firm read that faulted or is unreadable is a retryable 503 (nothing blames the caller); only a DECIDED
+        // empty set is the uniform 403. Both are decided here, before any invoice or submission is read.
         var firms = await ReadFirmsAsync(principal, ct);
-        if (firms is null || firms.Count == 0)
+        if (firms is null)
+        {
+            return FirmOutcomeErrors.Unavailable();
+        }
+
+        if (firms.Count == 0)
         {
             return FirmOutcomeErrors.Forbidden();
         }
@@ -161,7 +168,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
     /// <summary>
     /// The caller's active firms; null when they could not be read. An unreadable firm set is a SYSTEM failure (logged at Error) and the
-    /// caller is refused: it is never "no firm", never a pass.
+    /// caller gets the retryable 503: it is never "no firm", never a pass.
     /// </summary>
     private async Task<IReadOnlyList<Guid>?> ReadFirmsAsync(CallerPrincipal principal, CancellationToken ct)
     {
@@ -172,13 +179,13 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the caller's firms could not be read; denying (fail closed).");
+            _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the caller's firms could not be read; answering 503.");
             return null;
         }
 
         if (read.Unreadable || read.Firms is null)
         {
-            _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the caller's firms are unreadable; denying (fail closed).");
+            _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the caller's firms are unreadable; answering 503.");
             return null;
         }
 

@@ -531,11 +531,11 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _data.Reads.Should().Be(0, "no firm means no invoice is looked at");
     }
 
-    [Theory(DisplayName = "130b: a firm read that faults, or comes back unreadable, is 403 (fail closed), never a pass and never 'no firm'")]
+    [Theory(DisplayName = "130b fix 4: a firm read that faults, or comes back unreadable, is a retryable 503 (unknown), never a pass and never 'no firm' (403)")]
     [InlineData("membership-fault")]
     [InlineData("membership-unreadable")]
     [InlineData("contact-unreadable")]
-    public async Task AFirmReadThatCannotBeCompleted_Is403(string kind)
+    public async Task AFirmReadThatCannotBeCompleted_Is503_AndNoSubjectIsRead(string kind)
     {
         var invoice = SeedInvoice(FirmA);
         switch (kind)
@@ -551,8 +551,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
                 break;
         }
 
-        await AssertRefusedAndNothingProjectedAsync(await Invoice(invoice));
-        _data.Reads.Should().Be(0);
+        await AssertRefusedAsync(await Invoice(invoice), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().BeEmpty("a refused request projects nothing");
+        _data.Reads.Should().Be(0, "the firm is decided before any invoice is read");
     }
 
     [Fact(DisplayName = "130b: an invoice hidden by the (a') predicate is 403 like another firm's, and is never projected")]
@@ -813,8 +814,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         await AssertRefusedAndNothingProjectedAsync(await Submission(elsewhere));
     }
 
-    [Fact(DisplayName = "130b: a caller with no firm, or whose firm cannot be read, is 403 on the submission route")]
-    public async Task Submission_ForACallerWithNoFirm_OrAnUnreadableFirm_Is403()
+    [Fact(DisplayName = "130b fix 4: on the submission route a caller with no firm is 403, and one whose firm cannot be read is a retryable 503")]
+    public async Task Submission_ForACallerWithNoFirm_Is403_AndAnUnreadableFirm_Is503()
     {
         var submission = SeedSubmission(FirmA);
 
@@ -823,7 +824,10 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
         _participations.Firms = [FirmA];
         _participations.MembershipFault = new TimeoutException("memberships are down");
-        await AssertRefusedAndNothingProjectedAsync(await Submission(submission));
+        await AssertRefusedAsync(await Submission(submission), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().BeEmpty("a refused request projects nothing");
+        _data.Reads.Should().Be(0, "the firm is decided before any invoice is read");
+        _submissionDecisions.Should().BeEmpty("the firm is decided before the submission is looked at");
     }
 
     [Fact(DisplayName = "130b: a submission hidden by the (a') seam is 403 and never projected")]
