@@ -50,7 +50,8 @@
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
 | 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code done and merged into the work branch 2026-11-08 (deafbd328c; `task/fm-021` ffd2336afc). NFR-02 re-measure r3 +1288 ms; owner: the verdict is taken in UAT. Left: next PR to master, then UAC-r2 deploys the wizard (owner go) and the live check |
-| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
+| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔄 code + fix round 1 on `task/fm-022` (7f821892ef); fix round 2 (a secure source maps only into a row owned by its isolation owner) running on `task/fm-022-2`; UAC-r2 reviews before merge |
+| 022b | [Mapping from a Restricted source; document access permission set in the create](022b-restricted-mapping-source.poml) | FR-16, FR-08 | opus / high | FULL | W3-wizards | 022 round 2 | 🔲 split from 022 round 2 (UAC-r2 2026-11-08); UAC-r2 reviews |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
 | 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
 | 025 | [Invoice wizard](025-invoice-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 024, 041 | 🔲 |
