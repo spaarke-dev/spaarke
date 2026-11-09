@@ -222,4 +222,42 @@ Evidence (fix round 2):
 - **Known: lint-staged commit hook.** Each commit pushes a backup stash on the shared stack ("Backed up original state in
   git stash", this session: a1d0320413, a67117d63d, 337473d4fd).
 
+## Pair-type bind spelling (found in passing)
+
+Web API `@odata.bind` keys use the lookup's navigation property, which is case-sensitive. Evidence (SpaarkeMaster
+`Other/Relationships/sprk_RecordType_Ref.xml`, the `sprk_regardingrecordtype` relationships' `NavigationPropertyName`):
+`sprk_RegardingRecordType` for sprk_todo (:904), sprk_event (:239), sprk_workassignment (:974), sprk_project (:624),
+sprk_servicerequest (:694), sprk_invoicesubmission (:484), sprk_communication (:64); lower-case `sprk_regardingrecordtype` for
+sprk_invoice only (:834). `ThePairTypeNavigationProperties_MatchTheSolution` pins this per pair table. Live metadata (read-only
+Dataverse MCP `describe tables/sprk_todo`) names sprk_todo's relationship `sprk_sprk_recordtype_ref_sprk_todo_RegardingRecordType`,
+consistent with the solution; the tool lists relationship names, not navigation properties, so the solution XML stays the evidence
+for the spelling itself.
+
+Key finding: every BFF entry that takes a Web API-shaped body resolves a bind's key **case-insensitively** against the table's
+metadata (`DataverseWriteItemMapper.MapWebApiPayloadAsync`, `byNavigationProperty` is `OrdinalIgnoreCase`; the project filing
+shape rule `ProjectFilingShapeProblem` compares `OrdinalIgnoreCase`) and writes the metadata's own navigation property.
+
+| Site | Table | Verdict |
+|---|---|---|
+| 1. `DecisionActionExecutors.FileUnderAsync` (`:1281`) | sprk_todo, sprk_event, sprk_workassignment: all `sprk_RegardingRecordType` | **Wrong spelling, fixed.** The body goes to `DecisionRouteCores.CreateChildAsync` -> `ChildRecordEndpoints.CreateAsync` -> `RecordCreationService` -> `MapWebApiPayloadAsync`, which matches case-insensitively, so it did not 400 today. It was still a hard-coded spelling that disagrees with the solution and would fail at the first Web API write that skipped the mapper. Now `OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(Table)`. |
+| 2. `bffChildWriteAdapter.ts:366` (`fileProjectUnderMatter`) | sprk_project: `sprk_RegardingRecordType` | **Left as is.** A client-to-BFF PATCH body, not a Web API write. The route's documented contract is the lower-case logical name (`ProjectFilingShapeProblem`, `SecureRootInheritance.PairTypeColumn + "@odata.bind"`), accepted in any case; `fileProjectUnderMatter.test.ts` pins it and `SecureRootInheritanceWriterTests.ProjectFiling` sends it. Changing it would move the contract for no behaviour change. |
+| 3. `ChildRecordEndpoints.cs:237` | sprk_project | **Left as is.** A hint string describing site 2's contract. Same reason. |
+
+Class search (`src/`, C# and TS): the other hard-coded keys all use the right spelling for their table:
+`BudgetInquiryExecutor.cs:348` (sprk_servicerequest), `ExternalDataService.cs:2639` (sprk_todo),
+`InvoiceSubmissionEndpoints.cs:548` (sprk_invoicesubmission), `ConnectionsWriteHandler.ts:412` and the three built web
+resources (sprk_communication). The only lower-case hits are site 2 and 3, the `RegardingPairUpdatePlannerTests` invoice case
+(correct), and the client test fixtures. One stale fixture, not changed: `useSprkMemoRepository.test.ts:97` declares
+`navPropName: 'sprk_regardingrecordtype'` for sprk_memo (the solution says `sprk_RegardingRecordType`); production reads the
+name from metadata, so only the fixture is off.
+
+Tests: `AddTodo_CreatesThroughTheChildRecordsCore...` now asserts `sprk_RegardingRecordType@odata.bind` (and no lower-case key);
+the `AssignTask` (sprk_event) and `AssignWork` (sprk_workassignment) assertions moved to the same spelling. Fail before the fix,
+pass after.
+
+Guard: `PairTypeBindSpellingGuardTests` (ArchTests) scans `src/server/**` for the literal lower-case `"sprk_regardingrecordtype@odata.bind"`
+outside `OwnedChildWrite.cs` and file names containing `Invoice`, with a must-fire and a must-not-fire control. Not scanned: keys built at run
+time, escaped hint strings, and client TypeScript (the browser-to-BFF body is case-insensitive by contract, so a lower-case key
+there is not a defect). `DecisionActionExecutors.cs` belongs to the ontology work; the change there is the one line.
+
 rework: fix-round-1 task 045b
