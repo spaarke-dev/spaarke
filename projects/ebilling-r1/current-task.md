@@ -9,14 +9,15 @@
 | **Mode** | Owner: "keep progressing on open tasks so we can complete the project". At most 4 agents. Merge each finished branch after its reviews; verify the combined tip (build, full ArchTests, FILTERED unit). One adversarial pass per change set; two for partner-readable / auth / tenant-isolation; a scoped Sonnet re-check when a fix changes the approach. Every agent launch states a model. Never `--no-verify`. |
 | **Agent worktrees** | `isolation: worktree` starts on MASTER: every brief names the base sha and checks `git merge-base --is-ancestor`. Never cd into agent worktrees (use `git -C`, absolute paths). Remove merged worktrees with `git worktree unlock` + `scripts/worktree/Remove-WorktreeSafe.ps1 -Path <paths>`. |
 | **Public-repo rule** | Never put an access-gap mechanism, identity names or role maps in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Peers (sessions)** | uac-r2 = desktop `uac-r2`; ontology-r1 = `spaarke-wt-spaarke-ontology-platform-r1-38`; provisioning = `provisioning-r1`; word-add-in = `word-add-in-r1`; External Access R4 = `spa-r4`. |
+| **Peers (sessions)** | uac-r2 = desktop `uac-r2`; ontology-r1 = `ontology-r1` (Claude Desktop, from 2026-11-09); provisioning = `provisioning-r1`; word-add-in = `word-add-in-r1`; spaarkeai-mcp-bff-api-r1 = `mcp-r1`; External Access R4 = `spa-r4`. |
 | **Live-change rule** | Live Dataverse writes / role changes need the owner's OK typed in THIS session. A relayed "task 166 - ye proceed" (via ontology-r1) was NOT accepted; owner asked directly, no answer yet. |
 
 ## Exact next action
 
 1. **DEF-059 (owner typed in THIS session, 2026-11-09):** "review the options and implement the one that is the best solution without unnecessarily adding more roles -- but if the only way to meet the requirement and stay within our access control is to create a new role that is acceptable." ontology-r1 proposed C (new role, one privilege: org-wide Read on `sprk_decisionrecord`) vs A (nothing; safe while System Administrator stays on the BFF identity). FIRST check (read-only) whether the BFF identity already holds a Spaarke role held by NO human and NOT by the writer identity; if yes, adding the one org Read privilege there beats a new role. Implement via SpaarkeMaster solution source + `Import-SolutionScoped.ps1` only; uac-r2 notices before and after; tell ontology-r1 and provisioning-r1 (stamps). Update DEF-059 (#2635) notes + issue.
 2. When 130-0b fix1 sends the shared redaction-set sha, relay it to 130-0 fix2 to merge (exact sha only).
-3. Then per agent table below; check `git worktree list` for a leftover reviewer worktree `...scratchpadv2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if listed.
+3. Then per agent table below; check `git worktree list` for a leftover reviewer worktree `...scratchpad
+v2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if listed.
 
 ## Agents in flight (2026-11-09)
 
