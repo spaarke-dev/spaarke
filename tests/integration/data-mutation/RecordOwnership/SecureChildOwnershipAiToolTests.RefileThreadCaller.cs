@@ -759,7 +759,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             SecureChildShareWorld.EntitiesOver(() => ShareWorld).Object, _shareTable,
             new Lazy<Sprk.Bff.Api.Services.Communication.Membership.IThreadMembershipDerivationService>(() => members.Object),
             SecureChildShareWorld.Configuration(),
-            NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing);
+            NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing,
+            Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.Unconfigured());
         return new ThreadResolver(
             strategies ?? Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
             grants);

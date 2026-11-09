@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 
@@ -39,6 +40,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private readonly IConfiguration _configuration;
     private readonly ILogger<DirectThreadAccessService> _logger;
     private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
+    private readonly DirectMessageOwnerTeam _directMessageOwnerTeam;
 
     /// <param name="membershipDerivation">
     /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
@@ -53,14 +55,17 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// <param name="configuration">The Secure Record business-unit and owner-team names (task 149 r1): a message owned by
     /// that team is a secure child, and its shares are <see cref="SecureChildShareSynchronizer"/>'s alone.</param>
     /// <param name="gateDecisionRecords">Ontology task 042b (D-169): an unfiled communication's gate Decision Records follow its shares.</param>
+    /// <param name="directMessageOwnerTeam">fm task 054a: the Direct-message owner team lookup (uac-r2 task 198 Part B).</param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
         IDataverseRecordShareService accessGrant,
         Lazy<IThreadMembershipDerivationService> membershipDerivation,
         IConfiguration configuration,
         ILogger<DirectThreadAccessService> logger,
-        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords)
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
+        DirectMessageOwnerTeam directMessageOwnerTeam)
     {
+        _directMessageOwnerTeam = directMessageOwnerTeam ?? throw new ArgumentNullException(nameof(directMessageOwnerTeam));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
         _membershipDerivation = membershipDerivation ?? throw new ArgumentNullException(nameof(membershipDerivation));
@@ -249,32 +254,43 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     }
 
     /// <summary>
-    /// Task 198 Part B test seam, until fm 054a's lookup is merged (Part C): answers <see cref="IsDirectMessageOwnerTeamAsync"/>
-    /// in tests. Unset (production), no team is the Direct-message owner team, so behaviour is unchanged until Part C.
+    /// THE one check that <paramref name="owningTeam"/> is the Direct-message owner team (fm 054a's lookup, the pattern of
+    /// <see cref="ReadMessageOwnershipAsync"/>'s Secure check). <c>true</c>: it is; <c>false</c>: it is not; <c>null</c>: it
+    /// cannot be told, and the caller grants nothing.
+    /// <list type="bullet">
+    /// <item>The team's own row proves it is not the Direct team (<see cref="DirectMessageOwnerTeam.CannotBeDirectOwnerTeamAsync"/>
+    /// answers <c>true</c>): <c>false</c>. Its <c>false</c> is "not proven", never "safe": the full resolution decides.</item>
+    /// <item>Resolved: <c>true</c> exactly when the resolved team is <paramref name="owningTeam"/>.</item>
+    /// <item>Refused as <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>: <c>false</c>. No Direct team is configured,
+    /// so fm's writer assigns no message to one.</item>
+    /// <item>Any other refusal, or a fault: <c>null</c> (unknown).</item>
+    /// </list>
+    /// A fault in the one-row check propagates to the caller's catch, which grants nothing.
     /// </summary>
-    internal Func<Guid, CancellationToken, Task<bool?>>? DirectOwnerTeamProbe { get; init; }
-
-    /// <summary>
-    /// THE one check that <paramref name="owningTeam"/> is the Direct-message owner team (fm 054). <c>true</c>: it is;
-    /// <c>false</c>: it is not; <c>null</c>: it cannot be told (fm's Refusal), and the caller grants nothing.
-    /// </summary>
-    private Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct)
+    private async Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct)
     {
-        // TODO(task 198 Part C): fm 054a lookup sha. Replace this body with fm's pair from SecureRecordOwnerTeam.cs:
-        // CannotBeDirectOwnerTeamAsync(owningTeam) => false; ResolveDirectMessageOwnerTeamAsync() Refusal => null;
-        // TeamId == owningTeam => true; otherwise false. Then remove DirectOwnerTeamProbe. Until then no team is the Direct team.
-        return DirectOwnerTeamProbe is { } probe ? probe(owningTeam, ct) : Task.FromResult<bool?>(false);
+        if (await _directMessageOwnerTeam.CannotBeDirectOwnerTeamAsync(owningTeam, ct))
+            return false;
+
+        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct);
+        if (direct.IsResolved)
+            return direct.TeamId == owningTeam;
+        if (direct.Refusal == DirectMessageOwnerTeamRefusal.NotConfigured && direct.Fault is null)
+            return false;
+        return null;
     }
 
     /// <summary>
     /// Task 198 Part B: the content rows of a Direct-team-owned message that its readers need, each as (table, the lookup to
     /// the message). They are granted to the same participants when the same Direct team owns them. Entity sets come from
-    /// <see cref="SecureChildLineage.Children"/>.
+    /// <see cref="SecureChildLineage.Children"/>. Gate Decision Records (<c>sprk_decisionrecord</c>) also follow the message to
+    /// the Direct team, but their shares are <c>GateDecisionRecordSharing</c>'s (task 198 Part E), never this list's.
     /// </summary>
     private static readonly (string Table, string MessageLookup)[] DirectContentRows =
     [
         ("sprk_communicationattachment", "sprk_communication"),
         ("sprk_communicationparticipant", "sprk_communication"),
+        ("sprk_emailreviewlog", "sprk_communication"),
         ("sprk_document", "sprk_relatedcommunication"),
     ];
 

@@ -1935,7 +1935,11 @@ public class SecureChildShareMirrorTests
     // Task 149 r1 — F3: thread participants are never granted a SECURE message (DirectThreadAccessService)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    private DirectThreadAccessService MessageAccess(SecureChildShareWorld world, params Guid[] participants)
+    private DirectThreadAccessService MessageAccess(SecureChildShareWorld world, params Guid[] participants) =>
+        MessageAccess(world, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.Unconfigured(), participants);
+
+    private DirectThreadAccessService MessageAccess(
+        SecureChildShareWorld world, Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam directOwnerTeam, params Guid[] participants)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => world);
         entities
@@ -1969,7 +1973,8 @@ public class SecureChildShareMirrorTests
 
         return new DirectThreadAccessService(
             entities.Object, _shares, new Lazy<IThreadMembershipDerivationService>(() => derivation.Object),
-            SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
+            SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
+            directOwnerTeam);
     }
 
     private static readonly Guid ThreadId = Guid.Parse("7e7e0000-0000-4000-8000-000000000001");
