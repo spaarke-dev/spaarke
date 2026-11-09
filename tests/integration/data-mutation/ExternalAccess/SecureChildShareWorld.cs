@@ -737,7 +737,8 @@ internal sealed class SecureChildShareWorld
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges, relocator,
             coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
-            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()); // 194b F1-c: the To Do job's predicate (nobody linked)
+            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore(), // 194b F1-c: the To Do job's predicate (nobody linked)
+            recordShares: shares); // uac-r2 task 198 Part D: the Restricted filing bar's share seam, as the host composes it
     }
 
     /// <summary>

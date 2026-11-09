@@ -495,13 +495,21 @@ public sealed class RestrictedExternalShareRemover
             .ToDictionary(g => g.Key, g => g.Aggregate(0, (mask, s) => mask | s.AccessRightsMask));
 
     /// <summary>The users' eligibility columns (incl. <c>sprk_isexternal</c>), in batches. Exceptions propagate.</summary>
-    private async Task<Dictionary<Guid, InternalShareEndpoints.SystemUserRow>> ReadUsersAsync(
-        IReadOnlyList<Guid> ids, CancellationToken ct)
+    private Task<Dictionary<Guid, InternalShareEndpoints.SystemUserRow>> ReadUsersAsync(
+        IReadOnlyList<Guid> ids, CancellationToken ct) => ReadUsersAsync(_dataverse, ids, ct);
+
+    /// <summary>
+    /// THE user-flag read of the Restricted bar: the users' eligibility columns (incl. <c>sprk_isexternal</c>), in batches. A
+    /// user the read does not return is absent from the answer (never "internal"). Exceptions propagate. Also the read of the
+    /// filing bar (<see cref="Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"/>, uac-r2 task 198 Part D).
+    /// </summary>
+    internal static async Task<Dictionary<Guid, InternalShareEndpoints.SystemUserRow>> ReadUsersAsync(
+        DataverseWebApiClient dataverse, IReadOnlyList<Guid> ids, CancellationToken ct)
     {
         var users = new Dictionary<Guid, InternalShareEndpoints.SystemUserRow>();
         foreach (var batch in ids.Chunk(InternalShareEndpoints.NameBatchSize))
         {
-            var rows = await _dataverse.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+            var rows = await dataverse.QueryAsync<InternalShareEndpoints.SystemUserRow>(
                 InternalShareEndpoints.SystemUserEntitySet,
                 filter: string.Join(" or ", batch.Select(id => $"systemuserid eq {id}")),
                 select: InternalShareEndpoints.SystemUserSelect,

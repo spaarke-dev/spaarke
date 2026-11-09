@@ -612,6 +612,8 @@ public partial class ChildAccessPermissionReconcileTests
             services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World));
             // Round 122 fix round 1 (K1): the attribute metadata the release reads for the two document link columns.
             services.AddSingleton<DataverseWebApiClient>(_ => LinkColumns);
+            // uac-r2 task 198 Part D: the share seam, as the host registers it — the Restricted filing bar reads and revokes here.
+            services.AddSingleton<IDataverseRecordShareService>(_ => Shares);
             _provider = services.BuildServiceProvider();
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

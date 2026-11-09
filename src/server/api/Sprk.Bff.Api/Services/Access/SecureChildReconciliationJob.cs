@@ -1416,9 +1416,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 : _accessPermissionSweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
         }
 
+        // uac-r2 task 198 Part D: a communication whose filing became Restricted loses its external-flagged shares through the
+        // ONE bar (the same one every re-file runs). Its share seam and user reader are registered unconditionally.
+        var restrictedBar = new RestrictedFilingShareBar(
+            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token),
+            services.GetService<IDataverseRecordShareService>(), services.GetService<DataverseWebApiClient>(), _logger);
         var reconciler = new ChildAccessPermissionReconciler(
             dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger,
-            token => DocumentLinkColumnsSecuredAsync(services, token));
+            token => DocumentLinkColumnsSecuredAsync(services, token),
+            async (communicationId, token) => (await restrictedBar.RemoveBarredSharesAsync(communicationId, token).ConfigureAwait(false)).Complete);
         ChildAccessPermissionRun run;
         try
         {

@@ -49,6 +49,9 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         ["sprk_events"] = "sprk_event",
         ["sprk_communications"] = "sprk_communication",
         ["sprk_communicationattachments"] = "sprk_communicationattachment",
+        // uac-r2 task 198 Part D: the Restricted filing bar removes shares on a message's participant and review-log rows too.
+        ["sprk_communicationparticipants"] = "sprk_communicationparticipant",
+        ["sprk_emailreviewlogs"] = "sprk_emailreviewlog",
         ["sprk_memos"] = "sprk_memo",
         ["sprk_analysises"] = "sprk_analysis",
         ["sprk_fileversions"] = "sprk_fileversion",

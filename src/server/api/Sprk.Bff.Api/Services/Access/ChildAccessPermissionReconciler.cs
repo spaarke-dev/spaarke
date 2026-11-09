@@ -172,6 +172,9 @@ internal sealed class ChildAccessPermissionReconciler
     /// <summary>Owner round 122 fix round 1 (K1): whether both document link columns are field-secured. A fault throws.</summary>
     private readonly Func<CancellationToken, Task<bool>> _linkColumnsSecured;
 
+    /// <summary>uac-r2 task 198 Part D: the Restricted bar for a filed communication (see the constructor). <c>null</c>: not run.</summary>
+    private readonly Func<Guid, CancellationToken, Task<bool>>? _restrictedCommunicationBar;
+
     /// <summary>
     /// Round 122 fix round 1 (K1): this run's answer to <see cref="_linkColumnsSecured"/>, asked at most once per run and only
     /// when a release is due: null = not asked yet; otherwise the reason code that refuses a release, or "" when secured.
@@ -185,10 +188,16 @@ internal sealed class ChildAccessPermissionReconciler
     /// and <c>sprk_document.sprk_parentdocument</c> are both field-secured (attribute metadata). A provisional own narrowing
     /// is released only when they are: otherwise a user who can write a document could set a link and release it, and a
     /// user who can write an <c>.eml</c> but not its children could release the children. A fault throws.</param>
+    /// <param name="restrictedCommunicationBar">uac-r2 task 198 Part D: for a communication this run finds filed under a Restricted
+    /// record — its value written to Restricted now, or already Restricted and carried — removes the shares of users flagged
+    /// external (<see cref="RestrictedFilingShareBar.RemoveBarredSharesAsync"/>); <c>true</c> when complete. A row it leaves
+    /// incomplete is carried, so the next run tries again. Never asked in a report-only run. <c>null</c>: not run.</param>
     internal ChildAccessPermissionReconciler(
         IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger,
-        Func<CancellationToken, Task<bool>> linkColumnsSecured)
+        Func<CancellationToken, Task<bool>> linkColumnsSecured,
+        Func<Guid, CancellationToken, Task<bool>>? restrictedCommunicationBar = null)
     {
+        _restrictedCommunicationBar = restrictedCommunicationBar;
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
@@ -330,6 +339,7 @@ internal sealed class ChildAccessPermissionReconciler
         var problems = new List<string>();
         var changes = new List<(string, Guid, int?, int)>();
         var carry = new List<(string, Guid)>();
+        var carriedSet = carried.Select(c => (c.Table.ToLowerInvariant(), c.Id)).ToHashSet();
         foreach (var ((table, id), row) in candidates.OrderBy(c => c.Key.Table, StringComparer.Ordinal).ThenBy(c => c.Key.Id))
         {
             ct.ThrowIfCancellationRequested();
@@ -367,6 +377,9 @@ internal sealed class ChildAccessPermissionReconciler
             if (stored == inherited)
             {
                 correct++;
+                // Task 198 Part D: a carried communication already Restricted is one the bar left incomplete: try again.
+                if (carriedSet.Contains((table, id)))
+                    await BarIfRestrictedCommunicationAsync(table, id, inherited).ConfigureAwait(false);
                 continue;
             }
 
@@ -398,6 +411,8 @@ internal sealed class ChildAccessPermissionReconciler
                 _logger.LogInformation(
                     "[CHILD-ACCESS-PERMISSION] set: {Table} {Id} {From} -> {To} (inherited from {Tops}).",
                     table, id, stored?.ToString() ?? "null", inherited, InheritedAccessPermission.Describe(answer.Tops));
+                // Task 198 Part D: a communication whose filing BECAME Restricted loses its external-flagged shares now.
+                await BarIfRestrictedCommunicationAsync(table, id, inherited).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -407,6 +422,34 @@ internal sealed class ChildAccessPermissionReconciler
                     problems.Add($"{table} {id:D}: the write failed ({ex.GetType().Name})");
                 _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: writing its inherited Access Permission {To} failed; " +
                     "it is tried again next run.", table, id, inherited);
+            }
+        }
+
+        // uac-r2 task 198 Part D: a communication filed under a Restricted record (its inherited value) loses the shares of users
+        // flagged external, through the ONE bar. Only in a run that writes. Incomplete (or a fault): carried, tried next run.
+        async Task BarIfRestrictedCommunicationAsync(string table, Guid id, int inherited)
+        {
+            if (!writes || _restrictedCommunicationBar is null || inherited != InheritedAccessPermission.Restricted
+                || !string.Equals(table, RestrictedFilingShareBar.CommunicationTable, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            bool complete;
+            try
+            {
+                complete = await _restrictedCommunicationBar(id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: the Restricted filing bar faulted; tried again next run.",
+                    table, id);
+                complete = false;
+            }
+
+            if (!complete && !carry.Contains((table, id)))
+            {
+                carry.Add((table, id));
+                if (problems.Count < MaxProblems)
+                    problems.Add($"{table} {id:D}: the shares of users flagged external were not all removed yet");
             }
         }
 

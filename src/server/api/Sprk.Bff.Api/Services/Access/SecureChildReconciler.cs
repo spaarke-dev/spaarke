@@ -444,6 +444,11 @@ public sealed class SecureChildReconciler
     /// asks the To Do job's own predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
     private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? _links;
 
+    /// <summary>uac-r2 task 198 Part D: the one share seam the Restricted filing bar reads and revokes through
+    /// (<see cref="RestrictedFilingShareBar"/>). Optional so the test compositions keep compiling; the host registers it
+    /// unconditionally. Without it the bar removes nothing (logged).</summary>
+    private readonly IDataverseRecordShareService? _recordShares;
+
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
@@ -479,8 +484,10 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         DocumentContainerRelocator? relocator = null,
         CoreAncestorResolver? coreAncestors = null,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
+        IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _relocator = relocator;
         _coreAncestors = coreAncestors;
         _links = links;
@@ -1333,10 +1340,27 @@ public sealed class SecureChildReconciler
                 _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
                     CommunicationTable, childId);
             }
+
+            // uac-r2 task 198 Part D (owner 2026-11-09): filed under a Restricted record, every user flagged external loses
+            // their shares on the message and its content rows. Every communication; after the mirror, so a Secure target's
+            // shares are the synchronizer's first. Never thrown; nothing granted.
+            try
+            {
+                await RestrictedFilingBar().AfterFilingAsync(childId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the Restricted filing bar faulted; no " +
+                    "share was removed by it.", CommunicationTable, childId);
+            }
         }
 
         return report;
     }
+
+    /// <summary>uac-r2 task 198 Part D: the Restricted filing bar over this reconciler's reads, probe and share seam.</summary>
+    private RestrictedFilingShareBar RestrictedFilingBar() =>
+        new(_dataverse, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _recordShares, _webApi, _logger);
 
     /// <summary>
     /// #2159 slice 2 — the F3 release of one document's file (the re-filed document, or one filed under the re-filed row):
