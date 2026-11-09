@@ -341,6 +341,27 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _creates.Should().BeEmpty();
     }
 
+    // ── Fix round 6, K4: an adapter default whose column a mapped value filled, after the strip removes that value ────
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_AnAdapterDefaultAMappedValueShadowed_IsNotReapplied_KnownLimitK4()
+    {
+        // The profile maps the matter's description into the work assignment's notes; the adapter also defaults the notes.
+        // Step 3½ fills a default only where the row leaves its column unset, so the mapped value shadows the default. The
+        // strip then removes the mapped value. This pins what the create writes today: neither (a stated limit, reported).
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam(Rule("sprk_matterdescription", "sprk_notes", Memo));
+
+        var outcome = await Service().CreateAsync(
+            WorkAssignmentMappedUnderSecureMatter(new Dictionary<string, object?> { ["sprk_notes"] = "The adapter's own default" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_notes",
+            "the mapped value is removed, and the default it shadowed at step 3½ is not re-applied after the strip (K4)");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Detail.Should().Be(RecordCreationService.MappingSourceSecureStripped);
+    }
+
     // ── Fix round 6: no Secure Record setup is not "cannot be told" ──────────────────────────────────────────────────
 
     /// <summary>The ordinary matter as a source owned by an ordinary team (every row is team-owned), unflagged.</summary>

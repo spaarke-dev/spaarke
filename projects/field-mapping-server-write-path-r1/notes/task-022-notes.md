@@ -339,9 +339,64 @@ Branch `task/fm-022-5`, from `85c70c4431`.
 
 **Known limits the reviewer raised (stay unfixed).**
 
-- K1: when the Secure Record owner team is missing, the gate reads it as undetermined, and the words suggest a retry rather than naming the setup (see round 4's known limits).
+- K1: when the Secure Record owner team is missing, the gate reads it as undetermined, and the words suggest a retry rather than naming the setup (see round 4's known limits). *Resolved in fix round 6.*
 - K2: the isolation owner is the single Secure Record owner team.
 - K3: the Project wizard's follow-on Event and Work Assignment creates still map in the browser (owned by tasks 023 and 024). The wizard's lock also reads an empty secure flag as not secure.
-- K4: adapter defaults are not re-applied after the strip (unverified).
+- K4: adapter defaults are not re-applied after the strip (unverified). *Verified in fix round 6: real; reported, not fixed (see there).*
 
 rework: fix-round-5 task 022 (F1 the push preview confines lookup binds to the column each rule names with the apply's helper, so preview and apply ask the source gate with one payload; F4 preview app-only read comment and the full ReasonCode set)
+
+## Fix round 6 (UAC-r2 review: F1, K1, K4)
+
+Branch `task/fm-022-6`, from `65094251c2`.
+
+**F1: a pushed clear of a filing column from a secure source is a filing change.**
+
+- The rule: a push from a secure source never clears a filing. `FieldMappingPushSourceGate.ChangesFiling(pushed: null, held)` answers `true` whatever the child holds, read or not. The child is skipped whole with `field_mapping.push.secure_source_refile_not_allowed`, on the preview and the apply (both ask `RefusalForChildAsync`).
+- The non-null direction is unchanged: a pushed value compared with a held value that was not read is a change.
+- An ordinary source is unchanged: no child read, its clears and re-files as before.
+- Tests (`FieldMappingPushSourceGateTests`): must fire — a clear of the pair type column while the child holds a type that names no record; a clear of a filing lookup whose held value is not among the returned attributes. Must not fire — the held filing pushed again goes on to the owner question (round 4's test); an ordinary source's clear is allowed and reads no child. The `ChangesFiling` rows now give `(null, null) → true` and add `(id, not read) → true`.
+
+**K1 (fixed): no Secure Record setup is not "undetermined".**
+
+- The rule, as the ownership resolver applies it (`RecordOwnershipResolver`: no Secure Record business unit means no secure owner; a business unit whose named team is missing or not unique is a refusal):
+  - No Secure Record business unit (not set up): no team can own a secure record, so the decision rests on `sprk_issecure` alone. A flagged source is still secure, and no row is isolated with it (refused for every target). An unflagged source is ordinary.
+  - Set up, but the named team is not found, is ambiguous, or the lookup faults: undetermined, fail closed.
+- Why not `IsSecureOwnerTeamAsync`'s distinction: it answers "no" for both an absent and an ambiguous team, and the configuration keys always carry defaults (the template sets them too), so neither tells "not set up" apart. The business unit's presence does.
+- Where: `SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync` answers `(id, null)`, `(null, null)` for no Secure Record business unit, or `(null, refusal)` (`SecureOwnerTeamNotFoundRefusal` for a business unit with no named team). It calls uac-r2's `ResolveSecureOwnerTeamAsync` unchanged and reads the business unit (`SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync`) a second time only when no team was found. `MappingSourceCopyGate.DecideAsync` treats `(null, null)` as not set up. The create and Repair reach it through `SecureOwnerTeamAsync` (task 016's member, re-pointed); the push through `FieldMappingPushSourceGate.For`. One predicate for create, Repair and push.
+- §11: Existing — `ResolveSecureOwnerTeamAsync` and `ResolveSecureBusinessUnitAsync` (both reused as is). Extension — the copy gate's resolution is extended with the business unit's presence; no new service, interface, DI registration or package. Cost of doing nothing — every row is team-owned, so in an environment with no Secure Record setup every create mapping and every push from a team-owned source fails as undetermined.
+- Stated limit: with a misnamed `SecureRecord:BusinessUnitName`, the business unit is not found and the environment reads as not set up, so an unflagged source owned by the real Secure team is ordinary here. This is the same edge `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync` documents for the ownership resolver; secure roots are flagged and stay secure.
+- Tests:
+  - `MappingWriteGatesTests`: the resolution over an in-memory Dataverse (`SecureChildShareWorld`) — set up `(team)`, no business unit `(null, null)`, team not found `(null, SecureOwnerTeamNotFoundRefusal)`, two teams and two business units ambiguous, a fault propagates; `DecideAsync` with nothing set up over 7 cases (unflagged team-owned → Allowed; flagged → Secure for every row owner, the row owned by the former Secure team id included); `DecideAsync` over the resolution (not set up → Allowed; not found → Unknown `secure_team_missing`; faults → Unknown `gate_fault`; flagged, not set up → Secure). The not-found row of the existing theory now uses the not-found refusal.
+  - `FieldMappingPushSourceGateTests` (push, the real resolution): not set up + unflagged team-owned source → written; not set up + flagged source → `secure_source_not_isolated`, nothing written; set up + team not found, set up + team lookup faults → `secure_source_undetermined`, nothing written.
+  - `RecordCreationServiceMappingSeamTests.MappingSourceRule` (create): not set up + unflagged team-owned source → maps, no warning; not set up + flagged source with a non-isolated owner → stripped with the secure words; set up + team not found, set up + team lookup faults → maps nothing with the undetermined words.
+  - `RecordRepairModeTests` (Repair): the review-pass-3 case now removes the named team from a set-up environment (still copies nothing); new: not set up + unflagged team-owned source → copied; not set up + flagged source → nothing copied.
+
+**K4 (verified, real, not fixed — reported).**
+
+- Test: `MappingSourceRule_Strip_AnAdapterDefaultAMappedValueShadowed_IsNotReapplied_KnownLimitK4`. A work assignment under the secure matter, owner forced to an ordinary team; the profile maps the matter's description into `sprk_notes` and the adapter defaults `sprk_notes`. After the strip the row has no `sprk_notes`: the default is not re-applied. The test pins that and must flip when it is fixed.
+- Why: step 3½ fills a default only where the row leaves its column unset (`RecordCreationService.cs:587`, `DefaultsToFill`), so a mapped value shadows it and it never enters `mappedValues`. The strip's rebuild (`RecordCreationService.Mapping.cs:513-517`) keeps only the surviving `mappedValues`.
+- A real case: the Office To Do's Assigned To (`OfficeService.cs:2969-2987`): the requested contact, else a mapped value, else the caller's own contact as a post-mapping default. A strip loses the caller's contact.
+- Not fixed here: re-applying a default after the strip writes a value that step 5's caller checks (AppendTo on a lookup default such as the caller's contact) and steps 6–7 never saw. A safe fix re-runs the caller checks (and, for a filing default, the owner steps) on the stripped row; that is larger than a re-fill. Reported to the coordinator for filing.
+
+**Time of check (stated limit).** The push gate reads each child's owner and filing just before that child's write; the planner's write follows. A change to the child's owner between the two is not seen by the gate. Recorded in `FieldMappingPushSourceGate`'s remarks.
+
+**Known limits (after this round).**
+
+- K1: resolved (above).
+- K2: the isolation owner is the single Secure Record owner team (accepted by UAC-r2).
+- K3: the Project wizard's follow-on Event and Work Assignment creates still map in the browser (tasks 023 and 024); the wizard's lock reads an empty secure flag as not secure (accepted by UAC-r2).
+- K4: resolved as a finding: verified real, reported (above).
+- Time of check: the push gate's owner read and the write are two steps.
+- A misnamed Secure Record business unit reads as not set up (above).
+
+**Evidence.**
+
+- Fail-then-pass, F1. Over HEAD's `FieldMappingPushSourceGate.cs`, `FieldMappingPushSourceGateTests`: **3 failed / 35 passed** of 38 (the two must-fire clears and the `(null, null)` row). With the change: 38 / 38.
+- Fail-then-pass, K1. Over HEAD's `MappingWriteGates.cs` (the new resolution kept so the tests compile; under HEAD's `DecideAsync` it gives the same verdicts as HEAD's resolution), the gate, copy-gate and create-seam classes: **13 failed / 303 passed** of 316 (every not-set-up must-fire and must-not-fire case on create, push and the copy gate; the not-found refusal's reason). The set-up-but-not-found and fault cases passed before too (unchanged rule). With the change: 316 / 316. Repair over HEAD's `MappingWriteGates.cs`: **1 failed / 77 passed** (not set up + unflagged source copied); with the change 78 / 78.
+- Filtered BFF run (the round-4 filter plus RecordRepair, SecureChildShare, OfficeTodoCreate, AnalysisEndpoints, RecordCreatorPerson, InvoiceReviewWritePath, EventEndpoints, OfficeTodoRegarding): **4917 passed, 0 failed**, 3 skipped (4920). The first run, before the Repair suite was updated, had 1 failure: `RecordRepairModeTests.ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed`, which pinned the old reading of "no Secure Record business unit" as undetermined; it now removes the named team from a set-up environment, and the not-set-up cases are new tests (above).
+- BFF build (`--no-incremental`) and BFF test-project build: 0 warnings, 0 errors.
+- `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): no vulnerable packages.
+- No TypeScript was touched, so jest was not run.
+
+rework: fix-round-6 task 022 (F1 a secure source's pushed clear of a filing column is always a filing change; K1 no Secure Record setup is decided by the flag alone, set up but the team not told stays undetermined, on create, Repair and push; K4 verified real and reported; time-of-check limit recorded)
