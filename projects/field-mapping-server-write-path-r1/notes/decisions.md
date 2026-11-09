@@ -1034,3 +1034,10 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 - **`DecisionRecordWriter` gate record about an unfiled communication: keep.** It is owned by the communication's own owning user and shared Read with its internal sharees (D-144 as amended, D-169). Its readers follow the communication's. It is secure-if-any first and fails closed without a readable, active user owner.
 - Contact row: today's two rules, plus "052b, pending" (every contact to the `ExternalAccess:CustomerBusinessUnitId` team).
 - Found in passing: row I-18 is stale (the Signal owner is now the resolver's team): DI-023, #2636.
+
+## 2026-11-08 — 032b-1 review by UAC-r2; invoice Assigned To targeting (owner, in fm's session); mapping-source rule
+
+- **UAC-r2 approved 032b-1 on the access side** (63fb6ce98e, 79b1aab39c, 4d24082a95). `AssignedAccessMaterializer.RegistryFor` grants on root types only, so removing the invoice entry revokes nothing.
+- **Premise correction (UAC-r2 F1):** Office quick-create writes the invoice's Assigned To to `sprk_assignedto1` (`OfficeService.InvoiceAssignedToAttribute`). U7 was accepted on the belief that nothing writes it. The `MembershipOptions` comment now states the Office writer.
+- **Owner decision (corrected U7): invoice Assigned To targets people without conferring access.** Daily Briefing and notifications also read the invoice's `sprk_assignedto1/2`, outside the access-conferring registry. No new grant path; the registry/display-copy guard still holds. Keeps the standing rule "notifications target Created By and Assigned To". Built as task 032b-1b.
+- **Mapping-source rule (UAC-r2, 2026-11-08):** a source record that is secure (the secure-if-any answer the 032b gate uses; one predicate) maps only into a create that is secure from creation. Otherwise the create maps nothing and returns a warning with a stable code; a source whose answer faults maps nothing. Enforced in the shared `MapFieldsAsync`, so every create surface gets it. The Project wizard preview turns Secure on and locks it when the chosen Matter is secure (a project under a secure parent is secure). Built in task 022's fix round 2.
