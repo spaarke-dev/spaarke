@@ -10,6 +10,50 @@
 
 ## Open (in priority order)
 
+### DEF-064 — Guard that every BFF writer of an invoice's core-record lookups calls InvoiceFamilyCoreRecordGuard
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 |
+| **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2643 |
+
+**Description**: an invoice-family row names exactly one core record (matter, project or work assignment). `InvoiceFamilyCoreRecordGuard.Check` enforces that, and today every known BFF write path calls it (submission persist and service, `OwnedChildWrite`, and the three generic update paths), each pinned by tests. Nothing pins the completeness of that set: a new BFF code path that writes those lookups without asking the guard would compile and pass every test. Readers such as the firm-outcome filter rely on "exactly one", so a second core set by such a path would change what they admit.
+
+**Fix direction**: an ArchTest (IL scan, as `FirmFindingsProjectionCallerBoundaryGuardTests` does) that every BFF type writing `sprk_matter` / `sprk_project` / `sprk_regardingworkassignment` on an invoice-family table either calls `InvoiceFamilyCoreRecordGuard` or is on a reviewed allow-list with a one-line reason; must-fire and must-not-fire controls. Writes made outside the BFF stay a documented known limit.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/**/InvoiceFamilyCoreRecordGuard.cs` (`Check`, :658-724); its callers (grep `InvoiceFamilyCoreRecordGuard.Check`); `tests/Spaarke.ArchTests/FirmFindingsProjectionCallerBoundaryGuardTests.cs` (pattern).
+
+**Estimated effort**: 0.5 day.
+**Blockers**: none.
+**Related**: task 130b, D-28, unified-access-control-r2 review.
+
+---
+
+### DEF-063 — Import-SolutionScoped.ps1 reports failure for a successful import of a solution with nothing to publish
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-09 |
+| **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2642 |
+
+**Description**: `scripts/Import-SolutionScoped.ps1` imports the zip, then builds a publish request from the solution's components. A solution whose components need no publish (for example one that carries only a security role) imports successfully, and then the publish step throws "Nothing to publish: refusing to build an empty ParameterXml" and the script exits 1. Refusing the empty publish is correct (it must never widen into a publish-all), but an operator, or a pipeline that checks the exit code, reads a successful import as a failure and may retry or roll back.
+
+**Fix direction**: when the plan has no publishable components, skip the publish step with an explicit "nothing to publish; import complete" line and exit 0. Keep the throw inside the ParameterXml builders so no caller can build an empty publish. Add a Pester case for a role-only solution.
+
+**Entry-points**: `scripts/Import-SolutionScoped.ps1`; `scripts/lib/Publish-SolutionComponents.ps1:149` and `:699`.
+
+**Estimated effort**: 1-2 hours.
+**Blockers**: none.
+**Related**: DEF-059.
+
+---
+
 ### DEF-062 — Dormant spend snapshot job sums billing events without the approve-record rule
 
 | Field | Value |
@@ -80,7 +124,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress |
+| **Status** | Done (2026-11-09) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-08 |
 | **Source** | ebilling-r1 task 165b-4 design note §7.8 / §7.12 (uac-r2 answer 4) |
@@ -95,6 +139,8 @@
 **Fails without it**: in an environment where the BFF identity has no broader role, counted spend for every core record is unknown, and spend-based Signals stop evaluating.
 
 **Resolution (2026-11-09, in progress)**: new role `Spaarke Decision Record Reader` with one privilege, `prvReadsprk_DecisionRecord` at Global, in `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Decision Record Reader.xml` (pinned by `FeatureRolePrivilegeGuardTests.ExactPrivilegeSets`), assigned to the BFF application users only by `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1` (`-Verify` exits 1 on drift); the live dev import and assignment follow under the owner's approval.
+
+**Done (2026-11-09)**: owner chose option C (a new role) in the ebilling session; uac-r2 reviewed the source and the script. Merged to `work/ebilling-r1` at `1678e1ae85`. Applied to dev: role-only carrier import through `Import-SolutionScoped.ps1`, added to SpaarkeMaster, carrier solution record deleted; `-Apply` removed the platform-added privileges outside the one declared privilege and assigned the role; `-Verify` exits 0. A smoke read through the dev BFF returned 200. Follow-ons owned elsewhere: customer-environment assignment in provisioning (customer-provisioning-orchestration-r1 accepted it; deployment guide §7.7 covers it until then). Still open, not part of this fix: retiring the BFF identity's broader roles, which needs least-privilege grants for its other app-only writes first (tracked with the unified-access-control-r2 work).
 
 ---
 
