@@ -15,7 +15,7 @@
 ## Exact next action
 
 Wait for the agent notifications below and act on each:
-1. **130b fix7** (Sonnet): K2 makes the second submission read self-sufficient (Read on one of `row`'s cores), K4 adds a row-gone test, K3 rewords the notes into neutral language. When done, send uac-r2 the 130b diff `e991dba7f8..<fix7 head>`. That covers fix6 `42cfdbce1b`, with the re-check finding no F, plus fix7. uac-r2 then finishes the 130b sign-off.
+1. **130b is FINAL** at `2367fbab2c` (uac-r2 signed off). Nothing pending except the SubmissionCoreColumns nit at the batch merge.
 2. **130-0 fix round 3** (Sonnet, branch `task/ebilling-130-0-fix3` → ff `task/ebilling-130-0-fix1` from `7a7f5d2808`). It covers:
    - Q2: a single invoice-linked record whose decision faults (the firm read or the per-invoice check) gets a 503.
    - A uniform 403 for a missing id on every verb of the single to-do and sibling routes.
@@ -26,7 +26,14 @@ Wait for the agent notifications below and act on each:
    - FULL ArchTests from a normal path. uac-r2 needs a clean count.
 
    When it's done, send uac-r2 the round 3 diff.
-3. **130c review pass 1** (Opus adversarial on `ecf694a8d1..77a0f8f312`, branch `task/ebilling-130c`). After it, fix any F, run pass 2 (partner-readable, so two passes), then send the diff to uac-r2.
+3. **130c:**
+   - Pass 1 found three F findings:
+     - F1-a: values projected to the firm are only those extracted from its own invoice; no ids.
+     - F3: tests use the real writer's JSON shape.
+     - F1-b: RequiredData names the missing field.
+   - It also found K1–K4.
+   - **Fix round 1 is DONE** at `adb765caa3` on `task/ebilling-130c` (filtered 177/0, full ArchTests 2183/0). Side effect to decide after pass 2: credit-test reads now show as empty-valued entries on ApprovedRate findings (one-line restriction to RequiredData if wanted).
+   - **Pass 2** (Opus adversarial, read-only, `ecf694a8d1..adb765caa3`) is running. Then any fix round, then the diff to uac-r2.
 4. **Then F3b** (one agent, Opus/Sonnet-xhigh), on a base that merges 130-0 fix tip + 130-0b `0f6b49b5ab`. Scope:
    - The four named descendants: analysisoutput, eventlog, fileversion, and document via parentdocument.
    - The child document is decided by EVERY invoice link up its parent chain, reusing the 188 hop bound (≤3, a cycle fails closed).
@@ -54,8 +61,8 @@ Wait for the agent notifications below and act on each:
 |---|---|---|
 | `task/ebilling-130-0-fix1` | `7a7f5d2808` | Round 2 approved by uac-r2, with one F going into round 3. Round 3 is running. |
 | `task/ebilling-130-0b` | `0f6b49b5ab` | FINAL, approved |
-| `task/ebilling-130b-fix1` | `42cfdbce1b` | Fix rounds 4 and 5 approved. Fix 6 was re-checked with no F. Fix 7 is running. |
-| `task/ebilling-130c` | `77a0f8f312` | Built on `ecf694a8d1`. Pass 1 is running. It will need 130b's later fixes merged at batch time. |
+| `task/ebilling-130b-fix1` | `2367fbab2c` | **FINAL, approved by uac-r2.** At the batch merge, derive `SubmissionCoreColumns` from the submission core column names `InvoiceSubmissionContracts` (:69) already maps from `InvoiceCoreRecordKind`, or add a one-line comment pointing at it. |
+| `task/ebilling-130c` | `adb765caa3` | Built on `ecf694a8d1`. Pass 1 + fix round 1 done; pass 2 running. It will need 130b's later fixes merged at batch time. |
 
 ## Rulings in force (uac-r2, 2026-11-09)
 
@@ -94,7 +101,8 @@ DEF-063 #2642 (Import-SolutionScoped exits 1 when there is nothing to publish), 
 1. Typed go for task **166** dev apply (field security incl. invoice totals + forms).
 2. OK to run `FinanceBaseValuesSeamTests` live (creates/sweeps `zz-025b-` rows on dev).
 3. DEF-061: schema change `sprk_publishedon` on `sprk_procedureversion`.
-4. 130c: show the rule set name when the firm flag is off (D-79 wording) or keep it hidden (current).
+4. 130c: show the rule set name when the firm flag is off (D-79 wording) or keep it hidden (current; the reviewer recommends keeping it hidden and amending FR-28/D-79 to match).
+4b. 130c: with the flag off and no `sprk_firmreason` writer (DEF-060), a rejection finding explains nothing. Should there be a closed, firm-safe text table keyed by the 7 reject-capable reason codes, shown regardless of the flag? (Reviewer suggestion.)
 5. provisioning-r1 needs the owner's go to open its DEF-059 H10 task.
 
 ## Owed to peers
