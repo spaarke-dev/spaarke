@@ -203,6 +203,53 @@ describe('describeWebApiCreateError', () => {
     }
   });
 
+  it.each([
+    ['sdap.access.deny.delegation_share_required', 'share'],
+    ['sdap.access.deny.delegation_write_required', 'edit and share'],
+  ])(
+    'under a secure matter, the secure-create rights refusal %s names the rule and the administrator',
+    (code, rights) => {
+      const err = new ChildRecordWriteError('To create a secure record you need Write and Share.', 403, code);
+      const text = describeWebApiCreateError(err, 'project', { rootCreate: true, secureParent: 'matter' });
+      expect(text).toEqual({
+        message: `Creating a project under a secure matter needs permission to ${rights} secure records. Ask an administrator.`,
+        isAccessDenied: true,
+      });
+      expect(text.message).not.toContain('without Secure');
+    }
+  );
+
+  it('under a secure matter, a rights check that could not be completed does not offer "without Secure"', () => {
+    const err = new ChildRecordWriteError('x', 403, 'sdap.access.deny.delegation_check_failed');
+    const text = describeWebApiCreateError(err, 'project', { secureParent: 'matter' });
+    expect(text.message).toBe(
+      'Whether you can create a project under a secure matter could not be checked. Try again in a moment.'
+    );
+  });
+
+  it('a value copied from a secure record that files the record gets its own sentence, which never suggests retrying', () => {
+    const asApiError = apiErrorFor(400, {
+      title: 'Invalid request',
+      status: 400,
+      detail: 'The server words.',
+      reasonCode: 'record_creation.mapping_source_secure_filing',
+    });
+    const asWriteError = new ChildRecordWriteError(
+      'The server words.',
+      400,
+      'record_creation.mapping_source_secure_filing'
+    );
+    for (const err of [asApiError, asWriteError]) {
+      const text = describeWebApiCreateError(err, 'project');
+      expect(text).toEqual({
+        message:
+          "This project can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.",
+        isAccessDenied: false,
+      });
+      expect(text.message.toLowerCase()).not.toContain('try again');
+    }
+  });
+
   it('a different sdap.access.deny code is not mapped to the secure-create sentence', () => {
     const err = new ChildRecordWriteError('Some other refusal.', 403, 'sdap.access.deny.delegation_no_caller_token');
     expect(describeWebApiCreateError(err, 'project')).toEqual({

@@ -156,6 +156,52 @@ describe('ProjectService.createProject — the secure intent travels with the BF
     expect(result.securedAtCreate).toBeUndefined();
     expect(urls).toEqual([`${BFF}/api/v1/child-records/sprk_project?secure=true`]);
   });
+
+  /** The route's Share refusal of a secure create (DelegationRuleFilter.DenyShareRequired, its own reasonCode). */
+  const shareRefusing = () =>
+    throwingAuthenticatedFetch(
+      async () =>
+        ({
+          ok: false,
+          status: 403,
+          json: async () => ({
+            title: 'Forbidden',
+            status: 403,
+            detail: 'To create a secure record you need Write access to it and the Share privilege on its table.',
+            reasonCode: 'sdap.access.deny.delegation_share_required',
+          }),
+        }) as unknown as Response
+    );
+
+  it('under a secure matter, the Share refusal says the rule and whom to ask, and never offers "without Secure"', async () => {
+    const { service } = innerDataService();
+    const refusing = shareRefusing();
+
+    const result = await new ProjectService(withBffChildWrites(service, refusing, BFF), refusing, BFF).createProject(
+      FORM,
+      undefined,
+      null,
+      true
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toBe(
+      'Creating a project under a secure matter needs permission to share secure records. Ask an administrator.'
+    );
+  });
+
+  it('with no secure matter, the Share refusal keeps the "without Secure" sentence (Secure can be turned off)', async () => {
+    const { service } = innerDataService();
+    const refusing = shareRefusing();
+
+    const result = await new ProjectService(withBffChildWrites(service, refusing, BFF), refusing, BFF).createProject(
+      FORM
+    );
+
+    expect(result.errorMessage).toBe(
+      "You don't have the access needed to create a secure project. You can create it without Secure, or ask an administrator."
+    );
+  });
 });
 
 describe('provisionSecureProject — already_provisioned after a secure-from-creation create (UAC-r2 ruling D2)', () => {

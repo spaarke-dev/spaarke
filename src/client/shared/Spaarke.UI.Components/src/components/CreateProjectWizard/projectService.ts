@@ -238,11 +238,14 @@ export class ProjectService {
    *   no filing key the server could infer the source from: the wizard files the project under its matter AFTER the
    *   create (task 195; task 049's known limit). The body never carries it. When omitted, no source is named and the
    *   server maps nothing.
+   * @param parentSecure True when the selected matter is secure (the wizard locks Secure on): a refusal of the rights a
+   *   secure create needs then says that a project under a secure matter needs them, never "create it without Secure".
    */
   async createProject(
     formValues: ICreateProjectFormState,
     _cascadeDefaults?: IUserBuCascadeDefaults,
-    association?: AssociationResult | null
+    association?: AssociationResult | null,
+    parentSecure?: boolean
   ): Promise<ICreateProjectResult> {
     const warnings: string[] = [];
 
@@ -396,7 +399,10 @@ export class ProjectService {
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
       // The create names no parent (the wizard files the project after it), so the route's uniform not-found can only be
       // one of the values the user selected: the root-create sentence, never "filed under".
-      const described = describeWebApiCreateError(err, 'project', { rootCreate: true });
+      const described = describeWebApiCreateError(err, 'project', {
+        rootCreate: true,
+        ...(parentSecure ? { secureParent: 'matter' } : {}),
+      });
       const message = described.message;
       // A server refusal usually says itself that nothing was saved ("The project was not created: …", "…, so the project
       // was not created."); a prefix would then say it twice.

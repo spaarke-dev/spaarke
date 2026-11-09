@@ -580,7 +580,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         // explicit mapping source, and a secure request is created secure from creation (task 049 fix round 2). Without
         // authFetch/bffBaseUrl the service refuses the create (it never falls back to Xrm.WebApi).
         const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
-        const result = await projectService.createProject(mergedFormValues, undefined, context.association);
+        const result = await projectService.createProject(
+          mergedFormValues,
+          undefined,
+          context.association,
+          parentSecure
+        );
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
