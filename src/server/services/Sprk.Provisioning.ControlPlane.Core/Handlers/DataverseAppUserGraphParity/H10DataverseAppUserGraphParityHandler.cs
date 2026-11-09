@@ -354,8 +354,11 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
 
         // (8b) T259 — the customer's own business unit, directly under the root (INCOMING-145 §6 T1).
+        //      The intake name check above is only a first filter (it compares names in code); the binding check is the
+        //      id comparison inside EnsureCustomerBusinessUnitAsync against the units Dataverse resolves for these names.
         var unitOutcome = await _appUserCreator.EnsureCustomerBusinessUnitAsync(
-            dataverseEnvUrl, tenantId, customerUnitName, cancellationToken).ConfigureAwait(false);
+            dataverseEnvUrl, tenantId, customerUnitName, [SecureRecordOwnerRoleSet.Embedded.BusinessUnitName],
+            cancellationToken).ConfigureAwait(false);
         Guid customerUnitId;
         switch (unitOutcome)
         {
@@ -373,6 +376,17 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                     $"{wrong.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {wrong.RootBusinessUnitId}. " +
                     "The customer's unit must be a DIRECT child of the root, a sibling of the Secure Record unit (INCOMING-145 " +
                     "§6 T1); re-parenting a unit is an owner decision. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.IsReservedUnit reserved:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.CustomerBusinessUnitIsReserved,
+                    $"The business unit Dataverse finds for the customer's name '{customerUnitName}' is the " +
+                    $"'{reserved.ReservedUnitName}' unit ({reserved.BusinessUnitId}): Dataverse matches business-unit names " +
+                    "without case or accents, so the name collides with it. No user may be placed in that unit. " +
+                    (reserved.CreatedByThisCall
+                        ? "H10 had just created that unit (no reserved unit existed yet); it is empty — remove it, then "
+                        : "H10 placed no user in it in this attempt (if an earlier attempt of an older build did, moving those " +
+                          "users is an owner decision); ") +
+                    "start a new run with a customer display name that differs by more than case or accents.",
                     cancellationToken).ConfigureAwait(false);
             default:
                 return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitFailed,
