@@ -247,6 +247,31 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
         }
     }
 
+    Context 'Unit names are read by Dataverse name eq, which ignores accents (R6 class fix)' {
+        It 'must fire: two units whose names differ only by an accent, both matching -SecureBusinessUnitName, refuse as ambiguous' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000c'; name = "Secure R$([char]0x00E9)cord"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'More than one business unit is named'
+            $r.Output | Should -Not -Match 'PLAN'
+        }
+
+        It 'must fire: two units whose names differ only by an accent, both matching -CustomerBusinessUnitName, refuse as ambiguous' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000d'; name = "Customer On$([char]0x00E9)"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One'; Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'Expected exactly one business unit'
+            $r.Output | Should -Not -Match 'PLAN'
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must not fire: a customer unit named in another case still resolves to the one unit (exit 0)' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'CUSTOMER ONE' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'Re-run with -Apply'
+        }
+    }
+
     Context 'Customer mode refuses a unit that holds the Direct-message role, whatever its name (task 198 fix round 1, R6)' {
         BeforeEach {
             # The Direct unit has a NON-default name and the operator omits -DirectMessageBusinessUnitName: the name read finds
