@@ -752,11 +752,11 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed()
+    public async Task ATeamOwnedSource_WhenTheSecureTeamIsSetUpButMissing_CopiesNothing_FailClosed()
     {
-        // Review pass 3: with no Secure Record owner team to compare against, the source's team owner cannot be told
-        // not to be it.
-        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        // Review pass 3, task 022 fix round 6: the Secure Record business unit exists but holds no named owner team, so the
+        // source's team owner cannot be told not to be it.
+        _world.ShareWorld = () => SecureChildShareWorld.Standard().Remove("team", SecureChildShareWorld.SecureTeam);
         var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
         var id = EventOwnedByThePersonUnder(source);
 
@@ -764,6 +764,34 @@ public sealed class RecordRepairModeTests
 
         NothingSecretWasWritten();
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task ATeamOwnedUnflaggedSource_WithNoSecureRecordSetUp_IsCopied()
+    {
+        // Task 022 fix round 6: an environment with no Secure Record business unit has no team that can own a secure record,
+        // so an unflagged team-owned source is ordinary.
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Ordinary Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Values).OfType<string>().Should().Contain("Ordinary Client");
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task AFlaggedSource_WithNoSecureRecordSetUp_IsStillNotCopied()
+    {
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: true, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -338,6 +339,67 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         asked[1].Item.Lookups.Should().NotContain(l => l.Column == "sprk_assignedtointernal");
         outcome.Refusal!.Code.Should().Be("seam.needs_assignee", "the re-run's refusal stands");
         _creates.Should().BeEmpty();
+    }
+
+    // ── Fix round 6: no Secure Record setup is not "cannot be told" ──────────────────────────────────────────────────
+
+    /// <summary>The ordinary matter as a source owned by an ordinary team (every row is team-owned), unflagged.</summary>
+    private void OrdinaryMatterOwnedByATeam()
+    {
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_matter", OrdinaryMatter);
+        foreach (var (column, value) in _sources[("sprk_matter", OrdinaryMatter)].Attributes)
+            row[column] = value;
+        row["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", Directory.ChildTeam);
+        _sources[("sprk_matter", OrdinaryMatter)] = row;
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_NoSecureRecordSetUp_AnUnflaggedTeamOwnedSource_Maps()
+    {
+        MatterToEventProfile();
+        OrdinaryMatterOwnedByATeam();
+        _shareWorld.Remove("businessunit", SecureChildShareWorld.SecureBu);
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the matter");
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.MappingSourceSecureCode);
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_NoSecureRecordSetUp_AFlaggedSource_IsStillStripped_ForARowNotIsolatedWithIt()
+    {
+        MatterToEventProfile();
+        _forcedOwnerTeam = Directory.ChildTeam;
+        _shareWorld.Remove("businessunit", SecureChildShareWorld.SecureBu);
+
+        var outcome = await Service().CreateAsync(EventUnder(SecureMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description").And.NotContainKey("sprk_location");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Detail.Should().Be(RecordCreationService.MappingSourceSecureStripped,
+            "a flagged source is secure whether or not the environment has a Secure Record owner team");
+    }
+
+    [Theory]
+    [InlineData("set up, the team not found")]
+    [InlineData("set up, the team lookup faults")]
+    public async Task MappingSourceRule_SecureRecordSetUp_ButTheTeamCannotBeTold_MapsNothing_AsUndetermined(string state)
+    {
+        MatterToEventProfile();
+        OrdinaryMatterOwnedByATeam();
+        if (state == "set up, the team not found")
+            _shareWorld.Remove("team", SecureChildShareWorld.SecureTeam);
+        else
+            _shareWorld.FailingQueriesOf("team");
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Detail.Should().Be(RecordCreationService.MappingSourceUndeterminedNotMapped);
     }
 
     /// <summary>The owner step answers <paramref name="team"/> for every create (the mismatch the invariant must catch).</summary>

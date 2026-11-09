@@ -172,6 +172,64 @@ public class FieldMappingPushSourceGateTests
         world.VerifyNothingWritten();
     }
 
+    // ── fix round 6: no Secure Record setup is not "cannot be told" (the real resolution over an in-memory Dataverse) ──
+
+    private static Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> ResolvedOver(
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld world) =>
+        ct => Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync(
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => world).Object,
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Configuration(), ct);
+
+    private static Entity TeamOwnedUnflaggedMatter() => new("sprk_matter", MatterId)
+    {
+        ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+    };
+
+    [Fact]
+    public async Task NoSecureRecordSetUp_AnUnflaggedTeamOwnedSource_IsWritten()
+    {
+        var world = new World(TeamOwnedUnflaggedMatter(), childOwner: new EntityReference("team", OrdinaryTeam));
+
+        var (updated, failed, _, errors, _) = await world.PushAsync(
+            secureTeam: ResolvedOver(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.WithoutSecureBusinessUnit()));
+
+        (updated, failed).Should().Be((1, 0));
+        errors.Should().BeEmpty();
+        world.Writes.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task NoSecureRecordSetUp_AFlaggedSource_IsStillRefused_ForAChildNotIsolatedWithIt()
+    {
+        var world = new World(SecureMatter(), childOwner: new EntityReference("team", OrdinaryTeam));
+
+        var (updated, failed, _, errors, _) = await world.PushAsync(
+            secureTeam: ResolvedOver(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.WithoutSecureBusinessUnit()));
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.ReasonCode.Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        world.VerifyNothingWritten();
+    }
+
+    [Theory]
+    [InlineData("set up, the team not found")]
+    [InlineData("set up, the team lookup faults")]
+    public async Task SecureRecordSetUp_ButTheTeamCannotBeTold_IsUndetermined(string state)
+    {
+        var shareWorld = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+        if (state == "set up, the team not found")
+            shareWorld.Remove("team", Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SecureTeam);
+        else
+            shareWorld.FailingQueriesOf("team");
+        var world = new World(TeamOwnedUnflaggedMatter(), childOwner: new EntityReference("team", OrdinaryTeam));
+
+        var (updated, failed, _, errors, _) = await world.PushAsync(secureTeam: ResolvedOver(shareWorld));
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.ReasonCode.Should().Be(FieldMappingPushSourceGate.UndeterminedReasonCode);
+        world.VerifyNothingWritten();
+    }
+
     [Fact]
     public async Task TheSourceIsReadOnce_ForEveryChildOfAPush()
     {

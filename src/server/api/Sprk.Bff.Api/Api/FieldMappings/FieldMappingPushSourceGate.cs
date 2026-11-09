@@ -17,16 +17,20 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// per push, on the first child that would be written. The source is first decided for a row in no isolation: a source that is
 /// not secure is allowed for every child and no child's owner is read. A secure source decides each child by the child's owner,
 /// read app-only as the push reads its children (the update planner's reader). The Secure Record owner team is resolved at most
-/// once per push (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>, the resolution the create's owner check
-/// uses).</para>
+/// once per push (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync"/>, the resolution the create's
+/// owner check and Repair use): with no Secure Record setup in the environment the source's flag alone decides; set up but the
+/// team missing, ambiguous or unreadable is undetermined.</para>
+/// <para><b>Time of check.</b> Each child's owner and filing are read just before its write; the write follows. A change to the
+/// child's owner between the two is not seen by this gate (a stated limit).</para>
 /// <para><b>Filing (UAC-r2 (a)).</b> A push from a secure source never changes what a child is filed under: a child whose
 /// pushed values would change any filing column (<see cref="FilingWrites"/>: the registry's filing lookups, the regarding pair
 /// and the columns the pair agrees with, which the update planner can move the pair with) is not written at all
 /// (<see cref="RefileNotAllowedReasonCode"/>). A pushed clear of a filing column is always a filing change. A pushed value equal
 /// to the child's current filing is no change; that child goes on to the owner question. A source that is not secure is
 /// unchanged, its re-files and clears included.</para>
-/// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, or
-/// an answer the gate cannot tell is <see cref="UndeterminedReasonCode"/>: the child is not written. Cancellation is rethrown.</para>
+/// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, a
+/// Secure Record owner team that is set up but cannot be told, or any other answer the gate cannot tell is
+/// <see cref="UndeterminedReasonCode"/>: the child is not written. Cancellation is rethrown.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <see cref="MappingSourceCopyGate"/> (the predicate, reused as is)
 /// and the create's owner check, which asks it for the owner the create decides. Extension: the push has no decided owner, only
 /// each child's stored one, and needs the source read once and the answer per child for both the apply and the preview, so the
@@ -90,7 +94,7 @@ internal sealed class FieldMappingPushSourceGate
     internal static FieldMappingPushSourceGate For(
         IGenericEntityService entities, IConfiguration configuration, string sourceTable, Guid sourceId, ILogger? logger) =>
         new(entities, sourceTable, sourceId,
-            ct => SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(entities, configuration, ct), logger);
+            ct => SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync(entities, configuration, ct), logger);
 
     /// <summary>The fixed per-child text of a reason code this gate gives.</summary>
     internal static string MessageFor(string reasonCode) => reasonCode switch
