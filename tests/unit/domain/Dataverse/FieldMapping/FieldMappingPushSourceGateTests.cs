@@ -46,7 +46,7 @@ public class FieldMappingPushSourceGateTests
         error.RecordId.Should().Be(ChildId);
         error.ReasonCode.Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
         error.Error.Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
-        error.Error.Should().Contain("weren't copied").And.Contain("source record is secure");
+        error.Error.Should().StartWith("No fields were copied").And.Contain("source record is secure");
         world.VerifyNothingWritten();
     }
 
@@ -278,6 +278,82 @@ public class FieldMappingPushSourceGateTests
             Times.Never);
     }
 
+    // ── the pair's agreement columns are filing too: the update planner moves the pair with a lookup it repeats ──
+
+    private static readonly Guid AccountA = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
+    private static readonly Guid AccountB = Guid.Parse("02200000-0000-4000-8000-0000000000b2");
+    private static readonly Guid AccountType = Guid.Parse("02200000-0000-4000-8000-0000000000a7");
+    private const string AccountColumn = "sprk_regardingaccount";
+    private const string AccountBind = "sprk_RegardingAccount@odata.bind";
+
+    /// <summary>An event filed by its pair under account A, its party lookup naming the same account.</summary>
+    private static IReadOnlyDictionary<string, object> PairOnAccountA() => new Dictionary<string, object>
+    {
+        [AccountColumn] = new EntityReference("account", AccountA),
+        [Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn] = AccountA.ToString("D"),
+        [Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", AccountType),
+    };
+
+    private static FieldMappingRuleDto AccountRule() => new()
+    {
+        Id = Guid.NewGuid(), SourceField = "sprk_client", SourceFieldType = "Lookup", TargetField = AccountColumn,
+        TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+    };
+
+    [Fact]
+    public void ThePairsAgreementColumns_AreFilingWrites()
+    {
+        Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PairAgreementColumns(Target).Should().ContainKey(AccountColumn);
+
+        FieldMappingPushSourceGate.FilingWrites(Target, new Dictionary<string, object?> { [AccountBind] = $"/accounts({AccountB:D})" })
+            .Keys.Should().Equal(AccountColumn);
+    }
+
+    [Fact]
+    public async Task ASecureSource_PushingAnotherAccountIntoTheLookupThePairRepeats_SkipsTheChildWhole_WithTheRefileCode()
+    {
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), childColumns: PairOnAccountA());
+        var rule = AccountRule();
+
+        var (updated, failed, _, errors, _) = await world.PushAsync(
+            sourceValues: new() { ["sprk_client"] = AccountB },
+            rule: rule,
+            lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+            {
+                [rule] = new(AccountBind, $"/accounts({AccountB:D})", null),
+            });
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        world.VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ASecureSource_PushingTheAccountThePairRepeats_GoesOnToTheOwnerQuestion()
+    {
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), childColumns: PairOnAccountA());
+
+        (await world.Gate().RefusalForChildAsync(Target, ChildId,
+                new Dictionary<string, object?> { [AccountBind] = $"/accounts({AccountA:D})" }, CancellationToken.None))
+            .Should().BeNull("an equal party value is no change, and the child is owned by the source's isolation owner");
+    }
+
+    [Fact]
+    public async Task AnOrdinarySource_PushingAnotherAccountIntoTheLookupThePairRepeats_IsAllowed_AndReadsNoChild()
+    {
+        var source = new Entity("sprk_matter", MatterId)
+        {
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+        };
+        var world = new World(source, new EntityReference("team", OrdinaryTeam), childColumns: PairOnAccountA());
+
+        (await world.Gate().RefusalForChildAsync(Target, ChildId,
+                new Dictionary<string, object?> { [AccountBind] = $"/accounts({AccountB:D})" }, CancellationToken.None))
+            .Should().BeNull();
+        world.Entities.Verify(e => e.RetrieveAsync(Target, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ───────────────────────── fixtures ─────────────────────────
 
     /// <summary>A secure matter as Dataverse holds one: flagged, owned by the Secure Record owner team.</summary>
@@ -294,7 +370,8 @@ public class FieldMappingPushSourceGateTests
 
         public List<Dictionary<string, object?>> Writes { get; } = [];
 
-        public World(Entity source, EntityReference? childOwner, Guid? filedUnderMatter = null)
+        public World(Entity source, EntityReference? childOwner, Guid? filedUnderMatter = null,
+            IReadOnlyDictionary<string, object>? childColumns = null)
         {
             Entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(source);
@@ -306,6 +383,8 @@ public class FieldMappingPushSourceGateTests
                         row["ownerid"] = childOwner;
                     if (filedUnderMatter is { } matter)
                         row[FilingColumn] = new EntityReference("sprk_matter", matter);
+                    foreach (var (column, value) in childColumns ?? new Dictionary<string, object>())
+                        row[column] = value;
                     return row;
                 });
             Writer.Setup(w => w.UpdateExistingRecordFieldsAsync(
@@ -322,19 +401,22 @@ public class FieldMappingPushSourceGateTests
         public Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> PushAsync(
             Dictionary<string, object?>? sourceValues = null,
             Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>>? secureTeam = null,
-            Guid[]? children = null)
+            Guid[]? children = null,
+            FieldMappingRuleDto? rule = null,
+            IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
         {
             return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Gate(secureTeam),
                 Writer.Object,
                 new StampWorld().Restamper,
-                [Rule()],
+                [rule ?? Rule()],
                 sourceValues ?? new Dictionary<string, object?> { ["sprk_source"] = "from the source" },
                 Target,
                 children ?? [ChildId],
                 CallerId,
                 NullLogger.Instance,
                 CancellationToken.None,
+                lookupBinds: lookupBinds,
                 appOnlyEntities: Entities.Object);
         }
 

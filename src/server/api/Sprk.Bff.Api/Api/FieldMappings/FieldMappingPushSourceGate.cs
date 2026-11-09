@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// once per push (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>, the resolution the create's owner check
 /// uses).</para>
 /// <para><b>Filing (UAC-r2 (a)).</b> A push from a secure source never changes what a child is filed under: a child whose
-/// pushed values would change any filing column (<see cref="FilingWrites"/>, from the registry) is not written at all
+/// pushed values would change any filing column (<see cref="FilingWrites"/>: the registry's filing lookups, the regarding pair
+/// and the columns the pair agrees with, which the update planner can move the pair with) is not written at all
 /// (<see cref="RefileNotAllowedReasonCode"/>). A pushed value equal to the child's current filing is no change; that child goes
 /// on to the owner question. A source that is not secure is unchanged, its re-files included.</para>
 /// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, or
@@ -44,16 +45,16 @@ internal sealed class FieldMappingPushSourceGate
 
     /// <summary>The per-child text of <see cref="RefileNotAllowedReasonCode"/>. Names no record.</summary>
     internal const string RefileNotAllowedMessage =
-        "This record's filing can't be changed by a push from a secure record, so nothing was written to it.";
+        "No fields were copied to this record because its filing can't be changed by a push from a secure record.";
 
     /// <summary>The per-child text of <see cref="NotIsolatedReasonCode"/>. Names no record.</summary>
     internal const string NotIsolatedMessage =
-        "Some fields weren't copied to this record because the source record is secure. Nothing was written to it.";
+        "No fields were copied to this record because the source record is secure.";
 
     /// <summary>The per-child text of <see cref="UndeterminedReasonCode"/>. Names no record.</summary>
     internal const string UndeterminedMessage =
-        "Fields weren't copied to this record because it could not be checked whether the source record is secure. "
-        + "Nothing was written to it. Try again later.";
+        "No fields were copied to this record because it could not be checked whether the source record is secure. "
+        + "Try again later.";
 
     private const string OwnerColumn = "ownerid";
 
@@ -101,18 +102,22 @@ internal sealed class FieldMappingPushSourceGate
     /// <summary>
     /// The filing columns <paramref name="payload"/> writes on <paramref name="targetEntity"/> (logical column → the value it
     /// writes). A filing column is one the create's registry predicate names
-    /// (<see cref="RecordCreationService.IsFilingLookup(string, string)"/>: lineage, ownership-parent and root filing lookups)
-    /// or the regarding pair (<see cref="SecureRootInheritance.PairIdColumn"/>, <see cref="SecureRootInheritance.PairTypeColumn"/>).
+    /// (<see cref="RecordCreationService.IsFilingLookup(string, string)"/>: lineage, ownership-parent and root filing lookups),
+    /// the regarding pair (<see cref="SecureRootInheritance.PairIdColumn"/>, <see cref="SecureRootInheritance.PairTypeColumn"/>),
+    /// or a column the pair agrees with (<see cref="Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PairAgreementColumns"/>:
+    /// a lookup the update planner moves the pair with when the pair repeats it, after this gate).
     /// </summary>
     internal static IReadOnlyDictionary<string, object?> FilingWrites(string targetEntity, IReadOnlyDictionary<string, object?> payload)
     {
         var filing = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var agreement = Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PairAgreementColumns(targetEntity);
         foreach (var (key, value) in payload)
         {
             var column = SecureRootInheritance.NormalizeColumn(key);
             if (string.Equals(column, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase)
-                || RecordCreationService.IsFilingLookup(targetEntity, column))
+                || RecordCreationService.IsFilingLookup(targetEntity, column)
+                || agreement.ContainsKey(column))
             {
                 filing[column] = value;
             }

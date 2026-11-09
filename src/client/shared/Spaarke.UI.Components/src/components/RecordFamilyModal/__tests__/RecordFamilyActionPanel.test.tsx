@@ -30,6 +30,7 @@ import {
   SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
   SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
   SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+  sourceRuleSkipText,
 } from '../recordFamilyPushService';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
@@ -328,11 +329,8 @@ describe('RecordFamilyActionPanel', () => {
     });
     renderPanel({ authenticatedFetch: fetchFn });
 
-    expect(
-      await screen.findByText(
-        "Some fields won't be copied to 1 record because the source record is secure, so it is not listed."
-      )
-    ).toBeTruthy();
+    expect(await screen.findByText('1 record will not be updated because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
     expect(screen.queryByText('server text')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
@@ -351,7 +349,7 @@ describe('RecordFamilyActionPanel', () => {
 
     expect(
       await screen.findByText(
-        '1 record is not listed because it could not be checked whether the source record is secure. Try again later.'
+        '1 record will not be updated because it could not be checked whether the source record is secure. Try again later.'
       )
     ).toBeTruthy();
     expect(screen.getByText('Nothing to update among the records that can be updated.')).toBeTruthy();
@@ -374,9 +372,8 @@ describe('RecordFamilyActionPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
 
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
-    expect(
-      screen.getByText("Some fields weren't copied to this record because the source record is secure.")
-    ).toBeTruthy();
+    expect(screen.getByText('No fields were copied to this record because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
     expect(screen.queryByText('server text')).toBeNull();
   });
 
@@ -395,7 +392,7 @@ describe('RecordFamilyActionPanel', () => {
 
     expect(
       await screen.findByText(
-        "1 record is not listed because its filing can't be changed by a push from a secure record."
+        "1 record will not be updated because its filing can't be changed by a push from a secure record."
       )
     ).toBeTruthy();
     expect(screen.queryByText('server text')).toBeNull();
@@ -422,7 +419,7 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
     expect(
       screen.getByText(
-        "This record's filing can't be changed by a push from a secure record, so nothing was copied to it."
+        "No fields were copied to this record because its filing can't be changed by a push from a secure record."
       )
     ).toBeTruthy();
     expect(screen.queryByText('server text')).toBeNull();
@@ -766,11 +763,31 @@ describe('recordFamilyPushService', () => {
       'constructor',
     ]);
     expect(parsed.errors.map(pushErrorText)).toEqual([
-      "Some fields weren't copied to this record because the source record is secure.",
-      "Fields weren't copied to this record because it could not be checked whether the source record is secure. Try again later.",
-      "This record's filing can't be changed by a push from a secure record, so nothing was copied to it.",
+      'No fields were copied to this record because the source record is secure.',
+      'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
+      "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
       'server text C',
       'server text D',
     ]);
+  });
+
+  // Task 022 fix round 4: each source-rule code skips the record whole; the preview counts say so, singular and plural.
+  it('counts the records each source-rule code keeps from the push, as records that will not be updated', () => {
+    const entry = (reasonCode: string) => ({ recordId: EVENT_A, error: 'x', reasonCode });
+    expect(
+      sourceRuleSkipText([
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+      ])
+    ).toEqual([
+      "1 record will not be updated because its filing can't be changed by a push from a secure record.",
+      '2 records will not be updated because the source record is secure.',
+      '3 records will not be updated because it could not be checked whether the source record is secure. Try again later.',
+    ]);
+    expect(sourceRuleSkipText([])).toEqual([]);
   });
 });
