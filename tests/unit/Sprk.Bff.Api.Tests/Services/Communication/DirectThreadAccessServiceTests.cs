@@ -596,6 +596,276 @@ public class DirectThreadAccessServiceTests
             Times.Once);
     }
 
+    // ── Task 198 Part B: a message owned by the Direct-message owner team (fm 054) ──────────────────────────
+    // Its audience is exactly the join's two-party list, on the message and on the content rows the same team owns.
+    // The Direct-team check is fm 054a's lookup (Part C); here it is the test seam DirectOwnerTeamProbe.
+
+    private static readonly Guid DirectTeamId = Guid.Parse("d1d1d1d1-0000-0000-0000-0000000000d1");
+    private static readonly Guid OtherTeamId = Guid.Parse("d2d2d2d2-0000-0000-0000-0000000000d2");
+    private static readonly Guid AttachmentRowId = Guid.Parse("a1a1a1a1-0000-0000-0000-0000000000a1");
+    private static readonly Guid ParticipantRowId = Guid.Parse("a2a2a2a2-0000-0000-0000-0000000000a2");
+    private static readonly Guid DocumentRowId = Guid.Parse("a3a3a3a3-0000-0000-0000-0000000000a3");
+    private static readonly Guid OtherTeamAttachmentRowId = Guid.Parse("a4a4a4a4-0000-0000-0000-0000000000a4");
+
+    /// <summary>A SUT whose Direct-team check answers <paramref name="answer"/> for <see cref="DirectTeamId"/> and
+    /// <c>false</c> for any other team; every question it is asked is recorded in <paramref name="asked"/>.</summary>
+    private DirectThreadAccessService DirectTeamSut(bool? answer, List<Guid>? asked = null) => new(
+        _entityService.Object,
+        _accessGrant.Object,
+        new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+        Mock.Of<ILogger<DirectThreadAccessService>>(),
+        new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing)
+    {
+        DirectOwnerTeamProbe = (team, _) =>
+        {
+            asked?.Add(team);
+            return Task.FromResult(team == DirectTeamId ? answer : false);
+        },
+    };
+
+    /// <summary>The message is owned by a non-default Owner team that is not the Secure team (the Direct team's shape).</summary>
+    private void MessageOwnedByOwnerTeam(Guid teamId)
+    {
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", teamId) },
+            }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "team"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("team") { Id = teamId, ["name"] = "Spaarke Direct Message Owners", ["isdefault"] = false, ["teamtype"] = new OptionSetValue(0) },
+            }));
+    }
+
+    /// <summary>The content rows of <paramref name="table"/>: the read answers with the rows whose owner team and message
+    /// lookup match the query's conditions, as Dataverse would.</summary>
+    private void ContentRows(string table, string messageLookup, params (Guid Id, Guid OwnerTeam)[] rows) =>
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                object? Value(string attribute) =>
+                    q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == attribute && c.Operator == ConditionOperator.Equal)?.Values.Single();
+                return new EntityCollection(rows
+                    .Where(r => Equals(Value("owningteam"), r.OwnerTeam) && Equals(Value(messageLookup), CommunicationId))
+                    .Select(r => new Entity(table) { Id = r.Id })
+                    .ToList());
+            });
+
+    /// <summary>A Direct thread owned by <see cref="Caller"/> and shared to <see cref="Other"/>; a Direct-team-owned
+    /// message with one content row per table owned by the Direct team, and one attachment owned by another team.</summary>
+    private void DirectTeamMessageWorld()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        MessageOwnedByOwnerTeam(DirectTeamId);
+        ContentRows("sprk_communicationattachment", "sprk_communication",
+            (AttachmentRowId, DirectTeamId), (OtherTeamAttachmentRowId, OtherTeamId));
+        ContentRows("sprk_communicationparticipant", "sprk_communication", (ParticipantRowId, DirectTeamId));
+        ContentRows("sprk_document", "sprk_relatedcommunication", (DocumentRowId, DirectTeamId));
+    }
+
+    private void VerifyGrant(string entitySet, Guid rowId, Guid user) =>
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(entitySet, rowId, User(user), "ReadAccess", It.IsAny<CancellationToken>()), Times.Once);
+
+    private void VerifyNoGrantAtAll() =>
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+    [Fact]
+    public async Task DirectTeamMessage_GrantsBothParticipants_TheSenderIncluded_OnTheMessage()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut(answer: true).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_GrantsBothParticipants_OnTheContentRowsTheDirectTeamOwns()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut(answer: true).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        foreach (var user in new[] { Caller, Other })
+        {
+            VerifyGrant("sprk_communicationattachments", AttachmentRowId, user);
+            VerifyGrant("sprk_communicationparticipants", ParticipantRowId, user);
+            VerifyGrant("sprk_documents", DocumentRowId, user);
+        }
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_NeverGrantsANonParticipant_ATeam_OrARowAnotherTeamOwns()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut(answer: true).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.Is<DataversePrincipalRef>(p => p != User(Caller) && p != User(Other)), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), OtherTeamAttachmentRowId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        // 2 participants x (message + 3 content rows); the anchor record's membership is never derived.
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(8));
+        _membershipDerivation.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_WithAJoinThatIsNotDirect_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        SetupGrantees(MatterA, ThirdUser);
+
+        await DirectTeamSut(answer: true).GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        VerifyNoGrantAtAll();
+        _membershipDerivation.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_WhenTheDirectTeamCannotBeDetermined_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut(answer: null).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNoGrantAtAll();
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_WhenOneParticipantsContentGrantThrows_StillGrantsTheRest()
+    {
+        DirectTeamMessageWorld();
+        _accessGrant
+            .Setup(g => g.GrantAccessAsync("sprk_communicationattachments", AttachmentRowId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("grant boom"));
+
+        var act = () => DirectTeamSut(answer: true).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        await act.Should().NotThrowAsync();
+        VerifyGrant("sprk_communicationattachments", AttachmentRowId, Other);
+        VerifyGrant("sprk_documents", DocumentRowId, Caller);
+    }
+
+    [Fact]
+    public async Task AnotherTeamOwnedMessage_KeepsTheOrdinaryGrant_AndReadsNoContentRow()
+    {
+        // A team that is not the Direct team: the message grant is unchanged (the join's participants), no content row is read.
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        MessageOwnedByOwnerTeam(OtherTeamId);
+        var asked = new List<Guid>();
+
+        await DirectTeamSut(answer: true, asked).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        asked.Should().Equal(OtherTeamId);
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+        _entityService.Verify(
+            s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationattachment"), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AUserOwnedMessage_NeverAsksTheDirectTeamCheck()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var asked = new List<Guid>();
+
+        await DirectTeamSut(answer: true, asked).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        asked.Should().BeEmpty();
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+    }
+
+    [Fact]
+    public async Task ASecureMessage_NeverAsksTheDirectTeamCheck_AndGrantsNothing()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var secureTeam = Guid.Parse("5e5e5e5e-0000-0000-0000-00000000005e");
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", secureTeam) },
+            }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "team" && q.Criteria.Conditions.Any(c => c.AttributeName == "teamid")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("team")
+                {
+                    Id = secureTeam,
+                    ["name"] = Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamName(config),
+                    ["isdefault"] = false,
+                    ["teamtype"] = new OptionSetValue(Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamType),
+                },
+            }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "businessunit"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("businessunit") { Id = Guid.NewGuid() } }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "team" && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("team") { Id = secureTeam } }));
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        var asked = new List<Guid>();
+
+        await DirectTeamSut(answer: true, asked).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        asked.Should().BeEmpty();
+        VerifyNoGrantAtAll();
+    }
+
+    [Fact]
+    public async Task WithoutTheDirectTeamCheck_ATeamOwnedMessage_ReadsNoContentRow()
+    {
+        // Production until Part C: no team is the Direct team, so the team-owned grant is exactly as before.
+        DirectTeamMessageWorld();
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
     /// <summary>The message is owned by an ordinary (default, non-Secure) team.</summary>
     private void MessageOwnedByOrdinaryTeam(Guid teamId)
     {

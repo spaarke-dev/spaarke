@@ -205,6 +205,25 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             if (!ordinary)
                 return;
 
+            // Task 198 Part B: a message owned by the Direct-message owner team (fm 054) is read by exactly its thread's
+            // participants, through their own shares (the team has no members). When that team cannot be told, nothing is
+            // granted (fail closed).
+            if (messageOwningTeam is { } owningTeam)
+            {
+                switch (await IsDirectMessageOwnerTeamAsync(owningTeam, ct))
+                {
+                    case null:
+                        _logger.LogWarning(
+                            "Message {CommunicationId} is team-owned and whether that team is the Direct-message owner team " +
+                            "cannot be determined; no participant is granted (ThreadId={ThreadId}).", communicationId, threadId);
+                        // TODO(task 198 Part C): enqueue the durable re-grant for this message.
+                        return;
+                    case true:
+                        await GrantDirectTeamMessageAsync(communicationId, assignment, owningTeam, ct);
+                        return;
+                }
+            }
+
             IReadOnlyList<Guid> principals = assignment.Audience switch
             {
                 ThreadGrantAudience.DirectParticipants => await ReadDirectParticipantsForGrantAsync(threadId, ct),
@@ -226,6 +245,127 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 ex,
                 "Message access grant lookup failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
                 communicationId, threadId);
+        }
+    }
+
+    /// <summary>
+    /// Task 198 Part B test seam, until fm 054a's lookup is merged (Part C): answers <see cref="IsDirectMessageOwnerTeamAsync"/>
+    /// in tests. Unset (production), no team is the Direct-message owner team, so behaviour is unchanged until Part C.
+    /// </summary>
+    internal Func<Guid, CancellationToken, Task<bool?>>? DirectOwnerTeamProbe { get; init; }
+
+    /// <summary>
+    /// THE one check that <paramref name="owningTeam"/> is the Direct-message owner team (fm 054). <c>true</c>: it is;
+    /// <c>false</c>: it is not; <c>null</c>: it cannot be told (fm's Refusal), and the caller grants nothing.
+    /// </summary>
+    private Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct)
+    {
+        // TODO(task 198 Part C): fm 054a lookup sha. Replace this body with fm's pair from SecureRecordOwnerTeam.cs:
+        // CannotBeDirectOwnerTeamAsync(owningTeam) => false; ResolveDirectMessageOwnerTeamAsync() Refusal => null;
+        // TeamId == owningTeam => true; otherwise false. Then remove DirectOwnerTeamProbe. Until then no team is the Direct team.
+        return DirectOwnerTeamProbe is { } probe ? probe(owningTeam, ct) : Task.FromResult<bool?>(false);
+    }
+
+    /// <summary>
+    /// Task 198 Part B: the content rows of a Direct-team-owned message that its readers need, each as (table, the lookup to
+    /// the message). They are granted to the same participants when the same Direct team owns them. Entity sets come from
+    /// <see cref="SecureChildLineage.Children"/>.
+    /// </summary>
+    private static readonly (string Table, string MessageLookup)[] DirectContentRows =
+    [
+        ("sprk_communicationattachment", "sprk_communication"),
+        ("sprk_communicationparticipant", "sprk_communication"),
+        ("sprk_document", "sprk_relatedcommunication"),
+    ];
+
+    /// <summary>Bounds each content-row read of one message (a defensive cap; a capped read is logged).</summary>
+    private const int MaxDirectContentRowsPerTable = 250;
+
+    /// <summary>
+    /// A Direct-team-owned message: Read to exactly its thread's participants (the join's two-party list, the sender
+    /// included: the sender no longer owns the row), on the message and on its content rows the same team owns. Never the
+    /// anchor record's grantees and never a team: a join that is not Direct grants nothing here.
+    /// </summary>
+    private async Task GrantDirectTeamMessageAsync(
+        Guid communicationId, ThreadAssignment assignment, Guid directTeam, CancellationToken ct)
+    {
+        var threadId = assignment.ThreadId;
+        if (assignment.Audience != ThreadGrantAudience.DirectParticipants)
+        {
+            _logger.LogWarning(
+                "Message {CommunicationId} is owned by the Direct-message owner team but its join is {Audience}, not Direct; " +
+                "no principal is granted (ThreadId={ThreadId}).", communicationId, assignment.Audience, threadId);
+            return;
+        }
+
+        var participants = await ReadDirectParticipantsForGrantAsync(threadId, ct);
+        if (participants.Count == 0)
+            return;
+
+        await GrantReadAccessToPrincipalsAsync(communicationId, threadId, participants, ct);
+        await GrantDirectContentRowsAsync(communicationId, threadId, directTeam, participants, ct);
+    }
+
+    /// <summary>
+    /// Read on each <see cref="DirectContentRows"/> row of the message that <paramref name="directTeam"/> owns, to each
+    /// participant. Best-effort per table, row and principal, as the message grant is.
+    /// </summary>
+    private async Task GrantDirectContentRowsAsync(
+        Guid communicationId, Guid threadId, Guid directTeam, IReadOnlyList<Guid> participants, CancellationToken ct)
+    {
+        foreach (var (table, messageLookup) in DirectContentRows)
+        {
+            List<Guid> rowIds;
+            try
+            {
+                var query = new QueryExpression(table)
+                {
+                    ColumnSet = new ColumnSet(false),
+                    TopCount = MaxDirectContentRowsPerTable,
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(messageLookup, ConditionOperator.Equal, communicationId);
+                query.Criteria.AddCondition("owningteam", ConditionOperator.Equal, directTeam);
+                rowIds = (await _entityService.RetrieveMultipleAsync(query, ct))?.Entities
+                    .Select(e => e.Id).Where(id => id != Guid.Empty).Distinct().ToList() ?? [];
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Direct message content-row read failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}",
+                    communicationId, threadId, table);
+                continue;
+            }
+
+            if (rowIds.Count >= MaxDirectContentRowsPerTable)
+            {
+                _logger.LogWarning(
+                    "Direct message content-row read reached its cap of {Cap}; rows beyond it are not granted here " +
+                    "| CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}",
+                    MaxDirectContentRowsPerTable, communicationId, threadId, table);
+            }
+
+            var entitySet = SecureChildLineage.Children[table].EntitySet;
+            foreach (var rowId in rowIds)
+            {
+                foreach (var principalId in participants)
+                {
+                    try
+                    {
+                        await _accessGrant.GrantAccessAsync(
+                            entitySet, rowId, DataversePrincipalRef.User(principalId), ReadAccessRights, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Direct message content-row grant failed (non-fatal) | CommunicationId={CommunicationId}, " +
+                            "ThreadId={ThreadId}, Table={Table}, RowId={RowId}, Principal={Principal}",
+                            communicationId, threadId, table, rowId, principalId);
+                    }
+                }
+            }
         }
     }
 
