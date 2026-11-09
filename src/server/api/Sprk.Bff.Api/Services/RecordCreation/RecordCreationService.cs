@@ -509,6 +509,10 @@ internal sealed partial class RecordCreationService
         Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamOnce(CancellationToken token) =>
             secureOwnerTeamAnswer ??= _shares.SecureOwnerTeamAsync(token);
         var copiedDefaults = new List<(string Column, string Source)>();
+
+        // Task 022 fix round 3: the columns step 3 mapped, as step 3 left them. A copied default whose source is one of these
+        // is a value from the mapping source, whatever step 5 later keeps of its source.
+        IReadOnlySet<string> stepThreeMappedColumns = NoDefaultColumns;
         if (rule.MappingExclusion is { } exclusion)
         {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
@@ -545,6 +549,7 @@ internal sealed partial class RecordCreationService
             // ebilling-r1's review of 013, item 1: the SAME local — the pre-write rules (5½) and the create (11) read this item.
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
+            stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
             // A mapped value with no gate read is checked as "not told" (fail closed), never skipped.
             mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(table, null) : null;
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
@@ -876,7 +881,7 @@ internal sealed partial class RecordCreationService
         {
             var enforced = await EnforceMappingSourceOwnerAsync(
                     table, rule, user, sourceGate, owningTeam, callerItem, item, mappedValues, defaultColumns, copiedDefaults,
-                    SecureOwnerTeamOnce, mappingWarnings, noun, ct)
+                    stepThreeMappedColumns, SecureOwnerTeamOnce, mappingWarnings, noun, ct)
                 .ConfigureAwait(false);
             if (enforced.Refusal is { } ownerCheckRefusal)
                 return Decision.Refuse(ownerCheckRefusal);

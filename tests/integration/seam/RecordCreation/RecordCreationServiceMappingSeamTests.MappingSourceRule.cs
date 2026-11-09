@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -171,6 +172,146 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         var fields = _creates.Should().ContainSingle().Subject.Fields;
         fields.Should().NotContainKey("sprk_RegardingMatter@odata.bind").And.NotContainKey("sprk_description");
         outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+    }
+
+    // ── Fix round 3: the strip's own branches, on a work assignment filed under the secure matter (b) ─────────────────
+
+    private const string WaAssignedToInternalBind = "sprk_AssignedToInternal@odata.bind";
+
+    /// <summary>The secure matter → work assignment profile: a Copy rule for Assigned To Internal (the copied default's
+    /// source) and a Default rule for the description; the owner forced to an ordinary team (the mismatch).</summary>
+    private void SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam(params FieldMappingRuleEntity[] extra)
+    {
+        _user.Columns["sprk_workassignment"] = new()
+        {
+            ["sprk_name"] = ("String", true),
+            ["sprk_description"] = ("Memo", true),
+            ["sprk_notes"] = ("Memo", true),
+            ["sprk_assignedto"] = ("Lookup", true),
+            ["sprk_assignedtointernal"] = ("Lookup", true),
+            ["sprk_regardingmatter"] = ("Lookup", true),
+            ["sprk_regardingproject"] = ("Lookup", true),
+        };
+        Profile("sprk_matter", "sprk_workassignment",
+            [
+                Rule("sprk_assignedtointernal", "sprk_assignedtointernal", Lookup),
+                Rule(null, "sprk_description", Memo, Default, "Set by the profile"),
+                .. extra,
+            ]);
+        _forcedOwnerTeam = Directory.ChildTeam;
+    }
+
+    private RecordCreationRequest WorkAssignmentMappedUnderSecureMatter(IReadOnlyDictionary<string, object?>? postMappingDefaults = null) =>
+        Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+        }) with
+        {
+            PostMappingDefaults = postMappingDefaults,
+        };
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_RemovesTheDefaultCopiedFromAMappedValue()
+    {
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam();
+
+        var outcome = await Service().CreateAsync(WorkAssignmentMappedUnderSecureMatter(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey(WaAssignedToInternalBind, "a mapped value is removed")
+            .And.NotContainKey("sprk_AssignedTo@odata.bind", "a default copied from a mapped value is a value from the source")
+            .And.NotContainKey("sprk_description", "a Default rule's value is the profile's: removed with the rest");
+        StringOf(fields, "sprk_name").Should().Be("Review the lease");
+        StringOf(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})");
+        Owner(fields).Should().Be(Directory.ChildTeam);
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+        warning.Detail.Should().Be(RecordCreationService.MappingSourceSecureStripped).And.Contain("because it is secure");
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_KeepsAPlainAdapterDefault_RebuiltOverTheCallersValues()
+    {
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam();
+
+        var outcome = await Service().CreateAsync(
+            WorkAssignmentMappedUnderSecureMatter(new Dictionary<string, object?> { ["sprk_notes"] = "The adapter's own default" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_notes").Should().Be("The adapter's own default", "a plain adapter default is not from the source");
+        fields.Should().NotContainKey(WaAssignedToInternalBind).And.NotContainKey("sprk_AssignedTo@odata.bind")
+            .And.NotContainKey("sprk_description");
+        StringOf(fields, "sprk_name").Should().Be("Review the lease");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_RemovesTheCopiedDefault_WhenStepFiveDroppedItsMappedSource()
+    {
+        // The mapped Assigned To Internal is field-secured for the caller: step 5 drops it and keeps the copy it filled.
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam();
+        _scripted.SecuredColumns.Add("sprk_assignedtointernal");
+
+        var outcome = await Service().CreateAsync(WorkAssignmentMappedUnderSecureMatter(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey(WaAssignedToInternalBind)
+            .And.NotContainKey("sprk_AssignedTo@odata.bind", "the copy's source was mapped at step 3, whatever step 5 kept");
+        outcome.MappingWarnings.Should().Contain(w => w.Code == RecordCreationWarning.MappingSourceSecureCode);
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_AMappedValueThatFilesTheRow_IsRefusedWithItsOwnCode_NotARetry()
+    {
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam(Rule("sprk_primaryproject", "sprk_regardingproject", Lookup));
+        _readable.Add(OtherProject);
+        _stamps.Row("sprk_project", OtherProject);
+
+        var outcome = await Service().CreateAsync(WorkAssignmentMappedUnderSecureMatter(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.MappingSourceSecureFilingCode);
+        outcome.Refusal.Kind.Should().Be(RecordCreationRefusalKind.Invalid);
+        var problem = Problem(outcome, "sprk_workassignment");
+        problem.Status.Should().Be(StatusCodes.Status400BadRequest);
+        problem.Extensions["reasonCode"].Should().Be(RecordCreationRefusal.MappingSourceSecureFilingCode);
+        problem.Detail.Should().Contain("copied from a secure record").And.Contain("Create it as secure")
+            .And.NotContainEquivalentOf("try again");
+        _creates.Should().BeEmpty("nothing is written");
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_AsksThePreWriteRulesAgain_OnTheStrippedRow()
+    {
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam();
+        var asked = new List<PreWriteRow>();
+        var rule = RecordTableRules.Get("sprk_workassignment") with
+        {
+            PreWriteRules =
+            [
+                new PreWriteRule(new NamedRule("SeamTestRule", "A fixture rule that needs the Assigned To Internal."),
+                    (row, _) =>
+                    {
+                        asked.Add(row);
+                        return Task.FromResult(row.Item.Lookups.Any(l => l.Column == "sprk_assignedtointernal")
+                            ? null
+                            : PreWriteRefusal.Refused("seam.needs_assignee", "The work assignment needs an assignee."));
+                    }),
+            ],
+        };
+        _tableRules = t => t == "sprk_workassignment" ? rule : RecordTableRules.Find(t);
+
+        var outcome = await Service().CreateAsync(WorkAssignmentMappedUnderSecureMatter(), AsCaller(), CancellationToken.None);
+
+        asked.Should().HaveCount(2, "step 5½ on the mapped row, then again on the row as it will be written");
+        asked[1].Item.Lookups.Should().NotContain(l => l.Column == "sprk_assignedtointernal");
+        outcome.Refusal!.Code.Should().Be("seam.needs_assignee", "the re-run's refusal stands");
+        _creates.Should().BeEmpty();
     }
 
     /// <summary>The owner step answers <paramref name="team"/> for every create (the mismatch the invariant must catch).</summary>

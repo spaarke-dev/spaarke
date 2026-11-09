@@ -95,13 +95,13 @@ internal sealed partial class RecordCreationService
     /// <summary>The words for a secure source whose fields are not copied (step 3): the create is neither secure from creation
     /// nor filed by the caller under that source.</summary>
     internal const string MappingSourceSecureNotMapped =
-        "No fields were copied from the related record: a secure record's fields are copied only into a record that is " +
-        "secure from creation or filed under it.";
+        "Some fields weren't copied from the related record because it is secure. A secure record's fields are copied only " +
+        "into a record that is secure from creation or filed under it.";
 
     /// <summary>The words for mapped values removed before the create: the row is not owned by the source's secure owner.</summary>
     internal const string MappingSourceSecureStripped =
-        "The fields copied from the related record were not written: a secure record's fields are written only into a " +
-        "record that its secure owner owns.";
+        "Some fields weren't copied from the related record because it is secure. A secure record's fields are copied only " +
+        "into a record its secure owner owns.";
 
     /// <summary>
     /// True for a lookup of <paramref name="table"/> that FILES the row under a record (FR-08 amendment, owner 2026-10-20,
@@ -468,7 +468,7 @@ internal sealed partial class RecordCreationService
             string table, RecordTableRule rule, IDataverseUserClient user, MappedSourceGate gate, Guid owningTeam,
             DataverseWriteItemMapper.MappedItem callerItem, DataverseWriteItemMapper.MappedItem item,
             IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> defaultColumns,
-            IReadOnlyCollection<(string Column, string Source)> copiedDefaults,
+            IReadOnlyCollection<(string Column, string Source)> copiedDefaults, IReadOnlySet<string> stepThreeMappedColumns,
             Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> secureOwnerTeam,
             List<RecordCreationWarning> warnings, string noun, CancellationToken ct)
     {
@@ -477,10 +477,12 @@ internal sealed partial class RecordCreationService
         if (decision.Verdict == MappingSourceCopyVerdict.Allowed)
             return (null, item, mappedValues);
 
+        // A copied default is a value from the mapping source when its source column was mapped at step 3 — matched against
+        // step 3's columns, so a copy is removed even when step 5 dropped its source and kept the copy.
         var mapped = mappedValues.Keys.Where(k => !defaultColumns.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var removed = mappedValues.Keys
             .Where(k => mapped.Contains(k) || copiedDefaults.Any(c => string.Equals(c.Column, k, StringComparison.OrdinalIgnoreCase)
-                                                                      && mapped.Contains(c.Source)))
+                                                                      && stepThreeMappedColumns.Contains(c.Source)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (removed.Count == 0)
             return (null, item, mappedValues);
@@ -493,9 +495,11 @@ internal sealed partial class RecordCreationService
         if (filing is not null)
         {
             _logger.LogWarning("[RECORD-CREATE] a removed mapped value of a {Table} files the row ({Column}); refused", table, filing);
-            return (MappingSourceOwnerRefused(noun), item, mappedValues);
+            return (MappingSourceFilingRefused(noun), item, mappedValues);
         }
 
+        // The rebuild and the pre-write rules' re-run fail closed: a row that cannot be rebuilt, or a fault in either, refuses
+        // the whole create (nothing is written).
         var kept = mappedValues.Where(kv => !removed.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var stripped = callerItem;
         if (kept.Count > 0)
@@ -503,7 +507,7 @@ internal sealed partial class RecordCreationService
             var remapped = await DataverseWriteItemMapper.MapAsync(user, table, MergedItem(callerItem, kept.Keys, kept), ct)
                 .ConfigureAwait(false);
             if (remapped.Item is not { } withDefaults)
-                return (MappingSourceOwnerRefused(noun), item, mappedValues);
+                return (MappingSourceCheckFailed(noun), item, mappedValues);
             stripped = withDefaults;
         }
 
@@ -533,7 +537,17 @@ internal sealed partial class RecordCreationService
         return WouldFileTheRow(table, column, lookup is null ? column : new EntityReference(lookup.RelatedTable, lookup.RecordId));
     }
 
-    private static RecordCreationRefusal MappingSourceOwnerRefused(string noun) => new(
+    /// <summary>
+    /// A value copied from a secure source files the row, and the row's owner is not that source's secure owner: the same
+    /// request answers the same way every time, so it is refused as the request (400) with its own code, never as a check that
+    /// could be retried.
+    /// </summary>
+    internal static RecordCreationRefusal MappingSourceFilingRefused(string noun) => new(
+        RecordCreationRefusalKind.Invalid, RecordCreationRefusal.MappingSourceSecureFilingCode,
+        $"This {noun} can't be created with values copied from a secure record, because it would not be secure. " +
+        $"Create it as secure, or file it under a different record.");
+
+    private static RecordCreationRefusal MappingSourceCheckFailed(string noun) => new(
         RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.CheckFailedCode,
         $"A check before the {noun} was created could not be completed, so it was not created.");
 
