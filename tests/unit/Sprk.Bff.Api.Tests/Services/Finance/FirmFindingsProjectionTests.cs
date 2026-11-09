@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -129,7 +130,7 @@ public sealed class FirmFindingsProjectionTests
         /// <summary>When set, the writer id the projection is told (default <see cref="WriterId"/>); <see cref="Guid.Empty"/> is an unknown writer.</summary>
         public Guid? WriterIdAnswered;
 
-        public FirmFindingsProjection Projection(Func<string?, ILogger, Guid, IReadOnlyList<FirmRejectionFindings.Finding>>? parse = null) => new(
+        public FirmFindingsProjection Projection(Func<string?, ILogger, Guid, FirmRejectionFindings.ParseResult>? parse = null) => new(
             Entities.Object,
             (version, invoice, ct) =>
             {
@@ -1687,17 +1688,69 @@ public sealed class FirmFindingsProjectionTests
         item.ValuesRead!.Should().OnlyContain(v => v.Value.Length <= FirmRejectionFindings.MaxValueTextLength + 3);
     }
 
-    [Fact(DisplayName = "130c: findings over the cap are not shown and are counted in the Warning")]
-    public async Task Rejected_FindingsOverTheCap_AreCountedNotShown()
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    [Fact(DisplayName = "130c fix 2 (F1, must-fire): 250 rejecting findings show 200 and the outcome says 50 are not shown (in the body and the Warning)")]
+    public async Task Rejected_FindingsOverTheCap_AreShownUpToTheCap_AndTheOutcomeCountsTheRest()
     {
         var world = new World();
         world.AddRejectedSubmission(RejectedDocument(
-            Enumerable.Range(0, FirmRejectionFindings.MaxFindings + 5).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToArray()));
+            Enumerable.Range(0, 250).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToArray()));
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
-        outcome!.Items.Should().HaveCount(FirmRejectionFindings.MaxFindings);
-        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode) && m.Contains("5 over the cap"));
+        FirmRejectionFindings.MaxFindings.Should().Be(200);
+        outcome!.Items.Should().HaveCount(200);
+        outcome.NotShownCount.Should().Be(50);
+        outcome.Degraded.Should().BeFalse();
+        outcome.Items.Select(i => i.LineNumber).Should().Equal(Enumerable.Range(1, 200).Select(i => (int?)i), "the first 200 in stored order");
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":50");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode) && m.Contains("50 over the cap"));
+    }
+
+    [Theory(DisplayName = "130c fix 2 (F1, must-not-fire): at or under the cap the member is absent from the outcome and from the JSON")]
+    [InlineData(1)]
+    [InlineData(199)]
+    [InlineData(200)]
+    public async Task Rejected_FindingsAtOrUnderTheCap_HaveNoNotShownCount(int count)
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Enumerable.Range(0, count).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(count);
+        outcome.NotShownCount.Should().BeNull();
+        JsonSerializer.Serialize(outcome, WebJson).Should().NotContainEquivalentOf("notShownCount");
+        Warnings(world).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130c fix 2 (F1): only valid rejecting findings past the cap are counted as not shown (a malformed entry is not a finding)")]
+    public async Task Rejected_TheNotShownCount_CountsOnlyValidRejectingFindingsPastTheCap()
+    {
+        var world = new World();
+        var entries = Enumerable.Range(0, 200).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToList();
+        entries.Add(JsonValue.Create("not an entry"));                                   // malformed
+        entries.Add(Stored("ApprovedRate", VersionA, 300, rejects: false));              // not a rejection
+        entries.AddRange(Enumerable.Range(400, 3).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)));
+        world.AddRejectedSubmission(RejectedDocument(entries.ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(200);
+        outcome.NotShownCount.Should().Be(3);
+    }
+
+    [Fact(DisplayName = "130c fix 2 (F1): every other outcome omits the member (existing shapes serialize as before)")]
+    public async Task OtherOutcomes_OmitTheNotShownCount()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+
+        var json = JsonSerializer.Serialize(await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None), WebJson);
+
+        json.Should().NotContainEquivalentOf("notShownCount");
     }
 
     [Fact(DisplayName = "130c EB-D-208: a firm reason comes only from a Signal the BFF writer created, for this invoice, rule version and line")]
@@ -1845,9 +1898,12 @@ public sealed class FirmFindingsProjectionTests
                 BillingHandlerKit.Facts(BillingHandlerKit.Fee(2) with { BilledRate = 650m, ApprovedRate = BillingHandlerKit.Rate(575m) }))
             .Should().ContainSingle().Subject;
         finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
-        finding.ValuesRead.Select(v => v.Name).Should().Contain(["rateCard.id", "rateCard.rateId", "approvedRate", "approvedRate.limit", "approvedRate.basis", "approvedRate.scope"],
-            "the fixture must carry the reference values the writer stores, or this test proves nothing");
-        Guid.TryParse(finding.ValuesRead.Single(v => v.Name == "rateCard.id").Value, out _).Should().BeTrue("the stored reference value is an identifier");
+        // Generic precondition (it does not name the handler's reference values, which later tasks may rename): the finding reads values that
+        // have no extracted field, and at least one of them is an identifier.
+        var referenceNames = finding.ValuesRead.Where(v => !v.ExtractedField.HasValue).Select(v => v.Name).ToList();
+        referenceNames.Should().NotBeEmpty("the fixture must carry the reference values the writer stores, or this test proves nothing");
+        finding.ValuesRead.Any(v => !v.ExtractedField.HasValue && Guid.TryParse(v.Value, out _))
+            .Should().BeTrue("a stored reference value is an identifier");
 
         var world = new World();
         world.AddRejectedSubmission(RejectedDocument(RealEntry(finding, 0)));
@@ -1859,8 +1915,8 @@ public sealed class FirmFindingsProjectionTests
         item.LineNumber.Should().Be(3);
         item.ValuesRead.Should().Contain(new FirmOutcomeValueRead("line.rate", "650.00"), "the rate extracted from the firm's own invoice is shown");
         item.ValuesRead!.Count(v => Guid.TryParse(v.Value, out _)).Should().Be(0, "no value is an identifier");
-        item.ValuesRead!.Select(v => v.Name).Should().NotContain(n => n.StartsWith("rateCard.", StringComparison.Ordinal))
-            .And.NotContain(["approvedRate", "approvedRate.basis", "approvedRate.scope", "approvedRate.limit"]);
+        item.ValuesRead!.Select(v => v.Name).Should().NotContain(referenceNames, "no value the handler read without an extracted field is projected");
+        item.ValuesRead!.Select(v => v.Name).Should().OnlyContain(n => finding.ValuesRead.Any(v => v.Name == n && v.ExtractedField.HasValue));
         var json = JsonSerializer.Serialize(outcome);
         json.Should().NotContain("07100000-0000-4000-8000-0000000000c1").And.NotContain("07100000-0000-4000-8000-0000000000c2");
         Regex.IsMatch(json, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").Should().BeFalse();
@@ -1972,5 +2028,190 @@ public sealed class FirmFindingsProjectionTests
         var item = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None))!.Items.Single();
 
         item.ValuesRead.Should().Equal(new FirmOutcomeValueRead(atCap, "1"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c fix round 2
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130c fix 2 (K1, must-fire): a value whose field the AI assigned is never projected; a firm-billed code and a plain extracted field are")]
+    public async Task Rejected_AnAiAssignedValue_IsNeverProjected()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 0, values:
+        [
+            ("line.rate", "450.00"),
+            ("line.taskCode", "AI-TASK"),
+            ("line.activityCode", "AI-ACTIVITY"),
+            ("line.expenseCode", "AI-EXPENSE"),
+            ("observation.blockBilling", "AI-OBSERVATION"),
+            ("observation.padded", "AI-PADDED"),
+            ("line.billedTaskCode", "L110"),
+        ]);
+        var fields = new[]
+        {
+            BillingFieldNames.Rate, BillingFieldNames.TaskCode, BillingFieldNames.ActivityCode, BillingFieldNames.ExpenseCode,
+            BillingFieldNames.ObservationBlockBilling, " " + BillingFieldNames.ObservationVagueDescription + " ", BillingFieldNames.BilledTaskCode,
+        };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead.Should().Equal(
+            new FirmOutcomeValueRead("line.rate", "450.00"), new FirmOutcomeValueRead("line.billedTaskCode", "L110"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("AI-");
+    }
+
+    // ── K5: reachability through the real decision (SubmissionRejectionRule.Decide) ──
+
+    private static readonly EbillingSettings DecisionSettings = new() { ReliabilityThreshold = 0.90m, ReferenceMissingCap = 0.80m, ArithmeticFailCap = 0.50m };
+
+    private static JsonObject DecidedEntry(FindingDecision decided)
+    {
+        var entry = InvoiceSubmissionPersister.FindingEntryJson(decided.Index, decided.Finding, decided, scrub: false);
+        entry["policyVersionId"] = VersionA.ToString("D");
+        return entry;
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K5): an ApprovedRate finding carrying the credit-test placeholders is held by the real decision, never rejected, so it is not projected")]
+    public async Task Rejected_AnApprovedRateFindingWithCreditTestPlaceholders_IsHeldByTheDecision_AndNeverProjected()
+    {
+        // A fee line with neither hours nor amount: the credit test has nothing to judge, so the finding lists both as unknown reads.
+        var line = BillingHandlerKit.Fee(2) with { BilledRate = 650m, ApprovedRate = BillingHandlerKit.Rate(575m), Hours = null, Amount = null };
+        var finding = BillingHandlerKit.Run(
+                BillingHandlerKit.Rule("""{"type":"ApprovedRate","tolerancePercent":0}"""), BillingHandlerKit.Facts(line))
+            .Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        var placeholders = finding.ValuesRead.Where(v => v.ExtractedField.HasValue && v.Confidence is null && v.Value is null).ToList();
+        placeholders.Should().HaveCount(2, "the credit test lists hours and amount as null-valued reads with unknown confidence");
+
+        var decision = SubmissionRejectionRule.Decide([finding], _ => (int)BillingConsequence.Reject, DecisionSettings);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Accepted);
+        var held = decision.Findings.Should().ContainSingle().Subject;
+        held.Rejects.Should().BeFalse();
+        held.HeldBecause.Should().Be(SubmissionHoldReasons.ReadFieldConfidenceUnknown);
+
+        // Stored as the persister stores it, beside a finding that did reject: only the rejecting one is projected.
+        var rejecting = BillingHandlerKit.Run(
+            BillingHandlerKit.Rule("""{"type":"RequiredData","fields":["firmInvoiceNumber"]}"""),
+            BillingHandlerKit.Facts(BillingHandlerKit.Fee(0)) with { Invoice = BillingHandlerKit.Invoice() with { FirmInvoiceNumber = null } });
+        var rejectingDecision = SubmissionRejectionRule.Decide(rejecting, _ => (int)BillingConsequence.Reject, DecisionSettings);
+        rejectingDecision.Findings.Should().ContainSingle().Which.Rejects.Should().BeTrue();
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(DecidedEntry(decision.Findings[0]), DecidedEntry(rejectingDecision.Findings[0] with { Index = 1 })));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var shown = outcome!.Items.Should().ContainSingle("the held ApprovedRate finding is a Flag, not a rejection").Subject;
+        shown.ValuesRead.Should().ContainSingle().Which.Name.Should().Be("invoice.firmInvoiceNumber");
+        shown.LineNumber.Should().NotBe(3, "line 3 is the held ApprovedRate finding's line");
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K5): a RequiredData missing-field finding with a known confidence rejects through the real decision, and projects the empty value")]
+    public async Task Rejected_ARequiredDataMissingFieldWithKnownConfidence_RejectsThroughTheDecision_AndProjectsTheEmptyValue()
+    {
+        var facts = BillingHandlerKit.Facts(BillingHandlerKit.Fee(0)) with
+        {
+            Invoice = BillingHandlerKit.Invoice() with { FirmInvoiceNumber = null },
+        };
+        var findings = BillingHandlerKit.Run(BillingHandlerKit.Rule("""{"type":"RequiredData","fields":["firmInvoiceNumber"]}"""), facts);
+        var finding = findings.Should().ContainSingle().Subject;
+        finding.ValuesRead.Should().ContainSingle(v => v.ExtractedField.HasValue && v.Value == null && v.Confidence >= 0.90m,
+            "the missing field is an extracted read with no text and a known confidence");
+
+        var decision = SubmissionRejectionRule.Decide(findings, _ => (int)BillingConsequence.Reject, DecisionSettings);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        var decided = decision.DecidingFindings.Should().ContainSingle().Subject;
+        decided.HeldBecause.Should().BeNull();
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(DecidedEntry(decided)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.ValuesRead.Should().Equal(new FirmOutcomeValueRead("invoice.firmInvoiceNumber", ""));
+    }
+
+    // ── K6: robustness ──
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-fire): a 201-character value ending in an emoji is cut without splitting the surrogate pair")]
+    public async Task Rejected_AValueEndingInAnEmoji_IsTruncatedWithoutSplittingThePair()
+    {
+        const string emoji = "\U0001F600";
+        var tooLong = new string('x', FirmRejectionFindings.MaxValueTextLength - 1) + emoji; // 199 + 2 = 201 characters; the cut would fall inside the pair
+        tooLong.Length.Should().Be(201);
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: ("line.narrative", tooLong))));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var value = outcome!.Items.Single().ValuesRead!.Single().Value;
+        value.Should().Be(new string('x', FirmRejectionFindings.MaxValueTextLength - 1) + "...");
+        value.Any(char.IsSurrogate).Should().BeFalse("no half of a pair is left");
+        var strict = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true);
+        var act = () => strict.GetBytes(JsonSerializer.Serialize(outcome));
+        act.Should().NotThrow("the outcome serializes to valid text");
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-not-fire): a whole emoji inside the cut is kept; a value at the cap is not touched")]
+    public async Task Rejected_AnEmojiInsideTheCut_IsKept()
+    {
+        const string emoji = "\U0001F600";
+        var inside = new string('x', FirmRejectionFindings.MaxValueTextLength - 2) + emoji + "y";   // 198 + 2 + 1 = 201: the cut falls after the pair
+        var atCap = new string('z', FirmRejectionFindings.MaxValueTextLength - 2) + emoji;           // exactly 200
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: [("line.a", inside), ("line.b", atCap)])));
+
+        var values = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None))!
+            .Items.Single().ValuesRead!;
+
+        values[0].Value.Should().Be(new string('x', FirmRejectionFindings.MaxValueTextLength - 2) + emoji + "...");
+        values[1].Value.Should().Be(atCap);
+    }
+
+    private const string BadSurrogateMarker = "BADSURROGATEMARKER";
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-fire): one entry whose value cannot be decoded is dropped and counted on its own; the others are shown and the document stays readable")]
+    public async Task Rejected_OneEntryThatCannotBeDecoded_DropsOnlyThatEntry()
+    {
+        var document = RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00")),
+            Stored("ApprovedRate", VersionA, 1, values: ("line.rate", BadSurrogateMarker)),
+            Stored("ApprovedRate", VersionA, 2, values: ("line.rate", "475.00")))
+            .Replace(BadSurrogateMarker, "\\ud800"); // a lone surrogate escape: the document parses, reading the string fails
+        var world = new World();
+        world.AddRejectedSubmission(document);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Degraded.Should().BeFalse();
+        outcome.Items.Select(i => i.LineNumber).Should().Equal(1, 3);
+        outcome.Items.SelectMany(i => i.ValuesRead!).Select(v => v.Value).Should().Equal("450.00", "475.00");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("1 stored finding(s)").And.Contain("1 malformed");
+        Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.UnreadableCode));
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-not-fire): a document that is malformed as a whole is still unreadable: status only, the stable UNREADABLE code, no entry shown")]
+    public async Task Rejected_AWholeDocumentThatCannotBeParsed_IsStillUnreadable()
+    {
+        var good = Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00")).ToJsonString();
+        var stored = "{ \"kind\": \"AutoRejected\", \"findings\": [ " + good + ", { \"ruleType\": \"ApprovedRate\", \"valuesRead\": [ SECRET-BROKEN";
+        var world = new World();
+        world.AddRejectedSubmission(stored);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains(FirmRejectionFindings.UnreadableCode));
+        Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.DroppedCode) || m.Contains("SECRET"));
     }
 }

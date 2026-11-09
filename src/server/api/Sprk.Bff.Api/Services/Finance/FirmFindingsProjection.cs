@@ -75,6 +75,11 @@ public enum FirmOutcomeDecision
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
 /// <param name="StatusLabel">What the firm sees as the status.</param>
+/// <param name="NotShownCount">
+/// A rejected submission only (130c fix round 2): the number of rejection findings the stored copy holds beyond the most that are shown
+/// (200), so the list in <see cref="Items"/> is known to be incomplete. Null (omitted from the
+/// JSON) when every rejection finding is shown, and for every other outcome.
+/// </param>
 public sealed record FirmOutcome(
     FirmOutcomeKind Kind,
     string? TrackingNumber,
@@ -82,7 +87,8 @@ public sealed record FirmOutcome(
     decimal? BilledTotal,
     decimal? ApprovedTotal,
     IReadOnlyList<FirmOutcomeItem> Items,
-    bool Degraded);
+    bool Degraded,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? NotShownCount = null);
 
 /// <summary>One decided or reviewer-added line, or one invoice-level adjustment, with the reviewer's reason and the rules behind it.</summary>
 /// <param name="LineId">The invoice line, for a line item; null for an adjustment.</param>
@@ -97,8 +103,9 @@ public sealed record FirmOutcome(
 /// invoice-level adjustment (it resolves no Signal).
 /// </param>
 /// <param name="LineNumber">
-/// A rejection finding only (130c): the one-based number of the invoice line it is about, as the firm's invoice lists it; null for an
-/// invoice-level finding and for every other item (omitted from the JSON). Never a line id, and never read from a live line.
+/// A rejection finding only (130c): the one-based position of the line it is about, counting the lines in the order the submission read
+/// them from the invoice (the Nth line read; it is not a number printed on the invoice); null for an invoice-level finding and for every
+/// other item (omitted from the JSON). Never a line id, and never read from a live line.
 /// </param>
 /// <param name="ValuesRead">
 /// A rejection finding only (130c): the values the rule read, as the submission stored them (name and value, nothing else); null for every other
@@ -214,7 +221,7 @@ public sealed class FirmFindingsProjection
     private readonly ILogger<FirmFindingsProjection> _logger;
 
     /// <summary>The stored-findings parser (<see cref="FirmRejectionFindings.Parse"/>); replaceable by the test assembly to inject a parser fault.</summary>
-    internal Func<string?, ILogger, Guid, IReadOnlyList<FirmRejectionFindings.Finding>> ParseRejectionFindings { get; init; } = FirmRejectionFindings.Parse;
+    internal Func<string?, ILogger, Guid, FirmRejectionFindings.ParseResult> ParseRejectionFindings { get; init; } = FirmRejectionFindings.Parse;
 
     /// <param name="writerUserId">The <c>systemuserid</c> of the identity that creates every Decision Record (<c>BillingDecisionRecorder.WriterUserIdAsync</c>).
     /// Asked at most once per projection, and only when the invoice has decided lines to give a reason to; a fault, or an empty id, degrades the
@@ -863,10 +870,10 @@ public sealed class FirmFindingsProjection
             return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], true);
         }
 
-        IReadOnlyList<FirmRejectionFindings.Finding> findings;
+        FirmRejectionFindings.ParseResult parsed;
         try
         {
-            findings = ParseRejectionFindings(json, _logger, submissionId);
+            parsed = ParseRejectionFindings(json, _logger, submissionId);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -876,6 +883,7 @@ public sealed class FirmFindingsProjection
             return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
         }
 
+        var findings = parsed.Findings;
         if (findings.Count == 0)
         {
             return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
@@ -884,7 +892,10 @@ public sealed class FirmFindingsProjection
         try
         {
             var items = await BuildRejectionItemsAsync(submissionId, findings, invoiceDecided, ct).ConfigureAwait(false);
-            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, items, false);
+
+            // Findings past the cap are left out, but the firm is told how many, so a capped list is never read as the whole of it.
+            return new FirmOutcome(
+                FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, items, false, parsed.NotShown > 0 ? parsed.NotShown : null);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {

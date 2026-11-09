@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <para><b>An allow-list parse.</b> Only the members named here are read: <c>kind</c>, <c>findings[]</c> and, per finding, <c>ruleType</c>,
 /// <c>rejects</c>, <c>policyVersionId</c>, <c>subject</c>, <c>line</c>, <c>reasonCode</c>, <c>detailWithheld</c> and <c>valuesRead[]</c> (<c>name</c>,
 /// <c>value</c> and whether <c>field</c> is present). A value is shown only when it was extracted from the firm's own invoice (the entry names
-/// its field) and its text is not an identifier. Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
+/// its field, and the field is not one the AI assigned: <see cref="BillingFieldNames.IsAiAssigned"/>) and its text is not an identifier. Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
 /// through <see cref="RuleSetService.GetFirmClauseAsync"/>), <c>policyId</c> and <c>policyCode</c> (internal identifiers), confidence and the
 /// reliability flag (NFR-10), <c>suggestedAdjustment</c>, the Signal plan (its sentences are the internal wording) and the Procedure snapshot.</para>
 /// <para><b>Which findings.</b> Only the findings that REJECTED the submission (<c>rejects</c> true) of an <c>AutoRejected</c> outcome. A
@@ -53,6 +53,16 @@ internal static class FirmRejectionFindings
     /// <summary>One finding that rejected the submission. <paramref name="LineIndex"/> is zero-based; null for an invoice-level finding.</summary>
     internal sealed record Finding(RuleType RuleType, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
 
+    /// <summary>
+    /// The result of a parse: the findings to show and how many rejection findings were valid but not shown because the stored document held
+    /// more than <see cref="MaxFindings"/> of them (<paramref name="NotShown"/>; zero when none). Malformed and refused entries are not
+    /// counted in it: they are not findings this build could show.
+    /// </summary>
+    internal sealed record ParseResult(IReadOnlyList<Finding> Findings, int NotShown)
+    {
+        internal static ParseResult Empty { get; } = new([], 0);
+    }
+
     private enum EntryResult
     {
         Accepted,
@@ -62,14 +72,16 @@ internal static class FirmRejectionFindings
     }
 
     /// <summary>
-    /// The rejection findings in <paramref name="json"/>, in stored order. Never throws for the content: an unreadable document yields none and a
-    /// Warning (<see cref="UnreadableCode"/>), dropped or refused entries a Warning (<see cref="DroppedCode"/>) with counts only.
+    /// The rejection findings in <paramref name="json"/>, in stored order, and the number of valid rejection findings left out over the cap.
+    /// Never throws for the content: an unreadable document yields none and a Warning (<see cref="UnreadableCode"/>); an entry that cannot be
+    /// read (wrong shape, or text that cannot be decoded) is dropped on its own and counted, and dropped or refused entries give a Warning
+    /// (<see cref="DroppedCode"/>) with counts only.
     /// </summary>
-    internal static IReadOnlyList<Finding> Parse(string? json, ILogger logger, Guid submissionId)
+    internal static ParseResult Parse(string? json, ILogger logger, Guid submissionId)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
-            return [];
+            return ParseResult.Empty;
         }
 
         try
@@ -79,27 +91,40 @@ internal static class FirmRejectionFindings
             if (root.ValueKind != JsonValueKind.Object)
             {
                 LogUnreadable(logger, submissionId);
-                return [];
+                return ParseResult.Empty;
             }
 
             // An internal hold (Blocked), an accepted outcome and anything else: no rejection a firm was given.
             if (!root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String
                 || !string.Equals(kind.GetString(), nameof(SubmissionEvaluationKind.AutoRejected), StringComparison.Ordinal))
             {
-                return [];
+                return ParseResult.Empty;
             }
 
             if (!root.TryGetProperty("findings", out var list) || list.ValueKind != JsonValueKind.Array)
             {
                 LogUnreadable(logger, submissionId);
-                return [];
+                return ParseResult.Empty;
             }
 
             var found = new List<Finding>();
             int malformed = 0, unknown = 0, overflow = 0;
             foreach (var entry in list.EnumerateArray())
             {
-                var result = ParseEntry(entry, out var finding);
+                // One entry that cannot be read (for example text that cannot be decoded) is dropped on its own; it does not make the
+                // whole document unreadable.
+                Finding? finding;
+                EntryResult result;
+                try
+                {
+                    result = ParseEntry(entry, out finding);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException or JsonException)
+                {
+                    result = EntryResult.Malformed;
+                    finding = null;
+                }
+
                 switch (result)
                 {
                     case EntryResult.Accepted when found.Count < MaxFindings:
@@ -124,12 +149,12 @@ internal static class FirmRejectionFindings
                     DroppedCode, submissionId, malformed + unknown + overflow, malformed, unknown, overflow);
             }
 
-            return found;
+            return new ParseResult(found, overflow);
         }
         catch (JsonException)
         {
             LogUnreadable(logger, submissionId);
-            return [];
+            return ParseResult.Empty;
         }
     }
 
@@ -243,9 +268,14 @@ internal static class FirmRejectionFindings
                 // Only a value extracted from the firm's own invoice is shown: the writer records the extracted field's name with it, and
                 // a value read from the system's own tables carries none. A Duplicate quotes an earlier invoice, and a withheld group shows
                 // no detail: neither projects a value.
-                var extracted = item.TryGetProperty("field", out var fieldJson) && fieldJson.ValueKind == JsonValueKind.String
-                    && !string.IsNullOrWhiteSpace(fieldJson.GetString());
-                if (!extracted || withheld || ruleType == RuleType.Duplicate || values.Count >= MaxValuesPerFinding)
+                var fieldName = item.TryGetProperty("field", out var fieldJson) && fieldJson.ValueKind == JsonValueKind.String
+                    ? fieldJson.GetString()
+                    : null;
+                var extracted = !string.IsNullOrWhiteSpace(fieldName);
+
+                // A value the AI assigned (a code, an observation) is the model's output, not something on the firm's invoice: never shown.
+                if (!extracted || BillingFieldNames.IsAiAssigned(fieldName!.Trim())
+                    || withheld || ruleType == RuleType.Duplicate || values.Count >= MaxValuesPerFinding)
                 {
                     continue;
                 }
@@ -266,12 +296,32 @@ internal static class FirmRejectionFindings
                     continue;
                 }
 
-                values.Add(new ValueRead(trimmedName, text.Length <= MaxValueTextLength ? text : text[..MaxValueTextLength].TrimEnd() + "..."));
+                values.Add(new ValueRead(trimmedName, Truncate(text)));
             }
         }
 
         finding = new Finding(ruleType, versionId, lineIndex, values);
         return EntryResult.Accepted;
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "..."; a cut that would fall between the two
+    /// halves of a surrogate pair (one character) steps back so the text stays valid.
+    /// </summary>
+    private static string Truncate(string text)
+    {
+        if (text.Length <= MaxValueTextLength)
+        {
+            return text;
+        }
+
+        var cut = MaxValueTextLength;
+        if (char.IsHighSurrogate(text[cut - 1]))
+        {
+            cut--;
+        }
+
+        return text[..cut].TrimEnd() + "...";
     }
 
     /// <summary>A member that is a string, or absent / JSON null (then <paramref name="text"/> is null). False for any other type.</summary>
