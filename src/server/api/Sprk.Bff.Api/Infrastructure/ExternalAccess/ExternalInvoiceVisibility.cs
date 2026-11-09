@@ -121,44 +121,38 @@ internal static class ExternalInvoiceVisibility
         && !IsInvoiceFamilyTable(logicalName);
 
     /// <summary>
-    /// Task 130-0b step 3: the columns the regarding resolver derives from a record's regarding target (the target's id as text, its
-    /// name, its URL). Every regarding target shares them, so on a root they carry the invoice only when the target IS the linked invoice.
-    /// </summary>
-    internal static readonly IReadOnlyList<string> RegardingTargetColumns =
-        new[] { "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl" };
-
-    /// <summary>
     /// Task 130-0b step 3: blanks (sets to null) every form of the invoice link in <paramref name="fields"/>, a row of the ROOT
     /// <paramref name="table"/> as a tool returns it, when the seam says that root's linked invoice is not visible to the caller (or
-    /// cannot be decided). The link columns come from <see cref="InvoiceLinks.LinkColumnsOf"/>, never from a hand list. Blanked: the
-    /// lookup in its plain and <c>_col_value</c> forms, its name columns (<c>colname</c>, <c>colyominame</c>), and every annotation on
-    /// any of them (<c>key@…</c>: formatted value, lookup logical name, navigation property). The <see cref="RegardingTargetColumns"/>
-    /// (and their annotations) are blanked too unless the row shows they hold ANOTHER target: a regarding id that reads as a GUID that
-    /// is not one of the row's linked invoices. When that cannot be told (no regarding id, no linked invoice in the row), they are
+    /// cannot be decided). The columns come from the root redaction set (<see cref="RootInvoiceLinkRedaction"/>, fix round 1 F1), never
+    /// from a hand list. Blanked always: the invoice link in every form (<see cref="RootInvoiceLinkRedaction.LinkFormsOf"/>: the lookup,
+    /// <c>_col_value</c>, <c>colname</c>, <c>colyominame</c>) and every annotation on any of them (<c>key@…</c>: formatted value, lookup
+    /// logical name, navigation property). Blanked when the regarding target is the hidden invoice (fix round 1 K2): every form of the
+    /// regarding pair and its resolver columns (<see cref="RootInvoiceLinkRedaction.RegardingForms"/>: id, record type, name, URL,
+    /// number) and their annotations. They are kept only when the row shows they hold ANOTHER target: a regarding id that reads as a GUID
+    /// that is not one of the row's linked invoices. When that cannot be told (no regarding id, no linked invoice in the row), they are
     /// blanked (fail closed). The row itself is kept.
     /// </summary>
     internal static void BlankRootInvoiceLink(string? table, IDictionary<string, object?> fields)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        var linkColumns = InvoiceLinks.LinkColumnsOf(table);
-        if (linkColumns.Count == 0)
+        var linkForms = RootInvoiceLinkRedaction.LinkFormsOf(table);
+        if (linkForms.Count == 0)
             return;
 
-        var valueForms = linkColumns.SelectMany(c => new[] { c, $"_{c}_value" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var linkForms = valueForms.Concat(linkColumns.SelectMany(c => new[] { c + "name", c + "yominame" }))
+        var valueForms = InvoiceLinks.LinkColumnsOf(table).SelectMany(c => new[] { c, $"_{c}_value" })
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var invoices = fields.Where(kv => valueForms.Contains(kv.Key)).Select(kv => GuidOf(kv.Value)).OfType<Guid>().ToHashSet();
         var regardingTarget = fields
-            .Where(kv => string.Equals(kv.Key, RegardingTargetColumns[0], StringComparison.OrdinalIgnoreCase))
+            .Where(kv => string.Equals(kv.Key, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase))
             .Select(kv => GuidOf(kv.Value))
             .FirstOrDefault();
         var regardingIsAnotherRecord = invoices.Count > 0 && regardingTarget is { } target && !invoices.Contains(target);
 
         foreach (var key in fields.Keys.ToList())
         {
-            var column = key.Split('@', 2)[0];
+            var column = RootInvoiceLinkRedaction.ColumnOf(key);
             if (linkForms.Contains(column)
-                || (!regardingIsAnotherRecord && RegardingTargetColumns.Contains(column, StringComparer.OrdinalIgnoreCase)))
+                || (!regardingIsAnotherRecord && RootInvoiceLinkRedaction.RegardingForms.Contains(column)))
             {
                 fields[key] = null;
             }
