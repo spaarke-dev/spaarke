@@ -34,6 +34,8 @@
 
 ## (b) Teams Developer Portal OAuth client registration — run by the owner
 
+> **Updated 2026-11-08 (live finding):** the portal **requires a client secret**, so the public-client steps below are superseded. The owner confirmed the secret. They create it in Entra (Certificates & secrets; dev expiry up to 24 months under ADR-028 A10 Path A) and paste it straight into the portal; the agent never sees it. The connector app is now a confidential client (public client flows off), and the portal's redirect URI goes on the **Web** platform, not Mobile and desktop. See `notes/decisions.md` 2026-11-08 and `notes/phase0-registration-facts.md`.
+
 1. Open https://dev.teams.microsoft.com › Tools › **OAuth client registration** › Register client.
 2. Fill in:
    - Name: `Spaarke Copilot Connector – dev`

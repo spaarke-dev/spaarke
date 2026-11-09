@@ -66,6 +66,9 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - 2026-11-05 — Client-secret writes for the connector client need human confirmation (root CLAUDE.md §9; FR-16). Prefer a public client with PKCE.
 - 2026-11-05 — No model-callable complete tool (O-14). April surface stays (O-15) except the OpenAPI action if FR-17 is built.
 - 2026-11-06 — Portfolio: Epic #421 (SPAARKE AI AND AUTOMATION). Hot-path `root-CLAUDE-md` = YES (FR-18).
+- 2026-11-08 — **FR-04 option A:** the privilege flag is derived from communication classification (task 018, `WorkItemPrivilege`); ontology approved it (D-212). Known limit: an AI-flagged but unclassified email is not flagged.
+- 2026-11-08 — **Connector secret:** the Teams Dev Portal requires a client secret. The owner confirmed it and creates it in Entra, pasting it straight into the portal; the agent never sees or stores the value. **ADR-028 A10 Path A:** the dev connector secret may expire up to 24 months out (Entra maximum); the 180-day cap stays for customer stamps (spec ADR Tensions). The connector app is a confidential client: public client flows off, redirect on the **Web** platform.
+- 2026-11-09 — The session moved from VS Code to the Claude Code desktop session **`mcp-r1`**; peers address this project there.
 
 ## 4. Coordination
 
@@ -75,7 +78,8 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - **ebilling-r1** — EB-D-194: invoice decisions happen only in Invoice Review. v1 shows billing Work Items only as a link out to `sprk_invoicereviewpage` (`invoiceId`, optional `lineId`, bare lower-case guids). A Copilot billing slice needs an owner decision plus uac-r2 and ebilling review.
 - **spaarke-auth-system-of-record-r1** — its planned ADR-028 amendment must be A11 or higher (A10 is ours); tell at next contact.
 - **agent-framework-fit-assessment** — a proposed `Sprk.Insights.Mcp` becomes a new `/mcp/{area}` on this host, not a second server.
-- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
+- This project's session: **`mcp-r1`** (Claude Code desktop, since 2026-11-09).
+- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `accelerator-claude-r2` (accelerator r2, desktop), `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
 - Run `/conflict-check` before each BFF PR (`AuthorizationModule.cs`, `Services/Signals/**` are shared).
 
 ## 5. Environment and live actions
@@ -101,6 +105,9 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - 2026-11-06 — No bundle-size check exists in CI yet. Fix: task 030 adds it; the widget build must run before `publish-bff-artifact.yml` embeds it.
 - 2026-11-06 — The MCP transport returns 406 without `Accept: application/json, text/event-stream`; streamed responses need buffering disabled (`WorkspaceMatterEndpoints.cs:196-200`).
 - 2026-11-06 — Agent-tool sub-agents cannot write `.claude/` (root CLAUDE.md §3). Fix: tasks 050 and 051 run in the main session.
+- 2026-11-08 — Under machine load, Git Bash `grep`/`az` calls hang, and a full `Sprk.Bff.Api.Tests` run shows dozens of unrelated failures, each taking 2–6 minutes (host start timeouts). Fix: use the Grep/Read tools and PowerShell for az. Re-run the failing classes in isolation before treating a failure as real (2026-11-08: all 5,162 passed).
+- 2026-11-08 — In PowerShell, `az … --query "length(@)"` breaks: az is a `.cmd`, so cmd mangles the `@`. Fix: `-o json | ConvertFrom-Json` and count in PowerShell. The console also shows the en dash as `�`; the stored name is correct (verify via Graph).
+- 2026-11-08 — `23610794-67de-4e6c-be61-ff80cc8cbe7f` is the External Access "Spaarke" Teams app (`src/client/external-spa/appPackage/manifest.json`), not the connector. The Dev Portal OAuth registration is under **Tools → OAuth client registration**, not **Apps**.
 
 ## 7. Key documents
 
