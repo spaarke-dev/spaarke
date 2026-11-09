@@ -613,3 +613,121 @@ Test doubles that hand-built rows now return explicit nulls for unset live-paren
 Counts: BFF build 0 errors, 0 warnings. `Spaarke.ArchTests` (full): 2181 passed, 0 failed. Filtered run of `Sprk.Bff.Api.Tests` (external, multi-root, live-parent, communication, document, invoice, unified access, finance, Issue963): 19339 total, 19330 passed, 9 skipped, 0 failed. (A first run before the last test-double fixes failed 27 and an earlier one 137, all test doubles that returned rows without the live-parent columns; none was a timeout.)
 
 Seeding proof: `ExternalMultiRootRule.cs` restored to `17a283c00c` and touched; the new tests (69 incl. the invoice source test): 54 failed, 15 passed. The passing 15 are the select pins (the selects were already complete), the FetchXML controls and the explicit-null / all-present controls. After restoring the committed file (SHA-256 `5e18ca8a9eb74616ff0d1bd4db2230d1854161cd6d4c0b42364e6154594b1242`) all pass.
+
+## Fix round 3d: class closure
+
+The closing sweep for one class: a lookup column (`_<name>_value`) read from a Web API (JSON) row that feeds an access decision for an external caller.
+
+### The rule
+
+A Web API row lists a lookup it was asked for as an explicit JSON `null` when it is not filed. A column the row does not carry was not read, which says nothing about whether it is filed. An absent column is treated as unreadable, using the decision's own fail-closed value; an explicit null is "not filed". SDK and FetchXML rows omit a null attribute, so there absence and null cannot be told apart; "absent = not filed" is kept there only where the query projects the attribute (cited below) and a test pins the projection. A typed row records whether each column was read (the property setter runs for a present property, an explicit null included) and reads an unread column as unreadable.
+
+Shared helpers (`ExternalMultiRootRule.cs:100-123`, no new type or service): `UnreadableLookup` (`"unreadable-lookup"`, not a GUID, so the existing malformed-link handling of the multi-root rule withholds the row), `LookupOf(row, column)` (null row or absent column: unreadable; explicit null: not filed; string: the value; anything else: unreadable) and `StampOf(columnRead, value)` for the typed rows.
+
+### Census A: changed in this round (Web API rows)
+
+| Site (file:line) | Columns | Decision it feeds | Absent before | Absent now |
+|---|---|---|---|---|
+| `ExternalDataService.TodoRow` (`:196`, `RootStamps()` `:221`) and `GetTodosAsync` (`:1768`) | the three root stamps (`_sprk_regardingproject/matter/workassignment_value`) | to-do list: the multi-root rule over the row's roots | not filed | unreadable stamp: the row is withheld from the list |
+| `ExternalDataService.EventRow` (`:251`, `RootStamps()` `:272`) and `ReadableEventsAsync` (`:1883`) | the three root stamps | event list: same rule | not filed | the row is withheld from the list |
+| `ExternalDataService.GetTodoRootAsync` (`:1683`, stamps at `:1703`) | the three root stamps | which root a single to-do belongs to (content, PATCH and delete scoping) | classified from the stamps that were present | `TodoRootKind.Ambiguous` (the existing deny state, refused on every route; never a 500) |
+| `ExternalDataService.CheckLiveParentsAsync` (`:2666`, reads `:2690-2692`) | the three root stamps | live-parent check before PATCH to-do and DELETE own to-do or event | not filed | `LiveParentDecision.Withheld`: 403, nothing written |
+| `ExternalDataService.ParseDeleteTarget` (`:3419`, select `BuildDeleteTargetUrl` `:3407`) | the table's parent lookups | delete-own scoping of a to-do, event or document | no parent | `HasUnreadableParentLink`: the delete is refused (blank or explicit null is still "no parent") |
+| `ExternalDataService.GetInvoiceLookupsAsync` (`:1295`, `:1314`) | `_sprk_matter_value`, `_sprk_project_value`, `_sprk_regardingworkassignment_value` of an invoice | the record gate's invoice parents | omitted (not filed) | passed on as `UnreadableLookup`; only an explicit null is omitted |
+| `ExternalInvoiceVisibility.LinkOf` (`:1134`) and `IsSet` (`:889`) | invoice source document, communication, submission and attachment links | invoice visibility (source documents, submissions, stored files) | no link | `ExternalDocumentNarrowing.UnreadableLink`, the existing "undecidable" value (the invoice is hidden); an absent column counts as set |
+| `ExternalDocumentNarrowing.JsonLink` (`:214`) | related communication and parent document links | assistant-plane document narrowing | no link | `UnreadableLink` |
+| `ExternalCallerCommunicationGuard.LinkOf` (`:242`) | the source links of an analysis, and communication and attachment ids | assistant-plane source-document decision | no link | `UnreadableLink` (the row is undecidable and hidden) |
+| `NoAccessListReader.ParseRows` (`:810`, from `QueryChunkAsync` `:789`) | `RowSelect` (subject and object columns of a deny entry) | the deny-list veto over an external caller's accessible set | an entry read without a column enforced less | a row that lacks any `RowSelect` column fails the chunk closed (the existing `NoAccessListResult.FailClosed`) |
+| `CommunicationThreadReadService.RootStamp` (`:525`) | the three root stamps of a message | message and thread visibility (`RootsOf` `:507`) | not filed | `"malformed"`, which the existing filter withholds |
+
+### Census B: already closed before this round (verified, no change)
+
+`DocumentRow` (`ExternalDataService.cs:147`, round 3b: records which root links were read); `DocumentRootLinks.Raw` (3b); `ExternalMultiRootRule.LiveParentsOf`, Web API overload (3c); `InvoiceLinksOf` (`:2011`, round 3); `GetDocumentParentAndNameAsync` (`:996`, 3c: an absent parent id is "not under the record"); `OrganizationReferenceRow` (`ExternalParticipationService.cs:1420`, `EveryLookupReturned` `:1455`, task 051, also what `InvoiceSubmissionService.LinkOf` `:2062` consumes); `GetNonSecureRootsAsync` (`:2745`: an asked root with no row or no boolean flag counts as secure and the read is not `Complete`); `CommunicationThreadReadService.ReadVisibleCommunicationAsync` (`:1321`: an absent thread id is empty, not in the open-thread set, so the message is hidden).
+
+### Census C: reads that only add a match, a right or a grant
+
+An absent column there gives fewer matches, rights or grants, never more access. `AssignedAccessStore.cs` (ledger row, `LinkCandidateRow`, `ReadRootAsync`: assigned-access grants); `CommunicationThreadReadService` `BuildParticipantClauseAsync` (`:1028`, a positive filter), `LoadAttachmentsAsync` (attachments of already-authorised messages) and `ParseMessageRow` (an absent thread id is empty and so hidden; an absent author never matches "own"); `ContactIdentityStore.cs` (`FindSystemUsersLinkingAsync` `:1726`, `ParseSystemUserRow` `:1481`: an absent contact link is unlinked, fewer bindings); `ExternalDataService.GetInvoiceParentsAsync` (`:1267`), `GetRecentGrantsAsync` (`:1395`), `GetServiceRequestRequesterAsync` (`:1030`), `GetServiceRequestRequesterAndStateAsync` (`:1076`), `GetServiceRequestsRequestedByAsync` (`:1477`) (a requester or parent match grants only to the matching party); `ExternalGrantRow` (`ExternalGrantLifecycle.cs:80`), `ExternalAccessRow` (`ExternalParticipationService.cs:2185`), `ContactOrgRow` (`:2214`), `ColleagueMembershipRow` (`:2240`) (grant and membership derivation).
+
+### Census D: not an access decision (the decision each one sits beside)
+
+- `ExternalDataService.AccessLinkRow` (`:305`) and `ContactRow` (`:283`): the participant list of a record shown to a manager; the decision beside it is the manager's can-manage-access check, which is not read from these rows.
+- `ExternalProjectDtos.cs` (`ExternalContactDto`, `ExternalDocumentDto`, `ExternalEventDto`, `ExternalTodoDto`): response DTOs serialised to the SPA; never read back from a Dataverse row.
+- `ExternalModuleDataEndpoints.RedactRootInvoiceLinksAsync` (`:516`): redaction of invoice-link values in returned module rows; the decision is the invoice visibility (`HideInvoiceLinkedRows`), which is separately fail-closed; an unreturned pair is not served.
+- `ProvisionProjectEndpoint.RootRow` and `UnsecureProjectEndpoint.SecurityRow`: secure-designation provisioning and removal on the management plane behind `DelegationRuleFilter`; an empty flag is refused as "could not tell" (task 150).
+- `RecordAccessGateEndpoint.OwnerRow`: owner facts in the can-manage-access answer (informational; `DelegationRuleFilter` is the gate).
+- `SecuredColumnReadProof` (`SdkColumnReadPermissionSource`): the field-security proof reads the application user id and column-permission names; not a lookup on a record.
+- `GrantExpiryReminderJob.DueGrant`: the expiry reminder job; grants nothing.
+- `SecureRecordIsolationCensus`: a diagnostic census; reports, grants nothing.
+
+### Census E: SDK and FetchXML rows (absent = not filed, with the projection proof)
+
+| Read | Projection (file:line) | Pin |
+|---|---|---|
+| Module rows and the record gate (`ExternalModuleRegistry.LiveParents`, `ChildRowRoots.Of`, `TryGetAttributeId` `:443`) | the module fetch `ExternalModuleDataEndpoints.cs:351` and the record gate `ExternalMessageEndpoints.cs:803` project `RootRuleAttributes` (`ExternalModuleRegistry.cs:195`, which includes the live-parent attributes) | `EveryFetchXmlModule_ProjectsEveryLiveParentAttribute` (3c) and, new, `TheRecordGate_ReadsEveryRuleAttribute_OfEverySecureRootsModule` |
+| Documents module that narrows (`ExternalDocumentNarrowing` FetchXML overload) | `ExternalModuleDataEndpoints.cs:348-352` adds `NarrowingAttributes` (`ExternalModuleRegistry.cs:224`) | new: a documents module that narrows projects every attribute the narrowing reads |
+| `ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync` (`:1094`) | SDK `ColumnSet` names the hold and the firm; no firm hides the invoice under the own-firms rule | new: `TheFirmHeldInvoiceRead_ProjectsTheHoldAndTheFirm` |
+| `ExternalAccessReconciliationJob` grant scan (`PlanGrantChange`) | `BuildGrantScanFetchXml` (`:1170-1181`) selects every root lookup, the organization and the issuer attributes | new: `TheGrantScan_ProjectsEveryLookupItReads` |
+
+### Typed rows (every Web API row type in scope)
+
+- `TodoRow` and `EventRow` (`ExternalDataService.cs:196`, `:251`): changed. Each root stamp's setter records that the column was read; `RootStamps()` returns `UnreadableLookup` for one that was not. The creator stamps (`sprk_createdbyperson`, `sprk_createdbycontact`) read as unmatched when unread, so the row is not "created by" anyone. The effect is per row: a list withholds that row, a single read or write is refused, no path gives a 500. Must-fire and must-not-fire tests for each (below).
+- `DocumentRow` (3b) and `OrganizationReferenceRow` (051): already track presence; unchanged.
+- `NoAccessEntryRow`: its list fails the chunk closed (`ParseRows`).
+- `ExternalGrantRow`, `ExternalAccessRow`, `ContactOrgRow`, `ColleagueMembershipRow`, assigned-access ledger rows, `AccessLinkRow`, `ContactRow`, the provisioning, unsecure and owner rows, `DueGrant`: reviewed (Census C and D); an absent column there cannot widen access.
+- `ContactOrganizationRow` (`ExternalOrganizationMembership.cs:168`): reported below.
+
+### Callers and selects pinned (Web API)
+
+`EveryStampReader_SelectsEveryStampColumn` drives every reader of the root stamps through its real URL builder or read and asserts the select contains all three stamp columns: `BuildTodoListUrl` and `BuildEventsQuery` (per root kind), `BuildLiveParentCheckUrl` and `BuildDeleteTargetUrl` (to-do and event), `GetTodoRootAsync`, and `CommunicationThreadReadService.ExternalSelect` (with and without content). `DeleteTargetRead_SelectsEveryLookupItsParseReads` asserts the delete-target select carries the creator stamps, every parent lookup its parse reads (found by removing each selected column and seeing the parse report it unreadable) and every invoice link column of the table. The 3c pin (`EveryCaller_SelectsEveryLiveParentColumn_OfItsTable`) keeps the live-parent columns, and the 3b/3c pins keep the document root links. The expected sets are derived from the registries (`LiveParentLookupsOf`, `LinkColumnsOf`, `RootRuleAttributes`), so a column added there breaks a pin until the select carries it.
+
+### Source-scan guard
+
+`tests/Spaarke.ArchTests/ExternalLookupAbsentReadGuardTests.cs`.
+
+How it recognises a site (line comments stripped) in `Infrastructure/ExternalAccess/`, `Api/ExternalAccess/`, `Services/ExternalAccess/`, `CommunicationThreadReadService.cs` and `ExternalCallerCommunicationGuard.cs`: a call to `TryGetValue`, `TryGetProperty`, `ContainsKey`, `GuidValue`, `TryGuid` or `GuidOf` whose argument holds a `"_..._value"` literal (also `$"_{x}_value"`) or names a `string` constant whose initialiser does (transitively); a `[JsonPropertyName]` whose argument is such a literal or constant (a typed row property); and an SDK read (`GetAttributeValue<EntityReference|Guid|Guid?>`, `Attributes.TryGetValue`, `Attributes.Contains`, `.Attributes[`, `is EntityReference`, `case EntityReference`). Sites are grouped by file and enclosing member (brace-matched). Reads through the sanctioned fail-closed helpers (`LookupOf`, `RootStamp`, `RootLinkOf`, `LinkOf`) are not sites.
+
+Ratchet: each group is in `ReviewedSites` with its exact count, a category (`FailsClosed`, `ProjectedAndPinned`, `PositiveOnly`, `NotAnAccessDecision`, `KnownOpen`) and a one-line reason (51 entries). An unreviewed group, a changed count, a stale entry and a changed number of `KnownOpen` entries (`KnownOpenSites = 4`) each fail.
+
+What it misses (covered by the unit and contract tests above): a column name that reaches the call through a variable, a parameter or a data table rather than a literal or constant (for example the column arrays of `ExternalCallerCommunicationGuard` and the registry's attribute lists); a helper that re-implements `LinkOf` under another name; a file outside the scope list; and whether a reviewed site stays correct after its code changes inside a counted group (it fixes where reads are, not what they do).
+
+Controls: an unreviewed read is caught; each spelling of a lookup read is caught (`Control_EachSpellingOfALookupRead_IsCaught`); a reviewed site passes; a changed count is caught; sanctioned and unrelated code is not a site; a comment is not a site; the enclosing member is the method.
+
+### Known limits (reported, not changed; the four `KnownOpen` baseline entries and two adjacent items)
+
+- `ExternalOrganizationMembership.ContactOrganizationRow` (`:168`, reads `:107`, `:148`): the revoke sweep (admin plane) skips a row that lacks the contact lookup, so a grant may stay for a later sweep. The select is a constant of the class. Follow-up: read an absent column as "cannot tell" and report it.
+- `NoAccessEnforcementStore.EntryFrom` (`:108`) and `ReadOwnerAsync` (`:335`): admin-side share removal over deny entries; an entry read without a subject or object column enforces less. The select is a constant of the class.
+- `CommunicationThreadReadService` `ThreadRegardingFields` (`:55`, read `:811`): the regarding record of an impersonated (Dataverse-permission) thread read; an absent column reads as a record-less thread. Dataverse applies the caller's own permissions on that path.
+- Adjacent, not a lookup: `sprk_accesspermission` (a choice column) absent reads as `DocumentPermission.NotNarrowed` in `ExternalDocumentNarrowing.FromWebApi`. Every caller selects it. Changing it touches about 35 test doubles; recommended as a follow-up of the same shape.
+- Outside the guard's scope: the impersonated regarding resolution (`CommunicationThreadReadService.ResolveRegardingFromRow`, `Api/Filters/CommunicationRecordAuthorizationFilter.cs`) and the internal reconciler `Services/Access/ChildAccessPermissionReconciler.cs`.
+
+### Tests (fix round 3d)
+
+New:
+- `ExternalLookupAbsentColumnReadTests` (integration/contract): to-do list, event list, `GetTodoRootAsync` and the live-parent check for each stamp column not returned (must fire), each with a control that lists, names or applies the row; PATCH to-do refused with nothing written and applied with explicit nulls; invoice lookups (absent unreadable, explicit null omitted); the pins above.
+- `ExternalLookupAbsentColumnUnitTests` (unit): `LookupOf` (must fire and must not fire), `StampOf`, `UnreadableLookup` withheld by the rule, `ParseDeleteTarget` (parents and invoice links one column at a time, a blank or null parent is none, a non-GUID is unreadable, creator stamps unread match nobody), `ExternalInvoiceVisibility.LinkOf`, document narrowing links, communication stamps (`RootsOf`), assistant-plane source documents, and the deny-list `ParseRows`.
+- `ExternalDeleteOwnTests`: `ParseDeleteTarget_AParentColumnNotReturned_IsUnreadable` (the document delete target).
+- `ExternalLookupAbsentReadGuardTests` (ArchTests): the guard and its controls.
+
+Existing test changed because the behaviour changed on purpose: `ExternalInvoiceVisibilityTests.Unreadable_ALiveParentColumnTheSourceReadDidNotReturn_HidesTheInvoice` (`:252`). A narrowing link column (the parent document, the related communication) that the source read did not return is now caught by the source's own narrowing first, so the invoice is hidden as `SourceHidden`; any other live-parent column is still `RootUnresolved`. Both hide the invoice.
+
+Test doubles changed to return explicit nulls for unset lookups: `Issue963_ExternalDataPagingTests` (to-do and event rows carry the other root stamps; document rows carry the narrowing columns), `ExternalMessageSendTests.AsDataverseRow` (stamps), `ExternalInvoiceVisibilityTests` (`InvoiceWorld`: source and communication links), `ExternalDocumentNarrowingTests` (related communication and parent document links), `InvoiceLinksTests` (its `Rows` double answers every selected column it was not seeded with as an explicit null), `DataverseDescribeHandlerTests`, `DataverseReadQueryHandlerTests` and `DataverseSearchDataHandlerTests` (the analysis source links: document, output file, regarding document). A first broad run showed 68 failures, all doubles that returned rows without these columns (plus one load timeout); none was a product defect.
+
+Counts: BFF build (`dotnet build src/server/api/Sprk.Bff.Api/`) 0 errors, 0 warnings. `Spaarke.ArchTests` (full, from the worktree path): 2208 passed, 0 failed, 0 skipped (2181 before this round plus the 27 cases of the new guard). Broad filtered run of `Sprk.Bff.Api.Tests` (External, MultiRoot, LiveParent, Communication, Document, Invoice, UnifiedAccess, Finance, Issue963, NoAccess, Todo, Event): 20553 total, 20540 passed, 10 skipped, 3 failed. Two of the three were `InvoiceLinksTests` (`ReadLinkedInvoices_ReadsEveryInvoiceColumn`, `ReadLinkedInvoices_OneReadPerChunk`): their row double omitted selected columns instead of answering explicit nulls; fixed after the run (test double only). The third, `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`, was a client timeout under load (1 m 35 s in a 31-minute run). Re-run after the fix of every touched or new class together with `ProvisionProjectIdempotencyTests` (`InvoiceLinksTests`, `ExternalLookupAbsentColumn*`, `ExternalDeleteOwnTests`, `ExternalInvoiceVisibilityTests`, `ExternalDocumentNarrowingTests`, `Issue963_ExternalDataPagingTests`, `ExternalMessageSendTests`, the three `Dataverse*HandlerTests`): 1211 total, 1211 passed, 0 failed. The full broad run was not repeated after the `InvoiceLinksTests` double fix.
+
+Seeding proof (the six production files restored to `be36c99e98`; `ExternalMultiRootRule.cs` kept at the new version because it only adds helpers; `CommunicationThreadReadService.RootsOf` made `internal` and a `ParseRows` stub with the old behaviour added so the tests compile; classes `ExternalLookupAbsentColumn*` and `ExternalDeleteOwnTests`): 212 tests run, 29 failed, 183 passed. Failed before, pass after: to-do list, event list and `GetTodoRootAsync` for each of the three stamp columns (9); live-parent check for to-do and event (2); PATCH to-do with the project and the work-assignment stamp not returned (2); invoice lookups (1); `ParseDeleteTarget` one column at a time for to-do, event and document (3) and the document delete target (1, in `ExternalDeleteOwnTests`); the delete-target pin (3); `LinkOf` (1); document narrowing (1); assistant source documents (1); communication stamps (1); deny list (1). Passed in both states: the explicit-null and all-present controls; the projection pins (the selects and projections were already complete, so those pins hold the line rather than fail before); `ParseDeleteTarget_AnAbsentCreatorStamp_MatchesNobody`; the PATCH variant that masks the matter stamp (the to-do's own root, which the old root resolution already refused); the helper tests of `ExternalMultiRootRule` (kept at the new version). The three `ParseDeleteTarget` must-not-fire cases cannot run against the old parse (they find the parent column by removing it and seeing the parse report it unreadable), so they also fail before. After restoring the committed files all pass.
+
+Files restored byte-identical (SHA-256 checked against the committed tree) and touched:
+
+| File | SHA-256 |
+|---|---|
+| `ExternalDataService.cs` | `185383bf5e498948a3f77bad08983f75e7649a85d34710cfad72d53bb051b1ec` |
+| `ExternalDocumentNarrowing.cs` | `32b1726c25db99b8d5a2838c7acc7f6c7a1d9b21a273c732c89c852b341e3732` |
+| `ExternalInvoiceVisibility.cs` | `4e92d061a9f64a06785cd63b30356f2c71d43309d1891d6b38d18d0fa7a6d176` |
+| `ExternalMultiRootRule.cs` | `f4b86271938876c0326db5704686ecdacb9a8fb729bac8edffd9eeb8b96eb8f0` |
+| `NoAccessListReader.cs` | `15da30935d52366d22bbaac40a261b58c3bb3ed084ba4ca5ce7a5bfb04d2a7b5` |
+| `ExternalCallerCommunicationGuard.cs` | `3d3b67108b867b7f87022436f7f13087a599dab8d3f20e19a358f4daecc6c665` |
+| `CommunicationThreadReadService.cs` | `f0d7de1052c4dc2c2284cc0c77c07e81017ee68284cf70939319f98238df4812` |
+
+### Is the class closed in the external-access surface?
+
+Yes for the reads that feed an external caller's access decision: every Web API read of a lookup column in that surface now treats an absent column as unreadable (Census A and B), adds only a match or grant (C), is not an access decision (D) or is an SDK/FetchXML read with a cited, pinned projection (E). The guard keeps a new read from appearing unreviewed. Not closed, and listed above: the four `KnownOpen` admin-plane and impersonated sites, the adjacent `sprk_accesspermission` choice column, and code outside the guard's scope.
