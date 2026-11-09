@@ -112,3 +112,61 @@ The review found no fix-now defect in 022 itself. The work branch was merged in 
 Fail-then-pass (fix round 1): with the old prefix rule in `projectService.ts` and the HEAD `SummarizeFilesDialog.tsx`, **4 failed / 24 passed** (2 suites). With the fix, the touched folders (`CreateProjectWizard`, `SummarizeFilesWizard`, `Wizard`, `assignedAccessSync.test.ts`, `webApiCreateError.test.ts`) pass **425 / 425 in 25 suites**. `tsc --noEmit`: exit 0. client-lint: `ui-components` ok (see above). Vite build of `CreateProjectWizard`: `dist/index.html` 1,175.56 kB (318.88 kB gzip), exit 0, not deployed.
 
 rework: fix-round-1 task 022 (K1 prefix, K2 owner wording, three found-in-passing items fixed, secure+source test, deploy hard gate)
+
+## Fix round 2 (the mapping-source rule, 2026-11-09)
+
+**The rule.** Values mapped from a secure source are written only into a row owned by that source's isolation owner. "Secure" is the 032b copy gate's secure-if-any predicate (`MappingSourceCopyGate.DecideAsync`): a secure-flagged root whose flag is not an explicit `false`, or a source owned by the Secure Record owner team. No second predicate was added.
+
+**Step 3 narrows early** (`RecordCreationService.Mapping.cs`, `MapFieldsAsync`, after the caller mask). A secure source maps only when one of these holds:
+
+- (a) the create is secure from creation (`request.SecureFromCreation`);
+- (b) the source is the caller's own filing parent: the regarding pair or typed parent resolved from the caller's payload, or an explicit source equal to a parent the caller's row is filed under (or to the pair id it sends). A mapped lookup never counts.
+
+Otherwise the create maps nothing and carries one warning, code `record_creation.mapping_source_secure`. An answer that cannot be told (no owner read back, a fault) maps nothing too. The create still proceeds. Helpers: `SourceMapsBeforeOwner`, `SourceIsCallersFilingParent`.
+
+**The owner check (the invariant).** It runs after step 7 (the owner) and before step 11 (the create), on every path that mapped a value (`EnforceMappingSourceOwnerAsync`). The copy gate is asked again with the decided owner team as the row owner:
+
+- Allowed: nothing changes.
+- Otherwise (secure, or not told — a fault resolving the Secure team included): every mapped value is removed, and so is any adapter default copied from a mapped value. The caller's values and the plain adapter defaults stay, and the same warning code is given. The owner and the filing are never changed.
+
+Two choices, made where the brief said "stop and report" might apply:
+
+- If a removed value files the row (the regarding pair, or a lookup that Repair's own `WouldFileTheRow` treats as filing), steps 6–7 read it. Removing it would leave the owner and filing decided by a value that is no longer written. So the create is **refused** (`CheckFailedCode`, nothing written) instead of stripped. Step 3's narrowing makes this reachable only under (a) or (b) with a mapped filing lookup.
+- After a strip, the table's pre-write rules are asked again on the row as it will be written.
+
+**Reads.** The source's owner and secure flag (`MappingSourceCopyGate.SourceGateColumns`) are read in the same app-only read as the mapped columns: one read, no new round trip. The caller mask still keeps only the mapped columns, so the gate columns are never copied. A Default-only profile now makes that one read (gate columns only).
+
+**Wizard (preview only).** When the Matter chosen in "Associate To" is secure (`sprk_issecure === true`), the Project wizard turns Secure on and locks it, with a short reason (`SECURE_PARENT_LOCK_REASON`). A non-secure matter, an account, or a failed read leaves it editable. Only the latest association's answer is applied. Files: `CreateProjectWizard.tsx` (`onAssociationChange`), `CreateProjectStep.tsx` (`parentSecure`), `SecureProjectSection.tsx` (`lockedOn`).
+
+**Tests.**
+
+- Unit (`tests/unit/domain/RecordCreation/MappingSourceRuleTests.cs`): (a)/(b)/neither/unknown, and which origins count as the filing parent.
+- Seam (`RecordCreationServiceMappingSeamTests.MappingSourceRule.cs`):
+  - must fire: an explicit secure source the row is not filed under maps nothing; the Project wizard's create from a secure matter with Secure off maps nothing; a source whose owner does not come back maps nothing; a secure source mapping a filing lookup, not the filing parent, maps and files nothing; a forced owner mismatch under (b) strips every mapped value and keeps the owner, the filing and the caller's values; a fault resolving the Secure team strips.
+  - must not fire: a child filed under a secure matter (inferred, and named explicitly) maps and is owned by the Secure team; a non-secure source is unchanged; the Project wizard's create from an ordinary matter maps.
+- Existing suites (Office quick-create, the Office to-do, the event/analysis routes, the secure-root create route, the child-record route): the fixture sources now state an owner and a secure flag, as Dataverse returns them.
+- Wizard (`CreateProjectWizard.secureParent.test.tsx`): a secure matter locks Secure on with the reason; a non-secure matter, an unreadable one and an account leave it editable; the locked section reports no change.
+
+**Not covered by a test:** the refusal when a removed mapped value files the row. The seam harness has no profile that maps a filing lookup from a secure parent the caller files under.
+
+**Evidence.**
+
+- Fail-then-pass, BFF. The new tests were run over HEAD's `RecordCreationService.cs` and `.Mapping.cs`, shimmed only for the new names (`SourceMapsBeforeOwner` and `SourceIsCallersFilingParent` answer `true`; the constants are present). Result: **12 failed / 9 passed** of 21. The 9 that passed are the must-not-fire cases and the unit rows that expect `true`. With the change: 21 / 21.
+- Fail-then-pass, wizard. `CreateProjectWizard.secureParent.test.tsx` over HEAD's `CreateProjectWizard.tsx` and `CreateProjectStep.tsx`: **4 failed / 2 passed**. With the change: 6 / 6.
+- Filtered BFF run (RecordCreation, ChildRecord, OfficeQuickCreate, MappingWriteGates, OfficeTodoCreate, AnalysisEndpoints, RecordCreatorPerson, InvoiceReviewWritePath, SecureRootCreateRoute, EventEndpoints, FieldMappingPush, MappingSourceRule, OfficeTodoRegarding): **1756 passed, 0 failed**, 3 skipped (1759).
+- BFF test-project build: 0 warnings, 0 errors.
+- ArchTests, RecordCreation-related guards: 161 / 162. The one failure is the 045a guard 1 on `CommunicationService.cs:3023` (`CopyRegardingFromSourceAsync`). That file is not touched here, so the failure is pre-existing on the work branch (see found in passing).
+- `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
+- Jest (`CreateProjectWizard`, `CreateRecordWizard`): **236 / 236 in 17 suites**. `tsc --noEmit`: exit 0. Vite build of `src/solutions/CreateProjectWizard`: `dist/index.html` 1,176.27 kB (319.10 kB gzip), exit 0, not deployed.
+
+**Found in passing (fix round 2).** ArchTest `RegardingPairTypeImpliesIdGuardTests` (045a guard 1) fails at the work-branch tip: `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs:3023`. `CopyRegardingFromSourceAsync` writes `sprk_regardingrecordtype` with no `sprk_regardingrecordid` in the same member. Not changed here.
+
+## Held: Restricted sources
+
+Held for a follow-up. In rule wording only:
+
+- A Restricted source (`sprk_accesspermission` = Restricted) follows the same class: values mapped from it are written only into a row that ends Restricted under the same source.
+- It needs two predicates beyond the secure one:
+  - per source table, whether the source is Restricted (the column and the tables that carry it);
+  - per target, whether the row being created ends Restricted in this create.
+- `sprk_document` gets its access permission after the create (#2169), so the second predicate cannot be read off the row before the create for a document target.
