@@ -54,6 +54,7 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     private static readonly Guid SharedMatter = Guid.Parse("13000000-0000-4000-8000-00000000aa01");
     private static readonly Guid OtherMatter = Guid.Parse("13000000-0000-4000-8000-00000000aa02");
     private static readonly Guid SecureProject = Guid.Parse("13000000-0000-4000-8000-00000000bb01");
+    private static readonly Guid DocumentId = Guid.Parse("13000000-0000-4000-8000-00000000cc01");
     private static readonly Guid ContactId = Guid.Parse("13000000-0000-4000-8000-0000000000e1");
     private static readonly Guid WriterId = Guid.Parse("13000000-0000-4000-8000-0000000000f1");
     private static readonly Guid UserId = Guid.Parse("13000000-0000-4000-8000-0000000000f9");
@@ -367,6 +368,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         }
 
         _h.Submissions[id] = row;
+        // The submission's own row as the secure-roots rule reads it (its core lookups and parents), which names the same core record.
+        _data.SubmissionRows[id] = new Dictionary<string, object?> { ["sprk_regardingmatter"] = matter ?? SharedMatter };
         _submissionRows.Add(new Entity("sprk_invoicesubmission", id)
         {
             ["sprk_processingstatus"] = new OptionSetValue((int)status),
@@ -1015,6 +1018,87 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _invoiceDecisions.Should().BeEmpty("there is no invoice to decide");
     }
 
+    // ── Fix round 6: a record decided by a core gets that core's secure-roots check, including a submission with no invoice yet ──
+
+    [Theory(DisplayName = "130b fix 6 (must-fire): a submission with NO invoice yet whose own row names a secure root the caller cannot read (a second core, or a parent filed under one) is 403 and nothing is projected")]
+    [InlineData("second-core")]
+    [InlineData("parent-under-secure-root")]
+    public async Task ASubmissionWithNoInvoice_WhoseOwnRowNamesASecureUnreadableRoot_Is403_AndNothingIsProjected(string kind)
+    {
+        var received = SeedSubmission(FirmA);
+        AddSecureRootTo(received, kind);
+
+        await AssertRefusedAndNothingProjectedAsync(await Submission(received));
+        _data.SubmissionReads.Should().Be(1, "the submission's own row was read for the rule");
+        _data.FlagReads.Should().Be(1, "the secure status of the unreadable root was asked");
+        _invoiceDecisions.Should().BeEmpty("there is no invoice, so the refusal came from the submission's own row");
+    }
+
+    [Theory(DisplayName = "130b fix 6 (must-not-fire): a submission with no invoice yet whose own core is readable (or whose extra root is known not secure) is 200, status only")]
+    [InlineData("readable-core")]
+    [InlineData("second-core-not-secure")]
+    [InlineData("parent-not-secure")]
+    public async Task ASubmissionWithNoInvoice_WhoseOwnRootsAreReadableOrNotSecure_Is200(string kind)
+    {
+        var received = SeedSubmission(FirmA);
+        if (kind != "readable-core")
+        {
+            AddSecureRootTo(received, kind == "second-core-not-secure" ? "second-core" : "parent-under-secure-root");
+            _data.NonSecureRoots.Add((ExternalGrantRootType.Project, SecureProject));
+        }
+
+        var response = await Submission(received);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("kind").GetString().Should().Be("SubmissionInProgress");
+        if (kind == "readable-core")
+        {
+            _data.FlagReads.Should().Be(0, "every root the submission names is readable, so no flag is needed");
+        }
+    }
+
+    [Theory(DisplayName = "130b fix 6: a root-status read on the submission's own row that faults or cannot be completed is a retryable 503, never a pass, and nothing is projected")]
+    [InlineData("flag-fault")]
+    [InlineData("row-fault")]
+    [InlineData("live-parent-fault")]
+    public async Task ASubmissionWithNoInvoice_WhoseOwnRootStatusCannotBeRead_Is503_AndNothingIsProjected(string kind)
+    {
+        var received = SeedSubmission(FirmA);
+        switch (kind)
+        {
+            case "flag-fault":
+                AddSecureRootTo(received, "second-core");
+                _data.FlagFault = new TimeoutException("the root status is down");
+                break;
+            case "row-fault":
+                _data.SubmissionFault = new TimeoutException("the submission row is down");
+                break;
+            default:
+                // A parent whose live roots could not be read is unknowable, so the submission is withheld as unavailable.
+                _data.SubmissionRows[received]["sprk_document"] = DocumentId;
+                _data.LiveParentFault = true;
+                break;
+        }
+
+        await AssertRefusedAsync(await Submission(received), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().BeEmpty("a refused request projects nothing");
+    }
+
+    /// <summary>Makes the submission's own row (as the rule reads it) name a project the caller cannot read, as a second core or through a parent.</summary>
+    private void AddSecureRootTo(Guid submission, string kind)
+    {
+        var row = _data.SubmissionRows[submission];
+        if (kind == "second-core")
+        {
+            row["sprk_regardingproject"] = SecureProject;
+            return;
+        }
+
+        row["sprk_document"] = DocumentId;
+        _data.LiveRoots[("sprk_document", DocumentId)] = [(ExternalGrantRootType.Project, SecureProject)];
+    }
+
     /// <summary>
     /// An invoice the PROJECTION's store holds and the filter's read does not: the filter sees no invoice (it passes undecided), the projection
     /// would find one. Seeded as another firm's on a matter the caller cannot read, so showing anything of it is a leak.
@@ -1390,6 +1474,43 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             return FlagFault is { } fault
                 ? Task.FromException<NonSecureRootsRead>(fault)
                 : Task.FromResult(new NonSecureRootsRead(roots.Where(NonSecureRoots.Contains).ToHashSet()));
+        }
+
+        /// <summary>Submission id to its own row's lookups as <see cref="ExternalDataService.GetSubmissionLookupsAsync"/> returns them.</summary>
+        public Dictionary<Guid, Dictionary<string, object?>> SubmissionRows { get; } = new();
+
+        /// <summary>When set, the submission row read throws it.</summary>
+        public Exception? SubmissionFault { get; set; }
+
+        private int _submissionReads;
+
+        public int SubmissionReads => Volatile.Read(ref _submissionReads);
+
+        /// <summary>The live roots of a parent (table, id) as the live-parent read resolves them; any other parent is left unresolved.</summary>
+        public Dictionary<(string Table, Guid Id), IReadOnlyList<(ExternalGrantRootType Root, Guid Id)>> LiveRoots { get; } = new();
+
+        /// <summary>When set, the live-parent read answers that it faulted.</summary>
+        public bool LiveParentFault { get; set; }
+
+        public override Task<LiveParentRootsRead> GetLiveParentRootsAsync(
+            IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct = default) =>
+            Task.FromResult(new LiveParentRootsRead(
+                parents.Where(LiveRoots.ContainsKey).ToDictionary(p => p, p => LiveRoots[p]),
+                Faulted: LiveParentFault));
+
+        public override Task<IReadOnlyDictionary<string, object?>> GetSubmissionLookupsAsync(
+            Guid submissionId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _submissionReads);
+            if (SubmissionFault is { } fault)
+            {
+                return Task.FromException<IReadOnlyDictionary<string, object?>>(fault);
+            }
+
+            return SubmissionRows.TryGetValue(submissionId, out var row)
+                ? Task.FromResult<IReadOnlyDictionary<string, object?>>(row)
+                : Task.FromException<IReadOnlyDictionary<string, object?>>(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoicesubmission", submissionId));
         }
 
         public override Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(

@@ -243,7 +243,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
         // The invoices module's other row rule, applied explicitly: Read on every SECURE root the invoice names (ExternalMultiRootRule, the
         // one the module registers through RequireReadOnSecureRoots). Before any projection read; the answer is the same 403.
-        var secure = await DecideSecureRootsAsync(principal, invoice, ct);
+        var secure = await DecideSecureRootsAsync(principal, InvoiceTable, invoice, InvoiceCoreColumns, ct);
         if (secure is not null)
         {
             return (secure, false);
@@ -283,13 +283,16 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// The secure-roots rule of the external invoices module (<c>RequireReadOnSecureRoots</c>), over the invoice as read: the SAME
-    /// functions the module grid and the record gate call (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/>,
-    /// <c>ChildRowRoots.Of</c>, <see cref="ExternalMultiRootRule.ReadFlagsAsync"/>, <see cref="ExternalMultiRootRule.ChildRowReadable"/>) over the invoice's core
-    /// lookups (matter, project, work assignment) and its parents' live roots. Null when the caller may see the invoice; the uniform 403
-    /// when it may not (nothing says which root); a retryable 503 when the answer rests on a read that failed (fail closed).
+    /// The secure-roots rule of the external invoices module (<c>RequireReadOnSecureRoots</c>), over a record this filter decides by its
+    /// core (an invoice, or a submission's own row), as read: the SAME functions the module grid and the record gate call
+    /// (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/>, <c>ChildRowRoots.Of</c>, <see cref="ExternalMultiRootRule.ReadFlagsAsync"/>,
+    /// <see cref="ExternalMultiRootRule.ChildRowReadable"/>) over the row's core lookups (<paramref name="core"/>: project, matter, work
+    /// assignment) and its parents' live roots. Null when the caller may see the record; the uniform 403 when it may not (nothing says which
+    /// root); a retryable 503 when the answer rests on a read that failed (fail closed). Every record decided by a core goes through here,
+    /// so a submission that has no invoice yet is checked on its own row (fix round 6).
     /// </summary>
-    private async Task<IResult?> DecideSecureRootsAsync(CallerPrincipal principal, IReadOnlyDictionary<string, object?> invoice, CancellationToken ct)
+    private async Task<IResult?> DecideSecureRootsAsync(
+        CallerPrincipal principal, string table, IReadOnlyDictionary<string, object?> row, CoreColumns core, CancellationToken ct)
     {
         try
         {
@@ -297,11 +300,10 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
                 !row.TryGetValue(column, out var value) || value is null ? null : value is Guid id ? id.ToString() : value.ToString();
 
             var live = await _data.ReadLiveParentRootsAsync(
-                [ExternalMultiRootRule.LiveParentsOf(InvoiceTable, invoice)], ct);
+                [ExternalMultiRootRule.LiveParentsOf(table, row)], ct);
             var rule = ChildRowRoots.Of(
-                InvoiceTable, invoice,
-                ExternalMultiRootRule.Stamps(
-                    Link(invoice, "sprk_project"), Link(invoice, "sprk_matter"), Link(invoice, "sprk_regardingworkassignment")),
+                table, row,
+                ExternalMultiRootRule.Stamps(Link(row, core.Project), Link(row, core.Matter), Link(row, core.WorkAssignment)),
                 live);
             var flags = await _data.ReadSecureRootFlagsAsync(principal, [(IEnumerable<(ExternalGrantRootType, string?)>)rule], ct);
             if (ExternalMultiRootRule.ChildRowReadable(principal, flags, rule))
@@ -311,21 +313,38 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
             if (live.Faulted || !flags.IsComplete)
             {
-                _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the invoice's secure-root status could not be read; answering 503.");
+                _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the record's secure-root status could not be read; answering 503.");
                 return FirmOutcomeErrors.Unavailable();
             }
 
-            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice names a root the caller cannot read.");
+            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the record names a root the caller cannot read.");
             return FirmOutcomeErrors.Forbidden();
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the invoice's secure-root status could not be read; answering 503.");
+            _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the record's secure-root status could not be read; answering 503.");
             return FirmOutcomeErrors.Unavailable();
         }
     }
 
+    /// <summary>The columns of a table that name its core record (project, matter, work assignment).</summary>
+    private readonly record struct CoreColumns(string Project, string Matter, string WorkAssignment);
+
     private const string InvoiceTable = "sprk_invoice";
+    private const string SubmissionTable = "sprk_invoicesubmission";
+
+    private static readonly CoreColumns InvoiceCoreColumns = new("sprk_project", "sprk_matter", "sprk_regardingworkassignment");
+
+    private static readonly CoreColumns SubmissionCoreColumns =
+        new("sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment");
+
+    /// <summary>
+    /// The columns of a submission's own row that the secure-roots rule takes in: its core lookups and the parents whose live roots join the
+    /// rule (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/> of the submission table).
+    /// </summary>
+    private static readonly string[] SubmissionScopeColumns =
+        [SubmissionCoreColumns.Project, SubmissionCoreColumns.Matter, SubmissionCoreColumns.WorkAssignment,
+            .. ExternalMultiRootRule.LiveParentLookupsOf(SubmissionTable).Select(l => l.Column)];
 
     /// <summary>The core record lookups of an invoice and the grant root each is checked against.</summary>
     private static readonly (string Column, ExternalGrantRootType Type)[] CoreRoots =
@@ -361,6 +380,31 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the submission's core record.");
             return (FirmOutcomeErrors.Forbidden(), false);
+        }
+
+        // The secure-roots rule on the submission's OWN row, exactly as the invoice's is applied above: a submission can exist before its
+        // invoice does, and then its own core record(s) and parents are all that decide it. The row is read here (its core lookups and the
+        // lookups LiveParentLookupsOf names), before any projection read.
+        IReadOnlyDictionary<string, object?> row;
+        try
+        {
+            row = await _data.GetSubmissionLookupsAsync(submissionId, SubmissionScopeColumns, ct);
+        }
+        catch (RecordNotFoundException)
+        {
+            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the submission is missing.");
+            return (FirmOutcomeErrors.Forbidden(), false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The submission's core record and parents could not be read; answering 503.");
+            return (FirmOutcomeErrors.Unavailable(), false);
+        }
+
+        var secure = await DecideSecureRootsAsync(principal, SubmissionTable, row, SubmissionCoreColumns, ct);
+        if (secure is not null)
+        {
+            return (secure, false);
         }
 
         // THE (a') decision the submission list and the single read apply (one seam): with an invoice, the invoice predicate; without one,
