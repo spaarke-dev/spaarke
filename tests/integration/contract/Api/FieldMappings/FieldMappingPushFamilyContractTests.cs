@@ -390,7 +390,8 @@ public class FieldMappingPushFamilyContractTests
         var response = await FieldMappingPushFamily.PreviewAsync(
             new FieldMappingPushFamily.PreviewInput(
                 "sprk_event", members, false, [rule], new Dictionary<string, object?> { ["sprk_assignedname"] = "Alex" },
-                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (table, column) => column == "sprk_assignedname"),
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (table, column) => column == "sprk_assignedname",
+                Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild()),
             "token", CallerSystemUserId, probe, dataverse, entities.Object,
             (_, ids, _) => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(new Dictionary<Guid, RootRecordFlags>
             {

@@ -727,7 +727,7 @@ public static class FieldMappingEndpoints
                 return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        selection.SkippedCount, isAssignedToColumn, refusedChildIds, sourceGate),
+                        selection.SkippedCount, isAssignedToColumn, sourceGate, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
@@ -761,6 +761,7 @@ public static class FieldMappingEndpoints
 
             // Step 4: For each child, apply mapping rules and update
             var (updatedCount, failedCount, skippedCount, errors, fieldResults) = await ApplyMappingsToChildRecordsAsync(
+                sourceGate,
                 dataverseService,
                 restamper,
                 rules,
@@ -774,8 +775,7 @@ public static class FieldMappingEndpoints
                 rootFiling,
                 lookupBinds,
                 entityService,
-                impersonatedQuery,
-                sourceGate: sourceGate);
+                impersonatedQuery);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);

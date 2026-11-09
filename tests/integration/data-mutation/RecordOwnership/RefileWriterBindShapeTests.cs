@@ -485,6 +485,7 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [first, second],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -602,6 +603,7 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [matterRule, threadRule],
             new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid(), ["sprk_threadsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -818,6 +820,7 @@ public sealed class RefileWriterBindShapeTests
                     SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
                 };
                 var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                     _write.Object, Restamper(), [rule],
                     new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
                     "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -995,6 +998,7 @@ public sealed class RefileWriterBindShapeTests
             SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
         };
         return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, restamper ?? Restamper(), [rule],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", children ?? [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,

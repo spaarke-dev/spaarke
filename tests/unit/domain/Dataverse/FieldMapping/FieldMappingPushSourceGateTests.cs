@@ -230,6 +230,7 @@ public class FieldMappingPushSourceGateTests
                 Entities.Object, "sprk_matter", MatterId,
                 secureTeam ?? (_ => Task.FromResult<(Guid? TeamId, string? Refusal)>((SecureTeam, null))));
             return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+                gate,
                 Writer.Object,
                 new StampWorld().Restamper,
                 [Rule()],
@@ -239,8 +240,7 @@ public class FieldMappingPushSourceGateTests
                 CallerId,
                 NullLogger.Instance,
                 CancellationToken.None,
-                appOnlyEntities: Entities.Object,
-                sourceGate: gate);
+                appOnlyEntities: Entities.Object);
         }
 
         public void VerifyNothingWritten()
