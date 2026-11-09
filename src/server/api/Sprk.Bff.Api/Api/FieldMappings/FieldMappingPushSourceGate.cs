@@ -22,8 +22,9 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// <para><b>Filing (UAC-r2 (a)).</b> A push from a secure source never changes what a child is filed under: a child whose
 /// pushed values would change any filing column (<see cref="FilingWrites"/>: the registry's filing lookups, the regarding pair
 /// and the columns the pair agrees with, which the update planner can move the pair with) is not written at all
-/// (<see cref="RefileNotAllowedReasonCode"/>). A pushed value equal to the child's current filing is no change; that child goes
-/// on to the owner question. A source that is not secure is unchanged, its re-files included.</para>
+/// (<see cref="RefileNotAllowedReasonCode"/>). A pushed clear of a filing column is always a filing change. A pushed value equal
+/// to the child's current filing is no change; that child goes on to the owner question. A source that is not secure is
+/// unchanged, its re-files and clears included.</para>
 /// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, or
 /// an answer the gate cannot tell is <see cref="UndeterminedReasonCode"/>: the child is not written. Cancellation is rethrown.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <see cref="MappingSourceCopyGate"/> (the predicate, reused as is)
@@ -127,11 +128,13 @@ internal sealed class FieldMappingPushSourceGate
     }
 
     /// <summary>
-    /// Whether writing <paramref name="pushed"/> changes a filing column that holds <paramref name="held"/>. A clear changes it
-    /// unless it holds nothing; a value changes it unless it names the record it holds. A value that names no record is a change.
+    /// Whether writing <paramref name="pushed"/> changes a filing column that holds <paramref name="held"/>. A clear (a pushed
+    /// <c>null</c>) is always a filing change, whatever the column holds: a push from a secure source never clears a filing.
+    /// A value changes the column unless it names the record the column holds; a value that names no record, or one compared
+    /// with a held value that was not read, is a change.
     /// </summary>
     internal static bool ChangesFiling(object? pushed, Guid? held) =>
-        pushed is null ? held is not null : IdOf(pushed) is not { } id || id != held;
+        pushed is null || IdOf(pushed) is not { } id || id != held;
 
     /// <summary>The id a pushed value names: a bind path <c>/{set}({id})</c>, a bare id, or a GUID text.</summary>
     private static Guid? IdOf(object? value) => value switch
@@ -187,8 +190,8 @@ internal sealed class FieldMappingPushSourceGate
             if (child is null)
                 return Undetermined(targetEntity, childId, "the child did not come back", null);
 
-            // UAC-r2 (a): a push from a secure source never changes a child's filing. A value equal to what the child is filed
-            // under is no change.
+            // UAC-r2 (a): a push from a secure source never changes a child's filing. A clear is always a change; a value equal
+            // to what the child is filed under is no change.
             if (filing.FirstOrDefault(f => ChangesFiling(f.Value, HeldId(child, f.Key))) is { Key: { } moved })
             {
                 _logger.LogInformation(

@@ -214,7 +214,8 @@ public class FieldMappingPushSourceGateTests
         { MatterId, MatterId, false },
         { $"/sprk_matters({OtherMatterId:D})", null, true },
         { null, MatterId, true },
-        { null, null, false },
+        { null, null, true }, // fix round 6: a clear is always a filing change, whatever was (or was not) read
+        { MatterId, null, true },
         { "not a bind", MatterId, true },
         { "not a bind", null, true },
     };
@@ -246,6 +247,53 @@ public class FieldMappingPushSourceGateTests
             new Dictionary<string, object?> { [FilingBind] = null }, CancellationToken.None);
 
         refusal.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    // ── fix round 6: a pushed clear of a filing column from a secure source is always a filing change ──
+
+    [Fact]
+    public async Task ASecureSource_ClearingThePairType_WhileTheChildHoldsAType_IsRefusedWithTheRefileCode()
+    {
+        // The pair's type column holding a value that names no record (a table name): what the child holds is not an id.
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), childColumns: new Dictionary<string, object>
+        {
+            [Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn] = "sprk_matter",
+        });
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn] = null },
+            CancellationToken.None);
+
+        refusal.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    [Fact]
+    public async Task ASecureSource_ClearingAFilingLookupWhoseHeldValueDidNotComeBack_IsRefusedWithTheRefileCode()
+    {
+        // The child row comes back without the filing column: its held value was not read.
+        var world = new World(SecureMatter(), new EntityReference("team", SecureTeam), filedUnderMatter: null);
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [FilingBind] = null }, CancellationToken.None);
+
+        refusal.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    [Fact]
+    public async Task AnOrdinarySource_ClearingAFiling_IsAllowed_AndReadsNoChild()
+    {
+        var source = new Entity("sprk_matter", MatterId)
+        {
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+        };
+        var world = new World(source, new EntityReference("team", OrdinaryTeam), filedUnderMatter: MatterId);
+
+        var refusal = await world.Gate().RefusalForChildAsync(Target, ChildId,
+            new Dictionary<string, object?> { [FilingBind] = null }, CancellationToken.None);
+
+        refusal.Should().BeNull("an ordinary source's clear re-files as before");
+        world.Entities.Verify(e => e.RetrieveAsync(Target, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
