@@ -79,7 +79,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - **spaarke-auth-system-of-record-r1** — its planned ADR-028 amendment must be A11 or higher (A10 is ours); tell at next contact.
 - **agent-framework-fit-assessment** — a proposed `Sprk.Insights.Mcp` becomes a new `/mcp/{area}` on this host, not a second server.
 - This project's session: **`mcp-r1`** (Claude Code desktop, since 2026-11-09).
-- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `accelerator-claude-r2` (accelerator r2, desktop), `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
+- Peer sessions: `ontology-r1` (ontology r1, Claude Desktop session since 2026-11-09; send all ontology reviews and the PR #2587 merge ping there), `spaarke-wt-ebilling-r1-c7`, `accelerator-claude-r2` (accelerator r2, desktop), `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
 - Run `/conflict-check` before each BFF PR (`AuthorizationModule.cs`, `Services/Signals/**` are shared).
 
 ## 5. Environment and live actions

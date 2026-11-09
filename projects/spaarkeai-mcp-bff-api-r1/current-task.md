@@ -45,5 +45,5 @@
 - Billing review in Copilot (next slice) vs EB-D-194: does not block v1.
 
 ## Peer obligations
-- **Ontology** (`spaarke-wt-spaarke-ontology-platform-r1-38`): APPROVED 018 (their D-212). **Ping them when PR #2587 merges to master**; their DI-143 (#2630) builds on `WorkItemPrivilege`. Not urgent for them.
+- **Ontology** (desktop session `ontology-r1` since 2026-11-09): APPROVED 018 (their D-212). **Ping them when PR #2587 merges to master**; their DI-143 (#2630) builds on `WorkItemPrivilege`. Not urgent for them.
 - **uac-r2** (`uac-r2`, desktop): orchestrates dev deploys; the owner gives the per-SHA go there.
