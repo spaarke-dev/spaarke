@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "16193167852349809230"
+      "templateHash": "15907316274422067031"
     }
   },
   "parameters": {
@@ -271,6 +271,106 @@
         "parameters": {
           "name": {
             "value": "[format('mi-spaarke-{0}-{1}', parameters('customerId'), parameters('environmentName'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "9540690764789504680"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128,
+              "metadata": {
+                "description": "Name of the User-Assigned Managed Identity (per-customer). Recommended pattern: sprk-{env}-{customerId}-uami. Case-insensitive; 3-128 chars."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the UAMI. Defaults to resource group location."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tag envelope applied to the UAMI. Spaarke standard: env, customerId, owner. Do NOT hardcode - always pass from caller."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the UAMI. Consumed by App Service identity.userAssignedIdentities map key (task 029) and by App Service keyVaultReferenceIdentity PATCH (task 029 + H4). Also POML step 2 \"resourceId\"."
+              },
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the UAMI resource. Convenience for downstream logging + Dataverse env-var writes."
+              },
+              "value": "[parameters('name')]"
+            },
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Principal (object) ID of the UAMI service principal. Consumed by ALL role assignments in task 030 (Key Vault Secrets User, Storage Blob Data Contributor, Cognitive Services User, Cosmos DB Data Contributor, etc.) + Graph app-role grants (H10)."
+              },
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name')), '2023-01-31').principalId]"
+            },
+            "clientId": {
+              "type": "string",
+              "metadata": {
+                "description": "Client (application) ID of the UAMI. Consumed by Graph token acquisition scope (H10 app-only Graph client) + Dataverse App User application ID field (H10 registration) + BFF shared-lib MI migration (task 011 #3b)."
+              },
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name')), '2023-01-31').clientId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('uami-ontology-writer-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('mi-spaarke-{0}-{1}-ontology-writer', parameters('customerId'), parameters('environmentName'))]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -3247,6 +3347,11 @@
           "userAssignedIdentityResourceId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
           },
+          "additionalUserAssignedIdentityResourceIds": {
+            "value": [
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
+            ]
+          },
           "appSettings": {
             "value": {
               "Customer__Id": "[parameters('customerId')]",
@@ -3275,7 +3380,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "35904168131660294"
+              "templateHash": "633197458580785344"
             }
           },
           "parameters": {
@@ -3318,6 +3423,13 @@
                 "description": "Resource ID of the User-Assigned Managed Identity to bind to BOTH production and staging slots. REQUIRED (T5 structural fix - no BFF App Service may be deployed without an explicit UAMI). Sourced from `modules/uami.bicep` (task 028); consumed at the caller as `uami.outputs.id`. The same value MUST be passed to the corresponding `app-service-slot.bicep` / `deployment-slot.bicep` invocation so the slot binds the SAME identity."
               }
             },
+            "additionalUserAssignedIdentityResourceIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Further user-assigned identities to attach next to userAssignedIdentityResourceId (task 266 / #2605: the ontology writer UAMI). They are only ATTACHED: keyVaultReferenceIdentity and the BFF runtime identity stay userAssignedIdentityResourceId. Pass the SAME list to the site and its slot so a swap changes no attached identity. Default empty - other callers are unchanged."
+              }
+            },
             "vnetIntegrationSubnetId": {
               "type": "string",
               "defaultValue": "",
@@ -3350,9 +3462,7 @@
               "kind": "app,linux",
               "identity": {
                 "type": "UserAssigned",
-                "userAssignedIdentities": {
-                  "[format('{0}', parameters('userAssignedIdentityResourceId'))]": {}
-                }
+                "userAssignedIdentities": "[union(createObject(format('{0}', parameters('userAssignedIdentityResourceId')), createObject()), toObject(parameters('additionalUserAssignedIdentityResourceIds'), lambda('id', lambdaVariables('id')), lambda('id', createObject())))]"
               },
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
@@ -3410,7 +3520,8 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -3439,6 +3550,11 @@
           "userAssignedIdentityResourceId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
           },
+          "additionalUserAssignedIdentityResourceIds": {
+            "value": [
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
+            ]
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -3450,7 +3566,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "434425010265106412"
+              "templateHash": "9243383190698808945"
             }
           },
           "parameters": {
@@ -3486,6 +3602,13 @@
                 "description": "Resource ID of the User-Assigned Managed Identity to bind to this slot. REQUIRED (T5 structural fix). MUST equal the `userAssignedIdentityResourceId` bound to the parent App Service (`modules/app-service.bicep`) so slot-swap does NOT rotate the effective identity. Sourced from `modules/uami.bicep` (task 028) as `uami.outputs.id`."
               }
             },
+            "additionalUserAssignedIdentityResourceIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Further user-assigned identities to attach next to userAssignedIdentityResourceId (task 266 / #2605: the ontology writer UAMI). They are only ATTACHED: keyVaultReferenceIdentity and the BFF runtime identity stay userAssignedIdentityResourceId. Pass the SAME list to the site and its slot so a swap changes no attached identity. Default empty - other callers are unchanged."
+              }
+            },
             "healthCheckPath": {
               "type": "string",
               "defaultValue": "/healthz",
@@ -3510,9 +3633,7 @@
               "tags": "[parameters('tags')]",
               "identity": {
                 "type": "UserAssigned",
-                "userAssignedIdentities": {
-                  "[format('{0}', parameters('userAssignedIdentityResourceId'))]": {}
-                }
+                "userAssignedIdentities": "[union(createObject(format('{0}', parameters('userAssignedIdentityResourceId')), createObject()), toObject(parameters('additionalUserAssignedIdentityResourceIds'), lambda('id', lambdaVariables('id')), lambda('id', createObject())))]"
               },
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
@@ -3549,7 +3670,8 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('appServicePlan-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -4371,6 +4493,18 @@
     "userAssignedIdentityClientId": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]"
+    },
+    "ontologyWriterIdentityResourceId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
+    },
+    "ontologyWriterIdentityObjectId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+    },
+    "ontologyWriterIdentityClientId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-ontology-writer-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]"
     },
     "appServiceName": {
       "type": "string",

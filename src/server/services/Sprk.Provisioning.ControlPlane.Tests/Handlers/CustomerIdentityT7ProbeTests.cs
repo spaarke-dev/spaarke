@@ -58,6 +58,10 @@ public sealed class CustomerIdentityT7ProbeTests
     private const string CustomerBu = "a1b2c3d4-0000-4000-8000-0000000000aa";   // H10's CustomerBusinessUnitId ("D" format)
     private const string OtherBu = "b2c3d4e5-0000-4000-8000-0000000000bb";
     private const string BuSetting = "ExternalAccess__CustomerBusinessUnitId";
+    private const string StampClientId = "44444444-4444-4444-4444-444444444444";   // the request's UamiClientId
+    private const string WriterClientId = "5a5a5a5a-0000-4000-8000-0000000000cc";  // T266: H2a's ontology writer identity
+    private const string OtherWriter = "6b6b6b6b-0000-4000-8000-0000000000dd";
+    private const string WriterSetting = "Ontology__Writer__ManagedIdentityClientId";
 
     [Fact]
     public async Task ProbeAsync_BothSlotsCarryRunCustomerId_ReturnsPassed()
@@ -421,6 +425,87 @@ public sealed class CustomerIdentityT7ProbeTests
             .Should().Contain("= absent");
     }
 
+    // ---------- task 266 (#2605): the ontology writer identity ----------
+
+    [Fact]
+    public async Task ProbeAsync_StagingLacksTheOntologyWriter_ReturnsFailedNamingStaging_AndTheFix()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId, writer: null));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain($"staging [MISSING — no {WriterSetting} setting]")
+            .And.Contain("production [OK]")
+            .And.Contain(WriterClientId)
+            .And.Contain("FR-21")
+            .And.Contain("start a new run").And.Contain($"--settings {WriterSetting}={WriterClientId}");
+        failed.Diagnostic.Should().NotContain(KeyVaultRef, "no other app setting is ever reported")
+            .And.NotContain(BuSetting + " =", "the business unit clause is fine");
+    }
+
+    [Theory]
+    [InlineData("  ", "[BLANK")]
+    [InlineData("not-a-guid", "[UNPARSEABLE — " + WriterSetting + "='not-a-guid'")]
+    [InlineData(OtherWriter, "[MISMATCH — " + WriterSetting + "='" + OtherWriter + "'")]
+    [InlineData(StampClientId, "[FORBIDDEN — " + WriterSetting + "='" + StampClientId + "' is the stamp identity")]
+    public async Task ProbeAsync_OntologyWriterBlankUnparseableDifferentOrTheStampIdentity_ReturnsFailed(string observed, string expected)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId, writer: observed), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain($"production {expected}").And.Contain("staging [OK]");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_RunWriterEqualToTheStampIdentity_ReturnsFailedEvenWhenSlotsAgree()
+    {
+        // Fail closed: a run whose writer IS the stamp identity (System Administrator) never passes.
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId, writer: StampClientId), Settings(CustomerId, writer: StampClientId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request() with { OntologyWriterClientId = StampClientId }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("production [FORBIDDEN").And.Contain("staging [FORBIDDEN");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task ProbeAsync_RunCarriesNoOntologyWriter_ReturnsFailedEvenWhenSlotsCarryOne(string runValue)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request() with { OntologyWriterClientId = runValue }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("no InterStepState.OntologyWriterClientId").And.Contain("only a new run fixes it");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_OntologyWriterInAnotherHexCase_ReturnsPassed()
+    {
+        var arm = new FakeSlotSettingsArm(
+            Settings(CustomerId, writer: WriterClientId.ToUpperInvariant()), Settings(CustomerId));
+
+        (await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None))
+            .Should().BeOfType<TrapVerificationOutcome.Passed>("the clause compares GUIDs, not strings");
+    }
+
+    [Fact]
+    public void CheckOntologyWriter_StampIdentityIsForbidden_EvenWhenItIsTheExpectedValue()
+    {
+        var settings = new Dictionary<string, string> { [WriterSetting] = StampClientId };
+
+        CustomerIdentityT7Probe.CheckOntologyWriter(settings, StampClientId, StampClientId)
+            .Should().StartWith("[FORBIDDEN");
+        CustomerIdentityT7Probe.CheckOntologyWriter(settings, StampClientId, stampClientId: null)
+            .Should().BeNull("with no stamp id to compare, only equality with the expected value is checked");
+    }
+
     // ---------- task 265: the customer business unit ----------
 
     [Fact]
@@ -592,7 +677,8 @@ public sealed class CustomerIdentityT7ProbeTests
 
     // ---------- helpers ----------
 
-    private static Dictionary<string, string> Settings(string? customerId, string? businessUnit = CustomerBu)
+    private static Dictionary<string, string> Settings(string? customerId, string? businessUnit = CustomerBu,
+        string? writer = WriterClientId)
     {
         var settings = new Dictionary<string, string>
         {
@@ -612,6 +698,11 @@ public sealed class CustomerIdentityT7ProbeTests
         {
             settings[BuSetting] = businessUnit;
         }
+        // T266: what H4b writes from H2a's output (null → absent on the slot).
+        if (writer is not null)
+        {
+            settings[WriterSetting] = writer;
+        }
         return settings;
     }
 
@@ -622,13 +713,14 @@ public sealed class CustomerIdentityT7ProbeTests
         SubscriptionId: SubscriptionId,
         DataverseUrl: "https://org.crm.dynamics.com",
         BffAppRegId: BffAppRegId,
-        UamiClientId: "44444444-4444-4444-4444-444444444444",
+        UamiClientId: StampClientId,
         KeyVaultName: "sprk-acme-prod-kv",
         AppServiceName: AppServiceName,
         ResourceGroupName: ResourceGroupName,
         CustomerWorkforceTenantIds: [WorkforceA, WorkforceB],
         TenancyModel: "Model1",
-        CustomerBusinessUnitId: CustomerBu);
+        CustomerBusinessUnitId: CustomerBu,
+        OntologyWriterClientId: WriterClientId);
 
     private static CustomerIdentityT7Probe NewProbe(FakeSlotSettingsArm arm, FakeGraph? graph = null) => new(
         ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),

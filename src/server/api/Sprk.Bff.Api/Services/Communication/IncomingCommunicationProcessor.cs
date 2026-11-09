@@ -901,7 +901,7 @@ public sealed class IncomingCommunicationProcessor
     /// <summary>
     /// Processes incoming email attachments: filters signature images, uploads to SPE,
     /// and creates sprk_communicationattachment records.
-    /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
+    /// Asks IEmailAttachmentProcessor.ShouldFilterAttachment which attachments to skip.
     /// </summary>
     /// <summary>
     /// Extracts bounded plain text from the message's attachments and returns the envelope with
@@ -1182,7 +1182,7 @@ public sealed class IncomingCommunicationProcessor
                 // attachments — image001.png is the canonical case — from silently replacing each other:
                 // UploadSmallAsync is Graph's path-keyed simple PUT, which takes no conflictBehavior and
                 // unconditionally overwrites. Uniqueness therefore has to survive the flattening, so it
-                // moves into the name (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+                // moves into the name (as in UploadFinalizationWorker's attachment upload).
                 // SANITIZED 2026-08-29: `fileName` is `attachment.Name` off a Graph message — an
                 // ATTACKER-INFLUENCED value, since anyone who can send this mailbox an email chooses it. A
                 // '/' in an attachment name would make Graph create that folder inside the container, so an

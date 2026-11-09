@@ -160,6 +160,7 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:redis_endpoint',
     'from-h2a-output:content_safety_endpoint',
     'from-h2a-output:storage_blob_endpoint',
+    'from-h2a-output:ontology_writer_client_id',
     'from-h2a-output:bff_url',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',

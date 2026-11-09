@@ -94,6 +94,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
     private const string StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/";   // T186 follow-up: H2a StorageBlobEndpoint
+    private const string OntologyWriterClientId = "11111111-2222-3333-4444-555555555555";   // T266: H2a OntologyWriterClientId
     private const string CustomerBusinessUnitId = "7c1b2a40-5d6e-4f80-9a1b-2c3d4e5f6a7b";   // R3 073: H10's InterStepState.CustomerBusinessUnitId ("D" GUID)
 
     // T186 follow-up (AiSearch allow-list): the indexes H2b built and verified (InterStepState.AiSearchIndexNames), in catalog order.
@@ -191,6 +192,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
             ["storage_blob_endpoint"] = StorageBlobEndpoint,   // T186 follow-up: H2a StorageBlobEndpoint
+            ["ontology_writer_client_id"] = OntologyWriterClientId,   // T266: H2a OntologyWriterClientId
             ["customer_business_unit_id"] = CustomerBusinessUnitId,   // R3 073: H10's CustomerBusinessUnitId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
@@ -314,6 +316,46 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Diagnostic.Should().Contain("ExternalAccess__CustomerBusinessUnitId");
         failure.Diagnostic.Should().Contain("InterStepState.CustomerBusinessUnitId");
         failure.Diagnostic.Should().Contain("H10 must complete");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    // ---------- T266 (#2605): Ontology__Writer__ManagedIdentityClientId (H2a's ontology writer UAMI) ----------
+
+    [Fact]
+    public async Task RealManifest_WritesOntologyWriterClientId_FromH2a_NeverTheStampUami()
+    {
+        // The BFF's Signal / Decision Record writers authenticate ONLY as this identity and fail closed without it.
+        var entries = await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId");
+        var writer = FakeSettingsWriter.Succeeds();
+        var run = BuildRun();
+        var handler = Build(new FakeRepository(run, "etag-ow"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["Ontology__Writer__ManagedIdentityClientId"].Should().Be(OntologyWriterClientId)
+            .And.NotBe(run.InterStepState.MiClientId);
+    }
+
+    [Fact]
+    public async Task RunWithoutOntologyWriterClientId_ResumableFailure_BeforeAnyWrite()
+    {
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-ow-b"),
+            FakePerEnvManifest.Success(await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId")), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("ontology_writer_client_id");
+        failure.Diagnostic.Should().Contain("InterStepState.OntologyWriterClientId");
         writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
@@ -1143,6 +1185,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["SpeContainerId"] = "b!h8-created-customer-container",
         ["CustomerBusinessUnitId"] = CustomerBusinessUnitId,
         ["StorageBlobEndpoint"] = StorageBlobEndpoint,
+        ["OntologyWriterClientId"] = OntologyWriterClientId,
         ["OpenaiMonthlyLimitUsd"] = "500",
     };
 
@@ -1436,6 +1479,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
         s.StorageBlobEndpoint = StorageBlobEndpoint;   // H2a output (T186 follow-up - SessionFileStore__BlobEndpoint)
+        s.OntologyWriterClientId = OntologyWriterClientId;   // H2a output (T266 - Ontology__Writer__ManagedIdentityClientId)
         s.CustomerBusinessUnitId = CustomerBusinessUnitId;   // H10 output (R3 073 — ExternalAccess__CustomerBusinessUnitId)
         s.AiSearchIndexNames = [.. AiSearchIndexNames];   // H2b output (T186 follow-up — AiSearch__AllowedIndexes)
         return run;
