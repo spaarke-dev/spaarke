@@ -6,8 +6,8 @@
 //
 // REFINED 2026-09-25, same owner, after they asked whether a BFF-created record even HAS an accurate
 // "user BU": the source is the TARGET record's business unit first, the acting user's only as a fallback.
-// Two reasons, both verified — some BFF creates have no acting user at all (EmailAttachmentProcessor,
-// inbound email), and where there is one their BU is often the wrong scope (a root-BU user filing to a
+// Two reasons, both verified — some BFF creates have no acting user at all (inbound email and its
+// attachments), and where there is one their BU is often the wrong scope (a root-BU user filing to a
 // child-BU matter would put the document where the matter's own team cannot see it). This matches
 // RecordContainerResolver's already-sanctioned order for SPE containers. Nothing about the team-ownership
 // convention changed; only where the business unit is read from.
@@ -219,7 +219,7 @@ public enum UnfiledOwnership
 /// often than it is the right one:
 /// </para>
 /// <list type="number">
-/// <item><b>Some creates have no acting user at all.</b> <c>EmailAttachmentProcessor</c> creates documents from
+/// <item><b>Some creates have no acting user at all.</b> <c>IncomingCommunicationProcessor</c> creates documents from
 /// inbound email — no human initiated it, so "the acting user's BU" is undefined. Creator-first would have to
 /// refuse and would break inbound attachment processing outright.</item>
 /// <item><b>Even with an acting user, their BU is often the wrong scope.</b> A root-BU paralegal filing a
@@ -505,7 +505,7 @@ public sealed record RecordOwnershipContext
     /// <list type="bullet">
     /// <item><c>sprk_todo</c> (fix round F1-a): the subject first, then the document carrier, then the email carrier, then the
     /// lineage order — the Office writer's "the record regarding first, then the document or email"
-    /// (<c>OfficeService.ResolveTodoOwnerTeamAsync</c>), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
+    /// (<c>OfficeService.CreateTodoAsync</c>, through the unified create since field mapping task 030a), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
     /// which name the regarding as the primary.</item>
     /// <item><c>sprk_signal</c> / <c>sprk_decisionrecord</c>: the typed core lookups first, then the subject, then the lineage
     /// order (<c>SignalWriter.OwnershipContextOf</c>: core, subject, stamps).</item>
@@ -620,8 +620,33 @@ public sealed record RecordOwnershipContext
         "a Signal's or a Decision Record's filing is written only by its own writer, whose ownership question covers the core "
         + "record and the Signals it resolved; a generic re-file does not ask that question, so nothing was written (194b A5)";
 
-    private const string CoreRecordTypeColumn = "sprk_corerecordtype";
-    private const string CoreRecordIdColumn = "sprk_corerecordid";
+    internal const string CoreRecordTypeColumn = "sprk_corerecordtype";
+    internal const string CoreRecordIdColumn = "sprk_corerecordid";
+
+    /// <summary>A row's core record pair as it holds it (<see cref="CorePairOf"/>).</summary>
+    /// <param name="TypeRef">The <c>sprk_recordtype_ref</c> catalog row <c>sprk_corerecordtype</c> names, or <c>null</c>.</param>
+    /// <param name="CoreId">The id <c>sprk_corerecordid</c> holds, when it is a real GUID; otherwise <c>null</c>.</param>
+    /// <param name="Malformed">One half without the other, or an id that is not a GUID.</param>
+    internal readonly record struct CoreRecordPair(Guid? TypeRef, Guid? CoreId, bool Malformed)
+    {
+        /// <summary>Both halves, well formed.</summary>
+        public bool IsWhole => !Malformed && TypeRef is not null && CoreId is not null;
+    }
+
+    /// <summary>
+    /// THE reading of a Signal's or Decision Record's core record pair, shared by the ownership question
+    /// (<see cref="ForExistingRowAsync"/>) and the secure-child lineage (<c>SecureChildLineage.CorePairParent</c>), so the two
+    /// never disagree about which pair is whole: both halves, and an id that parses as a non-empty GUID.
+    /// </summary>
+    internal static CoreRecordPair CorePairOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
+        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
+        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
+        var malformed = (typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null);
+        return new CoreRecordPair(typeRef, coreId, malformed);
+    }
 
     /// <summary>
     /// UAC task 194b: the ownership question for an EXISTING row, with the parents in the order its writer asks them, so the
@@ -663,10 +688,8 @@ public sealed record RecordOwnershipContext
             return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
 
         var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
-        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
-        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
-        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
-        if ((typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null))
+        var (typeRef, coreId, malformed) = CorePairOf(row);
+        if (malformed)
             return undetermined with { Undetermined = "its core record pair is malformed" };
 
         var subject = Guid.TryParse(row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn)?.Trim(), out var pairId)

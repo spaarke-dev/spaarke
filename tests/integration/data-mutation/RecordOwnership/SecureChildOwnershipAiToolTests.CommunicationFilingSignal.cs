@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Domain.Signals;
 using Xunit;
@@ -153,18 +154,24 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
-    public async Task CommunicationFiling_ADeniedWrite_403_QueuesNothing()
+    public async Task CommunicationFiling_WhenDataverseRefusesTheCallersOwnPatchOfAReFile_IsTheRoutes403_NotA500_AndNothingFollowsTheWrite()
     {
+        // A real re-file (a lookup change): the caller's PATCH is the write Dataverse authorizes, so Append / Write on
+        // sprk_communication not held surfaces here as Dataverse's privilege refusal (HTTP 403), which the route answers as its
+        // own 403 ProblemDetails carrying the caller-access reason code. No owner is assigned and no Signal is queued.
         UnfiledCommunicationExists();
         _user.PatchStatus = 403;
+        // Dataverse's own text for a missing Append (the route's mapping is by status and code, not by this text).
+        _user.PatchRefusalMessage = "Principal user (Id=00000000-0000-0000-0000-000000000001, type=8, roleCount=2) is missing prvAppendsprk_communication privilege (Id=00000000-0000-0000-0000-000000000002) on OTC=10001 for entity 'sprk_communication'.";
         var trigger = FilingSignalDoubles.Trigger();
         var entities = ReadsBeforeAndAfter(matterBefore: PreviousMatter, matterAfter: OrdinaryMatter);
 
-        // A name-only update is the caller's own PATCH (not a re-file), which the scripted Dataverse refuses with 403.
-        var result = await RefileCommunicationWithTrigger(
-            new() { ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D") }, entities.Object, trigger.Object);
+        var result = await RefileCommunicationWithTrigger(FileUnderOrdinaryMatter(), entities.Object, trigger.Object);
 
-        Status(result).Should().NotBe(StatusCodes.Status204NoContent);
+        Status(result).Should().Be(StatusCodes.Status403Forbidden, Detail(result));
+        ReasonCode(result).Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty("the owner follows only a change that was written");
         FilingSignalDoubles.VerifyNothingEnqueued(trigger);
         VerifyOnlyTheBeforeRead(entities);
     }

@@ -322,7 +322,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Compose/ComposeService.cs:1515                   ReplaceFileContentAsUserAsync       CLIENT
     //   Services/DocumentCheckoutService.cs :: DeleteAsync (best-effort)  DeleteFileAsync          record
     //   Services/DocumentCheckoutService.cs :: DeleteFileOrRefuseAsync    DeleteFileAsync          record  <-- task 032
-    //   Services/Email/EmailAttachmentProcessor.cs:232            UploadSmallAsync                    DEAD
+    //   (Services/Email/EmailAttachmentProcessor.cs:232           — SINK DELETED, field-mapping-server-write-path-r1: was DEAD)
     //   Services/Office/OfficeStorageUploader.cs:54               UploadSmallAsync                    CLIENT  <-- NEW
     //   Services/Office/OfficeStorageUploader.cs:86               DeleteFileAsync                     record
     //   (Services/Workspace/MatterPreFillService.cs:334           — SINK RETIRED 2026-10-06, task 227f: in-memory only)
@@ -995,18 +995,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "communication id folded into a SANITIZED filename, so it can no longer mint folders."),
 
         // ---------------------------------------------------------------------------------------------
-        // Dead — expected to be deleted, not classified forever.
+        // Dead — expected to be deleted, not classified forever. None today: the last entry
+        // (Services/Email/EmailAttachmentProcessor.cs, its uncalled ProcessAttachmentsAsync upload) was
+        // deleted with that method by field-mapping-server-write-path-r1 (tasks 030b/034 cleanup).
         // ---------------------------------------------------------------------------------------------
-        new SinkSite("Services/Email/EmailAttachmentProcessor.cs", "UploadSmallAsync", 1,
-            Provenance.Dead, "083 (delete-rather-than-convert)",
-            "request.DriveId on ProcessAttachmentsRequest",
-            "EVIDENCE OF DEADNESS: IEmailAttachmentProcessor IS resolved in production, but only "
-            + "ShouldFilterAttachment is ever called (IncomingCommunicationProcessor.cs:901). "
-            + "ProcessAttachmentsAsync — the sole path to this sink, via the private "
-            + "ProcessSingleAttachmentAsync — has zero production callers; the inbound pipeline does its own "
-            + "upload through the task-075 resolver instead. A partially-live service with a dead write path "
-            + "is the hardest deadness to see, which is why the evidence is written down (ADR-003; "
-            + "ADR-045)."),
     };
 
     // =================================================================================================

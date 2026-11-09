@@ -20,8 +20,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// the thread-filing invariant, and its rules stay in <see cref="ThreadResolver"/>: this job only SELECTS candidates and
 /// calls the resolver. <i>Cost of doing nothing</i> — emails filed before the reconcile existed stay invisible on their
 /// records, and child-business-unit users keep seeing empty Messages panels for threads owned by the BFF app user in the
-/// root business unit (live, dev: 9 unanchored threads hold emails filed to records, and 27 of 35 anchored threads are
-/// owned by the app user).</para>
+/// root business unit. Threads that hold emails filed to records but are not anchored to them are anchored by this job, and
+/// anchored threads whose owner is not the anchor's team are re-owned by it when it is applied.</para>
 ///
 /// <para><b>Each run, two parts</b> (each reads a bounded slice, in id order, after a per-instance cursor):</para>
 /// <list type="number">

@@ -17,6 +17,7 @@
  */
 
 import { bffApiCall } from './bff-client';
+import { REGISTRATION_OWNER_UNCONFIGURED } from '../api/me-client';
 import { ApiError } from '../types';
 
 export const REGISTRATION_PATH = '/api/v1/external/registration';
@@ -126,7 +127,10 @@ export function validateRegistrationInput(input: RegistrationInput): Registratio
  *   - signin                          401: the sign-in is no longer accepted.
  *   - blocked                         any OTHER 403 / 409 deny code (e.g. `registration_home_identity_required`): the
  *                                     server refused on purpose, so a retry can never succeed; an administrator must act.
- *   - unavailable                     5xx or network: try again later.
+ *   - not_configured                  500 `registration_owner_unconfigured` or `registration_environment`: the organization's
+ *                                     set-up is unfinished (no customer business unit, or the environment cannot register
+ *                                     safely). A retry can never succeed; an administrator must finish set-up.
+ *   - unavailable                     any other 5xx or network: try again later.
  */
 export type RegistrationRefusal =
   | 'existing_record_found'
@@ -137,6 +141,7 @@ export type RegistrationRefusal =
   | 'invalid'
   | 'signin'
   | 'blocked'
+  | 'not_configured'
   | 'unavailable';
 
 export type RegistrationResult = { kind: 'ok' } | { kind: 'refused'; reason: RegistrationRefusal };
@@ -149,6 +154,15 @@ const REGISTRATION_REASONS: Record<string, RegistrationRefusal> = {
   'sdap.access.deny.contact_not_invited': 'contact_not_invited',
 };
 
+/** 500: the environment cannot register safely (the A9 columns are masked or missing, or the create is unavailable). */
+const REGISTRATION_ENVIRONMENT_REASON = 'sdap.access.registration_environment';
+
+/** 5xx reasons that are operator-fixable configuration faults, never an outage. */
+const NOT_CONFIGURED_REASONS: ReadonlySet<string> = new Set([
+  REGISTRATION_OWNER_UNCONFIGURED,
+  REGISTRATION_ENVIRONMENT_REASON,
+]);
+
 function refusalOfRegistration(err: unknown): RegistrationRefusal {
   if (!(err instanceof ApiError)) return 'unavailable';
   if (err.statusCode === 401) return 'signin';
@@ -156,6 +170,10 @@ function refusalOfRegistration(err: unknown): RegistrationRefusal {
   if (err.statusCode === 403 || err.statusCode === 409) {
     const reason = problemReason(err);
     return (reason && REGISTRATION_REASONS[reason]) || 'blocked';
+  }
+  if (err.statusCode >= 500) {
+    const reason = problemReason(err);
+    if (reason && NOT_CONFIGURED_REASONS.has(reason)) return 'not_configured';
   }
   return 'unavailable';
 }

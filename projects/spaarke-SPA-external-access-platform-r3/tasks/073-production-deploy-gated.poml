@@ -4,7 +4,7 @@
     <title>Production deploy to external.spaarke.com (A4) — gated</title>
     <phase>7 Deploy and verify</phase>
     <gate>BLOCKED until T240c directory, T240d CIAM-on-stamps, DNS for external.spaarke.com and owner go</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Production deployment (tags deploy)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -72,7 +72,7 @@
     <criterion testable="true">The production smoke test passes for the three personas against one stamp.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-20 go-live; owner 2026-10-09: R3 delivers build + package, go-live gated.</notes>
+  <notes>Spec FR-20 go-live; owner 2026-10-09: R3 delivers build + package, go-live gated. 2026-11-03: owner moved the go-live and its smoke test to customer-provisioning-orchestration-r1 (a production demo activity; provisioning owns every gate item). Handoff: GitHub #2532; defer-issues ISS-030. R3 closes without it.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

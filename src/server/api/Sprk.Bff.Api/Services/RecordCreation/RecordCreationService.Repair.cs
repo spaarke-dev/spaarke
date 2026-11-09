@@ -63,12 +63,11 @@ internal sealed partial class RecordCreationService
     private const string OwnerColumn = "ownerid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionNumberColumn = "versionnumber";
-    private const string SearchIndexTable = "sprk_aisearchindex";
 
     /// <summary>
-    /// Repairs <paramref name="table"/> <paramref name="id"/> as the system principal: mapping (step 3), owner (step 7),
-    /// search-index default (step 8) and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when
-    /// nothing is missing. Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
+    /// Repairs <paramref name="table"/> <paramref name="id"/> as the system principal: mapping (step 3), owner (step 7)
+    /// and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when nothing is missing. No search-index
+    /// column is written (task 041, FR-40). Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
     /// </summary>
     /// <exception cref="ArgumentException">No table or no id.</exception>
     internal async Task<RecordRepairOutcome> RepairAsync(string table, Guid id, CancellationToken ct)
@@ -116,9 +115,30 @@ internal sealed partial class RecordCreationService
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
+        // FR-41 (#2483, task 042b): the I-1 stamp is planned ONCE, before the owner. The owner question asks over the row as it
+        // ends (042b F1, owner decision A': a held stamp that disagrees is replaced); the stamp step adds the fill-only part of
+        // the same plan. A fault keeps the owner (RepairOwnerAsync) and adds no stamp.
+        (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp = (null, false);
+        if (CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
+        {
+            try
+            {
+                stamp = (await _restamper.PlanStampOfRowAsync(table, row, ct).ConfigureAwait(false), false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
+                stamp = (null, true);
+            }
+        }
+
         // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
         var ownerParents = new List<RecordOwnershipParent>();
-        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, ct).ConfigureAwait(false);
+        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, stamp, ct).ConfigureAwait(false);
         if (owner.MappingBlocked is { } blocked)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
@@ -129,8 +149,8 @@ internal sealed partial class RecordCreationService
             await RepairMappingAsync(table, rule, row, ownerParents, patch, mapped, report, warnings, ct).ConfigureAwait(false);
         }
 
-        await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
-        await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
+        // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
+        RepairStamp(table, row, stamp, patch, report);
 
         RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
         {
@@ -161,7 +181,7 @@ internal sealed partial class RecordCreationService
         // #2170: the write itself asks the app-only refusal (the per-member guard, EveryGenericUpdateWriter_AsksTheAppOnlyRefusal).
         // #2247: it asks over the MAPPED columns only (`mapped`: what a field-mapping rule, a configuration, gave), never over
         // the columns Repair decides itself: the owner (step 7, its ownership logic writes `ownerid`, which the refusal
-        // refuses from every configuration), the search-index default (step 8) and the I-1 stamp (step 10). A rule that
+        // refuses from every configuration) and the I-1 stamp (step 10). A rule that
         // targets the owner or the creator is never mapped: the per-rule ask (DocumentServerOwnedRefusal) skips it first, and
         // ProtectedFromMapping also holds the plain owner and creator-person names. So this only fires if the mapping ever
         // lets one through: nothing is written.
@@ -228,7 +248,10 @@ internal sealed partial class RecordCreationService
     /// filed-under parent; the record-type catalog read app-only), the profile, the source read app-only
     /// (<see cref="MappingSourceReader.System"/>, no probe), then <see cref="CreateTimeFieldMapping.ApplyFillOnly"/> — the
     /// create's own fill decision — over a copy of the row. A mapped value that would file the row under a record (a filing
-    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row.
+    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row. Task 052a: both
+    /// tables' column metadata is read app-only first — the source's field-secured columns are never read for mapping nor
+    /// copied, a mapped value its column cannot take is not written, Money columns get a Money (#2124), and metadata that
+    /// cannot be read maps nothing.
     /// </summary>
     private async Task RepairMappingAsync(
         string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
@@ -304,8 +327,23 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
+            // Task 052a: both tables' column metadata, read app-only before anything is read from the source (owner decision
+            // 2026-10-21, option 1; UAC-r2 condition 1: metadata that cannot be read, or does not say, maps nothing).
+            if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName,
+                    CreateTimeFieldMapping.CollectSourceColumns(rules), ct).ConfigureAwait(false) is not { } copyable)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceMetadataUnavailable));
+                return;
+            }
+
+            if (await ColumnMetadataForRepairAsync(table, row.Id, ct).ConfigureAwait(false) is not { } targetColumns)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingTargetMetadataUnavailable));
+                return;
+            }
+
             // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
-            var sourceColumns = SourceColumnsRepairMayCopy(source.EntityLogicalName, CreateTimeFieldMapping.CollectSourceColumns(rules))
+            var sourceColumns = copyable
                 .Concat(SourceGateColumns(source.EntityLogicalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -336,11 +374,20 @@ internal sealed partial class RecordCreationService
             var protectedColumns = new HashSet<string>(ProtectedFromMapping(table, rule, serverSetLookupColumns: null),
                 StringComparer.OrdinalIgnoreCase);
             protectedColumns.UnionWith(neverMapped.Keys);
+            // Review R3 (FR-38), task 041 (FR-40): on a search-indexed table both index columns are server-owned and nothing writes
+            // them, so a rule that targets either never copies the parent's index. Kept here, not in ProtectedFromMapping:
+            // create's step 3 drops a mapped index itself (and logs it, origin=mapping), so its behaviour stays as it is.
+            if (rule.SearchIndexed)
+                protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
+            // Task 052a: only the columns Repair may copy reach the engine — a gate column (the owner, the secure flag) is read to
+            // decide the gate, never copied unless a rule names it and it is not field-secured. #2124: the row's Money columns,
+            // so a Default or an expression into one is written as a Money.
+            var copySource = CopyableSource(source.EntityLogicalName, read.Record, copyable);
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
-                rules, target, read.Record, protectedColumns, warnings, _logger,
-                moneyAttributes: null, mappedColumns: written);
+                rules, target, copySource, protectedColumns, warnings, _logger,
+                moneyAttributes: MoneyColumns(targetColumns), mappedColumns: written);
 
             var columns = rules
                 .Select(r => r.TargetField?.Trim())
@@ -383,7 +430,17 @@ internal sealed partial class RecordCreationService
                         continue;
                     }
 
-                    patch[column] = value;
+                    var (unfit, columnValue) = TargetColumnValue(targetColumns, column, value);
+                    if (unfit is not null || columnValue is null)
+                    {
+                        // Task 052a (task 016 K-1; review F1): a value Dataverse would refuse is left out, so it cannot fail the
+                        // whole update.
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column,
+                            unfit ?? RecordRepairReason.MappedValueTypeMismatch));
+                        continue;
+                    }
+
+                    patch[column] = columnValue;
                     mappedHere.Add(column);
                     report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
                 }
@@ -427,16 +484,211 @@ internal sealed partial class RecordCreationService
             : null;
 
     /// <summary>
-    /// The mapped source columns Repair may copy (owner decision 2026-10-21, field security option 1). Today: all of them,
-    /// unchanged.
+    /// The mapped source columns Repair may read and copy (owner decision 2026-10-21, field security option 1; task 052a): Repair
+    /// runs as the system principal, with no caller to mask the source against (#2188), so it leaves out every column of
+    /// <paramref name="sourceTable"/> its metadata states is field-secured. A column the table does not have is left out too
+    /// (nothing to read or copy). <c>null</c> — map nothing for the row (UAC-r2 condition 1, fail closed) — when the metadata
+    /// cannot be read, comes back empty, or does not say whether a mapped column is secured.
     /// </summary>
-    // TODO(task 033): drop every column of sourceTable whose IsSecured is true, read through task 033's app-only metadata
-    // reader. Fail closed: when that metadata is unavailable (a fault, or IsSecured unknown) map nothing for the row, with
-    // reason record_repair.mapping_source_metadata_unavailable. Task 052 stays blocked until this lands.
-    private static IEnumerable<string> SourceColumnsRepairMayCopy(string sourceTable, IEnumerable<string> mappedSourceColumns)
+    private async Task<IReadOnlyList<string>?> SourceColumnsRepairMayCopyAsync(
+        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, CancellationToken ct)
     {
-        _ = sourceTable;
-        return mappedSourceColumns;
+        if (await ColumnMetadataForRepairAsync(sourceTable, rowId, ct).ConfigureAwait(false) is not { } columns)
+            return null;
+
+        var copyable = new List<string>();
+        var secured = new List<string>();
+        foreach (var column in mappedSourceColumns)
+        {
+            if (!columns.TryGetValue(column, out var metadata))
+                continue;
+
+            if (metadata.IsSecured is not { } isSecured)
+            {
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the metadata of the mapping source column {Source}.{Column} does not " +
+                                   "say whether it is field-secured; nothing was mapped", table, rowId, sourceTable, column);
+                return null;
+            }
+
+            (isSecured ? secured : copyable).Add(column);
+        }
+
+        if (secured.Count > 0)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the field-secured source column(s) {Columns} of {Source} are not " +
+                                   "copied", table, rowId, string.Join(", ", secured), sourceTable);
+        }
+
+        return copyable;
+    }
+
+    /// <summary>
+    /// <paramref name="table"/>'s column metadata, read app-only (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>,
+    /// task 052a), or <c>null</c> when it faulted or came back empty (an empty answer cannot be told from a failed read).
+    /// Cancellation is rethrown.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, ColumnMetadata>?> ColumnMetadataForRepairAsync(
+        string table, Guid rowId, CancellationToken ct)
+    {
+        try
+        {
+            var columns = await _entities.GetColumnMetadataAsync(table, ct).ConfigureAwait(false);
+            if (columns is { Count: > 0 })
+                return columns;
+
+            _logger.LogWarning("[RECORD-REPAIR] the column metadata of {Table} came back empty while repairing {Id}; nothing was " +
+                               "mapped", table, rowId);
+            return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] the column metadata of {Table} could not be read while repairing {Id}; nothing " +
+                                   "was mapped", table, rowId);
+            return null;
+        }
+    }
+
+    /// <summary>The engine's source: the read row's <paramref name="copyable"/> columns only, with their labels.</summary>
+    private static Entity CopyableSource(string sourceTable, Entity read, IReadOnlyCollection<string> copyable)
+    {
+        var source = new Entity(sourceTable, read.Id);
+        foreach (var column in copyable)
+        {
+            if (read.Attributes.TryGetValue(column, out var value))
+                source[column] = value;
+            if (read.FormattedValues.TryGetValue(column, out var label))
+                source.FormattedValues[column] = label;
+        }
+
+        return source;
+    }
+
+    /// <summary>The Money columns of a table (#2124: a Default or an expression into one is written as a <see cref="Money"/>).</summary>
+    private static IReadOnlySet<string> MoneyColumns(IReadOnlyDictionary<string, ColumnMetadata> columns) =>
+        columns.Values
+            .Where(c => string.Equals(c.AttributeType, nameof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Money), StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.LogicalName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The mapped <paramref name="value"/> as the SDK writes it to <paramref name="column"/> of the row's table, or why it is not
+    /// written (task 052a; review F1, K4) — each a refusal the SDK would otherwise give for the WHOLE update, and with it the
+    /// row's owner repair, on every pass:
+    /// <list type="bullet">
+    /// <item>the table has no such column, or an update may not set it (unknown counts as not):
+    /// <see cref="RecordRepairReason.MappedColumnNotUpdatable"/>;</item>
+    /// <item>the value is not of a kind the column takes — the create path's <see cref="Fits"/>, and for a number column a number
+    /// that does not convert to the column's exact CLR type (<see cref="AsNumber"/>):
+    /// <see cref="RecordRepairReason.MappedValueTypeMismatch"/>;</item>
+    /// <item>text longer than the column: <see cref="RecordRepairReason.MappedValueTooLong"/>;</item>
+    /// <item>a number outside the column's stated range, or a range not stated: <see cref="RecordRepairReason.MappedValueOutOfRange"/>;</item>
+    /// <item>a lookup to a table the column does not take, or targets not stated: <see cref="RecordRepairReason.MappedLookupTableNotAccepted"/>;</item>
+    /// <item>an option (or any option of a multi-select) the column does not have, or choices not stated:
+    /// <see cref="RecordRepairReason.MappedOptionNotAccepted"/>.</item>
+    /// </list>
+    /// </summary>
+    private static (string? Refusal, object? Value) TargetColumnValue(
+        IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value)
+    {
+        if (!columns.TryGetValue(column, out var metadata) || metadata.IsValidForUpdate != true)
+            return (RecordRepairReason.MappedColumnNotUpdatable, null);
+        if (metadata.AttributeType is not { } type)
+            return (RecordRepairReason.MappedValueTypeMismatch, null);
+
+        if (IsNumberType(type))
+        {
+            if (AsNumber(type, value) is not { } number)
+                return (RecordRepairReason.MappedValueTypeMismatch, null);
+            return InRange(metadata, number) ? (null, number) : (RecordRepairReason.MappedValueOutOfRange, null);
+        }
+
+        if (!Fits(type, value))
+            return (RecordRepairReason.MappedValueTypeMismatch, null);
+
+        return value switch
+        {
+            string text when metadata.MaxLength is { } max && text.Length > max => (RecordRepairReason.MappedValueTooLong, null),
+            EntityReference reference when metadata.Targets is not { Count: > 0 } targets
+                                           || !targets.Contains(reference.LogicalName, StringComparer.OrdinalIgnoreCase) =>
+                (RecordRepairReason.MappedLookupTableNotAccepted, null),
+            OptionSetValue option when metadata.OptionValues is not { } choices || !choices.Contains(option.Value) =>
+                (RecordRepairReason.MappedOptionNotAccepted, null),
+            OptionSetValueCollection options when metadata.OptionValues is not { } choices
+                                                  || options.Count == 0 || options.Any(o => o is null || !choices.Contains(o.Value)) =>
+                (RecordRepairReason.MappedOptionNotAccepted, null),
+            _ => (null, value),
+        };
+    }
+
+    private static bool IsNumberType(string type) => type is "Integer" or "BigInt" or "Decimal" or "Double" or "Money";
+
+    /// <summary>
+    /// A mapped number as the exact CLR type the SDK takes for a column of <paramref name="type"/> — Integer: <see cref="int"/>
+    /// (a whole number that fits), BigInt: <see cref="long"/> (likewise), Decimal: <see cref="decimal"/>, Double:
+    /// <see cref="double"/>, Money: <see cref="Money"/> (#2124: a Copy keeps the source's value, so a decimal or a Money's
+    /// amount must be converted here) — or <c>null</c> when the value is not a number or does not convert. Review K4: a conversion
+    /// that overflows is <c>null</c> too, so one extreme number skips one column, never the whole mapping.
+    /// </summary>
+    private static object? AsNumber(string type, object value)
+    {
+        decimal? exact;
+        try
+        {
+            exact = value switch
+            {
+                int whole => whole,
+                long big => big,
+                decimal number => number,
+                Money money => money.Value,
+                double real when double.IsFinite(real) => (decimal)real,
+                _ => null,
+            };
+        }
+        catch (OverflowException)
+        {
+            return null; // a double no decimal holds
+        }
+
+        if (exact is not { } amount)
+            return null;
+
+        try
+        {
+            return type switch
+            {
+                "Integer" when decimal.Truncate(amount) == amount && amount is >= int.MinValue and <= int.MaxValue => (int)amount,
+                "BigInt" when decimal.Truncate(amount) == amount && amount is >= long.MinValue and <= long.MaxValue => (long)amount,
+                "Decimal" => amount,
+                "Double" => value is double real ? real : (double)amount,
+                "Money" => new Money(amount),
+                _ => null,
+            };
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether a converted number lies within its column's stated range; a range not stated is not (fail closed).</summary>
+    private static bool InRange(ColumnMetadata metadata, object number)
+    {
+        if (metadata.MinValue is not { } min || metadata.MaxValue is not { } max)
+            return false;
+
+        return number switch
+        {
+            int whole => whole >= min && whole <= max,
+            long big => big >= min && big <= max,
+            decimal amount => amount >= min && amount <= max,
+            Money money => money.Value >= min && money.Value <= max,
+            double real => real >= (double)min && real <= (double)max,
+            _ => false,
+        };
     }
 
     /// <summary>A secure root's security business unit (provisioning's; it decides where the record's access lives).</summary>
@@ -603,127 +855,28 @@ internal sealed partial class RecordCreationService
         return type?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn);
     }
 
-    // ── Step 8: search-index default ────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Step 8 (FR-10) for an existing row: on a search-indexed table, each of the two columns the row does not hold is filled
-    /// from its OWNING business unit (the repaired owner's when step 7 re-owned it), by the create's own reads. A unit that
-    /// cannot be read fills nothing.
-    /// </summary>
-    private async Task RepairSearchIndexAsync(
-        string table, RecordTableRule rule, Entity row, Guid? businessUnit, Dictionary<string, object> patch,
-        List<RecordRepairField> report, CancellationToken ct)
-    {
-        if (!rule.SearchIndexed)
-            return;
-
-        var name = SearchIndexColumns.LegacyTextColumn;
-        var lookup = SearchIndexColumns.LookupColumn;
-        var holdsName = HoldsValue(row, name) || patch.ContainsKey(name);
-        var holdsLookup = HoldsValue(row, lookup) || patch.ContainsKey(lookup);
-        if (holdsName)
-            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, name));
-        if (holdsLookup)
-            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, lookup));
-        if (holdsName && holdsLookup)
-            return;
-
-        // UAC-r2 condition (b) F2-1: filled only once the owner is settled on a team — already team-owned, or re-owned in this
-        // patch (step 7 writes only a team). A held column overrides SearchIndexNameResolver's own choice for good, so it is
-        // never filled from the unit of an owner Repair did not settle (kept in another unit, refused, or unknown).
-        var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
-        var ownerIsTeam = patch.ContainsKey(OwnerColumn)
-            || (rowOwner is { } held && held.Id != Guid.Empty
-                && string.Equals(held.LogicalName, "team", StringComparison.OrdinalIgnoreCase));
-        if (!ownerIsTeam)
-        {
-            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the owner is not settled on a team; no search index filled",
-                table, row.Id);
-            if (!holdsName)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexOwnerUnsettled));
-            if (!holdsLookup)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexOwnerUnsettled));
-            return;
-        }
-
-        (string? Name, Guid? Index) defaults;
-        try
-        {
-            if (businessUnit is not { } unit)
-                throw new InvalidOperationException("the row's owning business unit is not known");
-            defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] the search-index defaults for {Table} {Id} could not be read; none filled", table, row.Id);
-            if (!holdsName)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexUnavailable));
-            if (!holdsLookup)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexUnavailable));
-            return;
-        }
-
-        if (!holdsName)
-        {
-            if (defaults.Name is { } indexName)
-            {
-                patch[name] = indexName;
-                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, name));
-            }
-            else
-            {
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexNoDefault));
-            }
-        }
-
-        if (!holdsLookup)
-        {
-            if (defaults.Index is { } index)
-            {
-                patch[lookup] = new EntityReference(SearchIndexTable, index);
-                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, lookup));
-            }
-            else
-            {
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexNoDefault));
-            }
-        }
-    }
-
     // ── Step 10: I-1 stamp ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Step 10 (I-1) for an existing row: the stamp columns it is MISSING, from its source's current root
-    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>). A held stamp — stale or not — and the row's children are
+    /// (<see cref="CoreAncestorRestamper.MissingOf"/> of <see cref="CoreAncestorRestamper.PlanStampOfRowAsync"/>), as planned once before the owner (FR-41, task 042b:
+    /// <paramref name="stamp"/>; no second derivation). A held stamp — stale or not — and the row's children are
     /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
     /// </summary>
-    private async Task RepairStampAsync(
-        string table, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report, CancellationToken ct)
+    private static void RepairStamp(
+        string table, Entity row, (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp, Dictionary<string, object> patch,
+        List<RecordRepairField> report)
     {
         if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
             return;
 
-        Dictionary<string, object>? missing;
-        try
+        if (stamp.Faulted)
         {
-            missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
             report.Add(RecordRepairField.Skipped(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampUnavailable));
             return;
         }
 
-        if (missing is null)
+        if (CoreAncestorRestamper.MissingOf(row, stamp.Plan) is not { } missing)
         {
             report.Add(RecordRepairField.Present(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampNothingMissing));
             return;
@@ -835,9 +988,6 @@ internal enum RecordRepairPart
     /// <summary>Step 7, the owner.</summary>
     Owner,
 
-    /// <summary>Step 8, the search-index default.</summary>
-    SearchIndex,
-
     /// <summary>Step 10, the I-1 core-ancestor stamp.</summary>
     CoreAncestorStamp,
 }
@@ -928,6 +1078,32 @@ internal static class RecordRepairReason
     internal const string MappingNoValue = "record_repair.mapping_no_value";
     internal const string MappedValueWouldRefile = "record_repair.mapped_value_would_refile";
 
+    /// <summary>Task 052a (owner decision 2026-10-21, UAC-r2 condition 1): the mapping source's column metadata could not be
+    /// read, or does not say whether a mapped source column is field-secured — nothing is mapped (fail closed).</summary>
+    internal const string MappingSourceMetadataUnavailable = "record_repair.mapping_source_metadata_unavailable";
+
+    /// <summary>Task 052a: the row's own column metadata could not be read, so no mapped value can be checked against its
+    /// column (update validity, length, Money) — nothing is mapped (fail closed).</summary>
+    internal const string MappingTargetMetadataUnavailable = "record_repair.mapping_target_metadata_unavailable";
+
+    /// <summary>Task 052a: the mapped column does not exist on the row's table, or an update may not set it.</summary>
+    internal const string MappedColumnNotUpdatable = "record_repair.mapped_column_not_updatable";
+
+    /// <summary>Task 052a: the mapped text is longer than its column takes.</summary>
+    internal const string MappedValueTooLong = "record_repair.mapped_value_too_long";
+
+    /// <summary>Task 052a: the mapped value is not of a kind its column takes (the create path's <c>Fits</c>).</summary>
+    internal const string MappedValueTypeMismatch = "record_repair.mapped_value_type_mismatch";
+
+    /// <summary>Task 052a review F1: the mapped number is outside its column's range (or the range is not stated).</summary>
+    internal const string MappedValueOutOfRange = "record_repair.mapped_value_out_of_range";
+
+    /// <summary>Task 052a review F1: the mapped lookup points at a table its column does not take (or no targets are stated).</summary>
+    internal const string MappedLookupTableNotAccepted = "record_repair.mapped_lookup_table_not_accepted";
+
+    /// <summary>Task 052a review F1: the mapped option is not one of its column's choices (or no choices are stated).</summary>
+    internal const string MappedOptionNotAccepted = "record_repair.mapped_option_not_accepted";
+
     /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
     /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>
     internal const string MappedValueConfersAccess = "record_repair.mapped_value_confers_access";
@@ -939,10 +1115,6 @@ internal static class RecordRepairReason
     /// <summary>UAC-r2 condition (b) F1-1: the ADR-024 regarding pair — filling it would change what the row is filed under
     /// (its stamp source), so Repair's mapping never fills it.</summary>
     internal const string MappedValueWouldRefilePair = "record_repair.mapped_value_would_refile_pair";
-
-    /// <summary>UAC-r2 condition (b) F2-1: the owner is not settled on a team, so the search index is not filled from the
-    /// row's current unit (the column would override the resolver's own choice for good).</summary>
-    internal const string SearchIndexOwnerUnsettled = "record_repair.search_index_owner_unsettled";
 
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";
@@ -962,9 +1134,6 @@ internal static class RecordRepairReason
 
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
-
-    internal const string SearchIndexUnavailable = "record_repair.search_index_unavailable";
-    internal const string SearchIndexNoDefault = "record_repair.search_index_no_default";
 
     internal const string StampUnavailable = "record_repair.stamp_unavailable";
     internal const string StampNothingMissing = "record_repair.stamp_nothing_missing";

@@ -167,9 +167,8 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("DataverseServiceClientImpl.cs", "sprk_attachmentartifact", 1, Disposition.Seam,
             "CreateAttachmentArtifactAsync — refuses without the OwningTeamId request property; UploadFinalizationWorker "
             + "passes its document's team (task 146)."),
-        new CensusEntry("DataverseWebApiService.cs", "sprk_event", 1, Disposition.Seam,
-            "CreateEventAsync — throws when CreateEventRequest.OwningTeamId is absent; EventEndpoints resolves it from "
-            + "the regarding record (or the caller for an unfiled event)."),
+        // Field-mapping-server-write-path-r1 task 031 fix round 1: DataverseWebApiService.CreateEventAsync (the sprk_event POST,
+        // a Seam) was deleted - POST /api/v1/events creates through RecordCreationService - so its entry is gone.
 
         // ── Routed: the file resolves the owner and writes it ───────────────────────────────────────────────────
         new CensusEntry("DataverseWebApiService.cs", "sprk_eventlog", 1, Disposition.Routed,
@@ -230,9 +229,8 @@ public class RecordOwnerAssignmentCensusTests
             + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
-        new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
-            "Office to-do: ForChild over the record regarding, its core-ancestor stamps and the document / email "
-            + "carriers (secure-if-any, task 146); unfiled → the acting user's team."),
+        // Field-mapping-server-write-path-r1 task 030a: POST /api/office/todo creates its sprk_todo through RecordCreationService
+        // (the unified create decides the owner from the record regarding and the carriers), so OfficeService.cs's entry is gone.
         new CensusEntry("TodoGenerationService.cs", "sprk_todo", 1, Disposition.Routed,
             "Generated to-dos are owned from their source event (ownershipSource); a refusal counts the rule failed."),
 
@@ -256,7 +254,9 @@ public class RecordOwnerAssignmentCensusTests
             + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
             + "keep their creator as owner; filed ones are routed secure-if-any. The per-user master thread keys on the "
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
-            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
+            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
+            + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
@@ -332,6 +332,10 @@ public class RecordOwnerAssignmentCensusTests
             "transaction UpsertRequests of sprk_invoicecorrection rows built with deterministic ids (the Accepted-in-bulk rows)",
             "ebilling-r1 task 100: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the first write, so nothing is created."),
+        new UnscannedWriter("InvoiceCorrectionService.cs",
+            "transaction UpsertRequest of one sprk_invoicecorrection row (Corrected or Confirmed individually) built with a deterministic id",
+            "ebilling-r1 task 101 part B1: ResolveOwnerAsync over the row's own question (RecordOwnershipContext.ForChild, the same one the "
+            + "secure-child reconciler asks), applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses before the write, so nothing is created."),
         new UnscannedWriter("InvoiceAdjustmentService.cs",
             "transaction CreateRequest of one sprk_billingevent Adjustment line built with a deterministic id",
             "ebilling-r1 task 102: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
@@ -344,18 +348,18 @@ public class RecordOwnerAssignmentCensusTests
             "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
             + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
             + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
-        new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
-            "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
+        new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventLogAsync)",
+            "The event row is created by RecordCreationService (field-mapping task 031), which decides its owner; the audit row takes the "
+            + "owner the service wrote. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
-            "Create and promote resolve the owner from the document and regarding record; a refusal is a 409 (the fork route was deleted by task 162)."),
+            "Promote resolves the owner from the document and regarding record; create goes through RecordCreationService (field-mapping "
+            + "task 031). A refusal is a 409 (the fork route was deleted by task 162)."),
         new UnscannedWriter("AnalysisResultPersistence.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
             "Outputs are owned like their analysis; a refusal skips the analysis and its outputs."),
         new UnscannedWriter("AppOnlyAnalysisService.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
             "App-only profile analyses owned from the document; a refusal skips (best-effort shape)."),
         new UnscannedWriter("DataverseObservationMirror.cs", "owner of ObservationMirrorMapper's row",
             "ForChild over the mirrored row; a refusal skips the mirror."),
-        new UnscannedWriter("EmailAttachmentProcessor.cs", "seam caller (CreateDocumentAsync)",
-            "Inbound attachment documents owned from the parent document and its association."),
         new UnscannedWriter("UploadFinalizationWorker.cs", "seam caller (CreateDocumentAsync, artifact creates)",
             "Office upload documents and their artifacts carry the resolved / carried team."),
         new UnscannedWriter("DataverseDocumentsEndpoints.cs", "seam caller (POST) + PUT re-file",
@@ -390,7 +394,7 @@ public class RecordOwnerAssignmentCensusTests
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
             + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
             + "OwnedChildWrite.RefileAsync. #1616: a project's BFF-managed (field-secured) pair is written update-only by the "
-            + "application after the caller's AppendTo/Write/Append checks (OwnedChildWrite.PatchWithBffManagedPairAsync); "
+            + "application after the caller's AppendTo/Write/Append checks, conditioned on the row version (task 195: ProjectMatterFiling.FileAsync); "
             + "the owner is never written there."),
 
         // ── task 147 r1 (owner round 28 item 1): the browser's child writers, through the BFF ─────────────────────────
@@ -399,7 +403,8 @@ public class RecordOwnerAssignmentCensusTests
             + "server create: as-the-caller checks, the resolver's owner or the secure-create plan's named team, the app-only "
             + "create, then the post-create steps). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
             + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
-            + "caller's own update."),
+            + "caller's own update. Task 195: PATCH .../sprk_project/{id} takes the filing pair only, written by "
+            + "ProjectMatterFiling.FileAsync (the application, version-conditioned; the owner is never written there)."),
 
         // ── #2084 (owner round 102 item 4, option A3 agreed with spaarke-ontology-platform-r1) ─────────────────────────
         new UnscannedWriter("OntologyAdminAuthoringService.cs",
@@ -432,7 +437,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "RequireArtifactOwner", Refusal),
         // b2 merge (task 152 extracted the payload builder): the refusal lives in the builder, so no payload without an
-        // owner is ever built; CreateEventAsync's POST uses only that builder.
+        // owner is ever built (its CreateEventAsync POST was deleted by field-mapping task 031; no production caller is left).
         new OwnerSeam("DataverseWebApiService.cs", "BuildCreateEventPayload", Refusal),
         // r2 (verifier items 3 and 15): a builder must REFUSE an empty team AND BIND the team it was handed — dropping the
         // bind used to pass every test, leaving the external create owned by the BFF application user.
@@ -547,7 +552,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", 1, OwnerWriteKind.Seam,
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "BuildCreateEventPayload", 1, OwnerWriteKind.Seam,
-            "CreateEventRequest.OwningTeamId — throws without it (the builder CreateEventAsync POSTs; task 152 extracted it)."),
+            "CreateEventRequest.OwningTeamId — throws without it (task 152 extracted it; its CreateEventAsync POST was deleted by field-mapping task 031)."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventLogAsync", 1, OwnerWriteKind.Seam,
             "The owner EventEndpoints resolved as content of the event; null only when the resolver answered Unchanged."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildDocumentCreatePayload", 1, OwnerWriteKind.Seam,
@@ -592,8 +597,8 @@ public class RecordOwnerAssignmentCensusTests
             "Owned from the inherited filing links or the caller."),
         new OwnerWriteEntry("OfficeService.cs", "QuickCreateAsync", 1, OwnerWriteKind.Routed,
             "Office invoice quick-create — the resolver's team (task 080)."),
-        new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
-            "Office to-do — secure-if-any over regarding, stamps and carriers."),
+        // (OfficeService.cs.CreateTodoAsync writes no owner since field-mapping task 030a: RecordCreationService.cs's
+        // OwnedCreateFields, below, writes the Office To Do's.)
         new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
             "Upload capture — the team the evaluated filing resolved."),
         new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
@@ -2102,6 +2107,11 @@ public class RecordOwnerAssignmentCensusTests
     /// are <see cref="UnscannedWriters"/>; so is the update tool, whose re-file the r1 census never saw (verifier item 2).</remarks>
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
+        ["ProjectMatterFiling.cs"] = "uac-r2 task 195: the chat update tool's other columns of a project, PATCHed as the caller after "
+                                     + "the regarding pair is stripped from the body. They are the general update tool's columns, governed "
+                                     + "by the caller's own Dataverse rights (Assign included), as on any update. The pair, a project's only "
+                                     + "filing, is not in that PATCH: the application writes it, version-conditioned (an "
+                                     + "ExternalDocumentNarrowingGuard writer), so this PATCH files the project under nothing.",
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
                                            + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
@@ -2588,10 +2598,12 @@ public class RecordOwnerAssignmentCensusTests
             "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
             + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter "
             + "(task 092: an upload creates no document; the Stored File the persister creates carries the workforce submitter as its creator person, none for a contact)"),
-        new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
-        new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
+        // Field-mapping task 031 (FR-19): POST /api/v1/events and POST /api/ai/analysis/create create their row through
+        // RecordCreationService (the row above: DecideOwnerAsync names the caller via WhoAmI), so EventEndpoints.OwnershipContextFor,
+        // EventEndpoints.CreateEventInDataverseAsync and AnalysisEndpoints.CreateAnalysis no longer create or decide an owner and
+        // left this list. The event's creation LOG row (below, and here) still names the person whose create it records.
+        new PersonBearingWriter("EventEndpoints.cs", "WriteCreatedAuditLogAsync", "the caller whose create the event's creation log row records"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
-        new PersonBearingWriter("AnalysisEndpoints.cs", "CreateAnalysis", "POST /api/ai/analysis/create caller"),
         // (ForkAnalysis left with POST /api/ai/analysis/fork, deleted by task 162 under owner round 10 item 1.)
         new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),
@@ -2619,7 +2631,8 @@ public class RecordOwnerAssignmentCensusTests
         // in-process save, IOfficeSubmissionEmailSave); SaveAsync is now a one-line delegation.
         new PersonBearingWriter("OfficeService.cs", "SaveCoreAsync", "the Office user saving a document (carried to the worker)"),
         new PersonBearingWriter("OfficeService.cs", "QuickCreateAsync", "the Office user quick-creating an invoice"),
-        new PersonBearingWriter("OfficeService.cs", "ResolveTodoOwnerTeamAsync", "the Office user creating a To Do"),
+        // (OfficeService.ResolveTodoOwnerTeamAsync was deleted by field-mapping task 030a: the Office To Do is created through
+        // RecordCreationService, whose DecideOwnerAsync names the caller via WhoAmI.)
         new PersonBearingWriter("OfficeDocumentPersistence.cs", "CreateDocumentWithSpePointersAsync", "the saving user, on the document"),
         new PersonBearingWriter("OfficeJobQueue.cs", "QueueUploadFinalizationAsync", "carries the saving user to the worker"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateDocumentRecordAsync", "the carried saving user"),
@@ -2699,7 +2712,6 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> PersonLessWriters = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["IncomingCommunicationProcessor.cs"] = "inbound mail: nobody in the organisation asked for it (the sender is outside it)",
-        ["EmailAttachmentProcessor.cs"] = "inbound mail attachments: as above",
         ["MessagingIngestor.cs"] = "inbound channel message (E1, keeps the application as creator): no BFF caller",
         ["CommunicationParticipantIndexer.cs"] = "derived index rows of a communication: system work",
         ["CommunicationEnrichmentService.cs"] = "background enrichment and its review logs: system work",

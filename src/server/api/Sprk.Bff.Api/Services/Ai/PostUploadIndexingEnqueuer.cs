@@ -75,7 +75,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IDocumentDataverseService _documentService;
     private readonly DocumentIndexParentResolver _parentResolver;
-    private readonly AnalysisOptions _analysisOptions;
+    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly IOptions<PostUploadIndexingOptions> _options;
     private readonly ILogger<PostUploadIndexingEnqueuer> _logger;
 
@@ -84,7 +84,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         JobSubmissionService jobSubmissionService,
         IDocumentDataverseService documentService,
         DocumentIndexParentResolver parentResolver,
-        IOptions<AnalysisOptions> analysisOptions,
+        ISearchIndexNameResolver searchIndexNameResolver,
         IOptions<PostUploadIndexingOptions> options,
         ILogger<PostUploadIndexingEnqueuer> logger)
     {
@@ -92,7 +92,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _parentResolver = parentResolver ?? throw new ArgumentNullException(nameof(parentResolver));
-        _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
+        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -191,7 +191,6 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 FileName = request.FileName,
                 DocumentId = request.DocumentId,
                 ParentEntity = parentEntity,
-                SearchIndexName = request.SearchIndexName,
                 // Task 048 (spaarkeai-word-add-in-r1): this is the single seam every OBO upload/re-index
                 // caller converges on (Compose save-back, the Create* wizards, SprkChat persist, the
                 // "LinearDocumentProfile" direct-Action re-index). A first index has nothing to trim
@@ -205,12 +204,11 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             _logger.LogInformation(
                 "[PostUploadIndexingEnqueuer] Starting sync OBO indexing for {FileName} " +
                 "(DriveId={DriveId} ItemId={ItemId} DocumentId={DocumentId} " +
-                "SearchIndexName={SearchIndexName} Source={Source} TenantId={TenantId} CorrelationId={CorrelationId})",
+                "Source={Source} TenantId={TenantId} CorrelationId={CorrelationId})",
                 request.FileName,
                 request.DriveId,
                 request.ItemId,
                 request.DocumentId ?? "(none)",
-                request.SearchIndexName ?? "(resolver-pending)",
                 request.Source,
                 request.TenantId,
                 request.CorrelationId);
@@ -335,7 +333,6 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 FileName = request.FileName,
                 DocumentId = request.DocumentId,
                 ParentEntity = request.ParentEntity,
-                SearchIndexName = request.SearchIndexName,
                 Source = request.Source,
                 EnqueuedAt = DateTimeOffset.UtcNow,
                 // Task 048 (spaarkeai-word-add-in-r1): unconditional as of this task (was
@@ -408,12 +405,9 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             return;
         }
 
-        // Prefer the caller-supplied index name; otherwise fall back to the shared default.
-        // Compose passes SearchIndexName=null and the resolver lands on the shared default
-        // (spaarke-files-index == SharedIndexName), matching the proven RAG paths.
-        var indexName = !string.IsNullOrEmpty(request.SearchIndexName)
-            ? request.SearchIndexName
-            : _analysisOptions.SharedIndexName;
+        // The index the file landed in (task 041, FR-40; G-9): the request named none, so the pipeline wrote the single
+        // canonical default (AiSearchOptions.KnowledgeIndexName), never the deprecated Analysis:SharedIndexName.
+        var indexName = _searchIndexNameResolver.GetDefaultIndexName();
 
         try
         {
@@ -425,7 +419,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 // Legacy dual-write (preserved during transition)
                 SearchIndexed = true,
                 SearchIndexedOn = completedAt,
-                // Index routing (unchanged)
+                // Index routing (task 041: the content type's index)
                 SearchIndexName = indexName
             };
 

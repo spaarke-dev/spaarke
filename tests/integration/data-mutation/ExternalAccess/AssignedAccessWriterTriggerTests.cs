@@ -67,7 +67,10 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     /// Dataverse stores: the created row's Assigned column, as the materializer reads it back. Returns the created rows.
     /// </summary>
     private WebApplicationFactory<Program> OfficeHost(
-        OfficeQuickCreateTestWebAppFactory factory, Guid makersContact, List<(string Table, Guid Id)> created)
+        OfficeQuickCreateTestWebAppFactory factory, Guid makersContact, List<(string Table, Guid Id)> created,
+        Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>? identityOverride = null,
+        bool queueFails = false, Action<ExternalGrantRootType, Guid>? alsoAssign = null,
+        Microsoft.Extensions.Logging.ILoggerProvider? logs = null)
     {
         factory.CallerResolver
             .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
@@ -91,6 +94,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
                 {
                     _h.Store.Root(root, id);
                 }
+
+                alsoAssign?.Invoke(root, id); // task 049b: the other "Assigned *" columns the stored row carries
             })
             .Returns(Task.CompletedTask);
         factory.Entities
@@ -99,20 +104,99 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
                 It.Is<string[]>(columns => columns.Length == 1), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] columns, CancellationToken _) => new Entity(table, id) { [columns[0]] = "NUM-142" });
 
-        var identity = IdentityNormalizationFixtures.WithContact(makersContact);
+        var identity = identityOverride ?? IdentityNormalizationFixtures.WithContact(makersContact);
+        if (logs is not null)
+        {
+            _h.Logger = new Microsoft.Extensions.Logging.Logger<AssignedAccessMaterializer>(
+                new Microsoft.Extensions.Logging.LoggerFactory(new[] { logs }));
+        }
+
         return factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
+            if (logs is not null)
+                services.AddSingleton(logs);
+
             services.RemoveAll<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>();
             services.AddSingleton(identity.Object);
             services.RemoveAll<AssignedAccessMaterializer>();
-            services.AddScoped(_ => _h.Materializer);
+            services.AddScoped(_ =>
+            {
+                // Resolved in the request only by an inline pass (a queued job is run by the test, over its own scope).
+                Interlocked.Increment(ref _inlinePasses);
+                return _h.Materializer;
+            });
+            // Task 049 Part B: the create queues its "Assigned *" pass; the jobs it queued are recorded here.
+            services.RemoveAll<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
+            services.AddSingleton(QueueThatRecords(queueFails));
         }));
     }
 
+    /// <summary>How many times the Office host's request resolved the materializer: once per inline pass.</summary>
+    private int _inlinePasses;
+
+    /// <summary>A contact the request names in Assigned To: the caller may read it and append to it.</summary>
+    private static void NamedAssignee(OfficeQuickCreateTestWebAppFactory factory, Guid contact)
+    {
+        factory.CallerDataverse.WithRow("contact", contact);
+        factory.AccessProbe
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "contacts", contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+    }
+
+    /// <summary>Task 049 Part B: the jobs the Office host's creates queued.</summary>
+    private readonly List<Sprk.Bff.Api.Services.Jobs.JobContract> _queued = new();
+
+    /// <summary>Task 049b fix round 2: how many sends a failing queue was asked for.</summary>
+    private int _submitAttempts;
+
+    private Sprk.Bff.Api.Services.Jobs.JobSubmissionService QueueThatRecords(bool fails = false)
+    {
+        var jobs = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Strict,
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "sdap-jobs" }),
+            Mock.Of<Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        if (fails)
+        {
+            jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+                .Callback<Sprk.Bff.Api.Services.Jobs.JobContract, CancellationToken>((_, _) => Interlocked.Increment(ref _submitAttempts))
+                .ThrowsAsync(new Azure.Messaging.ServiceBus.ServiceBusException(
+                    "Simulated send failure.", Azure.Messaging.ServiceBus.ServiceBusFailureReason.ServiceCommunicationProblem));
+            return jobs.Object;
+        }
+
+        jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback<Sprk.Bff.Api.Services.Jobs.JobContract, CancellationToken>((job, _) => _queued.Add(job))
+            .Returns(Task.CompletedTask);
+        return jobs.Object;
+    }
+
+    /// <summary>Task 049 Part B: runs a queued create-grant job over the harness's materializer, as the queue would.</summary>
+    private async Task RunQueuedGrantAsync(Sprk.Bff.Api.Services.Jobs.JobContract job)
+    {
+        var outcome = await RunQueuedJobAsync(job);
+        outcome.Status.Should().Be(Sprk.Bff.Api.Services.Jobs.JobStatus.Completed, outcome.ErrorMessage);
+    }
+
+    private async Task<Sprk.Bff.Api.Services.Jobs.JobOutcome> RunQueuedJobAsync(Sprk.Bff.Api.Services.Jobs.JobContract job)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => _h.Materializer);
+        var handler = new Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler(
+            services.BuildServiceProvider(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(),
+            NullLogger<Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler>.Instance);
+        return await handler.ProcessAsync(job, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Task 049 fix round 1 (UAC-r2 ruling, item 1): a create whose Assigned-To is its maker's own linked contact grants the
+    /// maker inline, so the maker's Assigned-To share is in place when the create returns. Task 049b: the full pass is then
+    /// queued (one job), and finds the maker's share already there.
+    /// </summary>
     [Theory]
     [InlineData("matter", "sprk_matter")]
     [InlineData("project", "sprk_project")]
-    public async Task OfficeQuickCreate_SharesTheRecordWithItsAssignedMaker_BeforeItReturns(string type, string table)
+    public async Task OfficeQuickCreate_ForItsMaker_SharesTheRecordWithThem_BeforeItReturns(string type, string table)
     {
         var (makersContact, makerUser) = _h.LinkedContact();
         var created = new List<(string Table, Guid Id)>();
@@ -123,13 +207,175 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         var createdId = created.Should().ContainSingle().Subject.Id;
+        _inlinePasses.Should().Be(1, "the maker's own subject is granted in the request");
         _h.Shares.MaskOf(table, createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull(
-            "owner A7: the maker is assigned, and the Assigned-To share is issued inline (R3 'immediate')");
+            "owner A7: the maker is assigned, and the Assigned-To share is issued before the create returns");
+        _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
+
+        var shareWrites = _h.Shares.Writes.Count;
+        await RunQueuedGrantAsync(_queued.Should().ContainSingle("task 049b: the full pass is queued").Subject);
+        _h.Shares.Writes.Count.Should().Be(shareWrites, "the queued pass finds the maker's share in place");
+        _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Field-mapping-server-write-path-r1 task 049b (UAC-r2 ruling): when the maker is the created root's Assigned To,
+    // only the maker's own subject is granted in the request; every other subject takes the queued path.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The other subjects a matter created for its maker also names: an internal attorney (a linked contact), an
+    /// external contact (an unlinked one: a contact grant) and a law firm (an organization grant).</summary>
+    private (Guid Attorney, Guid AttorneyUser, Guid External, Guid Firm, Action<ExternalGrantRootType, Guid> Assign) OthersOnTheMatter()
+    {
+        var (attorney, attorneyUser) = _h.LinkedContact();
+        var external = _h.Contact();
+        var firm = Guid.NewGuid();
+        return (attorney, attorneyUser, external, firm, (root, id) =>
+        {
+            _h.Store.Assign(root, id, Attorney1, attorney);
+            _h.Store.Assign(root, id, "sprk_assignedtoexternal", external);
+            _h.Store.Assign(root, id, "sprk_assignedlawfirm1", firm);
+        });
+    }
+
+    [Fact]
+    public async Task OfficeQuickCreate_ForItsMaker_GrantsOnlyTheMakerInline_AndQueuesTheRest()
+    {
+        var (makersContact, makerUser) = _h.LinkedContact();
+        var others = OthersOnTheMatter();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created, alsoAssign: others.Assign);
+
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _inlinePasses.Should().Be(1);
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull();
+        _h.Store.Ledger.Select(r => r.Subject).Distinct().Should().Equal(
+            new AssignedSubject?[] { new AssignedSubject(AssignedSubjectKind.Contact, makersContact) },
+            "exactly one subject, the maker's own, is granted in the request");
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(others.AttorneyUser)).Should().BeNull();
+        _h.Grants.WriteCount.Should().Be(0);
+
+        // The queued remainder: the full pass on the same path, idempotent for the maker.
+        var job = _queued.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler.JobTypeName);
+        var shareWrites = _h.Shares.WriteLog.Count(w => w.Principal == DataversePrincipalRef.User(makerUser));
+        await RunQueuedGrantAsync(job);
+
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(others.AttorneyUser)).Should().NotBeNull();
+        _h.Grants.ActiveRowsOf(createdId, others.External).Should().ContainSingle();
+        _h.Grants.ActiveRowsOf(createdId, organizationId: others.Firm).Should().ContainSingle();
+        _h.Shares.WriteLog.Count(w => w.Principal == DataversePrincipalRef.User(makerUser)).Should().Be(shareWrites);
         _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
     }
 
     [Fact]
-    public async Task OfficeQuickCreate_AMaterializerFault_NeverFailsTheCreate()
+    public async Task OfficeQuickCreate_ForItsMaker_NeverGrantsAnExternalSubjectInline()
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var others = OthersOnTheMatter();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created, alsoAssign: others.Assign);
+
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _h.Grants.Creates.Should().BeEmpty("no contact or organization grant is written in the request");
+        _h.Grants.ActiveRowsOf(createdId, others.External).Should().BeEmpty();
+        _h.Grants.ActiveRowsOf(createdId, organizationId: others.Firm).Should().BeEmpty();
+        _h.Store.RowsOf(createdId, others.External).Should().BeEmpty();
+        _h.Store.RowsOf(createdId, others.Firm).Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty();
+
+        await RunQueuedGrantAsync(_queued.Should().ContainSingle().Subject);
+        _h.Grants.ActiveRowsOf(createdId, others.External).Should().ContainSingle("the queued pass grants it");
+    }
+
+    /// <summary>
+    /// Task 049b fix round 2 (UAC-r2 ruling b), condition (i): the remainder cannot be queued (the send throws). The FULL
+    /// pass runs inline with the create's grantor, so the external subject gets its grant AND its invite, the maker is still
+    /// granted, and one neutral line records the queue-down create (no contact id, name or email).
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_RunsTheFullPassInline_GrantingAndInvitingTheExternalSubject()
+    {
+        var (makersContact, makerUser) = _h.LinkedContact();
+        var others = OthersOnTheMatter();
+        const string externalEmail = "partner@outside.test";
+        _h.Identities.Contacts[others.External].Email = externalEmail;
+        var grantorOid = Guid.NewGuid();
+        _h.Grants.SystemUserIdsByOid[grantorOid] = Guid.NewGuid(); // an internal user: the invite rule applies
+        var logs = new Sprk.Bff.Api.Tests.Auth.SpeAdmin.RecordingLoggerProvider();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created, queueFails: true, alsoAssign: others.Assign, logs: logs);
+        var client = host.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", grantorOid.ToString("D"));
+
+        var response = await client.PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _queued.Should().BeEmpty("the queue failed");
+        _inlinePasses.Should().Be(2, "the maker's own grant, then the full pass");
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull("the maker is still granted");
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(others.AttorneyUser)).Should().NotBeNull();
+        _h.Grants.ActiveRowsOf(createdId, others.External).Should().ContainSingle("the external subject is granted in the request");
+        _h.Grants.ActiveRowsOf(createdId, organizationId: others.Firm).Should().ContainSingle();
+        _h.Emails.InviteUrls.Should().ContainSingle("the external subject is invited, as the grantor's pass does");
+        _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
+
+        var lines = logs.Lines.Where(l => l.Message.Contains(createdId.ToString(), StringComparison.OrdinalIgnoreCase)).ToList();
+        var queueDown = lines.Where(l => l.Message.Contains("QueueDownInlinePass")).ToList();
+        queueDown.Should().ContainSingle("one neutral line counts a queue-down create").Which.Message
+            .Should().Contain("for 4 assigned subject(s)");
+        queueDown[0].Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        logs.Lines.Should().NotContain(l => l.Message.Contains("reconciliation job completes it"));
+        logs.Lines.Should().NotContain(l => l.Message.Contains("it runs inline"));
+        queueDown[0].Message.Should().NotContainAny(externalEmail, others.External.ToString(), makersContact.ToString())
+            .And.NotContainEquivalentOf(grantorOid.ToString("D"), "the line names no contact, email or person");
+    }
+
+    /// <summary>
+    /// Task 049b fix round 2, condition (iii): the fallback runs once. One send is attempted, the full pass is not run twice
+    /// (one full-pass line, one maker-only line) and nothing is queued again.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_TheFullPassRunsOnce_AndIsNotQueuedAgain()
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var others = OthersOnTheMatter();
+        var logs = new Sprk.Bff.Api.Tests.Auth.SpeAdmin.RecordingLoggerProvider();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created, queueFails: true, alsoAssign: others.Assign, logs: logs);
+
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _submitAttempts.Should().Be(1, "one send, not retried");
+        _queued.Should().BeEmpty();
+        _inlinePasses.Should().Be(2, "the maker's pass and exactly one full pass");
+
+        var lines = logs.Lines.Where(l => l.Message.Contains(createdId.ToString(), StringComparison.OrdinalIgnoreCase)).ToList();
+        lines.Count(l => System.Text.RegularExpressions.Regex.IsMatch(l.Message, @": \d+ assigned subject\(s\), \d+ write\(s\)"))
+            .Should().Be(1, "the full pass ran once");
+        lines.Count(l => l.Message.Contains("1 of 4 assigned subject(s) evaluated")).Should().Be(1);
+        lines.Count(l => l.Message.Contains("QueueDownInlinePass")).Should().Be(1);
+    }
+
+    /// <summary>
+    /// Task 049b, condition 3: the maker's inline grant meets a materializer fault (the ledger cannot be read). As before,
+    /// the create still succeeds and nothing is written; the full pass is still queued.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_ForItsMaker_AFaultInTheMakersGrant_NeverFailsTheCreate()
     {
         var (makersContact, _) = _h.LinkedContact();
         _h.Store.FailLedgerRead = true;
@@ -139,9 +385,113 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
 
         var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Created, "the job repairs it within minutes");
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the reconciliation job repairs it within minutes");
         created.Should().ContainSingle();
+        _inlinePasses.Should().Be(1);
+        _h.TotalWrites.Should().Be(0);
+        _queued.Should().ContainSingle("the full pass is queued whatever the maker's grant answered");
+    }
+
+    /// <summary>Task 049 fix round 1 (item 1): a create assigned to someone other than its maker queues the pass.</summary>
+    [Theory]
+    [InlineData("matter", "sprk_matter")]
+    [InlineData("project", "sprk_project")]
+    public async Task OfficeQuickCreate_ForAnotherAssignee_QueuesThePass_AndGrantsNothingInline(string type, string table)
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var (assignee, assigneeUser) = _h.LinkedContact();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        NamedAssignee(factory, assignee);
+        using var host = OfficeHost(factory, makersContact, created);
+
+        var response = await host.CreateClient().PostAsJsonAsync($"/api/office/quickcreate/{type}",
+            new QuickCreateRequest { Name = "Quick", AssignedToContactId = assignee });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _inlinePasses.Should().Be(0, "no pass runs in the request");
+        _h.TotalWrites.Should().Be(0);
+        await RunQueuedGrantAsync(_queued.Should().ContainSingle().Subject);
+        _h.Shares.MaskOf(table, createdId, DataversePrincipalRef.User(assigneeUser)).Should().NotBeNull("the queued pass shares it");
+    }
+
+    /// <summary>
+    /// Task 049 fix round 1 (item 1): when the maker's linked contact cannot be resolved, the create cannot tell that its
+    /// Assigned-To is its maker, so it queues the pass (fail closed: no inline grant on a guess).
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_WhenTheMakersContactLookupFaults_QueuesThePass()
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var identity = new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>();
+        identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Simulated identity read failure."));
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        NamedAssignee(factory, makersContact);
+        using var host = OfficeHost(factory, makersContact, created, identity);
+
+        // The request names the maker's own contact, so the create does not need the lookup to fill it.
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter",
+            new QuickCreateRequest { Name = "Quick", AssignedToContactId = makersContact });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        created.Should().ContainSingle();
+        identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce(),
+            "the create asked who its maker's contact is");
+        _inlinePasses.Should().Be(0, "an unanswered lookup never grants inline");
+        _h.TotalWrites.Should().Be(0);
+        _queued.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Task 049 fix round 1 (F3): the queue fails, so the pass runs inline, and that pass meets a materializer fault (the
+    /// ledger cannot be read). The create still succeeds, and nothing is shared.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_AMaterializerFault_NeverFailsTheCreate()
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var (assignee, _) = _h.LinkedContact();
+        _h.Store.FailLedgerRead = true;
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        NamedAssignee(factory, assignee);
+        using var host = OfficeHost(factory, makersContact, created, queueFails: true);
+
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter",
+            new QuickCreateRequest { Name = "Quick", AssignedToContactId = assignee });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the reconciliation job repairs it within minutes");
+        created.Should().ContainSingle();
+        _queued.Should().BeEmpty("the queue failed");
+        _inlinePasses.Should().Be(1, "the failed enqueue ran the pass inline, over the fault");
         _h.Shares.Writes.Should().BeEmpty();
+        _h.TotalWrites.Should().Be(0);
+    }
+
+    /// <summary>Task 049 fix round 1 (F3): the same fault in the queued job fails the job, and it writes nothing.</summary>
+    [Fact]
+    public async Task OfficeQuickCreate_AMaterializerFault_FailsItsQueuedJob_WithoutWriting()
+    {
+        var (makersContact, _) = _h.LinkedContact();
+        var (assignee, _) = _h.LinkedContact();
+        _h.Store.FailLedgerRead = true;
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        NamedAssignee(factory, assignee);
+        using var host = OfficeHost(factory, makersContact, created);
+
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter",
+            new QuickCreateRequest { Name = "Quick", AssignedToContactId = assignee });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var outcome = await RunQueuedJobAsync(_queued.Should().ContainSingle().Subject);
+
+        outcome.Status.Should().Be(Sprk.Bff.Api.Services.Jobs.JobStatus.Failed, "it is redelivered");
+        outcome.ErrorMessage.Should().Be("failed:ledger-unreadable");
+        _h.TotalWrites.Should().Be(0);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -161,8 +511,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             "sprk_matter", matter, null, null,
             new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) }), CancellationToken.None);
 
-        fieldMappings.Verify(f => f.UpdateRecordFieldsAsync("sprk_matter", matter, It.IsAny<Dictionary<string, object?>>(),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+        fieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync("sprk_matter", matter, It.IsAny<Dictionary<string, object?>>(),
+            null, It.IsAny<CancellationToken>()), Times.Once);
         _h.Grants.ActiveRowsOf(matter, contact).Should().ContainSingle();
     }
 
@@ -364,5 +714,36 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         updated.Should().Be(1);
         failed.Should().Be(0);
         _h.Grants.ActiveRowsOf(project, contact).Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 040 (FR-34, apply side): a push that writes an Assigned-To column of a SECURE
+    /// child suggests the assignee (pending confirmation) and grants nothing (owner answer A3).
+    /// </summary>
+    [Fact]
+    public async Task FieldMappingPush_ThatWritesAnAssignedColumnOfASecureChild_SuggestsIt_AndGrantsNothing()
+    {
+        var project = Guid.NewGuid();
+        var contact = _h.Contact();
+        _h.Participations.Flags[project] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Store.Assign(ExternalGrantRootType.Project, project, Attorney1, contact);
+        var dataverse = new Mock<IFieldMappingDataverseService>();
+
+        var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            dataverse.Object,
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },
+            new Dictionary<string, object?> { [Attorney1] = contact.ToString("D") },
+            "sprk_project",
+            new[] { project },
+            Guid.Parse("0000c166-0000-0000-0000-00000000ca11"),
+            NullLogger.Instance,
+            CancellationToken.None,
+            Scopes());
+
+        (updated, failed).Should().Be((1, 0));
+        _h.Grants.ActiveRowsOf(project, contact).Should().BeEmpty("a secure record is never granted by a push");
+        _h.Store.RowsOf(project, contact).Should().ContainSingle(r => r.SourceField == Attorney1)
+            .Which.State.Should().Be(AssignedAccessState.PendingConfirmation, "the assignee is suggested");
     }
 }

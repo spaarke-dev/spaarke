@@ -62,20 +62,26 @@
                       </cell>
                     </row>
                     <row>
+                      <cell id="{B36EBADE-C355-408D-96A9-2051ACE87320}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_senttoapdate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_senttoapdate" disabled="true" />
+                      </cell>
                       <cell id="{26EBB34B-F2EF-D3B1-0521-198E13C4D689}">
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
                         <control id="sprk_csvdocument" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_csvdocument" />
                       </cell>
+                    </row>
+                    <row>
                       <cell id="{E025B3DB-C2CC-C9C3-F3F6-9E95094A5A01}">
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
                         <control id="sprk_jsondocument" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_jsondocument" />
                       </cell>
-                    </row>
-                    <row>
                       <cell id="{4C931FBD-87CC-CC72-2D29-1301B2DEBCA5}">
                         <labels>
                           <label description="" languagecode="1033" />
@@ -96,6 +102,34 @@
                           <label description="" languagecode="1033" />
                         </labels>
                         <control id="sprk_mappingsnapshot" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_mappingsnapshot" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_sub_apemails" id="{1A6859E8-874F-973D-3A46-797A0BD26E78}" IsUserDefined="1" showlabel="true" showbar="false" columns="1" celllabelposition="Top" layout="varwidth">
+                  <labels>
+                    <label description="AP emails" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{161377F7-8729-75A8-3A3E-D6794CF47970}" rowspan="6" colspan="1" showlabel="false">
+                        <labels>
+                          <label description="AP emails" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_apemails" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>10</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_communication_billingexport_billingexport</RelationshipName>
+                            <TargetEntityType>sprk_communication</TargetEntityType>
+                            <ViewId>{E4BB816B-FC8A-F111-8076-7CED8D174EB8}</ViewId>
+                            <ViewIds>{E4BB816B-FC8A-F111-8076-7CED8D174EB8}</ViewIds>
+                          </parameters>
+                        </control>
                       </cell>
                     </row>
                   </rows>

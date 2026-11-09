@@ -13,7 +13,7 @@
     <parallel-group>W3-wizards</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
-    <deps>020</deps>
+    <deps>020, 041</deps>
     <tags>frontend, fluent-ui, bff-api, field-mapping, deploy, testing</tags>
     <estimated-effort>6-8 hours</estimated-effort>
   </metadata>
@@ -114,7 +114,7 @@
     <criterion testable="true">`applyFieldMappings` no longer appears in CreateMatterWizard/matterService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16, NFR-02, I-11. Reference migration: later wizard tasks copy this task's payload-test and live-check shape. Hosts: sprk_creatematterwizard web resource and the in-app QuickStartModal.</notes>
+  <notes>Spec FR-16, NFR-02, I-11. Reference migration: later wizard tasks copy this task's payload-test and live-check shape. Hosts: sprk_creatematterwizard web resource and the in-app QuickStartModal. FROM TASK 020 REVIEW (#2): the child-records route does not pass ReferenceLookupColumns / PostMappingDefaults as the Office path does (OfficeService.cs ~:2436-2440). Once the wizard is on the route, an unappendable matter type refuses the whole create (404) instead of being dropped with a warning, and Assigned To Internal no longer defaults to the maker. Decide and fix here (likely: pass RecordTableRules.Find(entity)?.OptionalReferenceLookups for matter/project) before cutover.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_procedureversionstatus" localizedName="Procedure Version Status" description="Lifecycle of one Procedure Version (model 3.2, I-P1, I-P5)." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.2.3.1</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Procedure Version Status" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Lifecycle of one Procedure Version (model 3.2, I-P1, I-P5)." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Draft" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Active" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Superseded" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Retired" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

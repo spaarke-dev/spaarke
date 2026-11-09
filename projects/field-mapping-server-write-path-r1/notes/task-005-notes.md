@@ -68,7 +68,17 @@ empty 20, One-time (0) 1, Manual Refresh (1) 4. The two sources agree.
 Profiles involved: Matter-Event (24dc0ed2-...), Matter-Report Card (b2915dad-...), Matter-Invoice (25dc0ed2-...), Matter-Work
 Assignment (7b147316-...).
 
-### Live `-Apply`: PENDING (not run)
+### Live `-Apply`: DONE on spaarkedev1 (2026-11-03)
+
+**Owner OK:** given in this session on 2026-11-03 ("005 migration - yes proceed"). The run used the owner's az account `ralph.schroeder@spaarke.com`.
+
+**Fresh dry run first.** Dev had changed since 2026-10-21: 40 rules, not 25. Every rule was created under the owner's account, the newest on 2026-10-22, and all are active Copy rules. 36 needed migrating (20 empty, 16 One-time), and 4 were already at Manual Refresh. Decision Q3 covers every existing Copy rule, so all 36 were migrated.
+
+**`-Apply -Verify`:** `Applied: 36 migrated, 0 failed.` → `VERIFY: PASS (Copy rules short of Manual Refresh: 0 active, 0 inactive)`.
+
+**Second pass (idempotency):** a dry run with `-Verify` gave `ToMigrate: 0; Aligned: 40` → `VERIFY: PASS`, exit 0.
+
+### Superseded: live `-Apply` PENDING (as written 2026-10-21)
 
 Needs the owner's explicit OK for the environment (project CLAUDE.md section 5). No `-Apply` was run on dev or anywhere. After the OK,
 the run is `... -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -Verify`, expected: 21 migrated, 0 failed, then

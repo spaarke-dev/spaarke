@@ -13,6 +13,7 @@
 // The write itself is InvoiceSubmissionService — the same operation the internal route calls (D-24).
 
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -133,8 +134,38 @@ public static class ExternalInvoiceSubmissionEndpoints
         return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
     }
 
-    private static IResult GetAsync(HttpContext http) =>
-        Scope(http) is { Submission: { } view } ? Results.Ok(ExternalView(view)) : NoScope();
+    private static async Task<IResult> GetAsync(
+        HttpContext http, InvoiceSubmissionService service,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger<Program> logger, CancellationToken ct)
+    {
+        if (Scope(http) is not { Submission: { } view } scope)
+        {
+            return NoScope();
+        }
+
+        // Task 097f (EB-D-180): the replaced-by-correction note, named only when the caller may see the correcting submission as they see this one.
+        var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(scope, hideSubmissions, logger), ct);
+        return Results.Ok(ExternalView(shown[0]));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 097f: which correcting submissions the external caller may be told, by the SAME rule that lets them see a submission
+    /// at all (the single read's filter and the list): its firm is one of the caller's, they can read its core record, and the (a') decision
+    /// (<see cref="VisibleSubmissionsAsync"/>, the one seam) keeps it. A decision that cannot be made names none (the caller treats the fault
+    /// as "not named"; <see cref="InvoiceSubmissionService.WithReplacementNoteAsync"/> logs it).
+    /// </summary>
+    private static ReplacementReadGate ReplacementGate(
+        ExternalInvoiceSubmissionScope scope, ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger logger) =>
+        async (replacements, ct) =>
+        {
+            var inScope = replacements
+                .Where(r => r is { FirmId: { } firmId, CoreRecord: { } core }
+                    && scope.FirmIds.Contains(firmId)
+                    && scope.Principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
+                .ToList();
+            var visible = await VisibleSubmissionsAsync(scope.Principal, inScope, hideSubmissions, logger, ct);
+            return visible.Select(v => v.SubmissionId).ToHashSet();
+        };
 
     /// <summary>
     /// ebilling-r1 task 098 review round 4b: the view an external caller is answered with. The submission's document link is read
@@ -258,7 +289,9 @@ public static class ExternalInvoiceSubmissionEndpoints
                 principal.AccessibleWorkAssignmentIds,
                 ct);
             var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct);
-            return Results.Ok(visible.Select(ExternalView).ToList());
+            // Task 097f (EB-D-180): the replaced-by-correction note on each visible Accepted submission whose invoice is Superseded.
+            var shown = await service.WithReplacementNoteAsync(visible, ReplacementGate(scope, hideSubmissions, logger), ct);
+            return Results.Ok(shown.Select(ExternalView).ToList());
         }
         catch (SdapProblemException ex)
         {

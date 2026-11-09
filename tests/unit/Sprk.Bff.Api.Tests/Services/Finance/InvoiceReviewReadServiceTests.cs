@@ -427,6 +427,98 @@ public sealed class InvoiceReviewReadServiceTests
         review.Lines.Single().HighestSeverity.Should().Be("Critical");
     }
 
+    // ── EB-D-175 / EB-D-176 (ebilling-r1 task 101 B2d): the lineFindings member the persister writes ──
+
+    private static string WithLineFindings(JsonNode? lineFindings, bool member = true)
+    {
+        var root = JsonNode.Parse(FindingsJson())!.AsObject();
+        if (member)
+        {
+            root[InvoiceSubmissionPersister.LineFindingsMember] = lineFindings;
+        }
+
+        return root.ToJsonString();
+    }
+
+    private static JsonObject LineNote(int line, string code, string? message = "note") => new() { ["line"] = line, ["code"] = code, ["message"] = message };
+
+    [Fact(DisplayName = "101 B2d: a line shows its lineFindings entry for each code, keyed on the line index")]
+    public async Task LineFindings_ShownOnTheirLine_ForEachCode()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.AddLine(2, InvoiceLineStatus.Flagged);
+        w.AddLine(3, InvoiceLineStatus.Clean);
+        w.Submission = SubmissionRow(WithLineFindings(new JsonArray(
+            LineNote(1, InvoiceSubmissionPersister.LineFindingNotReturned, "The line was not checked by the AI."),
+            LineNote(2, InvoiceSubmissionPersister.LineFindingNoDescription, "The line has no description."))));
+
+        var lines = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines;
+
+        lines[0].LineFindings.Should().BeEmpty("index 0 has no entry");
+        lines[1].LineFindings.Should().Equal(new ReviewLineFindingDto("coding.not_returned", "The line was not checked by the AI."));
+        lines[2].LineFindings.Should().Equal(new ReviewLineFindingDto("line.no_description", "The line has no description."));
+        lines[1].FindingCount.Should().Be(0, "the count describes the policy findings");
+        w.Logger.Invocations.Should().BeEmpty("nothing was malformed");
+    }
+
+    [Fact(DisplayName = "101 B2d: a row stored before lineFindings existed reads as an empty list on every line, with no error and no log")]
+    public async Task LineFindings_AbsentMember_ReadsEmpty()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(WithLineFindings(null, member: false));
+
+        var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
+
+        line.LineFindings.Should().NotBeNull().And.BeEmpty();
+        line.Findings.Should().HaveCount(2, "the policy findings are unchanged");
+        w.Logger.Invocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "101 B2d: a line with no stored submission reads an empty list")]
+    public async Task LineFindings_NoSubmission_ReadsEmpty()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+
+        (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single().LineFindings.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "101 B2d: a malformed lineFindings entry is skipped and logged once; the good entries and the page survive")]
+    public async Task LineFindings_MalformedEntries_SkippedAndLoggedOnce()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(WithLineFindings(new JsonArray(
+            "not an object",
+            new JsonObject { ["line"] = 0 },
+            new JsonObject { ["line"] = "zero", ["code"] = "line.no_description" },
+            new JsonObject { ["line"] = 0, ["code"] = 7 },
+            new JsonObject { ["line"] = 0, ["code"] = "" },
+            LineNote(0, InvoiceSubmissionPersister.LineFindingNoDescription, message: null))));
+
+        var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
+
+        line.LineFindings.Should().Equal(new ReviewLineFindingDto("line.no_description", null));
+        w.Logger.Invocations.Count(i => i.Method.Name == nameof(ILogger.Log) && (LogLevel)i.Arguments[0] == LogLevel.Warning)
+            .Should().Be(1, "five malformed entries are logged as one warning");
+    }
+
+    [Fact(DisplayName = "101 B2d: a lineFindings member that is not an array reads as empty and is logged once")]
+    public async Task LineFindings_MemberNotAnArray_ReadsEmpty()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(WithLineFindings(JsonValue.Create("oops")));
+
+        var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
+
+        line.LineFindings.Should().BeEmpty();
+        line.Findings.Should().HaveCount(2);
+        w.Logger.Invocations.Count(i => i.Method.Name == nameof(ILogger.Log) && (LogLevel)i.Arguments[0] == LogLevel.Warning).Should().Be(1);
+    }
+
     [Fact(DisplayName = "100: invoice-level findings, pipeline findings and the decision come from the same stored copy")]
     public async Task InvoiceFindings_AndSubmission()
     {
@@ -528,6 +620,7 @@ public sealed class InvoiceReviewReadServiceTests
     [InlineData(true, InvoiceStatusCodes.InReview, true)]
     [InlineData(false, InvoiceStatusCodes.InReview, false)]
     [InlineData(true, InvoiceStatusCodes.Approved, false)]
+    [InlineData(true, InvoiceStatusCodes.Superseded, false)] // task 097a: closed by its correction
     public async Task CanDecide(bool write, int status, bool expected)
     {
         var w = new World(status);
@@ -538,6 +631,22 @@ public sealed class InvoiceReviewReadServiceTests
 
         flags.CanRead.Should().BeTrue();
         flags.CanDecide.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "097a: a Superseded invoice reads with status Superseded (not Unknown), its stored code, not held and not decidable")]
+    public async Task Superseded_ReadsAsSuperseded_NotHeld_NotDecidable()
+    {
+        var w = new World(InvoiceStatusCodes.Superseded);
+        w.Access.Granted = AccessRights.Read | AccessRights.Write;
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(FindingsJson(), blocked: true); // a blocked submission holds only an In Review invoice
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        review.Header.Status.Should().Be("Superseded");
+        review.Header.StatusCode.Should().Be(InvoiceStatusCodes.Superseded);
+        review.Header.Held.Should().BeFalse();
+        review.Flags.CanDecide.Should().BeFalse();
     }
 
     [Fact(DisplayName = "100: a rights lookup that faults, a damaged findings column and unreadable settings do not fail the page")]

@@ -1114,6 +1114,20 @@ public class ExternalDocumentNarrowingGuardTests
         // ebilling-r1 task 103 fix round (K2): a refused transition clears the claim it wrote, conditional on the version just read.
         ["Sprk.Bff.Api.Services.Finance.InvoiceApprovalService::ReleaseClaimAsync"] =
             "Clears only sprk_decidedby, sprk_decidedon and sprk_approvedamount (DBNull, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 104: the reject / return claim, conditioned on the approval portion's row version.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceRejectReturnService::DecideHeldAsync"] =
+            "Writes only sprk_decidedby and sprk_decidedon (ClaimFields, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 104: a refused transition clears the claim it wrote, conditional on the version just read.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceRejectReturnService::ReleaseClaimAsync"] =
+            "Clears only sprk_decidedby and sprk_decidedon (DBNull, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 150: the AP export claims each invoice for its batch, conditional on the row version read, and releases the claim of a failed batch.
+        ["Sprk.Bff.Api.Services.Finance.ApExportService::CreateBatchAsync"] =
+            "Writes only sprk_billingexport (BatchLookup, an EntityReference to the batch) on sprk_invoice, a literal key (the claim, conditional on the row version read).",
+        ["Sprk.Bff.Api.Services.Finance.ApExportService::ReleaseClaimAsync"] =
+            "Clears only sprk_billingexport (BatchLookup, DBNull) on sprk_invoice, a literal key, under the version just read.",
+        // ebilling-r1 task 151c-1a: Email to AP / Mark Sent to AP set the batch's Sent to AP Date once, conditional on the row version read.
+        ["Sprk.Bff.Api.Services.Finance.ApExportDeliveryService::SetSentToApDateIfEmptyAsync"] =
+            "Writes only sprk_senttoapdate on sprk_billingexport (a literal key, never a document), only when the date was empty, under the version just read.",
         // ebilling-r1 task 090 (found at the merge of master's #2253 guard): the Stored File store's verified flip. It cannot ask the
         // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
@@ -1129,9 +1143,11 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid on sprk_communication (UpdateRecordFieldsIfUnchangedAsync, the routed owning team).",
         // Field-mapping task 017 (2d-5): OwnedChildWrite::CreateAsync and ::CreateIntoIsolationAsync were deleted; the
         // service's create (RecordCreationService::CreateAsync, below) replaced both.
-        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite::PatchWithBffManagedPairAsync"] =
-            "Writes only the BFF-managed pair columns (PairColumns: sprk_regardingrecordid, sprk_regardingrecordtype), picked " +
-            "out of the body by name; every other column goes in the caller's own PATCH.",
+        // uac-r2 task 195: OwnedChildWrite::PatchWithBffManagedPairAsync was removed; its sequence is this core's.
+        ["Sprk.Bff.Api.Services.Dataverse.ProjectMatterFiling::FileAsync"] =
+            "Writes only the BFF-managed pair columns (sprk_regardingrecordid, sprk_regardingrecordtype) on sprk_project, picked " +
+            "out of the body by name and conditioned on the row version read (UpdateRecordFieldsIfUnchangedAsync); every other " +
+            "column goes in the caller's own PATCH.",
         // ebilling-r1 (#2081): the handler's one write member is PatchAsync (an invoice or line update-only, through
         // InvoiceFamilyCoreRecordGuard.UpdateExistingAsync); WriteAsync and UpdateWithOptimisticConcurrencyAsync reach it.
         ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::PatchAsync"] =

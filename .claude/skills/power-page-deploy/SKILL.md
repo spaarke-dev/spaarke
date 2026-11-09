@@ -5,13 +5,13 @@ techStack: [vite, react, typescript, pac-cli, power-pages]
 appliesTo: ["**/external-spa/**", "deploy power pages", "deploy spa", "deploy external workspace", "deploy code site"]
 alwaysApply: false
 exemplar: src/client/external-spa/
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # Power Page Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — normalized minimal frontmatter)
 > **Exemplar rationale**: `src/client/external-spa/` is the canonical Vite/React 18 SPA deployed to the `sprk-external-workspace` Code Site — named throughout the skill body.
 
@@ -109,6 +109,19 @@ src/client/external-spa/
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Prerequisites: PAC CLI authenticated, Node installed, `.env.production.local` has `VITE_DEV_MOCK=false`, `.site-download/` present
+- [ ] Deploy via `scripts/Deploy-PowerPages.ps1`, or the manual steps below
+- [ ] Manual Step 1: Confirm PAC CLI Auth
+- [ ] Manual Step 2: Build the SPA
+- [ ] Manual Step 3: Upload to Power Pages Code Site
+- [ ] Manual Step 4: Verify (portal loads, prompts for login)
+```
+
 ## Deployment Procedure
 
 ### Recommended: Use the Deploy Script
@@ -183,6 +196,8 @@ pac pages upload-code-site `
 
 Open `https://sprk-external-workspace.powerappsportals.com` in a private browser.
 Expected: SPA loads, prompts for login, shows Secure Project Workspace.
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ---
 

@@ -2008,7 +2008,6 @@ public static class ExternalProjectDataEndpoints
                         ContentType: contentType,
                         DocumentId: documentId,
                         ParentEntity: null, // the app-only handler resolves the governing parent from the document row
-                        SearchIndexName: null, // the handler runs the ISearchIndexNameResolver chain
                         Source: ExternalUploadSource,
                         CorrelationId: correlationId),
                     queueCt);

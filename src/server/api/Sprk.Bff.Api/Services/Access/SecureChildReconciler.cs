@@ -1753,9 +1753,14 @@ public sealed class SecureChildReconciler
                     var lookups = _ordinary is null
                         ? table.Lookups
                         : table.Lookups.Concat(OrdinaryOnlyServiceRequestLookups(table.LogicalName));
+                    // A Signal or Decision Record whose core record pair names a root of this level is filed under it too
+                    // (SecureChildLineage.CorePairMatches): its question asks that core first (ForExistingRowAsync), and no
+                    // lookup may name it once its subject was re-filed (D-123). The ordinary pass also matches a service-request
+                    // root (F4-b): its question takes a service-request core as the row's primary parent too.
                     var pairs = lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
-                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
+                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Value: (object)id)))
+                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier, alsoServiceRequests: _ordinary is not null))
                         .ToArray();
 
                     foreach (var chunk in pairs.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
@@ -1763,7 +1768,7 @@ public sealed class SecureChildReconciler
                         var query = new QueryExpression(table.LogicalName) { ColumnSet = new ColumnSet(true), NoLock = true };
                         var anyParent = new FilterExpression(LogicalOperator.Or);
                         foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
-                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => p.Value).ToArray());
                         query.Criteria.AddFilter(anyParent);
 
                         foreach (var entity in await ReadAllPagesAsync(table.LogicalName, query).ConfigureAwait(false))
@@ -2452,7 +2457,12 @@ public sealed class SecureChildReconciler
                 synced.Sum(r => r.SharesGranted),
                 synced.Sum(r => r.SharesChanged),
                 synced.Sum(r => r.SharesRevoked),
-                open.Select(r => r.Detail).FirstOrDefault(d => d is not null));
+                open.Select(r => r.Detail).FirstOrDefault(d => d is not null))
+            {
+                HardDenyWiderThanRead = synced.Sum(r => r.HardDenyWiderThanRead),
+                HardDenyUnchecked = synced.Sum(r => r.HardDenyUnchecked),
+                HardDenyNarrowFailed = synced.Sum(r => r.HardDenyNarrowFailed),
+            };
         }
 
         /// <summary>

@@ -86,4 +86,38 @@ public class RecordTableRulesRegistryGuardTests
 
         Assert.Empty(TablesWithoutAnEntry(["sprk_todo", "sprk_event", "SPRK_Matter"], registered.Contains));
     }
+
+    // ── Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table only its writer creates is on no fixed
+    //    create accept-list (the service would refuse it there; RecordTableRule.CreatedOnlyByItsWriter). ─────────────────────
+
+    /// <summary>The detector: each create table <paramref name="writerOnly"/> names.</summary>
+    private static IReadOnlyList<string> WriterOnlyTablesIn(IEnumerable<string> createTables, Func<string, bool> writerOnly) =>
+        createTables.Where(writerOnly).ToList();
+
+    private static bool IsWriterOnly(string table) => RecordTableRules.Find(table) is { CreatedOnlyByItsWriter: true };
+
+    [Fact]
+    public void NoCreateTable_IsOneOnlyItsWriterCreates()
+    {
+        var found = WriterOnlyTablesIn(CreateTables(), IsWriterOnly);
+
+        Assert.True(RecordTableRules.All.Count(r => r.CreatedOnlyByItsWriter) == 3,
+            "Expected the three ontology writer tables to be flagged; the guard would check nothing.");
+        Assert.True(found.Count == 0,
+            "These create tables are created only by their writers (RecordTableRule.CreatedOnlyByItsWriter, owner decision " +
+            "D-204), so no fixed create accept-list may name them: " + string.Join(", ", found));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustFire_ACreateListNamingAWriterOnlyTable_IsReported()
+    {
+        Assert.Equal(["sprk_signal", "SPRK_BudgetRevision"],
+            WriterOnlyTablesIn(CreateTables().Append("sprk_signal").Append("SPRK_BudgetRevision"), IsWriterOnly));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustNotFire_OrdinaryCreateTables_ReportNothing()
+    {
+        Assert.Empty(WriterOnlyTablesIn(["sprk_todo", "sprk_event", "sprk_budget", "sprk_servicerequest"], IsWriterOnly));
+    }
 }
