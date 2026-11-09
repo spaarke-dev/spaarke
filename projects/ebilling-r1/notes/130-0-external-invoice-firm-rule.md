@@ -612,7 +612,7 @@ Test doubles that hand-built rows now return explicit nulls for unset live-paren
 
 Counts: BFF build 0 errors, 0 warnings. `Spaarke.ArchTests` (full): 2181 passed, 0 failed. Filtered run of `Sprk.Bff.Api.Tests` (external, multi-root, live-parent, communication, document, invoice, unified access, finance, Issue963): 19339 total, 19330 passed, 9 skipped, 0 failed. (A first run before the last test-double fixes failed 27 and an earlier one 137, all test doubles that returned rows without the live-parent columns; none was a timeout.)
 
-Seeding proof: `ExternalMultiRootRule.cs` restored to `17a283c00c` and touched; the new tests (69 incl. the invoice source test): 54 failed, 15 passed. The passing 15 are the select pins (the selects were already complete), the FetchXML controls and the explicit-null / all-present controls. After restoring the committed file (SHA-256 `5e18ca8a9eb74616ff0d1bd4db2230d1854161cd6d4c0b42364e6154594b1242`) all pass.
+Seeding proof: `ExternalMultiRootRule.cs` restored to `17a283c00c` and touched; the new tests (69 incl. the invoice source test): 54 failed, 15 passed. The passing 15 are the select pins, the FetchXML controls and the explicit-null / all-present controls. After restoring the committed file (SHA-256 `5e18ca8a9eb74616ff0d1bd4db2230d1854161cd6d4c0b42364e6154594b1242`) all pass.
 
 ## Fix round 3d: class closure
 
@@ -646,7 +646,7 @@ Shared helpers (`ExternalMultiRootRule.cs:100-123`, no new type or service): `Un
 
 ### Census C: reads that only add a match, a right or a grant
 
-An absent column there gives fewer matches, rights or grants, never more access. `AssignedAccessStore.cs` (ledger row, `LinkCandidateRow`, `ReadRootAsync`: assigned-access grants); `CommunicationThreadReadService` `BuildParticipantClauseAsync` (`:1028`, a positive filter), `LoadAttachmentsAsync` (attachments of already-authorised messages) and `ParseMessageRow` (an absent thread id is empty and so hidden; an absent author never matches "own"); `ContactIdentityStore.cs` (`FindSystemUsersLinkingAsync` `:1726`, `ParseSystemUserRow` `:1481`: an absent contact link is unlinked, fewer bindings); `ExternalDataService.GetInvoiceParentsAsync` (`:1267`), `GetRecentGrantsAsync` (`:1395`), `GetServiceRequestRequesterAsync` (`:1030`), `GetServiceRequestRequesterAndStateAsync` (`:1076`), `GetServiceRequestsRequestedByAsync` (`:1477`) (a requester or parent match grants only to the matching party); `ExternalGrantRow` (`ExternalGrantLifecycle.cs:80`), `ExternalAccessRow` (`ExternalParticipationService.cs:2185`), `ContactOrgRow` (`:2214`), `ColleagueMembershipRow` (`:2240`) (grant and membership derivation).
+These reads only add a match, a right or a grant from a column that is present. `AssignedAccessStore.cs` (ledger row, `LinkCandidateRow`, `ReadRootAsync`: assigned-access grants); `CommunicationThreadReadService` `BuildParticipantClauseAsync` (`:1028`, a positive filter), `LoadAttachmentsAsync` (attachments of already-authorised messages) and `ParseMessageRow` (an absent thread id is empty and so hidden; an absent author never matches "own"); `ContactIdentityStore.cs` (`FindSystemUsersLinkingAsync` `:1726`, `ParseSystemUserRow` `:1481`: an absent contact link is unlinked, fewer bindings); `ExternalDataService.GetInvoiceParentsAsync` (`:1267`), `GetRecentGrantsAsync` (`:1395`), `GetServiceRequestRequesterAsync` (`:1030`), `GetServiceRequestRequesterAndStateAsync` (`:1076`), `GetServiceRequestsRequestedByAsync` (`:1477`) (a requester or parent match grants only to the matching party); `ExternalGrantRow` (`ExternalGrantLifecycle.cs:80`), `ExternalAccessRow` (`ExternalParticipationService.cs:2185`), `ContactOrgRow` (`:2214`), `ColleagueMembershipRow` (`:2240`) (grant and membership derivation).
 
 ### Census D: not an access decision (the decision each one sits beside)
 
@@ -686,19 +686,19 @@ An absent column there gives fewer matches, rights or grants, never more access.
 
 How it recognises a site (line comments stripped) in `Infrastructure/ExternalAccess/`, `Api/ExternalAccess/`, `Services/ExternalAccess/`, `CommunicationThreadReadService.cs` and `ExternalCallerCommunicationGuard.cs`: a call to `TryGetValue`, `TryGetProperty`, `ContainsKey`, `GuidValue`, `TryGuid` or `GuidOf` whose argument holds a `"_..._value"` literal (also `$"_{x}_value"`) or names a `string` constant whose initialiser does (transitively); a `[JsonPropertyName]` whose argument is such a literal or constant (a typed row property); and an SDK read (`GetAttributeValue<EntityReference|Guid|Guid?>`, `Attributes.TryGetValue`, `Attributes.Contains`, `.Attributes[`, `is EntityReference`, `case EntityReference`). Sites are grouped by file and enclosing member (brace-matched). Reads through the sanctioned fail-closed helpers (`LookupOf`, `RootStamp`, `RootLinkOf`, `LinkOf`) are not sites.
 
-Ratchet: each group is in `ReviewedSites` with its exact count, a category (`FailsClosed`, `ProjectedAndPinned`, `PositiveOnly`, `NotAnAccessDecision`, `KnownOpen`) and a one-line reason (51 entries). An unreviewed group, a changed count, a stale entry and a changed number of `KnownOpen` entries (`KnownOpenSites = 4`) each fail.
+Ratchet: each group is in `ReviewedSites` with its exact count, a category (`FailsClosed`, `ProjectedAndPinned`, `PositiveOnly`, `NotAnAccessDecision`, `KnownOpen`) and a one-line reason (51 entries in round 3d, 54 after round 3e). An unreviewed group, a changed count, a stale entry and a changed number of `KnownOpen` entries (`KnownOpenSites`, 4 in round 3d, 0 after round 3e) each fail.
 
 What it misses (covered by the unit and contract tests above): a column name that reaches the call through a variable, a parameter or a data table rather than a literal or constant (for example the column arrays of `ExternalCallerCommunicationGuard` and the registry's attribute lists); a helper that re-implements `LinkOf` under another name; a file outside the scope list; and whether a reviewed site stays correct after its code changes inside a counted group (it fixes where reads are, not what they do).
 
 Controls: an unreviewed read is caught; each spelling of a lookup read is caught (`Control_EachSpellingOfALookupRead_IsCaught`); a reviewed site passes; a changed count is caught; sanctioned and unrelated code is not a site; a comment is not a site; the enclosing member is the method.
 
-### Known limits (reported, not changed; the four `KnownOpen` baseline entries and two adjacent items)
+### Hardening items (recorded in round 3d; the first three are closed in fix round 3e)
 
-- `ExternalOrganizationMembership.ContactOrganizationRow` (`:168`, reads `:107`, `:148`): the revoke sweep (admin plane) skips a row that lacks the contact lookup, so a grant may stay for a later sweep. The select is a constant of the class. Follow-up: read an absent column as "cannot tell" and report it.
-- `NoAccessEnforcementStore.EntryFrom` (`:108`) and `ReadOwnerAsync` (`:335`): admin-side share removal over deny entries; an entry read without a subject or object column enforces less. The select is a constant of the class.
-- `CommunicationThreadReadService` `ThreadRegardingFields` (`:55`, read `:811`): the regarding record of an impersonated (Dataverse-permission) thread read; an absent column reads as a record-less thread. Dataverse applies the caller's own permissions on that path.
-- Adjacent, not a lookup: `sprk_accesspermission` (a choice column) absent reads as `DocumentPermission.NotNarrowed` in `ExternalDocumentNarrowing.FromWebApi`. Every caller selects it. Changing it touches about 35 test doubles; recommended as a follow-up of the same shape.
-- Outside the guard's scope: the impersonated regarding resolution (`CommunicationThreadReadService.ResolveRegardingFromRow`, `Api/Filters/CommunicationRecordAuthorizationFilter.cs`) and the internal reconciler `Services/Access/ChildAccessPermissionReconciler.cs`.
+- `ExternalOrganizationMembership.ContactOrganizationRow`: a membership row that does not carry the lookup column the read selected. Closed in fix round 3e (below).
+- `NoAccessEnforcementStore.EntryFrom` and `ReadOwnerAsync`: an entry or owner row that does not carry a column the read selected. Closed in fix round 3e (below).
+- `CommunicationThreadReadService` `ThreadRegardingFields`: a thread row that does not carry every typed regarding column. Closed in fix round 3e (below).
+- Adjacent, not a lookup: `sprk_accesspermission` (a choice column) absent reads as `DocumentPermission.NotNarrowed` in `ExternalDocumentNarrowing.FromWebApi`. Every caller selects it. Not yet changed; it touches about 35 test doubles and has its own step in fix round 3e.
+- Outside the guard's scope in round 3d: the impersonated regarding resolution (`CommunicationThreadReadService.ResolveRegardingFromRow`, `Api/Filters/CommunicationRecordAuthorizationFilter.cs`; both closed in fix round 3e) and the internal reconciler `Services/Access/ChildAccessPermissionReconciler.cs` (a read-only census is in the fix round 3e report; the file is unchanged).
 
 ### Tests (fix round 3d)
 
@@ -730,4 +730,45 @@ Files restored byte-identical (SHA-256 checked against the committed tree) and t
 
 ### Is the class closed in the external-access surface?
 
-Yes for the reads that feed an external caller's access decision: every Web API read of a lookup column in that surface now treats an absent column as unreadable (Census A and B), adds only a match or grant (C), is not an access decision (D) or is an SDK/FetchXML read with a cited, pinned projection (E). The guard keeps a new read from appearing unreviewed. Not closed, and listed above: the four `KnownOpen` admin-plane and impersonated sites, the adjacent `sprk_accesspermission` choice column, and code outside the guard's scope.
+Yes for the reads that feed an external caller's access decision: every Web API read of a lookup column in that surface now treats an absent column as unreadable (Census A and B), adds only a match or grant (C), is not an access decision (D) or is an SDK/FetchXML read with a cited, pinned projection (E). The guard keeps a new read from appearing unreviewed. Not closed in round 3d, and listed above: the hardening items, the adjacent `sprk_accesspermission` choice column, and code outside the guard's scope. Fix round 3e closes the hardening items.
+
+## Fix round 3e: the remaining hardening items
+
+The same rule as round 3d (a column the row does not carry was not read; an explicit JSON `null` is "not filed"), applied to the four items round 3d left open. This part of the round covers the membership, deny-entry and communication reads; the choice-column item and the grant-row typing follow in the same round.
+
+### Membership rows (`ExternalOrganizationMembership.cs`)
+
+- `ContactOrganizationRow` records whether each lookup was read (the setter runs for an explicit null, not for an absent column), the idiom of `TodoRow` in `ExternalDataService.cs`. `QueryActiveMembersAsync` and `QueryActiveOrganizationsOfContactAsync` return the rows that carry the column, plus `OrganizationMemberSet.UnreadableRows` (the rows that do not). An explicit null names nobody and is not counted.
+- No new rule: each caller adds `UnreadableRows` to its own undecidable counter, so the existing handling applies. Person removal: `ExternalGrantRevocationService.cs:288-297` adds it to `failed`, the cleanup reports not completed and `ExternalAccessRemovalSweep` counts the person as `Incomplete` (`ExternalAccessRemovalSweep.cs:278`) and retries. Organization member sweep: `ExternalGrantRevocationService.cs:844-853`, the same counter. Overlap check: `:643-650`, no answer (the same result as an oversized organization). Project closure: `ProjectClosureEndpoint.cs:753-762` adds it to `unresolved`, which takes the container-wide confirmation path and otherwise reports `container_not_cleared`.
+- Pins: the `$select` of each reader contains the column it depends on (`MemberSelect` has `_sprk_contact_value`, `OrganizationSelect` has `_sprk_organization_value`).
+
+### Deny entries (`NoAccessEnforcementStore.cs`)
+
+- `EntryFrom` requires every column of `EntryRequiredColumns` (the entry select plus `statecode` and `_modifiedby_value`); `ReadOwnerAsync` selects `OwnerSelect` and `OwnerFrom` requires both owner columns. A row missing one throws an `InvalidOperationException` naming the column. An explicit null is an empty value, as before.
+- No new rule: the enforcer already records an entry it cannot read as `entry-unreadable` (`NoAccessShareEnforcer.cs:294`) and an owner it cannot read as `residual-access-unverifiable` (`:1301`, `:1308`); `NoAccessShareReconciliationJob.cs:116-196` counts an incomplete entry and reports the run as an error, so the entry is retried on the next run. Nothing in this path can remove less than before because of an absent column; the removal for that entry is simply reported as not done.
+- Pins: `EntrySelect` contains every required column; `OwnerSelect` contains both owner columns.
+
+### Thread regarding columns (`CommunicationThreadReadService.cs`)
+
+- `ResolveRegardingFromRow` returns `(EntityType, Id, Known)`. A row that does not carry a typed regarding column, or carries one that is not a GUID, has an unknown anchor (`Known = false`). An explicit null is skipped; the first non-empty column in `RegardingFieldMap` order wins, as before.
+- Existing fail-closed path, no new rule: on the thread list the row is withheld (a warning is logged, and the paging signals are taken from the rows read so a withheld row does not hide a further page); `ReadVisibleThreadRegardingAsync` returns `null`, which the send route's authorization filter answers with its one 403 (`SendDenyReasonCode`). No path returns a 500.
+- Pins: both selects are built from `ThreadRegardingFields`; the list and the single read each contain every column.
+
+### Communication record authorization filter (`Api/Filters/CommunicationRecordAuthorizationFilter.cs`)
+
+- The affinity check reads the filed-to column through `ExternalMultiRootRule.LookupOf`: absent is unreadable and does not confirm the affinity; an explicit null is "not filed". Both were already the no-op answer; the change routes the read through the shared reader and two cases pin it. The inherit-from loop reads each copied column the same way: an explicit null is skipped, a value that is not a GUID is refused with the filter's deny reason, and an absent column is refused. The old private `ReadGuid` is removed.
+- Pin: the inherit-from select contains every regarding column.
+
+### Guard (`ExternalLookupAbsentReadGuardTests`)
+
+- Scope: `CommunicationOpenThreadGate.cs` and `CommunicationRecordAuthorizationFilter.cs` are scanned. Adding the first made a constant visible to a second file already in scope, so three further reads were reviewed (all fail closed: `CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync`, `CommunicationRecordAuthorizationFilter.Gate.LoadProposalAsync`, `ExternalCallerCommunicationGuard.ThreadIdOf`).
+- Four entries are now `FailsClosed` (thread regarding fields, membership row, deny-entry row, owner row); `KnownOpenSites` is 0; 54 reviewed entries.
+
+### Tests (fix round 3e, this part)
+
+- `OrganizationMembershipUnreadRowTests` (new): a row without the column is unreadable and the others are kept; an explicit null is not counted; all-present rows have none; the select pins; the typed row's read flags.
+- Caller tests: `PersonOrganizationGrantSpeCleanupTests`, `ProjectClosureCascadeTests`, `SpeRevokeMatcherTests` and `RevokeGrantOverlapAndOwnContainerTests` each have a case with a row that does not carry the column (the step is counted and retried; the project closure reports `container_not_cleared`) and a control with an explicit null.
+- `NoAccessEnforcementStoreTests` and `NoAccessShareEnforcerTests`: a row without each required column throws; an entry or owner that cannot be read is recorded as failed and retried; explicit nulls are empty; the select pins.
+- `CommunicationListThreadsSeamTests`: a thread row without a regarding column is withheld and does not hide a further page; explicit nulls list as record-less; the select contains every regarding column.
+- `CommunicationRecordAuthorizationContractTests`: confirm-affinity with the regarding column not returned, and with an explicit null, is the no-op (two cases of the existing deny theory); a send into a thread, or inheriting from a communication, whose regarding column was not returned is a 403 and nothing is sent; the selects contain every regarding column.
+- Test doubles changed to return explicit nulls for unset lookups: `NoAccessEnforcementTestDoubles`, the membership-row doubles in the four caller test classes above, `CommunicationListThreadsSeamTests.ThreadRow`, and the thread and communication doubles in `CommunicationRecordAuthorizationContractTests`.
