@@ -36,7 +36,7 @@
 - `uac-r2` (Desktop): dev BFF deploys, roles. A held message means the owner approves it in that session.
 - `spaarke-wt-field-mapping-server-write-pa-69`: field mapping (030b read sent 2026-11-08).
 - `spaarke-wt-ebilling-r1-c7`: ebilling.
-- `spaarke-wt-spaarke-ontology-platform-r1-38`: ontology.
+- `ontology-r1` (Desktop, since 2026-11-08; the VS Code session `-38` is retiring): ontology, including its dev BFF before/after notices.
 - `provisioning-r1` (Desktop): customer provisioning.
 
 ## Owner items (open)
