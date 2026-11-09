@@ -2,14 +2,14 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-07 (session b8). Task 266 complete; HEAD pushed.
+> **Last Updated**: 2026-11-09 (Desktop session `provisioning-r1`; took over from VS Code b8 on 2026-11-08). PR #2638 merged to master.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Task** | none in progress. Last completed: **266** — per-stamp ontology writer identity (#2605), ✅ 2026-11-07 |
-| **Next Action** | Reply to ontology (#2605): the Bicep lists both UAMIs; S24 adds Firm Reason membership after the 1.3.0.0 upgrade; the ACME writer's aad object id was verified; #2618 open. Then the next PR to master (S23 + 266) — every check terminal and green, `--merge`, no auto-merge. |
+| **Next Action** | Owner questions below (#2618 first). Done 2026-11-08/09: #2605 reply posted (issuecomment-6726317581); PR #2638 (S23 + 49ba9a70d3 + 266) merged to master `3fa6a061` (35 pass / 9 skipped, `--merge`), #2605 closed. ACME still needs a control-plane deploy (owner OK) to get S23/S24. |
 | **Task 266 outcome** | Code + tests + guide; no live change. Commits b514a9edca … 9f24305bf2. 3315 control-plane tests, ArchTests 1950/1950. Code review: W1 (justification) fixed in POML; adr-check clean. Adversarial ×2 + scoped re-check done; notes in the POML. |
 | **Follow-up** | **#2618** (owner decision): the guide's external-access row asks for a contact role on the customer unit's default team; the ontology writer would inherit it, so S24 refuses (fail-closed). Recommended: identity contacts owned by a dedicated memberless team (UAC/external-access change). Do not add a role to ACME's default team before it is decided. |
 | **ACME** | Writer applied by ontology 2026-11-06 under the owner's go; read-only verified 2026-11-07 (run log). Run is `Completed` under pre-266 outputs: a re-run of H4b/H10/H7b refuses "start a new run". Before any `customer.bicep` redeploy: confirm the hand-applied writer UAMI's tags match the template. |
@@ -24,8 +24,8 @@
 
 ## Branch state
 
-- **On branch, not on master**: H7b S23 (`923990a791`, `ba484977b2`; procedure v6), `49ba9a70d3` (publish rollback pointer on same-commit re-run), task 266 (procedure v7, writer identity). Goes to master with the next PR. ACME gets them only after a control-plane deploy (owner OK).
-- Last master merge from here: PR #2438 → `d511a329` (2026-10-29).
+- **On master** since PR #2638 → `3fa6a061` (2026-11-09): H7b S23 (procedure v6), `49ba9a70d3`, task 266 (procedure v7, writer identity). ACME gets them only after a control-plane deploy (owner OK). The merge republished the compiled `customer.bicep` ARM artifact (affects new H2a runs only).
+- Branch was updated from master at `3b22175ada` (clean); BFF build 0/0, ArchTests 2100/2100, control-plane 3316 pass / 1 skip.
 
 ## Ordering rules (live)
 
