@@ -376,8 +376,9 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     /// <c>sprk_invoice</c>'s four attorney and paralegal columns, filled by the seeded "Matter to Invoice (Attorney Matrix)"
     /// profile. <c>sprk_assignedto1/2</c> are not listed: no seeded profile maps them. They are plain data, not display
     /// copies: Office quick-create writes the invoice's Assigned To to <c>sprk_assignedto1</c>
-    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>). With the invoice out of the registry, that column no longer
-    /// targets people (Daily Briefing, notifications); whether it should is an open owner decision (UAC-r2, 2026-11-08).
+    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>). With the invoice out of the registry, that column stopped targeting
+    /// people (Daily Briefing, notifications); the owner has since decided it targets without conferring access (2026-11-08),
+    /// so it is listed in <see cref="TargetingOnlyColumns"/>, outside the registry (task 032b-1b).
     /// </para>
     /// </summary>
     internal static IReadOnlyDictionary<string, IReadOnlySet<string>> DisplayCopyColumns { get; } =
@@ -387,6 +388,31 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
             {
                 "sprk_assignedtoattorney1", "sprk_assignedtoattorney2", "sprk_assignedtoparalegal1", "sprk_assignedtoparalegal2",
             },
+        };
+
+    /// <summary>
+    /// TARGETING-ONLY COLUMNS (field-mapping-server-write-path-r1 task 032b-1b; owner decision 2026-11-08): Contact-typed lookups
+    /// that make a record FOR the person their contact represents on the people-targeting surface (Daily Briefing, portfolio,
+    /// notifications and the playbook membership node, all through <c>MembershipResolverService</c>) and confer NO access. Keyed
+    /// by table; every column is a Contact lookup, resolved exactly like a registry Contact column (the caller's linked contact,
+    /// no email or name fallback).
+    /// <para>
+    /// <c>sprk_invoice.sprk_assignedto1/2</c>: Office quick-create writes the invoice's Assigned To to <c>sprk_assignedto1</c>
+    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>), and the standing rule is "notifications target Created By and Assigned
+    /// To". The invoice's four attorney and paralegal columns are display copies (<see cref="DisplayCopyColumns"/>) and are not
+    /// listed: they stopped targeting when the invoice left the registry (U7, owner-accepted 2026-11-08).
+    /// </para>
+    /// <para>
+    /// Read ONLY by the people-targeting filter of <c>MembershipResolverService</c>. It is disjoint from
+    /// <see cref="CanonicalAccessConferringRegistry"/> and from <see cref="DisplayCopyColumns"/>, and no grant, share or
+    /// materializer path reads it; <c>TargetingOnlyColumnsGuardTests</c> fails on an overlap or on any other reader. It is not
+    /// operator-configurable, so no setting can turn a targeting column into an access one.
+    /// </para>
+    /// </summary>
+    internal static IReadOnlyDictionary<string, IReadOnlySet<string>> TargetingOnlyColumns { get; } =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_invoice"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedto1", "sprk_assignedto2" },
         };
 
     /// <inheritdoc/>
