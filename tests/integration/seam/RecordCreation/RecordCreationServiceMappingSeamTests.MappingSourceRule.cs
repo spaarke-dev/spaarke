@@ -118,7 +118,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
-        outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+        warning.Detail.Should().Be(RecordCreationService.MappingSourceUndeterminedNotMapped, "an answer that cannot be told is not \"secure\"")
+            .And.Contain("could not be checked").And.NotContain("because it is secure");
     }
 
     // ── The invariant: the owner check before the create ─────────────────────────────────────────────────────────────
@@ -154,7 +157,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         var fields = _creates.Should().ContainSingle().Subject.Fields;
         fields.Should().NotContainKey("sprk_description").And.NotContainKey("sprk_location");
         StringOf(fields, "sprk_eventname").Should().Be("Hearing");
-        outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappingSourceSecureCode);
+        warning.Detail.Should().Be(RecordCreationService.MappingSourceUndeterminedNotMapped).And.NotContain("because it is secure");
     }
 
     [Fact]
@@ -282,6 +287,27 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         problem.Extensions["reasonCode"].Should().Be(RecordCreationRefusal.MappingSourceSecureFilingCode);
         problem.Detail.Should().Contain("copied from a secure record").And.Contain("Create it as secure")
             .And.NotContainEquivalentOf("try again");
+        _creates.Should().BeEmpty("nothing is written");
+    }
+
+    [Fact]
+    public async Task MappingSourceRule_Strip_AMappedValueThatFilesTheRow_WhenTheAnswerCannotBeTold_IsACheckThatFailed()
+    {
+        // The same create, but whether the source is secure cannot be told for the decided owner (the Secure Record owner
+        // team cannot be read): not the secure source's 400, a check that failed (503), which may be retried.
+        SecureMatterToWorkAssignment_OwnedByAnOrdinaryTeam(Rule("sprk_primaryproject", "sprk_regardingproject", Lookup));
+        _readable.Add(OtherProject);
+        _stamps.Row("sprk_project", OtherProject);
+        _shareWorld.FailingQueriesOf("businessunit").FailingQueriesOf("team");
+
+        var outcome = await Service().CreateAsync(WorkAssignmentMappedUnderSecureMatter(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.CheckFailedCode);
+        outcome.Refusal.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        var problem = Problem(outcome, "sprk_workassignment");
+        problem.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.Detail.Should().ContainEquivalentOf("try again").And.NotContain("secure record");
         _creates.Should().BeEmpty("nothing is written");
     }
 

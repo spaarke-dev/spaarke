@@ -103,6 +103,12 @@ internal sealed partial class RecordCreationService
         "Some fields weren't copied from the related record because it is secure. A secure record's fields are copied only " +
         "into a record its secure owner owns.";
 
+    /// <summary>Task 022 fix round 4: the words for a source whose fields are not copied because whether it is secure could
+    /// not be told (the copy gate's <see cref="MappingSourceCopyVerdict.Unknown"/>), at step 3 or before the create. Never
+    /// "because it is secure".</summary>
+    internal const string MappingSourceUndeterminedNotMapped =
+        "No fields were copied from the related record because it could not be checked whether it is secure. Try again later.";
+
     /// <summary>
     /// True for a lookup of <paramref name="table"/> that FILES the row under a record (FR-08 amendment, owner 2026-10-20,
     /// unified-access-control-r2 condition c): a lineage lookup (<see cref="SecureChildLineage"/>), an ownership-parent
@@ -333,7 +339,8 @@ internal sealed partial class RecordCreationService
             _logger.LogInformation(
                 "[RECORD-CREATE] the mapping source of a {Table} is {Verdict} ({Reason}); nothing was mapped",
                 table, early.Verdict, early.Reason);
-            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null, MappingSourceSecureNotMapped));
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null,
+                early.Verdict == MappingSourceCopyVerdict.Unknown ? MappingSourceUndeterminedNotMapped : MappingSourceSecureNotMapped));
             return unmapped;
         }
 
@@ -491,11 +498,14 @@ internal sealed partial class RecordCreationService
             "[RECORD-CREATE] the mapping source of a {Table} is {Verdict} ({Reason}) and the row's owner is not its secure owner; " +
             "{Count} mapped value(s) removed before the create", table, decision.Verdict, decision.Reason, removed.Count);
 
+        // Task 022 fix round 4: a secure source refuses as the request (400, the same answer every time); a source whose answer
+        // could not be told refuses as a check that failed (503), which may be retried.
+        var undetermined = decision.Verdict == MappingSourceCopyVerdict.Unknown;
         var filing = removed.FirstOrDefault(c => FilesTheRow(table, item, c));
         if (filing is not null)
         {
             _logger.LogWarning("[RECORD-CREATE] a removed mapped value of a {Table} files the row ({Column}); refused", table, filing);
-            return (MappingSourceFilingRefused(noun), item, mappedValues);
+            return (undetermined ? MappingSourceCheckFailed(noun) : MappingSourceFilingRefused(noun), item, mappedValues);
         }
 
         // The rebuild and the pre-write rules' re-run fail closed: a row that cannot be rebuilt, or a fault in either, refuses
@@ -512,7 +522,8 @@ internal sealed partial class RecordCreationService
         }
 
         warnings.RemoveAll(w => w.Column is { } column && removed.Contains(column));
-        warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null, MappingSourceSecureStripped));
+        warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null,
+            undetermined ? MappingSourceUndeterminedNotMapped : MappingSourceSecureStripped));
 
         if (rule.PreWriteRules.Count > 0
             && await RunPreWriteRulesAsync(table, rule, user, stripped, noun, ct).ConfigureAwait(false) is { } preWriteRefusal)
@@ -549,7 +560,7 @@ internal sealed partial class RecordCreationService
 
     private static RecordCreationRefusal MappingSourceCheckFailed(string noun) => new(
         RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.CheckFailedCode,
-        $"A check before the {noun} was created could not be completed, so it was not created.");
+        $"A check before the {noun} was created could not be completed, so it was not created. Try again later.");
 
     /// <summary>
     /// What step 3 reads before it maps anything (task 049c: the first half of <see cref="MapFieldsAsync"/>, moved here
