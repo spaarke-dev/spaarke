@@ -845,6 +845,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
                 ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
+                // Field mapping task 045b: the communication's ADR-024 pair type (live: SpaarkeMaster sprk_Communication
+                // Entity.xml, sprk_RegardingRecordType), which the communication filing route binds on a pair move.
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_document"] = new[]
             {

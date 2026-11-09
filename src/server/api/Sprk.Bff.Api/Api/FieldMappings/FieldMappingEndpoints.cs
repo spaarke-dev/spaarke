@@ -766,7 +766,8 @@ public static class FieldMappingEndpoints
                 scopes,
                 rootFiling,
                 lookupBinds,
-                entityService);
+                entityService,
+                impersonatedQuery);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1304,7 +1305,8 @@ public static class FieldMappingEndpoints
         IServiceScopeFactory? scopes = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
-        IGenericEntityService? appOnlyEntities = null)
+        IGenericEntityService? appOnlyEntities = null,
+        IImpersonatedCommunicationQuery? callerQuery = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1427,6 +1429,36 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
+                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
+                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
+                    // caller has not read. Runs FIRST, before any re-file step (agreed with unified-access-control-r2, #2094).
+                    // Task 045b: and before the pair planner below, so a family row's refusal keeps its own code; the planner
+                    // never writes a lookup this guard decides on (only the pair and its display columns), so the decision is the
+                    // same. The filing gate below (work assignment, project — never a family table) stays after the planner.
+                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
+                        });
+                        continue;
+                    }
+
+                    // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
+                    // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
+                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
+                    // its display columns cleared; any other failed read fails this child.
+                    updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
+                        lookupsAreMapped: true,
+                        displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId));
+
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a
                     // host without the gate refuses such a write too).
@@ -1452,22 +1484,6 @@ public static class FieldMappingEndpoints
                             });
                             continue;
                         }
-                    }
-
-                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
-                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
-                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
-                    // caller has not read. Runs FIRST, before any re-file step (agreed with unified-access-control-r2, #2094).
-                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
-                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
-                    {
-                        failed++;
-                        errors.Add(new PushFieldMappingsError
-                        {
-                            RecordId = childRecordId,
-                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
-                        });
-                        continue;
                     }
 
                     // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES
