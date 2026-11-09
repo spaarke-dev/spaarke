@@ -27,6 +27,26 @@ v2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if liste
 | 130-0b fix round 1 (Opus) | `task/ebilling-130-0b-f1` → ff `task/ebilling-130-0b` (from `0acfebe470`) | uac-r2 rulings: F1-1 shared derived redaction set FIRST (own commit, sha to lead), F1-2 column-name refusal incl. record type, neutral text; F1-3 descendants + guard; K2; R1 row cap on visible rows + fixed note; R2 design statement + census line (sent). Then pass 2 over combined seam, diff to uac-r2. |
 | 130b small fix (Sonnet) | `task/ebilling-130b-fix3` → ff `task/ebilling-130b-fix1` (from `d303a11e5d`) | Re-check passed except F2 (accepted-without-invoice Warning+code on undecided path, route test) and K4 (reason order). Then diff to uac-r2 (incl. gate hunk), merge 130a+130b, 130c. |
 
+**uac-r2 rulings 2026-11-09:**
+- **F3 → F3b, one task and one agent after the 130-0b tip:**
+  - **Scope:** the four named descendants plus the registry-derived edge set, which the 130-0b report lists.
+  - **Guard:** every edge is decided or excluded with a one-line reason.
+  - **Family path:** a fault hides the row instead of throwing.
+  - **uac-r2 ruling on the three cases, each with a must-fire test:**
+    - **No firm** (decided): hide all invoice-family rows; no error.
+    - **Unknown** (an identity or binding fault, or a failed firm read): fail the whole call (a tool error / K1 503).
+    - **A per-row seam fault with known firms:** hide that row.
+  - **REST when the firm read fails (uac-r2 (B), relayed to 130-0 fix2):**
+    - Lists and collections: 200, hide every invoice-linked row, `truncated: true`.
+    - A single invoice-linked record: 503 `InvoiceUnreadableReasonCode`, never 404. A single non-invoice record: 200.
+    - K1 invoice routes and F1 writes: 503.
+    - read_query: tool error.
+  - **Review:** its own review.
+  - **Gate:** neither 130-0 nor 130-0b reaches dev until F3b is merged with them.
+- **Faults:** a fault on a decided row hides that row, on the family path too. A whole-read failure still fails the call: a 503 on REST, a tool error in read_query.
+- **K3:** WA in the invoices module's ReadableColumns is accepted, on three conditions: sibling-exact forms; a test that a secure, unreadable WA row never returns; and its own diff item.
+- **Shared redaction set:** `77d6becd24`; 130-0 merges that exact sha.
+
 **Merge plan for the 130 batch:** merge 130-0 fix (incl. 130-0b helper `446a40bb4e`), 130-0b head, 130b fix1 into work; expect conflicts in the 130-0 notes file (combine both sections by hand) and `WorkforceRoleCeilingGate.cs` (adjacent sets; remove `ReadInvoiceSubmissions` if unused); after merge replace fix1's `InvoiceLinkedChildAttributes` (`ExternalModuleDataEndpoints.cs` ~:502) with 130-0b's `ExternalInvoiceVisibility.IsInvoiceLinkedChildTable`. Verify tip, TASK-INDEX 130-0/130-0b/130a/130b ✅, remove agent worktrees.
 
 ## Decisions made this stretch (2026-11-08)
