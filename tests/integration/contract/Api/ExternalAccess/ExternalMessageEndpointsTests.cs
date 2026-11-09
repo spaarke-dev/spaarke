@@ -838,16 +838,30 @@ public class ExternalMessageEndpointsTests
         _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(hiddenInvoice);
     }
 
+    // Task 130-0 fix round 1 (K1): replaces Task098_APredicateReadFault_RefusesTheInvoiceThread_AsANonexistentInvoice_FailClosed.
+    // A failed invoice decision is the invoice-unreadable 503, reached only after the record check: a missing invoice and an
+    // invoice under a record the caller cannot read stay the uniform 403, and the decision is not asked for them.
     [Fact]
-    public async Task Task098_APredicateReadFault_RefusesTheInvoiceThread_AsANonexistentInvoice_FailClosed()
+    public async Task Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnlyAfterTheRecordCheck()
     {
         var matter = Guid.NewGuid();
         var invoice = Guid.NewGuid();
+        var elsewhere = Guid.NewGuid();
         AddInvoiceUnder(invoice, matter);
+        AddInvoiceUnder(elsewhere, Guid.NewGuid());
         _invoiceHiding = InvoiceHidingStub.Faulting();
         SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
 
-        ShouldBeTheSameAnswer(await Get("invoices", invoice, Ciam(matter: matter)), await Get("invoices", Guid.NewGuid(), Ciam(matter: matter)));
+        var faulted = await Get("invoices", invoice, Ciam(matter: matter));
+        var missing = await Get("invoices", Guid.NewGuid(), Ciam(matter: matter));
+        var unreachable = await Get("invoices", elsewhere, Ciam(matter: matter));
+
+        var problem = faulted.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        ShouldBeTheSameAnswer(unreachable, missing);
+        _invoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { invoice }),
+            "the invoice decision is asked only after the record check admits the caller");
         ShouldNotHaveReadMessages();
     }
 

@@ -558,9 +558,9 @@ public class ExternalMessageSendTests
 
     // ebilling-r1 task 098 surface (b): the post gate is the read gate, so an invoice the (a') predicate hides (or cannot
     // decide) is refused exactly as an invoice that does not exist, and nothing is written.
+    // Task 130-0 fix round 1 (K1): the "fault" case moved to Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_AfterTheRecordCheck.
     [Theory]
     [InlineData("hidden")]
-    [InlineData("fault")]
     public async Task Task098_AnInvoiceThePredicateHides_IsRefusedAsANonexistentInvoice_AndCreatesNoRow(string kind)
     {
         var matter = Guid.NewGuid();
@@ -579,6 +579,40 @@ public class ExternalMessageSendTests
         ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
         ((ProblemHttpResult)hidden).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
         ((ProblemHttpResult)hidden).ProblemDetails.Title.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Title);
+        ShouldHaveWrittenNothing();
+    }
+
+    // Task 130-0 fix round 1 (K1): a failed invoice decision is "could not check" (the invoice-unreadable 503), but only for a
+    // caller the record check admits; a missing invoice and one under a record the caller cannot read stay the uniform 403.
+    [Fact]
+    public async Task Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_AfterTheRecordCheck()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var elsewhere = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _records[("sprk_invoice", elsewhere)] = new Dictionary<string, object?>
+        {
+            ["id"] = elsewhere,
+            ["sprk_matter"] = Lookup(Guid.NewGuid(), "sprk_matter"),
+        };
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+
+        var faulted = await Post("invoices", invoice, Ciam(matter: matter));
+        var missing = await Post("invoices", Guid.NewGuid(), Ciam(matter: matter));
+        var unreachable = await Post("invoices", elsewhere, Ciam(matter: matter));
+
+        var problem = faulted.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeForbidden(unreachable, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        _invoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { invoice }),
+            "the invoice decision is asked only after the record check admits the caller");
         ShouldHaveWrittenNothing();
     }
 

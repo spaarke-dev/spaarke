@@ -260,10 +260,19 @@ public static class ExternalMessageEndpoints
 
         try
         {
-            var rights = await GetRecordRightsAsync(
-                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
-                    hideInvoices)
-                .ConfigureAwait(false);
+            Spaarke.Dataverse.AccessRights rights;
+            try
+            {
+                rights = await GetRecordRightsAsync(
+                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
+                        hideInvoices)
+                    .ConfigureAwait(false);
+            }
+            catch (ExternalDataService.DataverseUnavailableException)
+            {
+                // Task 130-0 fix round 1 (K1): the invoice decision faulted after the record check; nothing is posted.
+                return ExternalProjectDataEndpoints.InvoiceUnreadableProblem();
+            }
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             {
@@ -414,10 +423,21 @@ public static class ExternalMessageEndpoints
             // The gate is INSIDE the try: a Dataverse fault on its app-only record read (invoices / service requests) is
             // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
             // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
-            if (!await IsRootRecordReadableAsync(
+            bool readable;
+            try
+            {
+                readable = await IsRootRecordReadableAsync(
                         messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
                         hideInvoices)
-                    .ConfigureAwait(false))
+                    .ConfigureAwait(false);
+            }
+            catch (ExternalDataService.DataverseUnavailableException)
+            {
+                // Task 130-0 fix round 1 (K1): the invoice decision faulted after the record check.
+                return ExternalProjectDataEndpoints.InvoiceUnreadableProblem();
+            }
+
+            if (!readable)
             {
                 logger.LogWarning(
                     "[EXT-MESSAGES] DENY {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in the " +
@@ -806,8 +826,10 @@ public static class ExternalMessageEndpoints
             return (false, row, live.Faulted || !flags.IsComplete);
 
         // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is refused like a missing
-        // one, for a caller who is not an internal systemuser. No predicate, a hidden invoice and a failed read all refuse with
-        // the SAME answer as a missing record (Undecided false: a fault must not be distinguishable from "hidden").
+        // one, for a caller who is not an internal systemuser. No predicate and a hidden invoice refuse with the SAME answer as a
+        // missing record. Task 130-0 fix round 1 (K1): a FAILED read throws DataverseUnavailableException instead, answered as
+        // the InvoiceUnreadableReasonCode 503. It is reached only here, after the record check (the record exists and the caller
+        // reaches it), so it is no existence oracle.
         if (string.Equals(root.EntityLogicalName, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
         {
             if (hideInvoices is null)
@@ -817,6 +839,13 @@ public static class ExternalMessageEndpoints
             }
 
             var decision = await hideInvoices(principal, new[] { id }, ct).ConfigureAwait(false);
+            if (!decision.IsVisible(id) && decision.Faulted)
+            {
+                logger.LogWarning(
+                    "[EXT-MESSAGES] Invoice {RecordId}: the (a') read failed for a caller who reaches it; answered as unavailable.", id);
+                throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+            }
+
             if (!decision.IsVisible(id))
             {
                 logger.LogInformation(

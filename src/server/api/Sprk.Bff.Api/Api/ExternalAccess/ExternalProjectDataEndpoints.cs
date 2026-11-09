@@ -1314,11 +1314,7 @@ public static class ExternalProjectDataEndpoints
                 {
                     // Same posture as the service request: an unreadable invoice is a fault (503), never "no access" and
                     // never access. Nothing has touched SPE or been written.
-                    return (none, Results.Problem(
-                        statusCode: StatusCodes.Status503ServiceUnavailable,
-                        title: "Invoice unavailable",
-                        detail: "The invoice could not be checked right now. Try again shortly.",
-                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }), none);
+                    return (none, InvoiceUnreadableProblem(), none);
                 }
             default:
                 return (none, null, none);
@@ -1349,28 +1345,39 @@ public static class ExternalProjectDataEndpoints
     /// <summary>The 503 reason code when an invoice's parents could not be read (task 031, owner option A).</summary>
     internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
 
+    /// <summary>The 503 answered when an invoice could not be checked (generic detail; leaks nothing). Since ebilling-r1 task 130-0
+    /// fix round 1 (K1) also the message routes' answer when the invoice decision faulted for a caller who reaches the invoice.</summary>
+    internal static IResult InvoiceUnreadableProblem() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Invoice unavailable",
+            detail: "The invoice could not be checked right now. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode });
+
     /// <summary>
     /// ebilling-r1 task 098: whether the (a') predicate leaves <paramref name="invoiceId"/> visible to <paramref name="caller"/>.
-    /// False when no predicate is given, when it hides the invoice, and when its read failed (fail closed).
+    /// Not visible when no predicate is given, when it hides the invoice, and when its read failed (fail closed).
+    /// Task 130-0 fix round 1 (K1): <c>Faulted</c> says the read failed (<see cref="InvoiceVisibilityResult.Faulted"/>), so a caller
+    /// already known to reach the invoice can be told "could not check" (503) rather than "no access".
     /// </summary>
-    private static async Task<bool> InvoiceVisibleToAsync(
+    private static async Task<(bool Visible, bool Faulted)> InvoiceVisibleToAsync(
         CallerPrincipal caller, Guid invoiceId, ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
     {
         if (hideInvoices is null)
         {
             logger.LogError(
                 "[EXT-INVOICE-DOCS] No invoice (a') predicate is configured; invoice {InvoiceId} is denied (fail closed).", invoiceId);
-            return false;
+            return (false, false);
         }
 
         var decision = await hideInvoices(caller, new[] { invoiceId }, ct).ConfigureAwait(false);
         if (decision.IsVisible(invoiceId))
-            return true;
+            return (true, false);
 
         logger.LogInformation(
             "[EXT-INVOICE-DOCS] Invoice {InvoiceId} hidden by the (a') predicate ({Reasons}); denied like a missing invoice.",
             invoiceId, decision.HiddenSummary());
-        return false;
+        return (false, decision.Faulted);
     }
 
     /// <summary>
@@ -1415,17 +1422,26 @@ public static class ExternalProjectDataEndpoints
         if (parents is not { } invoiceParents)
             return denied;
 
-        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
-        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
-        // and a failed predicate read deny too (fail closed; never "unknown means visible").
-        if (!await InvoiceVisibleToAsync(caller, invoiceId, hideInvoices, dataService.Logger, ct).ConfigureAwait(false))
-            return denied;
-
         var rights = Spaarke.Dataverse.AccessRights.None;
         if (invoiceParents.MatterId is { } matterId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, matterId);
         if (invoiceParents.ProjectId is { } projectId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
+
+        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
+        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
+        // and a failed predicate read deny too (fail closed; never "unknown means visible").
+        // Task 130-0 fix round 1 (K1): a failed predicate read is the InvoiceUnreadableReasonCode 503 instead, but only AFTER the record
+        // check: the invoice exists (its parents were read) and the caller holds Read through one of them. Any other caller gets the
+        // uniform `denied`, so the 503 is no existence oracle.
+        var (invoiceVisible, invoiceFaulted) =
+            await InvoiceVisibleToAsync(caller, invoiceId, hideInvoices, dataService.Logger, ct).ConfigureAwait(false);
+        if (!invoiceVisible)
+        {
+            if (invoiceFaulted && rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+                throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+            return denied;
+        }
 
         // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
         // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.

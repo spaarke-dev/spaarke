@@ -799,9 +799,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     // is isolated. Every invoice-document route (list, download, versions, upload) answers exactly as for an invoice that does
     // not exist, before any document, SPE or write is touched; a predicate that cannot decide answers the same (fail closed).
 
+    // Task 130-0 fix round 1 (K1): the "fault" case moved to Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute.
     [Theory]
     [InlineData("hidden")]
-    [InlineData("fault")]
     public async Task Task098_AnInvoiceThePredicateHides_DeniesEveryDocumentRoute_AsAMissingInvoice_AndTouchesNothing(string kind)
     {
         _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
@@ -838,6 +838,53 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.Uploads.Should().BeEmpty();
         _fixture.Data.Documents.Should().ContainSingle("nothing was written");
         _fixture.InvoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { RecordA }));
+    }
+
+    // Task 130-0 fix round 1 (K1): a failed invoice decision is "could not check" (the invoice-unreadable 503) on every invoice
+    // document route, but only for a caller who reaches the invoice through one of its parents; a missing invoice and an invoice
+    // under a record the caller cannot read stay the uniform 403. Nothing is read, downloaded or written.
+    [Fact]
+    public async Task Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        var elsewhere = Guid.NewGuid();
+        _fixture.Data.InvoiceParents[elsewhere] = (Guid.NewGuid(), null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var faulted = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+        var unreachable = await client.GetAsync($"/api/v1/external/invoices/{elsewhere}/documents");
+
+        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
+        foreach (var response in faulted)
+            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        unreachable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await unreachable.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
+        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
+        _fixture.InvoiceHiding.Calls.Should().Contain(call => call.SequenceEqual(new[] { RecordA }));
     }
 
     [Fact]
