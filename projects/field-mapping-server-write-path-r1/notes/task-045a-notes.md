@@ -80,3 +80,19 @@ was the defect).
 ## Open
 
 - On a fill, display columns the caller sent are kept as sent (045c owns display columns).
+
+## Guard 1 false positive (fixed)
+
+`RegardingPairTypeImpliesIdGuardTests` flagged `CommunicationService.CopyRegardingFromSourceAsync` (~:3023, added by 045c's reply
+copy): it writes the type (only when the row's id equals the source's id) but writes the id through the helper
+`CopyStringIfPresent(source, communication, "sprk_regardingrecordid")`, which the source scan did not read as an id write. The code
+was safe; the guard was blind to the helper.
+
+Fix (guard only, no BFF change): the scan counts `CopyStringIfPresent(<name>, <name>, <ID key>)` as an id write, recognised only
+for that helper with the ID key (literal, shared constant or same-file const) as its THIRD argument. No file exception, no general
+loosening: a call that copies another column through the helper is no id write.
+
+Controls: must fire - a member writing the type and copying a different column (name, number, url) through the helper; the id
+copied in ANOTHER member. Must not fire - `CopyRegardingFromSourceAsync`'s shape, and the helper with the `RegardingRecordIdColumn`
+constant. Before the fix the guard failed with the one finding above; after, 3 of 3 pass (this guard's two tests and
+`GenericUpdatePathsPreparePairGuardTests`).

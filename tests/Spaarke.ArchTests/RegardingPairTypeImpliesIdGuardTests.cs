@@ -81,13 +81,22 @@ public class RegardingPairTypeImpliesIdGuardTests
         + @"|\bWrite(?:String|PropertyName|Null|Boolean|Number|StartObject|StartArray)\s*\(\s*" + key + @"\s*[,)]",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    /// <summary>Guard 1 false positive (fixed): the id written through the copy helper <c>CopyStringIfPresent(source, target, KEY)</c>
+    /// (<c>CommunicationService</c>) counts as an id write, recognised only for that helper with the ID key as its THIRD argument. A
+    /// call that copies another column is no id write; the helper's arguments are plain names or member accesses.</summary>
+    private static Regex CopyHelperIdWrite(string idKey) => new(
+        @"\bCopyStringIfPresent\s*\(\s*[\w.]+\s*,\s*[\w.]+\s*,\s*" + idKey + @"\s*\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>The problems in one file's source (empty when every type write has its id in its member); and how many type
     /// writes it saw.</summary>
     internal static (IReadOnlyList<string> Problems, int TypeWrites) Scan(string source)
     {
         var code = SourceScan.CodeText(source.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n'));
         var typeWrites = Writes(KeyPattern(code, TypeColumn, TypeConstants)).Matches(code);
-        var idWrites = Writes(KeyPattern(code, IdColumn, IdConstants)).Matches(code).Select(m => m.Index).ToList();
+        var idKey = KeyPattern(code, IdColumn, IdConstants);
+        var idWrites = Writes(idKey).Matches(code).Select(m => m.Index)
+            .Concat(CopyHelperIdWrite(idKey).Matches(code).Select(m => m.Index)).ToList();
         var memberStarts = MemberDeclaration.Matches(code).Select(m => (m.Index, Name: m.Groups[1].Value)).ToList();
         var problems = new List<string>();
 
@@ -189,6 +198,25 @@ public class RegardingPairTypeImpliesIdGuardTests
             """).Problems);
         Assert.Single(Scan("""map["recordtype"] = "SPRK_RegardingRecordType";""").Problems);
 
+        // Guard 1 false positive (fixed): the copy helper counts as an id write only for the ID column. A member that writes the
+        // type and copies a DIFFERENT column through the helper has no id; so does one that passes the id as the SOURCE argument.
+        Assert.Single(Scan("""
+            private void M(Entity source, Entity row)
+            {
+                CopyStringIfPresent(source, row, "sprk_regardingrecordname");
+                row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+            }
+            """).Problems);
+        Assert.Single(Scan("""
+            private void M(Entity source, Entity row)
+            {
+                CopyStringIfPresent(source, row, "sprk_regardingrecordnumber");
+                CopyStringIfPresent(source, row, "sprk_regardingrecordurl");
+                row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+            }
+            private void N(Entity source, Entity row) { CopyStringIfPresent(source, row, "sprk_regardingrecordid"); }
+            """).Problems);
+
         // An id only in a comment is no id; an id that is only READ is no write.
         Assert.Single(Scan("""
             private void M(Entity entity)
@@ -243,6 +271,24 @@ public class RegardingPairTypeImpliesIdGuardTests
             """).Problems);
         Assert.Empty(Scan("""
             private void M(Entity e) { e.SetAttributeValue(TodoRegardingBuilder.FieldRegardingRecordType, t); e.SetAttributeValue(TodoRegardingBuilder.FieldRegardingRecordId, i); }
+            """).Problems);
+
+        // Guard 1 false positive (fixed): CommunicationService.CopyRegardingFromSourceAsync's shape — the id copied through the
+        // helper, the type written later in the same member, after the helper copies of the display values.
+        Assert.Empty(Scan("""
+            private async Task<bool> CopyRegardingFromSourceAsync(DataverseEntity communication, DataverseEntity source)
+            {
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
+                if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"), source.GetAttributeValue<string>("sprk_regardingrecordid")))
+                {
+                    CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+                    communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+                }
+                return true;
+            }
+            """).Problems);
+        Assert.Empty(Scan("""
+            private void M(Entity s, Entity t) { CopyStringIfPresent(s, t, RegardingRecordIdColumn); t[RegardingRecordTypeColumn] = r; }
             """).Problems);
 
         // Reads: an attribute read, a condition, a filter, an equality test, a column set, a select.

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022b" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Mapping from a Restricted source; a document's access permission set in the create (UAC-r2 2026-11-08)</title>
+    <phase>3 W3 Wizards (follow-up to 022 fix round 2)</phase>
+    <gate>022 fix round 2 (the secure-source owner invariant) merged into the work branch first: both edit RecordCreationService and its mapping step. UAC-r2 reviews the diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what a create maps and what it writes for access permission (.cs, bff-api); access-rule adjacent.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per-table access rules and fail-closed reasoning across the create steps.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService and the mapping step, which 022 round 2 and 045b also edit.</parallel-reason>
+    <deps>022 (fix round 2)</deps>
+    <tags>bff-api, security, field-mapping, testing</tags>
+    <estimated-effort>1-2 sessions</estimated-effort>
+  </metadata>
+
+  <prompt>Rules (UAC-r2, 2026-11-08): (1) Values mapped from a source whose `sprk_accesspermission` is Restricted are written only into a row that is itself Restricted in the same create; otherwise the mapped values are stripped (caller-supplied values stay) with a warning. This sits on the same post-Owner, pre-Create check as the secure-source owner invariant from 022 fix round 2. (2) `sprk_accesspermission` on `sprk_document` is set IN the create from the filing parent, the same way as the I-16 step-10 value on to-do, event and communication (today a document gets it only after the create: RecordCreationService ~:987-988, #2169). (3) When the access permission inherited from the parent cannot be told: "no Restricted ancestor" (no parent, or every parent read and none Restricted) maps normally; "unknown" (a parent's value unreadable, or a fault) strips the mapped values from a Restricted-capable source and warns. The resolver reports which of the two it is.</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed. Follow ADRs strictly.</role>
+  <goal>No create writes a value mapped from a Restricted source into a row that does not end Restricted in that create; a document filed under a Restricted parent is Restricted from creation.</goal>
+
+  <context>
+    <background>Split from 022 fix round 2, which delivered the secure-source owner invariant and held this part because it needs more than one predicate. Findings from that round (rule wording): only the root tables and sprk_todo, sprk_event, sprk_communication and sprk_document carry `sprk_accesspermission`; to-do, event and communication get it at step 10 (RecordCreationService ~:1062-1069, ParentLineage ~:480-483); project and work assignment take the caller's value against the round-87 floor (SecureRootInheritance ~:846-862); every other table has no column.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 10 for sprk_document; the post-Owner check gains the Restricted predicate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs</file>
+      <file role="modify">The access-permission resolver used at step 10 (ParentLineage or its caller): return "no Restricted ancestor" versus "unknown"</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-022-notes.md (fix round 2 and its "Held: Restricted sources" section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-022b &lt;tip of work/field-mapping-server-write-path-r1 after 022 round 2 merged&gt;`, then confirm this POML exists on the branch.</constraint>
+    <constraint source="source predicate">Whether a source table carries `sprk_accesspermission` comes from metadata the code already holds (the table registry or ParentLineage's tables), never a hand-written list; a guard test holds it equal to the solution's columns. A source table without the column is never read for it.</constraint>
+    <constraint source="target answer">Per table: to-do, event, communication and document by the in-create value; project and work assignment by the caller's value and the round-87 floor; a table without the column can never be Restricted, so a Restricted source is always stripped there (fail closed; one line in the notes).</constraint>
+    <constraint source="fail closed">A fault or an unreadable value strips the mapped values; never a create that wrote a Restricted source's values into a non-Restricted row.</constraint>
+    <constraint source="public repo">Commit messages, code comments, test names and notes state the rules only.</constraint>
+    <constraint source="ADR-038 / §10 / §11">KEEP test paths only; publish delta; CVE; §11 answers for any new member.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check.</step>
+    <step order="1">Resolver: distinguish "no Restricted ancestor" from "unknown".</step>
+    <step order="2">sprk_document: set the access permission in the create at step 10 from the filing parent.</step>
+    <step order="3">Add the Restricted predicate to the post-Owner, pre-Create check.</step>
+    <step order="4">Tests (AC1-AC4); build; filtered suites; ArchTests; publish delta; CVE; one Opus adversarial pass; diff to UAC-r2.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire): a Restricted source mapped into a non-Restricted target is stripped and warned: an explicit mappingSource that is not the filing parent; the Project wizard's no-parent case; a target table without the column.</criterion>
+    <criterion testable="true">AC2 (must not fire): a child filed under a Restricted parent (to-do, event, communication, document) is Restricted in the create and its mapped values are written; a Restricted source into a Restricted project or work assignment create maps.</criterion>
+    <criterion testable="true">AC3: a document filed under a Restricted parent has `sprk_accesspermission` = Restricted in the create request itself (no later update needed).</criterion>
+    <criterion testable="true">AC4 (fail closed): an unreadable or faulting parent value strips the mapped values from a Restricted-capable source; "no Restricted ancestor" maps normally; the source-column guard fails when a seeded table disagrees with the solution.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-08 from UAC-r2's ruling in fm's session; split from 022 fix round 2.</notes>
+</task>

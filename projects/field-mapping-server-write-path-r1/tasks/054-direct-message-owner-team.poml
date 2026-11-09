@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Direct 1:1 messages: a dedicated owner team, BFF-only thread flags, and the existing-row move (owner ruling 2026-11-08)</title>
+    <phase>6 W6 Ownership exceptions (follow-up)</phase>
+    <gate>UAC-r2 reviewed this POML before code. Parts 054b (column lock) and 054c (existing-row move) each run live only with the owner's go in fm's session. UAC-r2's share-side changes (Decision Record share mirror for team-owned messages; Set-CustomerOwnerTeams.ps1 Direct-BU mode) land before or with 054a's deploy.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the owner of a communication row on create, update and unfile; adds field security; moves existing rows. Security-sensitive (.cs, bff-api, dataverse).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ownership and field security across several writers; fail-closed reasoning; a live data move.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordOwnershipResolver, ThreadResolver, CommunicationService and OwnedChildWrite, which other tasks edit; sequence with 045b and 052b.</parallel-reason>
+    <deps>060 (ownership matrix), 045b merged</deps>
+    <tags>bff-api, dataverse, security, ownership, testing</tags>
+    <estimated-effort>4-6 sessions, as three parts: 054a owner rule, 054b thread-flag lock, 054c existing-row move</estimated-effort>
+  </metadata>
+
+  <prompt>Owner ruling 2026-11-08 (relayed and refined by UAC-r2): (1) a message filed under a record is readable by whoever can read the record, except a message tagged internal-only, which only internal users see (no change: today's model already does this). (2) A Direct 1:1 message that is not filed under any record is owned by a dedicated owner team that sits outside the business-unit tree (never the root business unit), and its participants are shared in. This amends "an unfiled communication keeps its creator" for Direct messages only. Unfiled inbound email is unchanged. fm builds the ownership rule, the thread-flag lock and the existing-row move; UAC-r2 owns the share side (who is shared in, revoke on leave, re-grant, last-reader).</prompt>
+  <role>SPAARKE platform developer, BFF write path and ownership. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Every Direct 1:1 message not filed under a record, and its content rows, is owned by the named Direct owner team from creation; filing re-owns it to the record as today; unfiling returns it to the Direct team; the thread-type and default-thread flags can be written only by the BFF; existing rows are moved by a dry-run / apply / verify script.</goal>
+
+  <context>
+    <background>Shape agreed with UAC-r2 2026-11-08. Reuse, not a new mechanism (§11): the owner team is found with the same lookup the Secure Record owner team uses (`SecureRecordOwnerTeam`), generalised to one parameterised lookup. The thread flags are locked with the same two field security profiles that lock `sprk_issecure` ("Spaarke BFF-Managed Field Readers" / "…Writers", `scripts/Set-SecureFlagFieldSecurity.ps1`). The existing-row move follows `Migrate-SecureRecordsToNamedOwnerTeam.ps1`.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerTeam.cs (generalise IdentifyAsync/ResolveAsync into one parameterised lookup; Secure Record keeps its behaviour)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (new UnfiledOwnership.DirectMessageOwnerTeam beside KeepCreator; content rows follow the named team ahead of the restricted-content step)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (ResolveOutboundOwnerAsync reads the thread type; refusal before a send)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (Direct branch of the thread join and the Direct thread create; re-own after the thread resolves)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs and the other callers that hard-code KeepCreator on unfile (one shared helper picks the rule)</file>
+      <file role="create">scripts/Set-ThreadFlagFieldSecurity.ps1 (054b; modelled on Set-SecureFlagFieldSecurity.ps1)</file>
+      <file role="create">scripts/Migrate-DirectMessagesToOwnerTeam.ps1 (054c; modelled on Migrate-SecureRecordsToNamedOwnerTeam.ps1)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (setup item: the Direct BU, team and role; a new BU's default team joins the reader profile)</file>
+      <file role="modify-at-ship">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5.2 communication row and its prose</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs (GrantMessageAccessAsync: participants are granted after the join; UAC-r2's side)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-054a &lt;tip of work/field-mapping-server-write-path-r1&gt;`, then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner team">One Direct BU per environment: a direct child of the root, beside Secure Record, holding one named, non-default, memberless Owner team. New settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName`, no default. The validity checks (unset, ambiguous, team has members, BU has users, BU is the root or Secure) run once and are cached with a short lifetime (ADR-009), not per message.</constraint>
+    <constraint source="fail closed">Before a send: an invalid configuration refuses with 409 and a user-readable message; nothing is sent. After the row exists (inbound, or a thread found after the send): keep today's owner and log an Error with a stable event code; never fall back to the root or any default team; never drop the message.</constraint>
+    <constraint source="scope">Only Message rows (and their content rows) in a Direct thread with no record filing move. Content rows = every child of the message that takes its owner from it: `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog` (all `SecureChildLineage` children of `sprk_communication`), `sprk_document` (attachment files and the archived .eml) and the gate `sprk_decisionrecord`. This list is exactly the table set of the Direct team's role (UAC-r2 task 198); a change to one changes the other. Threads do NOT move. Record-filed messages, the per-user master thread, unfiled inbound email, the chat create and secure filings are unchanged.</constraint>
+    <constraint source="thread flags">`sprk_threadtype` and `sprk_isdefaultthread` on `sprk_communicationthread` become secured: reader profile on every BU default team; writer profile holds only the BFF application users (on dev: SDAP-BFF-SPE-API and mi-bff-api-dev). No BFF create or update path writes either column with an impersonated caller (MSCRMCallerID); a write as the user would fail once secured.</constraint>
+    <constraint source="share side">Participant shares are UAC-r2's. Design the hand-off so the pending owner answer on "participants keep their shares after filing" is a single switch either way (recommendation: keep, except on secure or Restricted targets, decided by the existing share-eligibility rule).</constraint>
+    <constraint source="registry">`UnfiledCommunicationKeepsCreator` stays in RecordTableRules (the service never creates Direct messages); only its rationale text changes. The Direct rule is a writer rule, like the gate Decision Record.</constraint>
+    <constraint source="public repo">Commit messages, code comments, test names, notes and this POML state rules only. No description of who could read what before the change.</constraint>
+    <constraint source="ADR-002 / ADR-038 / §10 / §11">No plugin. KEEP test paths only. Publish delta and CVE on BFF parts. §11 answers for the generalised lookup, the new settings and the two scripts.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check (the files above; communication files are shared with other projects).</step>
+    <step order="1">054a: generalise the owner-team lookup; add the Direct owner rule at the send, join and Direct-create points, re-owning after the thread resolves; content rows follow; one shared helper for the unfile direction replaces the hard-coded KeepCreator callers. Refusal and after-the-fact behaviour per the fail-closed constraint.</step>
+    <step order="2">054a tests and guards (see AC1-AC4). Build; verify-suites.sh; publish delta; CVE; one Opus adversarial pass plus a second pass (security). Send the diff to UAC-r2.</step>
+    <step order="3">054b: Set-ThreadFlagFieldSecurity.ps1 with -DryRun (default), -Apply, -Verify. Dry-run preconditions: both profiles exist; the reader profile is on every BU; the writer profile holds only the BFF identities; no null row; no BFF update path writes either column and no impersonated write exists (code scan evidence in the notes); no saved view or SavedQuery filters on them; no form other than main shows them, and every control found is removed in the solution; no field-mapping rule or registry row targets them. Apply: remove the form controls, secure, grant, publish. Verify: as below (AC5).</step>
+    <step order="4">054c: Migrate-DirectMessagesToOwnerTeam.ps1. Dry-run precondition, checked by the script (not only by step order): on this environment `sprk_threadtype` and `sprk_isdefaultthread` are secured and the writer profile holds only the BFF identities (054b -Verify would exit 0); otherwise the script refuses to select anything. Selection: Message rows in a Direct thread (by the now-locked `sprk_threadtype`, excluding the per-user master by the locked `sprk_isdefaultthread`) with no typed record lookup, not owned by the Direct or the Secure team, with an empty ownership question. Dry run by default; -Apply row by row: count shares, assign, read back, stop if shares fell, stop if `sharetopreviousowneronassign` is on; -Verify exits 1 on any leftover. Idempotent. Test rows use the FMSWP- prefix.</step>
+    <step order="5">Docs: the deployment guide setup item (the Direct BU, team and role; a new BU's default team joins the reader profile) and a message to provisioning-r1 to add it to environment setup. The §5.2 matrix row changes at ship.</step>
+    <step order="6">Live (owner's go in fm's session, UAC-r2 deploys): deploy 054a with UAC-r2's share side; run 054b -DryRun, -Apply, -Verify; run 054c -DryRun, then -Apply, then -Verify.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire): a Direct 1:1 message not filed under a record is owned by the Direct team on each path: send, respond into a thread, inbound join, new Direct thread. The owner is set before UAC-r2's participant grant. If the participant grant fails after the re-own, the message stays owned by the Direct team (visible to no participant) and UAC-r2's re-grant restores it; the owner is never rolled back to widen access. Its content rows follow. Unfiling a filed Direct message returns it to the Direct team.</criterion>
+    <criterion testable="true">AC2 (fail closed): each invalid-configuration state refuses a send with 409 and sends nothing; after the row exists it keeps today's owner and logs the Error code; no path falls back to the root or a default team; no message is dropped. Recovery for an after-the-fact miss: re-running 054c -Verify finds the row and -Apply moves it (tested with a seeded row); no sweep job is needed.</criterion>
+    <criterion testable="true">AC3 (must not fire): record-filed messages (including a Direct-type thread carrying a typed lookup); a Direct thread filed to a SECURE record goes to the secure team, not the Direct team; the per-user master; unfiled inbound email; the chat create; threads keep their owner.</criterion>
+    <criterion testable="true">AC4 (guards): only the one owner step assigns to the Direct team (source-scan guard with must-fire control); no user and no member in the Direct BU or team (NFR-05-style check in the lookup and in -Verify); the registry, census, InboundIngestionCreatorsGuardTests and CrossSurfaceOwnerTests updated.</criterion>
+    <criterion testable="true">AC5 (054b verify): -Verify checks the writer profile's membership against the BFF identities; a non-admin user's PATCH of either flag is rejected; a non-admin reads the true values (not null); the BFF still creates a master thread and a Direct thread.</criterion>
+    <criterion testable="true">AC6 (054c): -DryRun lists the selected rows and writes nothing; -Apply moves them with shares preserved or stops; a second run selects nothing; -Verify exits 0 after apply and 1 when a leftover is seeded.</criterion>
+  </acceptance-criteria>
+
+  <known-limits>
+    <limit>System Administrator bypasses field security (same class as the Decision Record and task 085).</limit>
+    <limit>Users placed in the root business unit reach the Direct BU by Deep read (same accepted dev artifact as Secure Record); production users sit in the customer child BU.</limit>
+    <limit>One Direct BU per environment; an environment hosting several customers shares it.</limit>
+    <limit>A BU created later needs its default team added to the reader profile (setup item).</limit>
+  </known-limits>
+
+  <escalation>
+    <trigger>If any BFF path writes either thread flag on update or with an impersonated caller, STOP and report before 054b.</trigger>
+    <trigger>If the share side is not ready when 054a is, do not deploy 054a; report.</trigger>
+    <trigger>Any live -Apply without the owner's go in fm's session: do not run.</trigger>
+  </escalation>
+
+  <notes>Added 2026-11-08 from the owner's ruling, with UAC-r2's approved shape and conditions.</notes>
+</task>
