@@ -19,6 +19,23 @@
 3. Then per agent table below; check `git worktree list` for a leftover reviewer worktree `...scratchpad
 v2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if listed.
 
+## DEF-059 status (2026-11-09)
+
+- **Step 1** is on `task/ebilling-def059` at `ad59d94a2f`, `f0b5ed1112` and `f764a7fb3c`. **uac-r2 APPROVED** the shape.
+- **Ruling:** the pin stays STRICT. `-Apply` FIRST strips this role's privileges outside {DR Read Global}, reads back, then assigns. It exits 2 when the role is missing, or the declared privilege is missing or has the wrong depth. A Sonnet agent is pushing this ff onto `task/ebilling-def059` (`task/ebilling-def059-f1`).
+- **Pre-check done (read-only, dev):** SpaarkeMaster is Unmanaged at 1.2.3.1; the role is not present yet.
+- **Step 3** runs after the script fix:
+  1. uac-r2 before-notice.
+  2. Carrier solution `SpaarkeDecisionRecordReaderRole` (SpaarkeMaster publisher, one type-20 component).
+  3. `pac solution pack`, then `Import-SolutionScoped.ps1 -SolutionUniqueName SpaarkeDecisionRecordReaderRole`.
+  4. AddSolutionComponent (type 20) → SpaarkeMaster.
+  5. DELETE the carrier solution record. Its components stay.
+  6. Script `-Apply`, then `-Verify`, which must exit 0.
+  7. One DR smoke read through the BFF DR read path.
+  8. uac-r2 after-notice, saying the carrier was deleted.
+- **Done:** provisioning-r1 told about H10 and the role-expectations file. It accepted the work, which waits on the owner's go. **Owed to provisioning-r1:** the master SHA once def059 merges, plus the SpaarkeMaster version carrying the role.
+- **Owner question (open):** remove Ontology Service from the BFF identity? uac-r2 says it belongs in the SA-removal work, which first needs minimal Assign/Share on DR/Signal (reconciler re-own, GateDecisionRecordSharing, and maybe Repair on Signal). `SpendReaderSourceAccessGuardTests.cs:25` moves when Ontology Service comes off.
+
 ## Agents in flight (2026-11-09)
 
 | Work | Branch / base | Next |
@@ -41,11 +58,23 @@ v2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if liste
     - A single invoice-linked record: 503 `InvoiceUnreadableReasonCode`, never 404. A single non-invoice record: 200.
     - K1 invoice routes and F1 writes: 503.
     - read_query: tool error.
+  - **Also in F3b (uac-r2 2026-11-09, from 130-0b pass 2):**
+    - **K-a, now F:** a guard over EVERY Entity.xml lookup to `sprk_invoice` on any table. Each lookup is decided (a child → hide, a root → redact) or excluded with a reason. `sprk_servicerequest` follows the child rule on BOTH planes, REST workforce routes included.
+    - **K-b, option 1:** a regarding pair typed `sprk_invoice` with a GUID id is a candidate invoice alongside `sprk_regardinginvoice`. Tests: the pair is hidden and the link is null → hide; the pair is visible and the link is hidden → hide.
+    - **K-d:** fix the `RootInvoiceLinkRedaction` doc comment in the batch merge.
   - **Review:** its own review.
   - **Gate:** neither 130-0 nor 130-0b reaches dev until F3b is merged with them.
 - **Faults:** a fault on a decided row hides that row, on the family path too. A whole-read failure still fails the call: a 503 on REST, a tool error in read_query.
 - **K3:** WA in the invoices module's ReadableColumns is accepted, on three conditions: sibling-exact forms; a test that a secure, unreadable WA row never returns; and its own diff item.
 - **Shared redaction set:** `77d6becd24`; 130-0 merges that exact sha.
+
+**130b review by uac-r2 (fc68d0b44a):** approved once FIX-1, FIX-2 and the Q1 answer land.
+- **FIX-1:** a firm-read fault returns 503; "no firm" stays 403.
+- **FIX-2:** an ArchTest pins that only the endpoints and DI may call FirmFindingsProjection.
+- **Q1:** is "exactly one core record" enforced? If yes, cite it; if not, use the invoices-module precedence.
+- **Status:** a Sonnet agent is on the `task/ebilling-130b-fix4` branch and will push onto fix1. Q2 and Q3 are accepted.
+- **Batch diff note:** must include the merged-tip grep for `ReadInvoiceSubmissions`, showing a single constant.
+- **130c starts after fix4.**
 
 **Merge plan for the 130 batch:** merge 130-0 fix (incl. 130-0b helper `446a40bb4e`), 130-0b head, 130b fix1 into work; expect conflicts in the 130-0 notes file (combine both sections by hand) and `WorkforceRoleCeilingGate.cs` (adjacent sets; remove `ReadInvoiceSubmissions` if unused); after merge replace fix1's `InvoiceLinkedChildAttributes` (`ExternalModuleDataEndpoints.cs` ~:502) with 130-0b's `ExternalInvoiceVisibility.IsInvoiceLinkedChildTable`. Verify tip, TASK-INDEX 130-0/130-0b/130a/130b ✅, remove agent worktrees.
 
