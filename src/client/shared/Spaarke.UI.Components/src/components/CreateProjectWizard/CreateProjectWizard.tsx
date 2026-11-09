@@ -451,6 +451,21 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
     [dataService]
   );
 
+  // Task 022 fix round 4: the lock forces Secure on (CreateProjectStep); when a parent change releases it, Secure goes back
+  // to the value it had before the lock (off if it was never set). A choice made while unlocked is that value, so it is
+  // kept. Held here, not in the step: the step remounts with the wizard's values, and the parent changes on another step.
+  const secureBeforeLockRef = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (parentSecure) {
+      if (secureBeforeLockRef.current === null) secureBeforeLockRef.current = formValuesRef.current.isSecure === true;
+      return;
+    }
+    if (secureBeforeLockRef.current === null) return;
+    const restored = secureBeforeLockRef.current;
+    secureBeforeLockRef.current = null;
+    setFormValues(prev => (prev.isSecure === restored ? prev : { ...prev, isSecure: restored }));
+  }, [parentSecure]);
+
   // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),

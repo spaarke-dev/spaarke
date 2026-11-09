@@ -109,6 +109,88 @@ describe('CreateProjectWizard — a project under a secure matter is secure (tas
   });
 });
 
+/** Task 022 fix round 4: the lock released by a parent change gives Secure back the value it had before the lock. */
+describe('CreateProjectWizard — a released lock restores Secure', () => {
+  let spies: jest.SpyInstance[];
+
+  beforeEach(() => {
+    mockShell.config = undefined;
+    retrieveRecord.mockClear();
+    spies = (['info', 'error', 'warn'] as const).map(m => jest.spyOn(console, m).mockImplementation(() => {}));
+  });
+
+  afterEach(() => spies.forEach(s => s.mockRestore()));
+
+  async function choose(association: AssociationResult | null) {
+    await act(async () => {
+      mockShell.config!.associateToStep!.onAssociationChange!(association);
+      await Promise.resolve();
+    });
+  }
+
+  /** Renders the Enter Info step as the shell would, and returns its toggle and a way to leave the step. */
+  function enterInfo() {
+    const view = renderWithProviders(<>{mockShell.config!.infoStep.renderContent([])}</>);
+    return { toggle: screen.getByRole('switch', { name: /secure project/i }), leave: () => view.unmount() };
+  }
+
+  function openWizard(isSecure: boolean) {
+    renderWithProviders(
+      <CreateProjectWizard
+        open
+        onClose={jest.fn()}
+        dataService={dataService}
+        navigationService={navigationService}
+        initialFormValues={{ projectName: 'Acme', isSecure }}
+      />
+    );
+  }
+
+  it('a secure Matter, then an ordinary one: Secure goes back off and is editable', async () => {
+    openWizard(false);
+    await choose(matter(SECURE_MATTER));
+    const locked = enterInfo();
+    expect(locked.toggle).toBeChecked();
+    locked.leave();
+
+    await choose(matter(ORDINARY_MATTER));
+    const { toggle } = enterInfo();
+
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeEnabled();
+  });
+
+  it('Secure turned on by the user before the lock stays on when the lock is released', async () => {
+    openWizard(false);
+    const unlocked = enterInfo();
+    await userEvent.click(unlocked.toggle);
+    expect(unlocked.toggle).toBeChecked();
+    unlocked.leave();
+
+    await choose(matter(SECURE_MATTER));
+    enterInfo().leave();
+    await choose(matter(ORDINARY_MATTER));
+    const { toggle } = enterInfo();
+
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+  });
+
+  it('a choice made after the release is kept', async () => {
+    openWizard(false);
+    await choose(matter(SECURE_MATTER));
+    enterInfo().leave();
+    await choose(matter(ORDINARY_MATTER));
+    const released = enterInfo();
+    await userEvent.click(released.toggle);
+    released.leave();
+
+    const { toggle } = enterInfo();
+
+    expect(toggle).toBeChecked();
+  });
+});
+
 describe('SecureProjectSection — locked on', () => {
   it('is on and disabled, says why, and reports no change', async () => {
     const onSecureChange = jest.fn();
