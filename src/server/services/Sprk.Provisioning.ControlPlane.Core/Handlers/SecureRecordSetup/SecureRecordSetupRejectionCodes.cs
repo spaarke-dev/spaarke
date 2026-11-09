@@ -224,6 +224,85 @@ public static class SecureRecordSetupRejectionCodes
     public const string AccessRemovedOnLockOtherWriter = "secure_setup.access_removed_on_lock_other_writer";
 
     /// <summary>
+    /// S23: the BFF's runtime Dataverse identity (H10's <c>SystemUserId</c>, the managed identity's application user) is not
+    /// known, or the "Spaarke Ontology Service" role cannot be resolved to exactly one copy in that user's business unit
+    /// (Resumable: H10's output is missing, or import SpaarkeMaster, H6).
+    /// </summary>
+    public const string OntologyServiceRoleUnresolved = "secure_setup.ontology_service_role_unresolved";
+
+    /// <summary>
+    /// S23: the runtime user's business unit is not the customer's business unit, so the customer-unit copy of the role
+    /// cannot be assigned to it (QuarantineRequired: moving a user strips its roles - an owner decision).
+    /// </summary>
+    public const string OntologyServiceRoleUserOutsideCustomerBusinessUnit = "secure_setup.ontology_service_role_user_outside_customer_bu";
+
+    /// <summary>
+    /// S23: a team, or a systemuser with no application id (an interactive user), holds a copy of "Spaarke Ontology Service"
+    /// (QuarantineRequired: nothing is removed here; who holds the role is an operator decision).
+    /// </summary>
+    public const string OntologyServiceRoleHumanOrTeamHolder = "secure_setup.ontology_service_role_human_or_team_holder";
+
+    /// <summary>S23: the re-read shows the runtime identity does not hold the role after the association (Resumable).</summary>
+    public const string OntologyServiceRoleNotHeld = "secure_setup.ontology_service_role_not_held";
+
+    // ---- S24 (#2605): the ontology writer's application user ----
+
+    /// <summary>
+    /// S24: the ontology writer's application user (H10's <c>ontologyWriterSystemUserId</c>) is not known. A run whose H10
+    /// completed before task 266 never created it (Resumable: start a new run).
+    /// </summary>
+    public const string OntologyWriterUnresolved = "secure_setup.ontology_writer_unresolved";
+
+    /// <summary>
+    /// S24: the ontology writer's application user is one of the BFF's own application users, which hold System
+    /// Administrator (QuarantineRequired: the writer must be its own identity - FR-21).
+    /// </summary>
+    public const string OntologyWriterIsBffIdentity = "secure_setup.ontology_writer_is_bff_identity";
+
+    /// <summary>
+    /// S24: the ontology writer's application user is not in the customer's business unit, or does not exist
+    /// (QuarantineRequired: moving a user strips its roles - an owner decision).
+    /// </summary>
+    public const string OntologyWriterOutsideCustomerBusinessUnit = "secure_setup.ontology_writer_outside_customer_bu";
+
+    /// <summary>
+    /// S24: the ontology writer's application user holds a role other than the customer-unit copy of "Spaarke Ontology
+    /// Service" (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterHoldsOtherRole = "secure_setup.ontology_writer_holds_other_role";
+
+    /// <summary>
+    /// S24: an ontology-writer field-security profile is missing or ambiguous. Both ship in SpaarkeMaster; "Spaarke Ontology
+    /// Writer Firm Reason Writers" first in 1.3.0.0 (Resumable: upgrade SpaarkeMaster, H6).
+    /// </summary>
+    public const string OntologyWriterProfileUnresolved = "secure_setup.ontology_writer_profile_unresolved";
+
+    /// <summary>
+    /// S24: an ontology-writer profile has a member other than the ontology writer's application user, or any team
+    /// (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterProfileHasOtherMember = "secure_setup.ontology_writer_profile_has_other_member";
+
+    /// <summary>
+    /// S24: the ontology writer is in a team other than its business unit's default team, or that default team holds a role
+    /// - the writer would inherit it (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterTeamAccess = "secure_setup.ontology_writer_team_access";
+
+    /// <summary>
+    /// S24: the ontology writer is a direct member of a field-security profile other than the two ontology-writer profiles
+    /// (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterHoldsOtherProfile = "secure_setup.ontology_writer_holds_other_profile";
+
+    /// <summary>
+    /// S24: the re-read after the writes shows the ontology writer without its role or a profile membership (Resumable: a
+    /// write not yet visible), or holding more than them - another role, another member, a team or another profile
+    /// (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterNotConfigured = "secure_setup.ontology_writer_not_configured";
+
+    /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing
     /// was written. The run stops here so no later handler runs against an environment the dry run left unconfigured.
     /// </summary>
