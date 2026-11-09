@@ -638,11 +638,10 @@ public sealed class RegardingPairUpdatePlannerTests
                 r => (string)r.Descendants("EntityRelationshipRole").Single(role => (string?)role.Element("RelationshipRoleType") == "1")
                     .Element("NavigationPropertyName")!);
 
-        RegardingRecordTypeNavigationProperties.Keys.Should().BeEquivalentTo(RegardingPairTables);
         foreach (var table in RegardingPairTables)
         {
             declared.Should().ContainKey(table, $"{table} carries the pair's type lookup");
-            RegardingRecordTypeNavigationProperties[table].Should().Be(declared[table], $"{table}'s relationship declares it (case-sensitive)");
+            RegardingRecordTypeNavigationPropertyOf(table).Should().Be(declared[table], $"{table}'s relationship declares it (case-sensitive)");
         }
 
         declared["sprk_invoice"].Should().Be("sprk_regardingrecordtype", "the control: the one lower-case spelling");

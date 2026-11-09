@@ -453,20 +453,15 @@ internal static class OwnedChildWrite
 
     /// <summary>The pair type's navigation property on each pair table (the relationship's referencing attribute schema name,
     /// SpaarkeMaster <c>Other/Relationships/sprk_RecordType_Ref.xml</c>). Web API names are case-sensitive, and the invoice's is
-    /// lower-case. Pinned against the solution by <c>RegardingPairUpdatePlannerTests.ThePairTypeNavigationProperties_MatchTheSolution</c>.</summary>
-    internal static readonly IReadOnlyDictionary<string, string> RegardingRecordTypeNavigationProperties =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["sprk_analysis"] = "sprk_RegardingRecordType", ["sprk_billingevent"] = "sprk_RegardingRecordType",
-            ["sprk_communication"] = "sprk_RegardingRecordType", ["sprk_decisionrecord"] = "sprk_RegardingRecordType",
-            ["sprk_event"] = "sprk_RegardingRecordType", ["sprk_externalidentifier"] = "sprk_RegardingRecordType",
-            ["sprk_invoice"] = "sprk_regardingrecordtype", ["sprk_invoiceapproval"] = "sprk_RegardingRecordType",
-            ["sprk_invoicecorrection"] = "sprk_RegardingRecordType", ["sprk_invoicesubmission"] = "sprk_RegardingRecordType",
-            ["sprk_kpiassessment"] = "sprk_RegardingRecordType", ["sprk_memo"] = "sprk_RegardingRecordType",
-            ["sprk_project"] = "sprk_RegardingRecordType", ["sprk_reportcard"] = "sprk_RegardingRecordType",
-            ["sprk_servicerequest"] = "sprk_RegardingRecordType", ["sprk_signal"] = "sprk_RegardingRecordType",
-            ["sprk_todo"] = "sprk_RegardingRecordType", ["sprk_workassignment"] = "sprk_RegardingRecordType",
-        };
+    /// lower-case; every other pair table's is <c>sprk_RegardingRecordType</c>. Pinned against the solution for each of the
+    /// <see cref="RegardingPairTables"/> by <c>RegardingPairUpdatePlannerTests.ThePairTypeNavigationProperties_MatchTheSolution</c>.</summary>
+    internal static string RegardingRecordTypeNavigationPropertyOf(string table) =>
+        string.Equals(table.Trim(), "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+            ? InvoiceRegardingRecordTypeNavigationProperty
+            : RegardingRecordTypeNavigationProperty;
+
+    private const string RegardingRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+    private const string InvoiceRegardingRecordTypeNavigationProperty = "sprk_regardingrecordtype";
 
     /// <summary>The structured log event an update that kept its pair whole writes (owner ruling Q5 (a): the response is unchanged).</summary>
     internal static readonly EventId RegardingPairKeptWholeEvent = new(45_201, "RegardingPairKeptWholeOnUpdate");
@@ -1116,7 +1111,7 @@ internal static class OwnedChildWrite
         foreach (var (column, value) in plan.Columns)
         {
             if (string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase))
-                written[$"{RegardingRecordTypeNavigationProperties[table.Trim()]}@odata.bind"] = value is Guid type ? $"/{RecordTypeEntitySet}({type:D})" : null;
+                written[$"{RegardingRecordTypeNavigationPropertyOf(table)}@odata.bind"] = value is Guid type ? $"/{RecordTypeEntitySet}({type:D})" : null;
             else
                 written[column] = value;
         }

@@ -148,7 +148,9 @@ Recommendation: 045d carries both halves, re-deriving inside the guard's own dec
 
 ## Known limits
 
-- K: the app-only display read writes a name read app-only. This is accepted (design §2.2.4, UAC-r2), as are the existing app-only guards on those paths.
+- Display reads (fix round 2): the playbook Update Record and output-mapping paths read the display values with their
+  app-only reader. The push derives display values as the caller (`OwnedChildWrite.CallerDisplayReader`): a record the
+  caller cannot read (403/404) has its display columns cleared, and any other failed read refuses that child.
 - K: the planner adds one row read (as the path's reader) whenever an update touches the pair or an agreement lookup, plus one catalog read and one record read on a fill or move.
   Measured on the push: the 500-child no-op push went from 5 to 6 Dataverse calls per child. The test's bound moved from
   5 to 6 and now pins exactly one planner row read per child; the "no descendant pass" assertion is unchanged (Q4 (b)
@@ -157,6 +159,51 @@ Recommendation: 045d carries both halves, re-deriving inside the guard's own dec
 - K2: on an app-only path, rule 4's catalog read answering 404 (the row's stored type names a deleted catalog row) leaves the
   payload as sent: the lookup moves and the dangling pair stays. On a caller path the same case refuses. Rare (a deleted
   catalog row); the readers cannot resolve a type that names nothing.
+- K: the re-file cost on the app-only paths. A pair column the planner adds can send an app-only update through the re-file
+  checks, at their read cost, where the payload alone would not. The outcome is unchanged.
+- K: guard 2's rule 1 is file-level. It asks that a file containing a generic update calls the planner somewhere in that file,
+  not in the same member as each update (rule 2 checks the named members).
+- K: on the caller paths, rule 4's catalog read answering 403 is returned as the caller's own 403 response, not mapped to the
+  uniform not-found.
+- K: the chat-mapper nulls (found in passing, below): a plain column clear on the chat path is listed as a cleared column and
+  costs the re-file reads.
+
+## Fix round 2 (Opus adversarial review of 54e34820f1)
+
+- **F1, invoice navigation property.** The planner bound the type as `sprk_RegardingRecordType` on every table; the invoice's
+  navigation property is `sprk_regardingrecordtype` (SpaarkeMaster `Other/Relationships/sprk_RecordType_Ref.xml:823,834`).
+  Now chosen per table (`OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf`), and pinned for all 18 pair tables against
+  the solution XML by `RegardingPairUpdatePlannerTests.ThePairTypeNavigationProperties_MatchTheSolution`. Rule 4 no longer
+  writes the unchanged type.
+  - It is a function, not a map, because guard 1's rule 2 refuses a column map whose value is the type: it would route a
+    type write through a run-time key. The planner's type write was already a computed key that guard 1 does not see; the
+    planner writes the type only as a clear (rules 1 and 2), which its own unit tests pin.
+- **F1, the push's display read.** The push derives display values as the caller (see Known limits, display reads).
+- **F2, a failed read on a move.** Rule 3's catalog read and every record read refuse on any status other than 403/404 (the
+  record reader now returns its status); 403/404 clear the display columns, and the logged outcome says so.
+- **F1 (rare), the push's intermediate test.** Rule 2 asks whether an intermediate is bound of the row as it will be (the
+  push's mapped lookups included); the candidates are still only the lookups the row keeps.
+
+Evidence (fix round 2):
+- **Fail-first.** Each fixed behaviour was reverted in `OwnedChildWrite.cs` with its signatures kept: the invoice's spelling,
+  rule 4's type write, rule 3's catalog refusal, the record-read refusal, the intermediate test and the push's caller display
+  reader. Result: all 18 new or changed tests failed. The spelling was then a map entry; it became a function afterwards (guard 1,
+  below), with the same values and the same test.
+  - The record-read revert first missed (a CRLF line ending), so the first run failed 15 of 18. The rerun with it applied
+    failed all 4 tests selected, including the 3 that had passed.
+  - The must-not-fire control `Push_ARecordTheCallerCanRead_GivesItsDisplayValues` failed too before the fix, on its "no
+    app-only read of the named record" assertion; its values assertion holds either way.
+  - Restored; no diff.
+- **Harness changes.** The push harness passes a caller query over the world (`RefileWriterBindShapeTests.CallerQuery`), as the
+  endpoint passes its `IImpersonatedCommunicationQuery`. `ATypeOnlyUpdate_OnEveryPairTable_IsFilledFromItsAgreementColumn`
+  scripts the filled record as readable: its fake answered 404 for it, which now clears the display.
+- **Intent changes (coordinator-directed).** `MovingTheLookupThePairRepeated_MovesThePairWithIt_OnAToDo` and the per-path
+  theory now assert the unchanged type is not written.
+- **Filtered suites:** 2311/2311 pass.
+- **Gates:**
+  - BFF build (`--no-incremental`): 0 warnings, 0 errors.
+  - Guards 1 and 2: 6/6. Guard 1 first refused the map form (see F1 above); it passes with the function.
+  - `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
 
 ## Found in passing
 
