@@ -880,6 +880,10 @@ internal sealed class SecureChildShareWorld
             .OrderBy(r => r.Id)
             .ToList();
 
+        // uac-r2 task 198 fix round 1 (R4): a query's own order is honoured, as Dataverse does (the id order above is the tie-break).
+        if (query.Orders.Count > 0)
+            matched = matched.OrderBy(r => r, new OrderComparer(query.EntityName, query.Orders)).ToList();
+
         if (query.TopCount is { } top)
             matched = matched.Take(top).ToList();
 
@@ -903,6 +907,38 @@ internal sealed class SecureChildShareWorld
         }
 
         return answer;
+    }
+
+    /// <summary>Orders rows by a query's <see cref="OrderExpression"/>s (a missing value sorts first, as a null does in Dataverse).</summary>
+    private sealed class OrderComparer(string table, IEnumerable<OrderExpression> orders) : IComparer<Entity>
+    {
+        private readonly List<OrderExpression> _orders = orders.ToList();
+
+        public int Compare(Entity? x, Entity? y)
+        {
+            foreach (var order in _orders)
+            {
+                var result = CompareValues(Value(x!, order.AttributeName), Value(y!, order.AttributeName));
+                if (result != 0)
+                    return order.OrderType == OrderType.Descending ? -result : result;
+            }
+
+            return 0;
+        }
+
+        private object? Value(Entity row, string attribute) =>
+            attribute == table + "id" ? row.Id : row.Attributes.TryGetValue(attribute, out var value) ? value : null;
+
+        private static int CompareValues(object? a, object? b) => (a, b) switch
+        {
+            (null, null) => 0,
+            (null, _) => -1,
+            (_, null) => 1,
+            (OptionSetValue o, OptionSetValue p) => o.Value.CompareTo(p.Value),
+            (EntityReference r, EntityReference s) => r.Id.CompareTo(s.Id),
+            (IComparable c, _) => c.CompareTo(b),
+            _ => 0,
+        };
     }
 
     private Entity Project(Entity row, ColumnSet columns)

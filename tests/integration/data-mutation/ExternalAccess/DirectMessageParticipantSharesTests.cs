@@ -190,9 +190,9 @@ public class DirectMessageParticipantSharesTests
     {
         _directory.WithUserInDirectUnit(Outsider); // the lookup refuses: bu_has_users
 
-        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(Lookup(), DirectTeam, NullLogger.Instance, CancellationToken.None))
+        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(SecureChildShareWorld.EntitiesOver(() => _world).Object, Lookup(), DirectTeam, NullLogger.Instance, CancellationToken.None))
             .Should().BeNull("a refusal is unknown, never a match");
-        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(Lookup(), Guid.Empty, NullLogger.Instance, CancellationToken.None))
+        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(SecureChildShareWorld.EntitiesOver(() => _world).Object, Lookup(), Guid.Empty, NullLogger.Instance, CancellationToken.None))
             .Should().BeFalse("an empty owner is no team");
     }
 
@@ -349,13 +349,146 @@ public class DirectMessageParticipantSharesTests
 
         var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
 
-        first.ResultJson.Should().Contain("\"capReached\":true").And.Contain("\"carried\":1");
-        messages.Count(m => Holds("sprk_communication", m, Caller)).Should().Be(SecureChildShareReconciliationJob.MaxDirectMessagesPerRun);
+        first.ResultJson.Should().Contain("\"capReached\":true");
+        var budget = SecureChildShareReconciliationJob.MaxDirectMessagesPerRun - SecureChildShareReconciliationJob.DirectSweepReserve;
+        first.ResultJson.Should().Contain($"\"carried\":{messages.Count - budget}");
+        messages.Count(m => Holds("sprk_communication", m, Caller)).Should().Be(budget,
+            "the sweep's reserve went to the same oldest ids, so the run granted exactly its priority budget");
 
         _time.Advance(TimeSpan.FromMinutes(2));
         await job.ExecuteAsync(RunContext(), CancellationToken.None);
 
         messages.Should().OnlyContain(m => Holds("sprk_communication", m, Caller) && Holds("sprk_communication", m, Other));
+    }
+
+    // ── Fix round 1 R4: bounded, but nothing starves ──
+
+    /// <summary>Direct-team messages on one Direct thread (no content rows), each changed at <paramref name="modifiedOn"/>(i), or
+    /// never (null).</summary>
+    private List<Guid> DirectMessages(int count, Func<int, DateTime?> modifiedOn, Func<int, Guid>? id = null)
+    {
+        var thread = DirectThread();
+        var messages = new List<Guid>();
+        for (var i = 0; i < count; i++)
+        {
+            var message = id?.Invoke(i) ?? Guid.NewGuid();
+            var columns = new List<(string, object)>
+            {
+                OwnedBy(DirectTeam), ("sprk_communicationthread", new EntityReference("sprk_communicationthread", thread)),
+            };
+            if (modifiedOn(i) is { } at)
+                columns.Add(("modifiedon", at));
+            _world.Add("sprk_communication", message, columns.ToArray());
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    private async Task<int> RunUntilAsync(SecureChildShareReconciliationJob job, Func<bool> done, int maxRuns, Action? beforeEach = null)
+    {
+        for (var run = 1; run <= maxRuns; run++)
+        {
+            beforeEach?.Invoke();
+            await job.ExecuteAsync(RunContext(), CancellationToken.None);
+            if (done())
+                return run;
+            _time.Advance(TimeSpan.FromMinutes(2));
+        }
+
+        return -1;
+    }
+
+    [Fact(DisplayName = "198 R4 must-fire: more changed rows than one listing holds drain over several runs, and a capped listing is not Ok")]
+    public async Task Job_MoreChangedRowsThanOneListing_DrainOverSeveralRuns()
+    {
+        var start = _time.GetUtcNow().UtcDateTime.AddMinutes(-40);
+        var messages = DirectMessages(SecureChildShareReconciliationJob.MaxDirectListedPerTable + 20, i => start.AddSeconds(i));
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+        first.Success.Should().BeFalse("a capped listing leaves changed rows unlisted");
+        first.ResultJson.Should().Contain("\"listingCapped\":true");
+        _time.Advance(TimeSpan.FromMinutes(2));
+
+        var runs = await RunUntilAsync(job, () => messages.All(m => Holds("sprk_communication", m, Caller)), maxRuns: 10);
+
+        runs.Should().BePositive("every changed message is listed by a later run once the watermark moves to the last row listed");
+    }
+
+    [Fact(DisplayName = "198 R4 must-fire: the sweep progresses while more than a run's budget of messages keeps changing")]
+    public async Task Job_TheSweepProgresses_WhileRecentChangesExceedTheBudget()
+    {
+        var busy = DirectMessages(SecureChildShareReconciliationJob.MaxDirectMessagesPerRun + 50, _ => _time.GetUtcNow().UtcDateTime);
+        var quiet = DirectMessages(1, _ => null).Single(); // never listed as changed: only the sweep reaches it
+        var job = Job();
+
+        var runs = await RunUntilAsync(job, () => Holds("sprk_communication", quiet, Caller), maxRuns: 10, beforeEach: () =>
+        {
+            foreach (var message in busy)
+                _world.Modified("sprk_communication", message, _time.GetUtcNow().UtcDateTime);
+        });
+
+        runs.Should().BePositive("part of every run's budget is the sweep's");
+    }
+
+    [Fact(DisplayName = "198 R4 must-fire: messages that fail every run do not starve the others, and are backed off")]
+    public async Task Job_PermanentlyFailingMessages_DoNotStarveTheOthers()
+    {
+        // The failing messages sort first (smaller ids, the same change time), so without a reserve or a backoff they fill every run.
+        var ids = Enumerable.Range(0, SecureChildShareReconciliationJob.MaxDirectMessagesPerRun + 20).Select(_ => Guid.NewGuid())
+            .OrderBy(id => id).ToList();
+        var at = _time.GetUtcNow().UtcDateTime.AddMinutes(-5);
+        var messages = DirectMessages(ids.Count, _ => at, i => ids[i]);
+        var failing = messages.Take(SecureChildShareReconciliationJob.MaxDirectMessagesPerRun).ToList();
+        var good = messages.Skip(failing.Count).ToList();
+        foreach (var message in failing)
+            _world.FailingRowReadsOf("sprk_communication", message);
+        var job = Job();
+
+        var runs = await RunUntilAsync(job, () => good.All(m => Holds("sprk_communication", m, Caller)), maxRuns: 10);
+
+        runs.Should().BePositive("the others are granted while the failing messages keep failing");
+    }
+
+    [Fact(DisplayName = "198 R4 must-fire: a message incomplete three runs in a row is backed off and not tried again until its time")]
+    public async Task Job_AMessageThatKeepsFailing_IsBackedOff()
+    {
+        var (message, _) = DirectMessage();
+        _world.FailingRowReadsOf("sprk_communication", message);
+        var job = Job();
+
+        for (var run = 0; run < SecureChildShareReconciliationJob.MaxDirectAttempts; run++)
+        {
+            await job.ExecuteAsync(RunContext(), CancellationToken.None);
+            _time.Advance(TimeSpan.FromMinutes(2));
+        }
+
+        var backedOff = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        backedOff.Success.Should().BeFalse("a backed-off message is still not granted");
+        backedOff.ResultJson.Should().Contain("\"backedOff\":1").And.Contain("\"examined\":0");
+
+        _time.Advance(SecureChildShareReconciliationJob.DirectBackoff);
+        var retried = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        retried.ResultJson.Should().Contain("\"examined\":1", "after the backoff it is tried again");
+    }
+
+    [Fact(DisplayName = "198 R5 must-fire: an owner that changes between the read and the write leaves nothing written, and is retried")]
+    public async Task Reconcile_AnOwnerThatChangesBeforeTheWrite_WritesNothing_AndIsRetried()
+    {
+        var (message, _) = DirectMessage();
+        _world.AfterQueriesOf("sprk_communication", 1,
+            w => w.MoveOwner("sprk_communication", message, DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam)));
+
+        var outcome = await new DirectMessageParticipantShares(
+            SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, Lookup(), _configuration,
+            SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse();
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Unknown);
+        _shares.WriteLog.Should().BeEmpty();
     }
 
     // ── Must-not-fire ──

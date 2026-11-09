@@ -671,6 +671,10 @@ public class DirectThreadAccessServiceTests
         _accessGrant
             .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Shares(Other));
+        // Fix round 1: the Direct-team grant derives its participants through the one seam, which reads the shares strictly.
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
         MessageOwnedByOwnerTeam(DirectTeamId);
         ContentRows("sprk_communicationattachment", "sprk_communication",
             (AttachmentRowId, DirectTeamId), (OtherTeamAttachmentRowId, OtherTeamId));
@@ -843,6 +847,68 @@ public class DirectThreadAccessServiceTests
         var act = () => DirectTeamSut(users: users).GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
         await act.Should().NotThrowAsync();
+        VerifyNoGrantAtAll();
+    }
+
+    // ── Task 198 fix round 1, R1: a message whose owner is not PROVEN Direct behaves exactly as before task 198 ──
+
+    [Fact(DisplayName = "198 R1: a default-team message keeps its anchor grant when the Direct lookup faults (decided by the team row)")]
+    public async Task ADefaultTeamMessage_WhenTheDirectLookupFaults_StillGrantsTheAnchorGrantees()
+    {
+        MessageOwnedByOrdinaryTeam(OtherTeamId);
+        SetupGrantees(MatterA, Other);
+        var directory = DirectDirectory();
+        directory.Faults = true;
+
+        await DirectTeamSut(directory).GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+    }
+
+    [Fact(DisplayName = "198 R1: a non-default owner team's message keeps its anchor grant when the Direct lookup faults")]
+    public async Task AnOwnerTeamMessage_WhenTheDirectLookupFaults_StillGrantsTheAnchorGrantees()
+    {
+        MessageOwnedByOwnerTeam(OtherTeamId);
+        SetupGrantees(MatterA, Other);
+        var directory = DirectDirectory();
+        directory.Faults = true;
+
+        await DirectTeamSut(directory).GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+    }
+
+    [Fact(DisplayName = "198 R1: a non-default owner team's message keeps its anchor grant when the Direct lookup refuses")]
+    public async Task AnOwnerTeamMessage_WhenTheDirectLookupRefuses_StillGrantsTheAnchorGrantees()
+    {
+        // The configured Direct team does not exist: the lookup cannot identify it and refuses, so the owner is not proven Direct.
+        MessageOwnedByOwnerTeam(OtherTeamId);
+        SetupGrantees(MatterA, Other);
+
+        await DirectTeamSut(new DirectMessageOwnerTeamDouble()).GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+    }
+
+    [Fact(DisplayName = "198 R5: a Direct message whose owner changes before the grant is not granted")]
+    public async Task DirectTeamMessage_WhoseOwnerChangesBeforeTheGrant_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        var reads = 0;
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication")
+                {
+                    Id = CommunicationId,
+                    ["owningteam"] = new EntityReference("team", reads++ == 0 ? DirectTeamId : OtherTeamId),
+                },
+            }));
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
         VerifyNoGrantAtAll();
     }
 

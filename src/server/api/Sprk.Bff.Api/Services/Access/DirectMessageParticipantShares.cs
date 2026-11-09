@@ -168,11 +168,33 @@ internal sealed class DirectMessageParticipantShares
     /// </list>
     /// </summary>
     internal static async Task<bool?> IsDirectOwnerTeamAsync(
-        DirectMessageOwnerTeam lookup, Guid owningTeam, ILogger logger, CancellationToken ct)
+        IGenericEntityService dataverse, DirectMessageOwnerTeam lookup, Guid owningTeam, ILogger logger, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(lookup);
         if (owningTeam == Guid.Empty)
             return false;
+
+        // Fix round 1 R1(a): the team's own row decides first. The Direct team is a named, non-default Owner team, so a
+        // default team (every business unit's, the owner of ordinary records) or an Access/Group team is never it — settled
+        // with no lookup read, so a lookup that faults or refuses can never turn an ordinary record's message into "unknown".
+        // A fault here is not an answer: the lookup decides.
+        try
+        {
+            var query = new QueryExpression("team") { ColumnSet = new ColumnSet("isdefault", "teamtype"), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition("teamid", ConditionOperator.Equal, owningTeam);
+            var team = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+            if (team is not null
+                && (team.GetAttributeValue<bool?>("isdefault") == true
+                    || (team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != SecureRecordOwnerTeam.OwnerTeamType)))
+            {
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Team {TeamId}'s own row could not be read; the Direct-message lookup decides.", owningTeam);
+        }
 
         try
         {
@@ -240,7 +262,7 @@ internal sealed class DirectMessageParticipantShares
         else if (_directTeam is null)
             return Outcome.Retry("no Direct-team lookup is available");
         else
-            direct = await IsDirectOwnerTeamAsync(_directTeam, owner, _logger, ct).ConfigureAwait(false);
+            direct = await IsDirectOwnerTeamAsync(_dataverse, _directTeam, owner, _logger, ct).ConfigureAwait(false);
 
         if (direct == false)
             return Outcome.Settled(Status.NotDirect, "owned by another team");
@@ -277,23 +299,12 @@ internal sealed class DirectMessageParticipantShares
         if (thread.GetAttributeValue<bool?>(DefaultThreadColumn) == true)
             return NoAudience(communicationId, "its thread is the per-user master thread");
 
-        var participants = new HashSet<Guid>();
-        if (thread.GetAttributeValue<EntityReference>("ownerid") is { } threadOwner
-            && string.Equals(threadOwner.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase)
-            && threadOwner.Id != Guid.Empty)
+        var derived = await DeriveParticipantsAsync(_dataverse, _shares, communicationId, threadId, _logger, ct).ConfigureAwait(false);
+        if (derived.Participants is not { } participants)
         {
-            participants.Add(threadOwner.Id);
-        }
-
-        try
-        {
-            participants.UnionWith(DirectUsers(await _shares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct).ConfigureAwait(false)));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "{Prefix} {Table} {Id}: its thread's shares could not be read, so its participants are unknown; " +
-                "nothing is granted or revoked now, and it is retried.", LogPrefix, CommunicationTable, communicationId);
-            return Outcome.Retry("the thread's shares could not be read");
+            _logger.LogWarning("{Prefix} {Table} {Id}: its participants are unknown ({Reason}); nothing is granted or revoked now, and " +
+                "it is retried.", LogPrefix, CommunicationTable, communicationId, derived.Unknown);
+            return Outcome.Retry(derived.Unknown ?? "the participants are unknown");
         }
 
         if (participants.Count == 0)
@@ -338,6 +349,11 @@ internal sealed class DirectMessageParticipantShares
         var revoked = new List<Guid>();
         foreach (var (table, entitySet, id) in rows)
         {
+            // Fix round 1 R5: the message may have been re-filed (re-owned) since step 1. Its owner is read again right before
+            // its own grant, and again before its revokes; a changed or unreadable owner writes nothing more and is retried.
+            if (table == CommunicationTable && !await OwnerUnchangedAsync(communicationId, owner, "grant", ct).ConfigureAwait(false))
+                return Outcome.Retry("the message's owner changed before its grant");
+
             IReadOnlyList<DataversePrincipalAccess> access;
             try
             {
@@ -376,7 +392,11 @@ internal sealed class DirectMessageParticipantShares
             if (table != CommunicationTable)
                 continue;
 
-            foreach (var other in DirectUsers(access).Where(u => !participants.Contains(u)))
+            var others = DirectUsers(access).Where(u => !participants.Contains(u)).ToList();
+            if (others.Count > 0 && !await OwnerUnchangedAsync(communicationId, owner, "revoke", ct).ConfigureAwait(false))
+                return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before its revokes");
+
+            foreach (var other in others)
             {
                 try
                 {
@@ -410,6 +430,82 @@ internal sealed class DirectMessageParticipantShares
 
         return new Outcome(Status.Reconciled, granted, revoked, complete);
     }
+
+    /// <summary>Who a Direct-team-owned message's participants are: the set, or <c>null</c> with why it cannot be told.</summary>
+    internal sealed record ParticipantDerivation(IReadOnlySet<Guid>? Participants, string? Unknown)
+    {
+        internal static ParticipantDerivation Of(IReadOnlySet<Guid> participants) => new(participants, null);
+
+        internal static ParticipantDerivation NotKnown(string reason) => new(null, reason);
+    }
+
+    /// <summary>
+    /// THE participant derivation of a Direct-team-owned message — the ONE seam the live grant
+    /// (<c>DirectThreadAccessService</c>), the re-file step and the share job all call, so they can never derive differently.
+    /// Today's source: <paramref name="threadId"/>'s user owner and its POA systemuser sharees (any right), the shares read
+    /// STRICTLY. A thread read or share read that faults is <see cref="ParticipantDerivation.NotKnown"/> (nothing granted or
+    /// revoked; retried). Never throws (cancellation aside).
+    /// </summary>
+    /// <remarks>Fix round 1: the source is under review (R2: a source only the BFF writes). Swapping it changes this method only;
+    /// <paramref name="communicationId"/> is the message whose participants are derived, for that source.</remarks>
+    internal static async Task<ParticipantDerivation> DeriveParticipantsAsync(
+        IGenericEntityService dataverse, IDataverseRecordShareService shares, Guid communicationId, Guid threadId, ILogger logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        ArgumentNullException.ThrowIfNull(shares);
+        try
+        {
+            var participants = new HashSet<Guid>();
+            var thread = await dataverse.RetrieveAsync(ThreadTable, threadId, ["ownerid"], ct).ConfigureAwait(false);
+            if (thread?.GetAttributeValue<EntityReference>("ownerid") is { } threadOwner
+                && string.Equals(threadOwner.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase)
+                && threadOwner.Id != Guid.Empty)
+            {
+                participants.Add(threadOwner.Id);
+            }
+
+            participants.UnionWith(DirectUsers(await shares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct).ConfigureAwait(false)));
+            return ParticipantDerivation.Of(participants);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{Prefix} {Table} {Id}: thread {ThreadId} or its shares could not be read, so its participants are " +
+                "unknown.", LogPrefix, CommunicationTable, communicationId, threadId);
+            return ParticipantDerivation.NotKnown("the thread or its shares could not be read");
+        }
+    }
+
+    /// <summary>
+    /// Fix round 1 R5: <c>true</c> when the message is still owned by <paramref name="owner"/>; <c>false</c> (logged) when it is
+    /// not, is gone, or cannot be read. Never throws (cancellation aside).
+    /// </summary>
+    internal static async Task<bool> OwnerUnchangedAsync(
+        IGenericEntityService dataverse, Guid communicationId, Guid owner, string step, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, communicationId);
+            var now = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault()
+                ?.GetAttributeValue<EntityReference>("owningteam")?.Id;
+            if (now is { } current && current != Guid.Empty && current == owner)
+                return true;
+
+            logger.LogWarning("{Prefix} {Table} {Id}: its owner changed before its {Step} (was team {Owner}, now {Now}); nothing more is " +
+                "written, and it is retried.", LogPrefix, CommunicationTable, communicationId, step, owner, now);
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{Prefix} {Table} {Id}: its owner could not be read again before its {Step}; nothing more is written, " +
+                "and it is retried.", LogPrefix, CommunicationTable, communicationId, step);
+            return false;
+        }
+    }
+
+    private Task<bool> OwnerUnchangedAsync(Guid communicationId, Guid owner, string step, CancellationToken ct) =>
+        OwnerUnchangedAsync(_dataverse, communicationId, owner, step, _logger, ct);
 
     private Outcome NoAudience(Guid communicationId, string reason)
     {

@@ -224,15 +224,16 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 return;
 
             // Task 198 Part B: a message owned by the Direct-message owner team (fm 054) is read by exactly its thread's
-            // participants, through their own shares (the team has no members). When that team cannot be told, nothing is
-            // granted (fail closed).
+            // participants, through their own shares (the team has no members).
+            // Fix round 1 R1: only a PROVEN Direct owner takes that branch. Any message whose owner is not proven Direct behaves
+            // exactly as before task 198. When it cannot be told, the record-anchored grant below still runs (an unfiled message
+            // has no anchor, so it grants nothing), and only the participant (Direct) grant is skipped: the two-minute share job
+            // (SecureChildShareReconciliationJob) lists a Direct-team-owned message and grants its participants.
             if (messageOwningTeam is { } owningTeam)
             {
                 switch (await IsDirectMessageOwnerTeamAsync(owningTeam, ct))
                 {
-                    case null:
-                        // Task 198 Part C: the durable trace is the row itself — a Direct-team-owned message whose participants
-                        // lack a share — which the two-minute share job (SecureChildShareReconciliationJob) lists and re-grants.
+                    case null when assignment.Audience == ThreadGrantAudience.DirectParticipants:
                         _logger.LogWarning(
                             "Message {CommunicationId} is team-owned and whether that team is the Direct-message owner team " +
                             "cannot be determined; no participant is granted now, and the share reconciliation retries it " +
@@ -289,7 +290,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// shared with the re-grant, so the live grant and the re-grant can never decide differently (K3: ids compared only when
     /// resolved and non-empty).</remarks>
     private Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct) =>
-        DirectMessageParticipantShares.IsDirectOwnerTeamAsync(_directMessageOwnerTeam, owningTeam, _logger, ct);
+        DirectMessageParticipantShares.IsDirectOwnerTeamAsync(_entityService, _directMessageOwnerTeam, owningTeam, _logger, ct);
 
     /// <summary>
     /// Task 198 Part B: the content rows of a Direct-team-owned message that its readers need, each as (table, the lookup to
@@ -325,9 +326,23 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             return;
         }
 
-        var participants = await ReadDirectParticipantsForGrantAsync(threadId, ct);
-        if (participants.Count == 0)
+        // Fix round 1: the ONE participant derivation the re-file step and the share job also use (a read that faults derives
+        // nobody here; the job retries the message).
+        var derived = await DirectMessageParticipantShares.DeriveParticipantsAsync(
+            _entityService, _accessGrant, communicationId, threadId, _logger, ct);
+        if (derived.Participants is not { Count: > 0 } derivedParticipants)
+        {
+            if (derived.Participants is null)
+            {
+                _logger.LogWarning(
+                    "Message {CommunicationId}: its participants are unknown ({Reason}); none is granted now, and the share " +
+                    "reconciliation retries it (ThreadId={ThreadId}).", communicationId, derived.Unknown, threadId);
+            }
+
             return;
+        }
+
+        IReadOnlyList<Guid> participants = derivedParticipants.ToList();
 
         // Task 198 Part C (ruling 6): every Direct grant applies the Restricted bar — the message's own or inherited Access
         // Permission, through the one predicate. A participant it does not clear (barred, unread, or undecidable) is not granted
@@ -345,6 +360,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
         participants = eligible;
         if (participants.Count == 0)
+            return;
+
+        // Fix round 1 R5: the message may have been re-filed since its owner was read; a changed owner grants nothing here.
+        if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(_entityService, communicationId, directTeam, "grant", _logger, ct))
             return;
 
         await GrantReadAccessToPrincipalsAsync(communicationId, threadId, participants, ct);

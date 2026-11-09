@@ -59,11 +59,20 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
     /// <summary>Task 198 Part C: the most rows one recent-changes listing reads per table; past it the watermark is held.</summary>
     internal const int MaxDirectListedPerTable = 500;
 
-    /// <summary>Task 198 Part C: the rolling sweep's slice per run (within <see cref="MaxDirectMessagesPerRun"/>).</summary>
+    /// <summary>Task 198 Part C: the rolling sweep's largest slice per run (within <see cref="MaxDirectMessagesPerRun"/>).</summary>
     internal const int DirectSweepSlice = 100;
+
+    /// <summary>Fix round 1 R4: the part of every run's budget kept for the sweep, however many messages are carried or recent.</summary>
+    internal const int DirectSweepReserve = 50;
 
     /// <summary>Task 198 Part C: the most messages carried between runs; past it the watermark is held.</summary>
     internal const int MaxDirectCarried = 1000;
+
+    /// <summary>Fix round 1 R4: how many runs in a row one message may stay incomplete before it is backed off.</summary>
+    internal const int MaxDirectAttempts = 3;
+
+    /// <summary>Fix round 1 R4: how long a backed-off message waits before its next attempt (logged as an error each time).</summary>
+    internal static readonly TimeSpan DirectBackoff = TimeSpan.FromMinutes(30);
 
     /// <summary>Task 198 Part C: how far back the first run on an instance looks for recently changed Direct messages.</summary>
     internal static readonly TimeSpan DirectInitialLookback = TimeSpan.FromMinutes(60);
@@ -77,6 +86,9 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
     private DateTimeOffset? _directWatermark;
     private readonly HashSet<Guid> _directPending = new();
     private Guid? _directSweepCursor;
+
+    // Fix round 1 R4: per carried message, how many runs in a row it stayed incomplete, and (once backed off) when it is next tried.
+    private readonly Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> _directAttempts = new();
 
     /// <summary>Stable job id — the scheduler's run history and admin endpoints key off it.</summary>
     public const string JobIdConstant = "secure-child-share-reconciliation";
@@ -168,7 +180,8 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                       : "")
                   + (direct.Ok
                       ? ""
-                      : $"; Direct messages: {direct.Status}, {direct.Incomplete} not complete" +
+                      : $"; Direct messages: {direct.Status}, {direct.Incomplete} not complete, {direct.BackedOff} backed off" +
+                        (direct.ListingCapped ? ", a recent-changes listing capped" : "") +
                         (direct.Failure is null ? "" : $" ({direct.Failure})"))
                   + "; the next run retries.",
             ProcessedItems: result.ChildrenInScope + direct.Examined,
@@ -203,6 +216,8 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                     incomplete = direct.Incomplete,
                     carried = direct.Carried,
                     capReached = direct.CapReached,
+                    listingCapped = direct.ListingCapped,
+                    backedOff = direct.BackedOff,
                     sweepPassComplete = direct.SweepPassComplete,
                     incompleteMessages = direct.IncompleteIds.Take(50).ToArray(),
                     failure = direct.Failure,
@@ -230,18 +245,32 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
         public int Incomplete { get; init; }
         public int Carried { get; init; }
         public bool CapReached { get; init; }
+
+        /// <summary>Fix round 1 R4: a recent-changes listing reached its cap this run (more changed rows wait).</summary>
+        public bool ListingCapped { get; init; }
+
+        /// <summary>Fix round 1 R4: carried messages not tried this run because they are backed off.</summary>
+        public int BackedOff { get; init; }
+
         public bool SweepPassComplete { get; init; }
         public IReadOnlyList<Guid> IncompleteIds { get; init; } = [];
         public string? Failure { get; init; }
 
-        /// <summary>Nothing undecided: not configured, unavailable (no lookup registered), or a pass that finished every message.</summary>
-        public bool Ok => Status is StatusNotConfigured or StatusUnavailable || (Status == StatusOk && Incomplete == 0 && Failure is null);
+        /// <summary>
+        /// Nothing undecided: not configured, unavailable (no lookup registered), or a pass that finished every message it tried,
+        /// listed every changed row (no capped listing) and holds no backed-off message.
+        /// </summary>
+        public bool Ok => Status is StatusNotConfigured or StatusUnavailable
+            || (Status == StatusOk && Incomplete == 0 && Failure is null && !ListingCapped && BackedOff == 0);
     }
 
     /// <summary>
     /// Task 198 Part C — the Direct-team messages: carried, recently changed (the message or a content row), then the rolling
     /// sweep; at most <see cref="MaxDirectMessagesPerRun"/>, each through <see cref="DirectMessageParticipantShares.ReconcileAsync"/>.
-    /// Never throws (cancellation aside).
+    /// Fix round 1 R4: the listings are ordered by <c>modifiedon</c> and a capped listing moves the watermark only to its last row;
+    /// <see cref="DirectSweepReserve"/> of every run is the sweep's; a message incomplete <see cref="MaxDirectAttempts"/> runs in a
+    /// row is backed off for <see cref="DirectBackoff"/> (an error log each time), so it cannot fill the budget. Never throws
+    /// (cancellation aside).
     /// </summary>
     private async Task<DirectMessageRun> ReconcileDirectMessagesAsync(
         IServiceProvider services, DateTimeOffset startedAt, Guid runId, CancellationToken ct)
@@ -260,11 +289,13 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
         DateTimeOffset since;
         List<Guid> carried;
         Guid? sweepAfter;
+        Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> attempts;
         lock (_directGate)
         {
             since = _directWatermark ?? startedAt - DirectInitialLookback;
             carried = _directPending.OrderBy(id => id).ToList();
             sweepAfter = _directSweepCursor;
+            attempts = new Dictionary<Guid, (int, DateTimeOffset?)>(_directAttempts);
         }
 
         // The Direct team, by its RESOLVED id only (K3: a refusal carries no id and lists nothing).
@@ -293,21 +324,22 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             };
         }
 
-        // ── Listing: recently changed messages and content rows, then the sweep slice ──
+        bool BackedOff(Guid id) => attempts.TryGetValue(id, out var a) && a.RetryAt is { } retryAt && retryAt > startedAt;
+
+        // ── Listing: recently changed messages and content rows, oldest change first ──
         var recent = new List<Guid>();
-        var listingCapped = false;
+        var horizons = new List<DateTimeOffset?>();
         string? failure = null;
         try
         {
-            var messages = await ListAsync(dataverse, DirectMessageParticipantShares.CommunicationTable, null, team, since, ct)
-                .ConfigureAwait(false);
-            listingCapped |= messages.Count >= MaxDirectListedPerTable;
-            recent.AddRange(messages);
-            foreach (var (table, messageLookup) in DirectMessageParticipantShares.ContentRows)
+            var listings = new List<(string Table, string? Lookup)> { (DirectMessageParticipantShares.CommunicationTable, null) };
+            listings.AddRange(DirectMessageParticipantShares.ContentRows.Select(c => (c.Table, (string?)c.MessageLookup)));
+            foreach (var (table, messageLookup) in listings)
             {
-                var ofRows = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
-                listingCapped |= ofRows.Count >= MaxDirectListedPerTable;
-                recent.AddRange(ofRows);
+                var (ids, horizon, capped) = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
+                recent.AddRange(ids);
+                if (capped)
+                    horizons.Add(horizon);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -317,44 +349,64 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                 "listed again next run.", runId);
         }
 
-        var first = carried.Concat(recent).Where(id => id != Guid.Empty).Distinct().ToList();
-        var sweepTake = Math.Min(DirectSweepSlice, Math.Max(0, MaxDirectMessagesPerRun - first.Count));
-        var swept = new List<Guid>();
-        var sweepPassComplete = false;
-        if (sweepTake > 0)
+        var listingCapped = horizons.Count > 0;
+        if (listingCapped)
         {
-            try
-            {
-                var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(DirectMessageParticipantShares.CommunicationTable)
-                {
-                    ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(false),
-                    TopCount = sweepTake,
-                    NoLock = true,
-                };
-                query.Criteria.AddCondition("owningteam", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, team);
-                if (sweepAfter is { } after)
-                    query.Criteria.AddCondition("sprk_communicationid", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan, after);
-                query.AddOrder("sprk_communicationid", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
-                swept = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
-                    .Select(e => e.Id).Where(id => id != Guid.Empty).ToList() ?? [];
-                sweepPassComplete = swept.Count < sweepTake;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                failure ??= "the Direct-message sweep could not be read";
-                _logger.LogError(ex, "[DIRECT-SHARES] run={RunId}: the Direct-message sweep could not be read; it resumes next run.", runId);
-                sweepTake = 0;
-            }
+            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Capped} recent-changes listing(s) reached the cap of {Cap}; the watermark " +
+                "moves only to the last row listed, so the rest is listed by the next runs.", runId, horizons.Count,
+                MaxDirectListedPerTable);
         }
 
-        var all = first.Concat(swept).Distinct().ToList();
-        var work = all.Take(MaxDirectMessagesPerRun).ToList();
-        var leftOver = all.Skip(MaxDirectMessagesPerRun).ToList();
+        // ── The budget: carried and recent first (all but the sweep's reserve), then the sweep ──
+        var candidates = carried.Concat(recent).Where(id => id != Guid.Empty).Distinct().ToList();
+        var deferred = candidates.Where(BackedOff).ToList();
+        var priority = candidates.Where(id => !BackedOff(id)).ToList();
+        var work = priority.Take(MaxDirectMessagesPerRun - DirectSweepReserve).ToList();
+        var leftOver = priority.Skip(work.Count).ToList();
+
+        var sweepTake = Math.Min(DirectSweepSlice, MaxDirectMessagesPerRun - work.Count);
+        var swept = new List<Guid>();
+        var sweepPassComplete = false;
+        var sweepRead = false;
+        try
+        {
+            var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(DirectMessageParticipantShares.CommunicationTable)
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(false),
+                TopCount = sweepTake,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("owningteam", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, team);
+            if (sweepAfter is { } after)
+                query.Criteria.AddCondition("sprk_communicationid", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan, after);
+            query.AddOrder("sprk_communicationid", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
+            swept = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
+                .Select(e => e.Id).Where(id => id != Guid.Empty).ToList() ?? [];
+            sweepPassComplete = swept.Count < sweepTake;
+            sweepRead = true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            failure ??= "the Direct-message sweep could not be read";
+            _logger.LogError(ex, "[DIRECT-SHARES] run={RunId}: the Direct-message sweep could not be read; it resumes next run.", runId);
+        }
+
+        var inWork = work.ToHashSet();
+        foreach (var id in swept)
+        {
+            if (BackedOff(id))
+                deferred.Add(id);
+            else if (inWork.Add(id))
+                work.Add(id);
+        }
+
+        deferred = deferred.Distinct().ToList();
         var capReached = leftOver.Count > 0;
         if (capReached)
         {
-            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Total} Direct messages are due, past the per-run cap of {Cap}; {LeftOver} " +
-                "are carried to the next run.", runId, all.Count, MaxDirectMessagesPerRun, leftOver.Count);
+            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Total} carried or recent Direct messages are due, past this run's budget " +
+                "of {Budget}; {LeftOver} are carried to the next run.", runId, priority.Count,
+                MaxDirectMessagesPerRun - DirectSweepReserve, leftOver.Count);
         }
 
         // ── Reconcile each ──
@@ -370,12 +422,28 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             var outcome = await reconciler.ReconcileAsync(id, team, ct).ConfigureAwait(false);
             granted += outcome.Granted.Count;
             revoked += outcome.Revoked.Count;
-            if (!outcome.Complete)
-                incomplete.Add(id);
+            if (outcome.Complete)
+            {
+                attempts.Remove(id);
+                continue;
+            }
+
+            incomplete.Add(id);
+            var failures = (attempts.TryGetValue(id, out var before) ? before.Failures : 0) + 1;
+            DateTimeOffset? retryAt = null;
+            if (failures >= MaxDirectAttempts)
+            {
+                retryAt = startedAt + DirectBackoff;
+                _logger.LogError("[DIRECT-SHARES] run={RunId}: Direct message {Id} has stayed incomplete {Failures} runs in a row ({Detail}); " +
+                    "it is backed off and tried again after {RetryAt:o}.", runId, id, failures, outcome.Detail ?? outcome.Status.ToString(),
+                    retryAt);
+            }
+
+            attempts[id] = (failures, retryAt);
         }
 
         // ── Carry, watermark, cursor ──
-        var carry = incomplete.Concat(leftOver).Distinct().ToList();
+        var carry = incomplete.Concat(leftOver).Concat(deferred).Distinct().ToList();
         var carryOverflow = carry.Count > MaxDirectCarried;
         if (carryOverflow)
         {
@@ -383,24 +451,45 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                 "the window is listed again.", runId, carry.Count, MaxDirectCarried);
         }
 
+        DateTimeOffset? watermark = null;
+        if (failure is null && !carryOverflow)
+        {
+            if (!listingCapped)
+            {
+                watermark = startedAt - DirectOverlap;
+            }
+            else if (horizons.All(h => h is not null))
+            {
+                // The capped listings were read oldest change first: everything before the earliest last-row is listed.
+                var horizon = horizons.Min()!.Value;
+                if (horizon <= since)
+                {
+                    // Every listed row of a capped listing carries the window's own start: listing again would return the
+                    // same rows. Step past it; the rolling sweep reaches the rows that share that instant.
+                    horizon = since.AddTicks(1);
+                    _logger.LogWarning("[DIRECT-SHARES] run={RunId}: a capped listing did not move past {Since:o}; the watermark steps " +
+                        "past it, and the sweep reaches the rows changed at that instant.", runId, since);
+                }
+
+                watermark = horizon;
+            }
+        }
+
         int carriedOut;
         lock (_directGate)
         {
             _directPending.Clear();
             _directPending.UnionWith(carry.Take(MaxDirectCarried));
-            if (failure is null && !listingCapped && !carryOverflow)
-                _directWatermark = startedAt - DirectOverlap;
-            if (sweepTake > 0 && swept.Count > 0 && !sweepPassComplete)
-                _directSweepCursor = swept[^1];
-            else if (sweepTake > 0 && sweepPassComplete)
+            _directAttempts.Clear();
+            foreach (var (id, attempt) in attempts.Where(a => _directPending.Contains(a.Key)))
+                _directAttempts[id] = attempt;
+            if (watermark is { } next)
+                _directWatermark = next;
+            if (sweepRead && sweepPassComplete)
                 _directSweepCursor = null;
+            else if (sweepRead && swept.Count > 0)
+                _directSweepCursor = swept[^1];
             carriedOut = _directPending.Count;
-        }
-
-        if (listingCapped)
-        {
-            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: a recent-changes listing reached its cap of {Cap}; the watermark is held, " +
-                "so the window is listed again next run.", runId, MaxDirectListedPerTable);
         }
 
         return new DirectMessageRun(failure is null ? DirectMessageRun.StatusOk : DirectMessageRun.StatusListingFailed)
@@ -415,6 +504,8 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             Incomplete = incomplete.Count,
             Carried = carriedOut,
             CapReached = capReached || listingCapped,
+            ListingCapped = listingCapped,
+            BackedOff = deferred.Count,
             SweepPassComplete = sweepPassComplete,
             IncompleteIds = incomplete,
             Failure = failure,
@@ -423,29 +514,36 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
 
     /// <summary>
     /// The ids of the Direct-team messages changed since <paramref name="since"/>: the messages themselves
-    /// (<paramref name="messageLookup"/> null), or the messages a content table's changed rows name. At most
-    /// <see cref="MaxDirectListedPerTable"/> rows. A fault propagates (the caller holds the window).
+    /// (<paramref name="messageLookup"/> null), or the messages a content table's changed rows name — oldest change first, at most
+    /// <see cref="MaxDirectListedPerTable"/> rows. <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last listed
+    /// row's <c>modifiedon</c> (null when it carries none). A fault propagates (the caller holds the window).
     /// </summary>
-    private static async Task<List<Guid>> ListAsync(
+    private static async Task<(List<Guid> Ids, DateTimeOffset? Horizon, bool Capped)> ListAsync(
         Spaarke.Dataverse.IGenericEntityService dataverse, string table, string? messageLookup, Guid team, DateTimeOffset since,
         CancellationToken ct)
     {
         var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(table)
         {
             ColumnSet = messageLookup is null
-                ? new Microsoft.Xrm.Sdk.Query.ColumnSet(false)
-                : new Microsoft.Xrm.Sdk.Query.ColumnSet(messageLookup),
+                ? new Microsoft.Xrm.Sdk.Query.ColumnSet("modifiedon")
+                : new Microsoft.Xrm.Sdk.Query.ColumnSet(messageLookup, "modifiedon"),
             TopCount = MaxDirectListedPerTable,
             NoLock = true,
         };
         query.Criteria.AddCondition("owningteam", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, team);
         query.Criteria.AddCondition("modifiedon", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterEqual, since.UtcDateTime);
-        IEnumerable<Microsoft.Xrm.Sdk.Entity> rows =
-            (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
-            ?? Enumerable.Empty<Microsoft.Xrm.Sdk.Entity>();
-        return messageLookup is null
+        query.AddOrder("modifiedon", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
+        query.AddOrder(table + "id", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
+        var rows = ((await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
+            ?? Enumerable.Empty<Microsoft.Xrm.Sdk.Entity>()).ToList();
+        var ids = messageLookup is null
             ? rows.Select(e => e.Id).Where(id => id != Guid.Empty).ToList()
             : rows.Select(e => e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(messageLookup)?.Id ?? Guid.Empty)
                 .Where(id => id != Guid.Empty).ToList();
+        var capped = rows.Count >= MaxDirectListedPerTable;
+        DateTimeOffset? horizon = capped && rows[^1].GetAttributeValue<DateTime?>("modifiedon") is { } last
+            ? new DateTimeOffset(DateTime.SpecifyKind(last, DateTimeKind.Utc))
+            : null;
+        return (ids, horizon, capped);
     }
 }
