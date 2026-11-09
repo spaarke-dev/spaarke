@@ -766,7 +766,8 @@ public static class FieldMappingEndpoints
                 scopes,
                 rootFiling,
                 lookupBinds,
-                entityService);
+                entityService,
+                impersonatedQuery);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1304,7 +1305,8 @@ public static class FieldMappingEndpoints
         IServiceScopeFactory? scopes = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
-        IGenericEntityService? appOnlyEntities = null)
+        IGenericEntityService? appOnlyEntities = null,
+        IImpersonatedCommunicationQuery? callerQuery = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1449,9 +1451,13 @@ public static class FieldMappingEndpoints
                     // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
                     // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
                     // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
+                    // its display columns cleared; any other failed read fails this child.
                     updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
                         appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
-                        lookupsAreMapped: true);
+                        lookupsAreMapped: true,
+                        displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId));
 
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a

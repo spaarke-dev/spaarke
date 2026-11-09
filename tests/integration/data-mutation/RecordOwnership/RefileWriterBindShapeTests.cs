@@ -488,7 +488,7 @@ public sealed class RefileWriterBindShapeTests
             _write.Object, Restamper(), [first, second],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
-            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader());
+            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader(), callerQuery: CallerQuery().Object);
 
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
@@ -605,7 +605,7 @@ public sealed class RefileWriterBindShapeTests
             _write.Object, Restamper(), [matterRule, threadRule],
             new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid(), ["sprk_threadsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
-            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader());
+            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader(), callerQuery: CallerQuery().Object);
 
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
@@ -717,11 +717,66 @@ public sealed class RefileWriterBindShapeTests
 
         var written = _writes.Should().ContainSingle().Subject;
         written[SecureRootInheritance.PairIdColumn].Should().Be(SecureMatter.ToString("D"), "the pair follows the lookup it repeated");
-        written[$"{OwnedChildWrite.RegardingRecordTypeNavigationProperty}@odata.bind"].Should().Be($"/sprk_recordtype_refs({MatterType:D})");
+        written.Keys.Should().NotContain(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)
+                                               && SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn,
+            "the type is unchanged, so it is not written again");
         written["sprk_regardingrecordname"].Should().Be("Secure v. Matter", "the display is re-derived for the record the pair now names");
         written["sprk_regardingrecordurl"].Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", SecureMatter.ToString("D")));
         _world.ValueOf<string>("sprk_communication", Communication, SecureRootInheritance.PairIdColumn)
             .Should().Be(SecureMatter.ToString("D"));
+    }
+
+    [Fact(DisplayName = "045b: the push derives display values as the caller — a record the caller cannot read has its display cleared, never read app-only")]
+    public async Task Push_ARecordTheCallerCannotRead_HasItsDisplayCleared_AndIsNeverReadAppOnly()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var appOnly = AppOnlyReaderMock();
+        var caller = CallerQuery(denied: true);
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            appOnly: appOnly.Object, callerQuery: caller.Object);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        var written = _writes.Should().ContainSingle().Subject;
+        written[SecureRootInheritance.PairIdColumn].Should().Be(SecureMatter.ToString("D"), "the pair still follows the lookup it repeated");
+        foreach (var display in OwnedChildWrite.PairDisplayColumns)
+            written.Should().ContainKey(display).WhoseValue.Should().BeNull();
+        caller.Verify(q => q.QueryAsync("sprk_matters", It.IsAny<string?>(), ConfirmingUser, It.IsAny<CancellationToken>()), Times.Once);
+        appOnly.Verify(e => e.RetrieveAsync("sprk_matter", SecureMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the push reads the named record's display values as the caller only");
+    }
+
+    [Fact(DisplayName = "045b: the push derives display values as the caller — a record the caller can read gives its values")]
+    public async Task Push_ARecordTheCallerCanRead_GivesItsDisplayValues()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var appOnly = AppOnlyReaderMock();
+        var caller = CallerQuery();
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            appOnly: appOnly.Object, callerQuery: caller.Object);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        var written = _writes.Should().ContainSingle().Subject;
+        written["sprk_regardingrecordname"].Should().Be("Secure v. Matter");
+        written["sprk_regardingrecordurl"].Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", SecureMatter.ToString("D")));
+        appOnly.Verify(e => e.RetrieveAsync("sprk_matter", SecureMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "045b: the push's display read as the caller faulting refuses that child, nothing written")]
+    public async Task Push_TheCallersDisplayReadFaults_RefusesThatChild()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            callerQuery: CallerQuery(fault: new TimeoutException("socket")).Object);
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.Error.Should().Contain(RecordOwnerRefusal.ParentUndetermined);
+        _writes.Should().BeEmpty();
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(General, "nothing moved");
     }
 
     [Theory(DisplayName = "045b: each app-only update path whose pair-planner row read faults writes nothing")]
@@ -932,7 +987,7 @@ public sealed class RefileWriterBindShapeTests
 
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string bindKey, string bindValue, IServiceScopeFactory? scopes, string? targetField = null, Guid[]? children = null,
-        CoreAncestorRestamper? restamper = null)
+        CoreAncestorRestamper? restamper = null, IGenericEntityService? appOnly = null, IImpersonatedCommunicationQuery? callerQuery = null)
     {
         var rule = new FieldMappingRuleDto
         {
@@ -945,10 +1000,41 @@ public sealed class RefileWriterBindShapeTests
             "sprk_communication", children ?? [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
             scopes, rootFiling: null,
             lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan> { [rule] = new(bindKey, bindValue, null) },
-            appOnlyEntities: AppOnlyReader());
+            appOnlyEntities: appOnly ?? AppOnlyReader(), callerQuery: callerQuery ?? CallerQuery().Object);
     }
 
     /// <summary>The push's app-only reader over the world, as the endpoint passes its <c>IGenericEntityService</c> (task 045b:
     /// the update planner reads the row's pair and agreement lookups with it before the write).</summary>
-    private IGenericEntityService AppOnlyReader() => SecureChildShareWorld.EntitiesOver(() => _world).Object;
+    private IGenericEntityService AppOnlyReader() => AppOnlyReaderMock().Object;
+
+    private Mock<IGenericEntityService> AppOnlyReaderMock()
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => $"{table}s");
+        return entities;
+    }
+
+    /// <summary>The push's caller query (as the endpoint passes its <c>IImpersonatedCommunicationQuery</c>): the push derives
+    /// display values as the caller. Over the world's rows, as the confirming user; <paramref name="denied"/> answers what
+    /// Dataverse answers a caller who may not read the row (no row), <paramref name="fault"/> throws.</summary>
+    private Mock<IImpersonatedCommunicationQuery> CallerQuery(bool denied = false, Exception? fault = null)
+    {
+        var query = new Mock<IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), ConfirmingUser, It.IsAny<CancellationToken>()))
+            .Returns((string set, string? odata, Guid _, CancellationToken _) =>
+            {
+                if (fault is not null)
+                    throw fault;
+                var table = set.TrimEnd('s');
+                var query = odata ?? "";
+                var id = Guid.Parse(query[(query.LastIndexOf(" eq ", StringComparison.Ordinal) + 4)..]);
+                if (denied)
+                    return Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>([]);
+                var select = query["$select=".Length..query.IndexOf('&')].Split(',');
+                var row = select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(_world.ValueOf<string>(table, id, c)));
+                return Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>([row]);
+            });
+        return query;
+    }
 }

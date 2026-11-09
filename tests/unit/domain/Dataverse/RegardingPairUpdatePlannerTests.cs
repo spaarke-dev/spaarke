@@ -53,8 +53,12 @@ public sealed class RegardingPairUpdatePlannerTests
                     ? RegardingPairRead<RegardingPairType>.Ok(type)
                     : new RegardingPairRead<RegardingPairType>(null, TypeStatus, null));
             },
-            (_, id, _, _) => Task.FromResult<IReadOnlyDictionary<string, string?>?>(
-                Records.TryGetValue(id, out var values) ? values : null));
+            (_, id, _, _) => Task.FromResult(Records.TryGetValue(id, out var values)
+                ? RegardingPairRead<IReadOnlyDictionary<string, string?>>.Ok(values)
+                : new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, RecordStatus, null)));
+
+        /// <summary>What a record read answers for a record not in <see cref="Records"/>.</summary>
+        public int RecordStatus { get; set; } = 404;
 
         public Reads KnowsTheMatterType()
         {
@@ -141,6 +145,7 @@ public sealed class RegardingPairUpdatePlannerTests
         var (column, target) = agreement.First();
         reads.Row = RowOf(lookups: (column, MatterA));
         reads.Types[MatterType] = new RegardingPairType(target, null);
+        reads.Records[MatterA] = new(); // the record the lookup names exists and is readable (a 404 would clear the display)
 
         var plan = await Plan(table, TypeOnly(), reads);
 
@@ -203,6 +208,21 @@ public sealed class RegardingPairUpdatePlannerTests
         ShouldClearThePair(await Plan("sprk_todo", TypeOnly(), stamped));
         (await Plan("sprk_todo", TypeOnly(), direct)).Columns[SecureRootInheritance.PairIdColumn]
             .Should().Be(MatterA.ToString("D"), "the control: a matter column with no intermediate bound is a direct filing");
+    }
+
+    [Fact]
+    public async Task ATypeOnlyPush_MappingAnIntermediate_NeverFillsFromTheStampColumnTheRowKeeps()
+    {
+        // Q2: the push maps the to-do under an invoice and sends a matter type with no id. The matter column the row keeps
+        // becomes the invoice's I-1 stamp, so it is no candidate, though the mapped invoice itself is never one either.
+        var payload = TypeOnly();
+        payload["sprk_RegardingInvoice@odata.bind"] = $"/sprk_invoices({Invoice:D})";
+
+        var plan = await PlanRegardingPairAsync("sprk_todo", PairChangeOf("sprk_todo", payload),
+            new Reads { Row = RowOf(lookups: ("sprk_regardingmatter", MatterA)) }.KnowsTheMatterType().Readers, default,
+            lookupsAreMapped: true);
+
+        ShouldClearThePair(plan);
     }
 
     [Fact]
@@ -328,6 +348,50 @@ public sealed class RegardingPairUpdatePlannerTests
         plan.Columns["sprk_regardingrecordnumber"].Should().BeNull();
     }
 
+    [Theory]
+    [InlineData(500)]
+    [InlineData(503)]
+    public async Task MovingThePair_WhenTheCatalogReadFails_IsTheReadsFailure_AndNothingIsPlanned(int status)
+    {
+        // Rule 3 as rule 2: only 403 and 404 clear the display; any other failed read writes nothing.
+        var reads = new Reads { Row = RowOf(MatterA.ToString("D"), MatterType), TypeStatus = status };
+
+        var plan = await Plan("sprk_todo", new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, reads);
+
+        plan.Failed.Should().BeTrue();
+        plan.FailedStatus.Should().Be(status);
+        plan.Columns.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(503)]
+    public async Task MovingThePair_WhenTheRecordReadFails_IsTheReadsFailure_AndNothingIsPlanned(int status)
+    {
+        var reads = new Reads { Row = RowOf(MatterA.ToString("D"), MatterType), RecordStatus = status };
+        reads.Types[MatterType] = new RegardingPairType("sprk_matter", "sprk_matternumber");
+
+        var plan = await Plan("sprk_todo", new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, reads);
+
+        plan.Failed.Should().BeTrue();
+        plan.FailedStatus.Should().Be(status);
+        plan.Columns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MovingThePair_ToARecordTheReaderMayNotRead_ClearsEveryDisplayColumn()
+    {
+        var reads = new Reads { Row = RowOf(MatterA.ToString("D"), MatterType), RecordStatus = 403 };
+        reads.Types[MatterType] = new RegardingPairType("sprk_matter", "sprk_matternumber");
+
+        var plan = await Plan("sprk_todo", new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, reads);
+
+        plan.Failed.Should().BeFalse();
+        foreach (var display in PairDisplayColumns)
+            plan.Columns.Should().ContainKey(display).WhoseValue.Should().BeNull();
+        plan.Outcome.Should().Contain("cleared").And.NotContain("re-derived");
+    }
+
     [Fact]
     public async Task MovingThePair_WithEveryDisplayColumnSent_PlansNothing()
     {
@@ -365,7 +429,7 @@ public sealed class RegardingPairUpdatePlannerTests
         var plan = await Plan("sprk_todo", new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({MatterB:D})" }, reads);
 
         plan.Columns[SecureRootInheritance.PairIdColumn].Should().Be(MatterB.ToString("D"));
-        plan.Columns[SecureRootInheritance.PairTypeColumn].Should().Be(MatterType);
+        plan.Columns.Should().NotContainKey(SecureRootInheritance.PairTypeColumn, "the type is unchanged, so it is not written again");
         ShouldHaveTheMattersDisplay(plan, MatterB, "Beta v. Gamma", "M-0002");
     }
 
@@ -554,6 +618,102 @@ public sealed class RegardingPairUpdatePlannerTests
             .Should().BeSameAs(other);
         await FluentActions.Invoking(() => KeepRegardingPairWholeAppOnlyAsync(null, "sprk_workassignment", Row, TypeOnly(), "UpdateRecord", null, default))
             .Should().ThrowAsync<RecordOwnerUnresolvedException>();
+    }
+
+    [Fact]
+    public void ThePairTypeNavigationProperties_MatchTheSolution()
+    {
+        // Web API navigation names are case-sensitive: each pair table's type is bound by the navigation property its
+        // relationship to sprk_recordtype_ref declares (SpaarkeMaster), never one spelling for all (the invoice's is lower-case).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs")))
+            dir = dir.Parent;
+        var relationships = Path.Combine(dir!.FullName, "src", "dataverse", "solutions", "SpaarkeMaster", "Other", "Relationships");
+        var declared = Directory.EnumerateFiles(relationships, "*.xml")
+            .SelectMany(f => System.Xml.Linq.XDocument.Load(f).Descendants("EntityRelationship"))
+            .Where(r => string.Equals((string?)r.Element("ReferencedEntityName"), "sprk_recordtype_ref", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals((string?)r.Element("ReferencingAttributeName"), "sprk_regardingrecordtype", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                r => ((string)r.Element("ReferencingEntityName")!).ToLowerInvariant(),
+                r => (string)r.Descendants("EntityRelationshipRole").Single(role => (string?)role.Element("RelationshipRoleType") == "1")
+                    .Element("NavigationPropertyName")!);
+
+        RegardingRecordTypeNavigationProperties.Keys.Should().BeEquivalentTo(RegardingPairTables);
+        foreach (var table in RegardingPairTables)
+        {
+            declared.Should().ContainKey(table, $"{table} carries the pair's type lookup");
+            RegardingRecordTypeNavigationProperties[table].Should().Be(declared[table], $"{table}'s relationship declares it (case-sensitive)");
+        }
+
+        declared["sprk_invoice"].Should().Be("sprk_regardingrecordtype", "the control: the one lower-case spelling");
+    }
+
+    [Fact]
+    public async Task AppOnly_AnInvoicesPairClear_IsWrittenByTheInvoicesOwnNavigationProperty()
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities.Setup(e => e.RetrieveAsync("sprk_invoice", Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", Row)
+            {
+                [SecureRootInheritance.PairIdColumn] = MatterA.ToString("D"),
+                [SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", MatterType),
+            });
+
+        var written = await KeepRegardingPairWholeAppOnlyAsync(entities.Object, "sprk_invoice", Row,
+            new() { ["sprk_regardingrecordid"] = null }, "UpdateRecord", null, default);
+
+        written.Should().ContainKey("sprk_regardingrecordtype@odata.bind").WhoseValue.Should().BeNull();
+        written.Should().NotContainKey("sprk_RegardingRecordType@odata.bind", "the invoice's navigation property is lower-case");
+    }
+
+    [Fact]
+    public async Task AppOnly_AnInvoicesPairFollowingItsLookup_DoesNotWriteTheUnchangedType()
+    {
+        var matterColumn = PairAgreementColumns("sprk_invoice").First(c => c.Value == "sprk_matter").Key;
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities.Setup(e => e.RetrieveAsync("sprk_invoice", Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", Row)
+            {
+                [matterColumn] = new EntityReference("sprk_matter", MatterA),
+                [SecureRootInheritance.PairIdColumn] = MatterA.ToString("D"),
+                [SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", MatterType),
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterB, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", MatterB) { [MatterNameColumn] = "Beta v. Gamma" });
+
+        var written = await KeepRegardingPairWholeAppOnlyAsync(entities.Object, "sprk_invoice", Row,
+            new() { [matterColumn] = new EntityReference("sprk_matter", MatterB) }, "UpdateRecord", null, default);
+
+        written[SecureRootInheritance.PairIdColumn].Should().Be(MatterB.ToString("D"));
+        written.Keys.Should().NotContain(k => k.EndsWith("@odata.bind", StringComparison.Ordinal), "the type is unchanged, so it is not written");
+    }
+
+    [Theory]
+    [InlineData("catalog")]
+    [InlineData("record")]
+    public async Task AppOnly_AMovesDisplayReadTimingOut_Refuses_AndNothingIsWritten(string faulting)
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities.Setup(e => e.RetrieveAsync("sprk_todo", Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_todo", Row)
+            {
+                [SecureRootInheritance.PairIdColumn] = MatterA.ToString("D"),
+                [SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", MatterType),
+            });
+        var catalog = entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (faulting == "catalog")
+            catalog.ThrowsAsync(new TimeoutException("socket"));
+        else
+            catalog.ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterB, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("socket"));
+
+        var act = () => KeepRegardingPairWholeAppOnlyAsync(entities.Object, "sprk_todo", Row,
+            new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, "UpdateRecord", null, default);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
     }
 
     [Fact]
