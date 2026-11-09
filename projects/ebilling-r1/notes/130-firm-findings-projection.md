@@ -331,3 +331,69 @@ Branch `task/ebilling-130b-fix4` from `task/ebilling-130b-fix1` at `fc68d0b44a`.
   - The "exactly one core record" rule (FR-05, D-28) is owned by `InvoiceFamilyCoreRecordGuard` (`Check` refuses none and several, `MultipleCoreRecordsCode`). It is called on the BFF create and update paths: the submission persister and service (`Check`, `RequireFiled`), `RecordCreationService`'s pre-write step and `OwnedChildWrite.RefileAsync` (`CheckWriteAsync`), and the three generic update paths (`CheckGenericUpdateAsync`: the playbook update, the output orchestrator, the field-mapping push). Behaviour tests: `InvoiceFamilyCoreRecordGuardTests`, `RecordCreationServiceInvoiceFamilyRuleSeamTests`, `InvoiceFamilyGenericUpdatePathTests`, `SecureChildOwnershipAiToolTests.InvoiceFamilyGuard`.
   - No ArchTest pins that every writer of the three lookups asks the guard (the completeness of the writer set is not pinned), so the answer is partial.
   - The external `invoices` module has no precedence to copy: it ORs its scope dimensions (`ExternalAccessModule.cs` invoices registration, `ExternalModuleRegistry.ScopeRows`, "OR across dimensions", owner decision D2 option A) and adds a Read requirement on secure roots. The filter's union matches the module's row scope. Choosing a precedence (or requiring Read on every set core) is a design decision for the owner; no filter change was made.
+
+## 130c: a rejected submission's findings (FR-18)
+
+Branch `task/ebilling-130c` from `task/ebilling-130b-fix1` at `ecf694a8d1`. Closes 130a open question 1 (where a rejection finding's content comes from): the submission's OWN stored findings. No new route, no new caller of `FirmFindingsProjection`.
+
+### What was built
+
+- `Services/Finance/FirmRejectionFindings.cs` (new, internal): the allow-list parse of `sprk_invoicesubmission.sprk_findingsjson` for the firm view. Stable log codes `EBILLING-FIRM-OUTCOME-REJECTION-FINDINGS-DROPPED` (counts only: malformed / unknown rule type / over the cap) and `EBILLING-FIRM-OUTCOME-REJECTION-FINDINGS-UNREADABLE` (a document that cannot be read as a whole).
+- `Services/Finance/FirmFindingsProjection.cs`: `GetForSubmissionAsync` on a Rejected submission now calls `ProjectRejectionAsync` (it returned status only). New contract members: `FirmOutcomeDecision.RejectionFinding`; `FirmOutcomeItem.LineNumber` (int?, one-based) and `FirmOutcomeItem.ValuesRead` (list of `FirmOutcomeValueRead(Name, Value)`), both omitted from the JSON when null, so every existing item serializes as before.
+- Tests: new cases in `FirmFindingsProjectionTests` and `FirmOutcomeScopeTests` (listed under Results). ArchTests: `FindingsJsonAppOnlyReadGuardTests` (the projection is now a reviewed reader of the column; row 18 of `notes/122-findings-json-field-secure.md`) and `ExternalInvoiceVisibilityGuardTests` (four reviewed `NotInvoiceSurfaces` entries for the new private members).
+
+### The JSON shape consumed (field names only)
+
+Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required, never shown), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, `field`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
+
+### Rules as built
+
+| Rule | Behaviour |
+|---|---|
+| Which submissions | A Rejected submission whose stored `kind` is `AutoRejected`. A `Blocked` outcome (also Rejected in status) is an internal hold awaiting a reviewer, not a decision a firm was given (FR-38): no finding. Any other kind: no finding. |
+| Which findings | `rejects` true only. A finding that did not reject is skipped silently (not a defect). |
+| Unknown rule type (FR-24) | Refused whatever else the entry says, even when it does not reject: the name must be exactly a defined `RuleType` member (not a number, not a comma-joined list whose OR is another member), in the Billing domain, and not the system marker `SubmissionIntegrity`. |
+| Malformed | A non-object entry, a wrong-typed member, a missing or empty policy version, a missing reason code, a line subject without a line (or an invoice subject with one), a `rejects` that is not a boolean, a rejection by a type that can never reject (including an AI observation, I-5), a non-string value: dropped. |
+| Logging | One Warning per read: stable code plus counts. No content, no ids of the finding. |
+| Bounds | 200 findings, 20 values per finding, 200 characters per value (trimmed with "..."). |
+| Line | `LineNumber` = stored zero-based index + 1; null for an invoice-level finding. Never a line id; no live line is read. |
+| Values read | Name and value as stored, nothing else (no confidence). A value with no text is dropped. A Duplicate finding and a `detailWithheld` finding project none (a Duplicate quotes an EARLIER invoice the caller may not see: D-112, D-176). |
+| Citation (the rule and the clause) | Exactly as an invoice item's (130b fix round 2): only when `RuleSetService.GetFirmClauseAsync` publishes text for that version on the submission's derived invoice AND the rule set's Procedure is not InternalStandard; otherwise none (no rule name, label, version, section or quote). A fault deciding it omits it; it is never a guess. No ids. |
+| Firm reason | From a `sprk_signal` the BFF writer created (`WriterCreatedRecord`), for the derived invoice, the finding's policy version and its line (the derived line id; none for an invoice-level finding), first non-blank `sprk_firmreason` in creation order. Independent of the citation gate. A fault, or an unknown writer id, makes the outcome Degraded (503), as for a decided line. |
+| Invoice not decided | `invoiceDecided` false (the derived invoice did not exist when the route's filter ran): the findings keep their line and values (the submission's own), but there is no citation, no firm reason, and nothing of the invoice is read (no clause call, no Signal, no rule row, no writer id). |
+| Faults | Reading the stored findings, the rules, the Procedure type or the Signals: status only, `Degraded` (route 503). A stored document that cannot be read, or has no usable rejection finding: status only, not degraded (route 200), with the stable-coded Warning when it was unreadable. |
+
+### Decisions taken inside the brief (for review)
+
+1. Flag off shows NO citation at all (no rule name, no rule set label), following 130b fix round 2 (the owner ruling that supersedes the earlier "rule name and reason" reading of D-79). The brief's D-79 line says "reason + rule set name only"; a rule set name cannot be shown because the POML forbids reading `sprk_ruleset.sprk_name` and the clause reader returns no label with the flag off. Open question 1.
+2. The rule type is validated but not projected: it is a category of an internal rule, and the owner ruling publishes the rule only as the firm flag allows.
+3. `rejects` true is the definition of a rejection finding (073's stored decision), not "every stored finding". A firm is not shown flagged findings that did not reject.
+4. A Blocked outcome projects no finding even though its submission status is Rejected.
+5. The firm reason is read from Signals (the only stored home of `sprk_firmreason`), not composed from the reason code; `reasonCode` is validated and never shown, because no firm-text composer for it exists.
+
+### Component justification (CLAUDE.md section 11)
+
+`FirmRejectionFindings` (internal parser) and the new projection members:
+
+1. Existing: `InvoiceReviewReadService.ParsedFindings` (private; the INTERNAL reader: confidence, stored clause, suggestion, Signal plan) and `InvoiceSubmissionAfterSteps.StoredFindings` (the writers' reader). The projection's own citation, clause, rule-name and Signal-read helpers are reused unchanged.
+2. Extension: neither existing parser can be narrowed to an allow-list without a second rule set inside it, and neither refuses an unknown rule type (FR-24). A small second parser with a closed member list is the smaller surface.
+3. Cost of doing nothing: FR-18's on-screen report (and the PDF, FR-40) cannot be built, or is built by copying the internal reader's members (confidence, the internal clause).
+
+### BFF hygiene (section 10)
+
+Placement: BFF, `Services/Finance` beside the projection (B4 live request). No package, no endpoint, no DI change. No HIGH CVE introduced (no package reference changed). Publish size: not re-measured (one small internal class and one projection method group; no package change).
+
+### Known limits
+
+- `sprk_signal.sprk_firmreason` still has no writer (130a decision 3): until one exists the firm reason of a rejection finding is empty in production, as an invoice item's is.
+- Which Signal belongs to a finding is decided by (invoice, policy version, derived line id). If the Signal writer subjects a line finding differently, the reason is absent (fail closed), never wrong.
+- A rejected submission whose derived invoice was never created shows its findings without citation or reason.
+
+### Results (130c)
+
+- Filtered run (`FirmFindingsProjectionTests` + the `FirmOutcome*` classes, including `FirmOutcomeScopeTests`): 169 passed, 0 failed.
+- Fail-before proofs (the real code temporarily replaced, the suite run, the real code restored and its SHA-256 verified):
+  - Old behaviour (a rejected outcome returns the status only): 27 of the 165 tests in the two classes fail, among them the must-fire two-findings test, the route happy path and the route 503 test.
+  - FR-24 (security-class): the unknown-rule-type refusal replaced by a plain enum parse: the seeded unknown-type test fails (1 of 94 in the projection class).
+  - EB-D-208: the writer-created conditions dropped from the Signal read: 3 tests fail (the firm-reason test, the writer-id test, the route happy path).
+- ArchTests: the full `Spaarke.ArchTests` run on the final tree, 2183 passed, 0 failed (includes the reviewed-reader guard for the field-secured column, the invoice-visibility guard's new reviewed entries, the caller-boundary guard and the writer-created single-source guard).

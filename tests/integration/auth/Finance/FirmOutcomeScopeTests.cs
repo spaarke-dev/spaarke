@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
@@ -371,6 +372,43 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_processingstatus"] = new OptionSetValue((int)status),
             ["sprk_trackingnumber"] = "INV-1.1",
         });
+        return id;
+    }
+
+    private const string InternalStoredClause = "INTERNAL stored clause quote";
+
+    private static JsonObject StoredFinding(string ruleType, Guid version, int? line, params (string Name, string Value)[] values) => new()
+    {
+        ["ruleType"] = ruleType,
+        ["policyId"] = Guid.NewGuid().ToString("D"),
+        ["policyCode"] = "BILL-INTERNAL-CODE",
+        ["policyVersionId"] = version.ToString("D"),
+        ["clause"] = InternalStoredClause,
+        ["clauseLocation"] = "INTERNAL location",
+        ["subject"] = line is null ? "Invoice" : "Line",
+        ["line"] = line,
+        ["reasonCode"] = "rate.over",
+        ["detailWithheld"] = false,
+        ["rejects"] = true,
+        ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject { ["name"] = v.Name, ["value"] = v.Value, ["confidence"] = 0.42m }).ToArray()),
+    };
+
+    /// <summary>The stored findings (<c>sprk_findingsjson</c>) of an auto-rejected submission with a line finding (line index 2) and an invoice-level one.</summary>
+    private static string RejectedFindingsJson(Guid version) => new JsonObject
+    {
+        ["schema"] = 1,
+        ["kind"] = "AutoRejected",
+        ["reasonCode"] = "rate.over",
+        ["findings"] = new JsonArray(
+            StoredFinding("ApprovedRate", version, 2, ("line.rate", "450.00"), ("approvedRate", "400.00")), StoredFinding("RequiredData", version, null)),
+        ["signalPlan"] = new JsonArray(new JsonObject { ["sentence"] = "INTERNAL Signal plan sentence" }),
+    }.ToJsonString();
+
+    /// <summary>A Rejected submission of <paramref name="firm"/> carrying <paramref name="findingsJson"/> (the projection's store is what holds the findings).</summary>
+    private Guid SeedRejectedSubmission(Guid? firm, string findingsJson)
+    {
+        var id = SeedSubmission(firm, status: InvoiceSubmissionStatus.Rejected);
+        _submissionRows.Single(r => r.Id == id)["sprk_findingsjson"] = findingsJson;
         return id;
     }
 
@@ -869,6 +907,130 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         var response = await Submission(rejected);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync()).Should().Contain("SubmissionRejected");
+    }
+
+    // ── 130c (FR-18): a rejected submission's findings ──
+
+    [Fact(DisplayName = "130c SEEDING PROOF (firm scope): another firm's REJECTED submission on a shared matter is 403 with no finding, and nothing is read")]
+    public async Task RejectedSubmission_OfAnotherFirm_Is403_AndNothingIsRead()
+    {
+        var version = Guid.NewGuid();
+        var others = SeedRejectedSubmission(FirmB, RejectedFindingsJson(version));
+        SeedInvoice(FirmB, status: InvoiceStatusCodes.Rejected, id: InvoiceSubmissionPersister.InvoiceIdFor(others));
+        _clauseFor = _ => new FirmClauseText("Clause of firm B.", "B-1", "Firm B guidelines");
+
+        var response = await Submission(others);
+
+        await AssertRefusedAndNothingProjectedAsync(response);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("450.00").And.NotContain("Clause of firm B.").And.NotContain("line.rate");
+        _clauseInvoices.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130c happy path: the caller's own firm's rejected submission is 200 with each finding's line, values read, rule and clause, and a writer-created firm reason")]
+    public async Task RejectedSubmission_OfTheCallersFirm_Is200_WithItsFindings()
+    {
+        var version = Guid.NewGuid();
+        var own = SeedRejectedSubmission(FirmA, RejectedFindingsJson(version));
+        var invoice = SeedInvoice(FirmA, status: InvoiceStatusCodes.Rejected, id: InvoiceSubmissionPersister.InvoiceIdFor(own));
+        SeedCitation(invoice, Guid.NewGuid(), Guid.NewGuid(), version); // the rule rows; its decision-linked Signal is not a rejection Signal
+        _signalRows.Add(new Entity("sprk_signal", Guid.NewGuid())
+        {
+            ["sprk_policyversion"] = new EntityReference("sprk_policyversion", version),
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
+            ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
+            ["sprk_firmreason"] = "Your rate is above the agreed rate.",
+            ["createdon"] = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc),
+            ["createdby"] = new EntityReference("systemuser", WriterId),
+        });
+        _signalRows.Add(new Entity("sprk_signal", Guid.NewGuid())
+        {
+            ["sprk_policyversion"] = new EntityReference("sprk_policyversion", version),
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
+            ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
+            ["sprk_firmreason"] = ForgedReason,
+            ["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc),
+            ["createdby"] = new EntityReference("systemuser", UserId),
+        });
+        _clauseFor = _ => new FirmClauseText("Clause of firm A.", "A-1", "Firm A guidelines");
+
+        var response = await Submission(own);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        var root = body.RootElement;
+        root.GetProperty("kind").GetString().Should().Be("SubmissionRejected");
+        root.GetProperty("degraded").GetBoolean().Should().BeFalse();
+        var items = root.GetProperty("items");
+        items.GetArrayLength().Should().Be(2);
+
+        var line = items[0];
+        line.GetProperty("decision").GetString().Should().Be("RejectionFinding");
+        line.GetProperty("lineNumber").GetInt32().Should().Be(3);
+        line.GetProperty("valuesRead")[0].GetProperty("name").GetString().Should().Be("line.rate");
+        line.GetProperty("valuesRead")[0].GetProperty("value").GetString().Should().Be("450.00");
+        line.GetProperty("valuesRead")[1].GetProperty("value").GetString().Should().Be("400.00");
+        line.GetProperty("firmReasons").EnumerateArray().Select(r => r.GetString()).Should().Equal("Your rate is above the agreed rate.");
+        var citation = line.GetProperty("citations").EnumerateArray().Should().ContainSingle().Subject;
+        citation.GetProperty("ruleName").GetString().Should().Be("Travel time");
+        citation.GetProperty("label").GetString().Should().Be("Firm A guidelines");
+        citation.GetProperty("sectionReference").GetString().Should().Be("A-1");
+        citation.GetProperty("quote").GetString().Should().Be("Clause of firm A.");
+
+        items[1].TryGetProperty("lineNumber", out _).Should().BeFalse("an invoice-level finding names no line");
+        text.Should().NotContain(ForgedReason).And.NotContain(InternalStoredClause).And.NotContain("INTERNAL").And.NotContain("0.42")
+            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain(version.ToString("D")).And.NotContain(invoice.ToString("D"));
+        _clauseInvoices.Should().NotBeEmpty().And.OnlyContain(id => id == invoice);
+        _projectionReads.Should().NotContain("sprk_billingevent", "a rejected submission's live lines are never read");
+    }
+
+    [Fact(DisplayName = "130c: a rejected submission whose invoice does not exist yet is 200 with its findings but no citation and no firm reason, and nothing of the invoice is read")]
+    public async Task RejectedSubmission_WithNoInvoiceYet_ShowsFindingsWithoutCitation()
+    {
+        var version = Guid.NewGuid();
+        var own = SeedRejectedSubmission(FirmA, RejectedFindingsJson(version));
+        _clauseFor = _ => new FirmClauseText("Clause of firm A.", "A-1", "Firm A guidelines");
+
+        var response = await Submission(own);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        var items = body.RootElement.GetProperty("items");
+        items.GetArrayLength().Should().Be(2);
+        items[0].GetProperty("valuesRead").GetArrayLength().Should().Be(2);
+        items.EnumerateArray().Should().OnlyContain(i => i.GetProperty("citations").GetArrayLength() == 0 && i.GetProperty("firmReasons").GetArrayLength() == 0);
+        text.Should().NotContain("Clause of firm A.");
+        _clauseInvoices.Should().BeEmpty();
+        _projectionReads.Should().NotContain(new[] { "sprk_invoice", "sprk_billingevent", "sprk_signal", "sprk_policyversion", "sprk_policy" });
+    }
+
+    [Fact(DisplayName = "130c: a firm read that faults is a retryable 503 on a rejected submission, and no finding is read")]
+    public async Task RejectedSubmission_WhenTheFirmReadFaults_Is503_AndNothingIsRead()
+    {
+        var own = SeedRejectedSubmission(FirmA, RejectedFindingsJson(Guid.NewGuid()));
+        _participations.MembershipFault = new TimeoutException("memberships are down");
+
+        var response = await Submission(own);
+
+        await AssertRefusedAsync(response, HttpStatusCode.ServiceUnavailable, Unavailable);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("450.00");
+        _projectionReads.Should().BeEmpty("a refused request projects nothing");
+        _data.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130c: a rejected submission's findings that fault to read are a retryable 503 (Degraded), never a 200 with no findings")]
+    public async Task RejectedSubmission_WhoseRulesCannotBeRead_Is503()
+    {
+        var version = Guid.NewGuid();
+        var own = SeedRejectedSubmission(FirmA, RejectedFindingsJson(version));
+        SeedInvoice(FirmA, status: InvoiceStatusCodes.Rejected, id: InvoiceSubmissionPersister.InvoiceIdFor(own));
+        _faultingProjectionEntities.Add("sprk_policyversion");
+
+        var response = await Submission(own);
+
+        await AssertRefusedAsync(response, HttpStatusCode.ServiceUnavailable, Unavailable);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("450.00");
     }
 
     [Fact(DisplayName = "130b fix 1: an Accepted submission whose invoice a correction replaced is 200, Closed, status only (not a retryable 503)")]
