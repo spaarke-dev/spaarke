@@ -78,6 +78,8 @@
 .PARAMETER DirectMessageBusinessUnitName
     Direct-message mode: the Direct-message business unit, by name (exactly one match; a direct child of the root with no
     users). The script does not create it.
+    Customer mode (task 198 Q4): the Direct-message unit, refused as a customer unit (decided by id; no unit of that name
+    refuses nothing). Default 'Spaarke Direct Messages'.
 
 .PARAMETER SecureBusinessUnitName
     The Secure Record business unit (SecureRecord:BusinessUnitName), refused as a customer unit. Default 'Secure Record'.
@@ -107,7 +109,9 @@
     Dry run for the Direct-message owner team, with no writes.
 #>
 
-[CmdletBinding(DefaultParameterSetName = 'ByName')]
+# Default 'Direct' (task 198 Q4): -DirectMessageBusinessUnitName is in all three sets, so a call naming only it must bind to the
+# Direct mode; a call naming a customer unit binds to its own set, and a call naming neither still stops on a missing parameter.
+[CmdletBinding(DefaultParameterSetName = 'Direct')]
 param(
     [Parameter(Mandatory)]
     [string]$EnvironmentUrl,
@@ -119,7 +123,9 @@ param(
     [guid]$CustomerBusinessUnitId,
 
     [Parameter(Mandatory, ParameterSetName = 'Direct')]
-    [string]$DirectMessageBusinessUnitName,
+    [Parameter(ParameterSetName = 'ByName')]
+    [Parameter(ParameterSetName = 'ById')]
+    [string]$DirectMessageBusinessUnitName = 'Spaarke Direct Messages',
 
     [string]$SecureBusinessUnitName = 'Secure Record',
 
@@ -302,6 +308,17 @@ try {
 
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
+
+    # Task 198 Q4: the Direct-message unit is never a customer unit, as Secure Record is not. Its id comes from ONE read that
+    # Dataverse filters by name; the refusal compares ids. No such unit (not created yet) refuses nothing.
+    if (-not $IsDirectMode) {
+        $directIds = @(Get-DvAll "businessunits?`$select=businessunitid&`$filter=name eq '$(Q $DirectMessageBusinessUnitName)'" |
+            ForEach-Object { [string]$_.businessunitid } | Where-Object { $_ })
+        if ($directIds -contains [string]$customerId) {
+            throw "Refused: $named is the Direct-message business unit (-DirectMessageBusinessUnitName '$DirectMessageBusinessUnitName'), never a customer unit."
+        }
+        $customerTops = @($customerTops | Where-Object { $directIds -notcontains [string]$_.businessunitid })
+    }
 
     if ($IsDirectMode) {
         # The Direct-message unit holds no users: a user homed there would reach its rows through any role at Business Unit

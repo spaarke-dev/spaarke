@@ -98,14 +98,20 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
             $setUp = (Get-Variable -Scope Global -Name "${w}DirectRoleSetUp").Value
             if ($u -match '/organizations\?') { return @{ value = @([pscustomobject]@{ name = 'test' }) } }
             if ($u -match '/businessunits\?') {
-                return @{ value = @(
-                        [pscustomobject]@{ businessunitid = $root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
-                        [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_SecureId; name = 'Secure Record'; _parentbusinessunitid_value = $root }
-                        [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_CustomerId; name = 'Customer One'; _parentbusinessunitid_value = $root }
-                        [pscustomobject]@{ businessunitid = $directId; name = $global:SetCustomerOwnerTeamsTest_DirectUnitName; _parentbusinessunitid_value = $root }
-                        @($global:SetCustomerOwnerTeamsTest_ExtraUnits)
-                    )
+                $allUnits = @(
+                    [pscustomobject]@{ businessunitid = $root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
+                    [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_SecureId; name = 'Secure Record'; _parentbusinessunitid_value = $root }
+                    [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_CustomerId; name = 'Customer One'; _parentbusinessunitid_value = $root }
+                    [pscustomobject]@{ businessunitid = $directId; name = $global:SetCustomerOwnerTeamsTest_DirectUnitName; _parentbusinessunitid_value = $root }
+                    @($global:SetCustomerOwnerTeamsTest_ExtraUnits)
+                )
+                # Task 198 Q4: a read Dataverse filters by name answers only the units of that name (name equality is
+                # case-insensitive in Dataverse, as -eq is here).
+                if ($u -match "filter=name eq '((?:[^']|'')*)'") {
+                    $wanted = $Matches[1] -replace "''", "'"
+                    $allUnits = @($allUnits | Where-Object { $_.name -eq $wanted })
                 }
+                return @{ value = $allUnits }
             }
             if ($u -match "EntityDefinitions\(LogicalName='([^']+)'\)/Privileges") {
                 return @{ value = @([pscustomobject]@{ PrivilegeType = 'Read'; Name = $global:SetCustomerOwnerTeamsTest_Privileges[$Matches[1]]; PrivilegeId = $global:SetCustomerOwnerTeamsTest_PrivilegeIds[$Matches[1]] }) }
@@ -199,6 +205,43 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
         $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One'; ConfigPaths = @(Join-Path $script:RepoRoot 'config' 'direct-message-owner-role.json') }
         $r.ExitCode | Should -Be 1
         $r.Output | Should -Match "names business unit 'direct'"
+    }
+
+    Context 'Customer mode never accepts the Direct-message unit (task 198 Q4)' {
+        It 'must fire: the Direct-message unit by name is refused as a customer unit' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = $global:SetCustomerOwnerTeamsTest_DirectUnitName }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'is the Direct-message business unit'
+            $r.Output | Should -Not -Match 'PLAN'
+        }
+
+        It 'must fire: the Direct-message unit by id is refused (decided by id, not by the name given)' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitId = [guid]$global:SetCustomerOwnerTeamsTest_DirectId; Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'is the Direct-message business unit'
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must fire: a non-default -DirectMessageBusinessUnitName is refused the same way' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000a'; name = 'Other Direct'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Other Direct'; DirectMessageBusinessUnitName = 'Other Direct' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "is the Direct-message business unit \(-DirectMessageBusinessUnitName 'Other Direct'\)"
+        }
+
+        It 'must not fire: a customer unit plans as before, and the Direct unit is not listed as a customer unit' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'Re-run with -Apply'
+            $r.Output | Should -Not -Match 'Direct-message business unit'
+            $r.Output | Should -Not -Match ([regex]::Escape($global:SetCustomerOwnerTeamsTest_DirectUnitName))
+        }
+
+        It 'must not fire: with no unit of the Direct name, nothing is refused' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One'; DirectMessageBusinessUnitName = 'Nonexistent' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Not -Match 'Direct-message business unit'
+        }
     }
 
     Context 'Direct-message mode (-DirectMessageBusinessUnitName)' {
