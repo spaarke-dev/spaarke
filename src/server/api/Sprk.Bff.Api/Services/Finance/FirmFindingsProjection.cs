@@ -127,8 +127,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 
 /// <summary>
 /// THE server-side projection of firm-visible outcome content (ebilling-r1 task 130a; FR-38, D-66, EB-D-202). Read-only. It has no caller
-/// check: the CALLER of this class has already established that the invoice may be shown (the external route's firm and core-record checks,
-/// or an internal job); every id passed in is one the caller read server-side.
+/// check: the CALLER of this class has already established that the invoice may be shown (the external route's firm and core-record checks);
+/// every id passed in is one the caller read server-side. It must only be called behind <c>FirmOutcomeAuthorizationFilter</c>; enforced by the
+/// ArchTest <c>FirmFindingsProjectionCallerBoundaryGuardTests</c> (only <c>FirmOutcomeEndpoints</c> and <c>FinanceModule</c> may reference it).
 /// </summary>
 /// <remarks>
 /// <para><b>What is shown.</b> A submission Received or Processing: status and billed total only. An invoice In Review: status, billed total,
