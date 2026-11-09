@@ -493,3 +493,5 @@ Before the test compositions matched the host, the brief filter showed 19 failur
 - **C-d (throughput):** roughly 6–10 reads per message; at most 200 messages per run (2-minute schedule). A large backlog drains over several runs, each logged.
 
 **Pending upstream:** Part E (Gate Decision Records, ontology-owned).
+
+**R3-1 coordinator ruling (2026-11-09):** K, filed as #2647 and reported to the operator. The record-anchored grant has had no durable retry since before 198 (best-effort, NFR-02); R3's fail-closed user-flag read only adds one more way to lose it. Fail-closed stays. Making the Restricted bar phase grant as well as remove is rejected as new behaviour in a removal-only phase (scope; §11). The retry is #2647's.
