@@ -102,17 +102,63 @@ None in Dataverse. `Services/Communication/Membership/MembershipReconciler.cs:12
 - No arch guard pins `direct-message-owner-role.json` (team and role names, Read/Basic, exact tables) the way `RestrictedContentOwnerRoleGuardTests` pins the customer files. The table list is TODO-fm; add the guard when fm names it.
 - The customer mode does not know the Direct unit's name, so it would accept the Direct unit as a customer unit (it is a direct child of the root). Refusing it there needs the Direct unit's name in the customer mode (for example, a `-DirectMessageBusinessUnitName` exclusion), which changes the customer mode. That is the owner's call: **Q4**.
 
+## §2b Part A role file (fm confirmed the tables 2026-11-09)
+
+`config/direct-message-owner-role.json` holds Read at Basic on exactly six tables: `sprk_communication`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_document` and `sprk_decisionrecord`. Privilege names come from `config/secure-record-owner-role.json`. Pester: 22/22.
+
 ## §3 Part B — participant grants on a Direct-team-owned message
 
-(filled in below as built)
+**Merged:** fm 054a lookup `6c1ad9cb16` (`git merge --no-ff`, merge `5e4eeed44f`). fm's fix sha, when it comes, merges on top.
 
-## §5 Part D — keep on filing
+**The one check:** `DirectThreadAccessService.IsDirectMessageOwnerTeamAsync`:
+1. `CannotBeDirectOwnerTeamAsync` returns true → not Direct.
+2. Otherwise resolve: Resolved → Direct exactly when the ids match.
+3. `NotConfigured` (no fault) → not Direct. This is **Q5**, see below.
+4. Any other refusal, or a fault → unknown → grant nothing (TODO Part C: enqueue a re-grant).
+5. A fault in the one-row check propagates to the method's catch, which also grants nothing.
 
-(filled in below as built)
+**When the message is Direct-team-owned:**
+- The audience must be `DirectParticipants`; any other join grants nothing.
+- The participants (thread owner ∪ thread POA systemuser sharees, so the sender is included) get Read on the message.
+- They also get Read on the rows of `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog` (lookup `sprk_communication`) and `sprk_document` (lookup `sprk_relatedcommunication`) whose `owningteam` is the Direct team. Each read is capped at 250 rows per table, and a capped read is logged.
+- `sprk_decisionrecord` is excluded: it is Part E's (`GateDecisionRecordSharing`).
+- Every grant is best-effort, per row and per principal.
+
+**Tests** (`DirectThreadAccessServiceTests`, real lookup over `TestInfrastructure/DirectMessageOwnerTeamDouble.cs`):
+- 35 pass.
+- Fail-first: against the pre-Part-B service, 6 fail: content rows, a join that is not Direct, no team or non-participant, best-effort, the lookup faults, refused.
+- The must-not-fire tests pass both before and after: another team, a lookalike in another unit, user-owned (the lookup faults if asked), secure, not configured.
+- Other constructors (`SecureChildShareMirrorTests`, `SecureChildOwnershipAiToolTests.RefileThreadCaller`) pass the unconfigured lookup.
+- Affected suites (`Services.Communication` + `ExternalAccess` + `DirectMessageOwnerTeam` filter): 6409/6409. BFF build: 0 warnings.
+
+**§11 (new surface):**
+1. *Existing:* `GrantMessageAccessAsync` already grants a message's participants; the new parts are the Direct-team branch and the content-row grant inside the same class.
+2. *Extension:* this is an extension of the existing grant method. Nothing else shares Direct content rows: `SecureChildShareSynchronizer` covers only Secure-team rows, and there is no cascade (NoCascade).
+3. *Cost of doing nothing:* after fm 054a a Direct-team-owned message and its content rows are readable by no participant, because the team has no members.
+
+New surface:
+- Test double `DirectMessageOwnerTeamDouble`. It reuses fm's fake pattern, shared because three test classes construct the service.
+- Constructor parameter `DirectMessageOwnerTeam`, already a DI singleton (`CommunicationModule.cs:725`).
+
+## §5 Part D — keep on filing (NOT DONE in this run)
+
+- Ordinary target: the census (§1a) and fm's census agree that no path revokes the message or content-row shares, so the rule holds today. The pin test is not written.
+- Secure target: the synchronizer decides. The pin test is not written.
+- Restricted target: needs new code. `RestrictedExternalShareRemover.RemoveForRecordAsync` (`Infrastructure/ExternalAccess/RestrictedExternalShareRemover.cs:185`) works per ROOT. It takes a per-record lease and does a strict read-back, a cache clear and a `SyncRootAsync` child fan-out (secure only). Extending it to a communication filed under a Restricted root needs these decisions:
+  - the hook: `SecureChildReconciler.AfterRefileCoreAsync` 1297-1339, or the remover's 5-minute job;
+  - the lease key;
+  - the content rows;
+  - Direct only, or every communication.
+  
+  Not guessed. Handed back.
+
+## Open questions
 
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
 - **Q2:** Restricted target (Part D): extend `RestrictedExternalShareRemover` to communications filed under a Restricted root, or add a step in `SecureChildReconciler.AfterRefileCoreAsync`? Direct messages only, or every communication?
+- **Q5:** `NotConfigured` is read as "not Direct". The coordinator's rule (2026-11-09) is that "a Refusal never settles not-Direct". Applied literally, every team-owned message (every record thread) gets no grant in any environment without `DirectMessage:*` settings, because `CannotBeDirectOwnerTeamAsync` answers false when unset. This needs a ruling before fm's fix sha changes the API.
+- **Q6:** the Secure twin's accent bug (`SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync` :1346 compares names in code). It is not started in this run; see the report.
 - **Q4:** Should the customer-unit mode refuse the Direct-message unit (it is a direct child of the root, so today it passes as a customer top unit)?
 - **Q3:** The Read depth the internal roles hold on `sprk_communicationattachment` / `sprk_communicationparticipant` / `sprk_document` was not checked live (no live reads in this run). Part B grants the shares regardless.
