@@ -1300,9 +1300,10 @@ public static class FieldMappingEndpoints
     /// <remarks>Internal (not private) so the test assembly can drive it directly: task 156 (the re-file cascade), and
     /// task 142's writer test, which asserts the inline Assigned-To trigger after a push that wrote a root's "Assigned *"
     /// column (InternalsVisibleTo).
-    /// <para>Task 022 fix round 4: <paramref name="sourceGate"/> is the mapping-source rule for the push's source. The route
-    /// always passes it (pinned by a source-scan test); a direct caller that passes none asks no source question.</para></remarks>
+    /// <para>Task 022 fix round 4: <paramref name="sourceGate"/> is the mapping-source rule for the push's source. It is a
+    /// required, non-nullable parameter, so the compiler holds every caller to pass one.</para></remarks>
     internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
+        FieldMappingPushSourceGate sourceGate,
         IFieldMappingDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         FieldMappingRuleDto[] rules,
@@ -1316,8 +1317,7 @@ public static class FieldMappingEndpoints
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
         IGenericEntityService? appOnlyEntities = null,
-        IImpersonatedCommunicationQuery? callerQuery = null,
-        FieldMappingPushSourceGate? sourceGate = null)
+        IImpersonatedCommunicationQuery? callerQuery = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1443,8 +1443,7 @@ public static class FieldMappingEndpoints
                     // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a
                     // row owned by that source's isolation owner (MappingSourceCopyGate, the one predicate). A child that is not,
                     // or whose answer cannot be told, is not written at all; its entry carries the stable code.
-                    if (sourceGate is not null
-                        && await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, ct) is { } sourceRefusal)
+                    if (await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, ct) is { } sourceRefusal)
                     {
                         failed++;
                         errors.Add(new PushFieldMappingsError
