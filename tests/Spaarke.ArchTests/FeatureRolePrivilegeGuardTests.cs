@@ -43,6 +43,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>The ruled changes (task 046b).</b> <c>config/feature-role-privileges.json</c> lists the role changes the owner ruled on
 /// task 046's gaps; <c>scripts/Set-FeatureRolePrivileges.ps1</c> applies it to an environment. The role files hold each change at
 /// its declared depth, and putting any one back to its earlier level fails this guard.</para>
+/// <para><b>Pinned whole sets (ebilling-r1 DEF-059).</b> <see cref="ExactPrivilegeSets"/> lists roles whose entire privilege set is
+/// fixed: Spaarke Decision Record Reader holds Read on <c>sprk_decisionrecord</c> at Global and nothing else. An added privilege, a
+/// depth change or a table change fails.</para>
 /// </remarks>
 public class FeatureRolePrivilegeGuardTests
 {
@@ -60,6 +63,7 @@ public class FeatureRolePrivilegeGuardTests
     private const string BillingAdmin = "Spaarke Billing Administrator";
     private const string OntologyAdmin = "Spaarke Ontology Administrator";
     private const string AiAdmin = "Spaarke AI Analysis Admin";
+    private const string DecisionRecordReader = "Spaarke Decision Record Reader";
 
     private const string Bff = "src/server/api/Sprk.Bff.Api/";
     private const string ChildCreate = Bff + "Api/ChildRecordEndpoints.cs:70-85,279-286; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90";
@@ -479,6 +483,12 @@ public class FeatureRolePrivilegeGuardTests
         new("Spaarke Reporting Access Admin", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Author", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Viewer", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
+        // ebilling-r1 DEF-059: held by the BFF application identity only, never by people. Not AppUsers on purpose: AppUsers leaves a
+        // role out of the person-role set, and so out of the writer-only must-not-hold rules, which must keep binding this role (the
+        // server writer alone creates Decision Records). Its whole privilege set is pinned by ExactPrivilegeSets.
+        new(DecisionRecordReader, RoleKind.AddOn, [], [],
+            NoBffFeature + "the BFF reads Decision Records app-only as its own application identity (counted spend, firm findings), "
+            + "not as a caller; this role gives that identity the one read, and ExactPrivilegeSets pins it."),
     ];
 
     private const string ReportingByRole =
@@ -879,7 +889,7 @@ public class FeatureRolePrivilegeGuardTests
     public void EveryRoleFileIsClassifiedAndEachAddOnIsCheckedAlone()
     {
         var files = RoleFileNames(RolesDirectory);
-        Assert.True(files.Count >= 13, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 13).");
+        Assert.True(files.Count >= 14, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 14).");
         _ = LoadRoles(RolesDirectory, files); // each file parses, holds privileges and names its own role
 
         var problems = ClassificationProblems(files, RoleClasses, Declared, Requirements, StandaloneExceptions.Keys.ToArray());
@@ -1418,6 +1428,107 @@ public class FeatureRolePrivilegeGuardTests
         var container = doc.Descendants().First(e => e.Name.LocalName == "RolePrivileges");
         container.Add(new XElement(container.Name.Namespace + "RolePrivilege", new XAttribute("name", privilege), new XAttribute("level", level)));
         doc.Save(path);
+    }
+
+    // ── Pinned whole privilege sets (ebilling-r1 DEF-059) ───────────────────────────────────────────────────────────────
+
+    /// <summary>Roles whose WHOLE privilege set is pinned: the role file holds exactly these entries (privilege and depth), no other
+    /// entry, and no entry twice. Spaarke Decision Record Reader gives the BFF application identity organization-wide Decision Record
+    /// read and nothing else; Create stays with the server writer (Spaarke Ontology Service), so write provenance is unchanged.</summary>
+    internal static readonly IReadOnlyDictionary<string, (string Privilege, string Depth)[]> ExactPrivilegeSets =
+        new Dictionary<string, (string Privilege, string Depth)[]>(StringComparer.Ordinal)
+        {
+            [DecisionRecordReader] = [("prvReadsprk_DecisionRecord", "Global")],
+        };
+
+    /// <summary>What differs between a role file's privilege entries and its pinned set: a count that is not the pinned count, an entry
+    /// outside the set (another privilege, or a pinned privilege at another depth), or a pinned entry that is absent.</summary>
+    internal static List<string> ExactPrivilegeSetProblems(string role, string roleXml, IReadOnlyList<(string Privilege, string Depth)> pinned)
+    {
+        var held = XDocument.Parse(roleXml).Descendants().Where(e => e.Name.LocalName == "RolePrivilege")
+            .Select(e => (Privilege: (string?)e.Attribute("name") ?? string.Empty, Depth: (string?)e.Attribute("level") ?? string.Empty))
+            .ToList();
+        bool Pinned((string Privilege, string Depth) h) => pinned.Any(p => Same(p.Privilege, h.Privilege) && Same(p.Depth, h.Depth));
+        var problems = new List<string>();
+        if (held.Count != pinned.Count)
+            problems.Add($"{role}: holds {held.Count} privilege entr{(held.Count == 1 ? "y" : "ies")}, pinned to exactly {pinned.Count}");
+        problems.AddRange(held.Where(h => !Pinned(h)).Select(h => $"{role}: holds {h.Privilege} at {h.Depth}, which is not in its pinned set"));
+        problems.AddRange(pinned.Where(p => !held.Any(h => Same(h.Privilege, p.Privilege) && Same(h.Depth, p.Depth)))
+            .Select(p => $"{role}: lacks {p.Privilege} at {p.Depth}"));
+        return problems;
+    }
+
+    [Fact(DisplayName = "DEF-059: Spaarke Decision Record Reader holds exactly one privilege, Read on sprk_decisionrecord at Global, and stays a person role for the writer-only rules")]
+    public void PinnedRolesHoldExactlyTheirSet()
+    {
+        // the pin itself is literal
+        Assert.Equal(new[] { DecisionRecordReader }, ExactPrivilegeSets.Keys);
+        Assert.Equal(new[] { ("prvReadsprk_DecisionRecord", "Global") }, ExactPrivilegeSets[DecisionRecordReader]);
+
+        foreach (var (role, pinned) in ExactPrivilegeSets)
+        {
+            Assert.Contains(RoleClasses, c => c.Role == role);
+            _ = LoadRoles(RolesDirectory, [role]); // present, parsable, names its own role
+            var problems = ExactPrivilegeSetProblems(role, File.ReadAllText(Path.Combine(RolesDirectory, role + ".xml")), pinned);
+            Assert.True(problems.Count == 0,
+                "A pinned role's privilege set changed (ebilling-r1 DEF-059). The role exists to give one read and nothing else; a change "
+                + "needs the owner's approval and unified-access-control-r2's review:\n  " + string.Join("\n  ", problems));
+        }
+
+        // Not exempt: the role is in the person-role set, so no writer-only privilege can be added to it unseen.
+        Assert.Contains(DecisionRecordReader, PersonRoles(SolutionsDirectory).Keys);
+        Assert.DoesNotContain(DecisionRecordReader, ExpectedAppUsersRoles);
+    }
+
+    [Theory(DisplayName = "DEF-059 must-fire: a seeded copy of Spaarke Decision Record Reader with an added privilege, another depth, another table, another verb, a duplicate or no grant fails the pin")]
+    [InlineData("add-baseline", "holds prvReadUser at Basic, which is not in its pinned set")]
+    [InlineData("add-signal-read", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("add-create", "holds prvCreatesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("depth-deep", "holds prvReadsprk_DecisionRecord at Deep, which is not in its pinned set")]
+    [InlineData("depth-basic", "lacks prvReadsprk_DecisionRecord at Global")]
+    [InlineData("table-signal", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("verb-write", "holds prvWritesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("duplicate", "holds 2 privilege entries, pinned to exactly 1")]
+    [InlineData("removed", "lacks prvReadsprk_DecisionRecord at Global")]
+    public void PinnedRoleSetFiresOnASeededCopy(string mutation, string expected)
+    {
+        var doc = XDocument.Parse(File.ReadAllText(Path.Combine(RolesDirectory, DecisionRecordReader + ".xml")));
+        var container = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivileges");
+        var grant = container.Elements().Single(e => e.Name.LocalName == "RolePrivilege");
+        XElement Grant(string name, string level) => new(grant.Name, new XAttribute("name", name), new XAttribute("level", level));
+        switch (mutation)
+        {
+            case "add-baseline": container.Add(Grant("prvReadUser", "Basic")); break;
+            case "add-signal-read": container.Add(Grant("prvReadsprk_Signal", "Global")); break;
+            case "add-create": container.Add(Grant("prvCreatesprk_DecisionRecord", "Global")); break;
+            case "depth-deep": grant.SetAttributeValue("level", "Deep"); break;
+            case "depth-basic": grant.SetAttributeValue("level", "Basic"); break;
+            case "table-signal": grant.SetAttributeValue("name", "prvReadsprk_Signal"); break;
+            case "verb-write": grant.SetAttributeValue("name", "prvWritesprk_DecisionRecord"); break;
+            case "duplicate": container.Add(Grant("prvReadsprk_DecisionRecord", "Global")); break;
+            case "removed": grant.Remove(); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null);
+        }
+
+        var problems = ExactPrivilegeSetProblems(DecisionRecordReader, doc.ToString(), ExactPrivilegeSets[DecisionRecordReader]);
+
+        Assert.Contains($"{DecisionRecordReader}: {expected}", problems);
+    }
+
+    [Fact(DisplayName = "DEF-059 must-not-fire: the exact set in other casing passes; must-fire: Create on a Decision Record given to the reader is also caught by the writer-only rule")]
+    public void PinnedRoleSetControls()
+    {
+        const string otherCasing = """<Role name="R"><RolePrivileges><RolePrivilege name="PRVREADSPRK_DECISIONRECORD" level="global" /></RolePrivileges></Role>""";
+        Assert.Empty(ExactPrivilegeSetProblems("R", otherCasing, [("prvReadsprk_DecisionRecord", "Global")]));
+
+        // The writer-only must-not-hold rule binds the reader too (it is a person role here, not AppUsers).
+        var real = PersonRoles(SolutionsDirectory);
+        var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(real)
+        {
+            [DecisionRecordReader] = new Dictionary<string, string>(real[DecisionRecordReader], StringComparer.OrdinalIgnoreCase) { ["prvCreatesprk_DecisionRecord"] = "Global" },
+        };
+        Assert.Empty(ForbiddenHeld(real, MustNotHold));
+        Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{DecisionRecordReader}: prvCreatesprk_DecisionRecord at Global", StringComparison.Ordinal));
     }
 
     // ── The ruled changes (task 046b) ──────────────────────────────────────────────────────────────────────────────────
