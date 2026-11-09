@@ -216,3 +216,65 @@ Client: `webApiCreateError.test.ts` (the filing code's sentence; the secure-matt
 - `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): no vulnerable packages.
 
 rework: fix-round-3 task 022 (F3 strip-branch tests; K4 copies matched on step 3; K1 filing refusal code and words; fail-closed rebuild noted; wizard Ks noted; secure-source and secure-matter refusal words)
+
+## Fix round 4 (push gate, 2026-11-09)
+
+Branch `task/fm-022-4`, from `task/fm-022-3` (3f7505c4da) with `work/field-mapping-server-write-path-r1` merged in (045b's push rework and the guard-1 fix; the merge was clean).
+
+**The rule.** Values copied from a secure source are written only into a row owned by that source's isolation owner. On the push, every value written is copied from the source, so each child is asked before anything is written to it. The predicate is `MappingSourceCopyGate.DecideAsync`, unchanged; nothing re-derives "secure".
+
+**Where (`Api/FieldMappings/FieldMappingPushSourceGate.cs`, new).**
+
+- The source's gate columns (`MappingSourceCopyGate.SourceGateColumns`: the owner, and the secure flag on a root) are read app-only, once per push, on the first child that would be written.
+- The source is first decided for a row in no isolation. A source that is not secure is allowed for every child, and no child's owner is read: an ordinary source is unchanged.
+- A secure source decides each child by the child's own owner, read app-only with the push's app-only service (the reader the update planner uses on the same child). The Secure Record owner team is `SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync`, the resolution behind the create's owner check (`_shares.SecureOwnerTeamAsync`), resolved at most once per push.
+- Answers:
+  - allowed: the child is written as before;
+  - secure, not isolated: `field_mapping.push.secure_source_not_isolated`, "Some fields weren't copied to this record because the source record is secure. Nothing was written to it.";
+  - not told (the source does not come back, its owner is missing, a read faults, the child has no owner, the Secure team is missing, ambiguous or faults): `field_mapping.push.secure_source_undetermined`, "Fields weren't copied to this record because it could not be checked whether the source record is secure. Nothing was written to it. Try again later."
+- Fail closed: a child with either code is not written at all (no partial write, no re-file, no step after the write).
+
+**Apply.** `ApplyMappingsToChildRecordsAsync` asks the gate first inside `updatePayload.Count > 0`, before the invoice-family guard, the pair planner, the filing check and the write. The child counts as failed and its entry carries `reasonCode` (new optional member of `PushFieldMappingsError`) and the fixed text. A child with nothing to write asks nothing. The route always passes the gate; a direct caller (the existing writer tests) that passes none asks no source question.
+
+**Preview.** `FieldMappingPushFamily.PreviewAsync` asks the same question for each writable child that would change. A child the apply would not write lists no value; it is returned in the preview's `errors` with its code and text.
+
+**Client (`RecordFamilyModal`).** `recordFamilyPushService.ts` reads `reasonCode` and maps both codes to their wording (`pushErrorText`, `sourceRuleSkipText`). The preview shows one warning line per code ("Some fields won't be copied to N records because the source record is secure, so they are not listed."); the apply's "Why" column shows the code's wording. A code it does not know shows the server's text.
+
+**Tests.**
+
+- `tests/unit/domain/Dataverse/FieldMapping/FieldMappingPushSourceGateTests.cs` (apply, direct): must fire — a secure matter (flagged, owned by the Secure team) and a child an ordinary team owns: skipped, the code and text, nothing written; a flagged source owned by a user and a user-owned child: skipped. Must not fire — the Secure team owns the child: written; an ordinary source: written, no child owner read; nothing to write: the gate is not asked. Fail closed — 7 faults (source read faults, source does not come back, source owner missing, child owner read faults, child owner missing, Secure team faults, Secure team ambiguous): skipped with the undetermined code, nothing written, no fault text in the entry. The source is read once for two children.
+- `FieldMappingPushFamilyContractTests` (through the route and the preview): apply from a secure source writes nothing to a user-owned child and gives the code; the preview lists no value for it and returns it with the code; an ordinary source is unchanged and reads no child owner; the preview over a secure source lists the child the Secure team owns and returns the ordinary-team child with the code.
+- `FieldMappingPushAuthorizationContractTests` / `FieldMappingPushDocumentSourceTests`: the host's fixture now states the source's owner and flag as the app-only read returns them (`ArrangeSourceGateRead`, an ordinary source by default).
+- Jest (`RecordFamilyActionPanel.test.tsx`): the preview's secure-source line and the record left out of the apply; the undetermined line with nothing to update; the apply's "Why" text for the code; the parser and the mapper (an unknown code keeps the server text).
+
+**Evidence.**
+
+- Fail-then-pass, BFF. With the gate made to allow every child (`RefusalForChildAsync` returning `null` first), the new tests and the family contract suite: **13 failed / 26 passed** of 39. The 13 are every must-fire, fault and preview case; the 4 new must-not-fire cases passed. With the gate: **39 / 39**.
+- Fail-then-pass, client. `RecordFamilyActionPanel.test.tsx` over HEAD's `recordFamilyPushService.ts` and `RecordFamilyActionPanel.tsx`: **4 failed / 43 passed**. With the change, `src/components/RecordFamilyModal`: **81 / 81 in 2 suites**.
+- Filtered BFF run (FieldMapping, PushCopyParity, MappingWriteGates, RecordCreation, ChildRecord, RegardingPair, RefileWriterBindShape, MappingSourceRule, GenericUpdatePath, AppOnlyWriter, SecureRootCreateRoute, OfficeQuickCreate, SecureRootInheritanceWriter, AssignedAccessWriterTrigger, RefilePathRestamp, WriterOnlyTables, CoreRecordPairUpdateWriter, DocumentAccessPermissionPushTarget, SecureChildOwnershipAiTool): **4369 passed, 0 failed**, 3 skipped (4372).
+- BFF build and BFF test-project build: 0 warnings, 0 errors.
+- ArchTests `RegardingPair*` and `GenericUpdatePathsPreparePair*`: **6 / 6**.
+- `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): no vulnerable packages.
+- `tsc --noEmit` (Spaarke.UI.Components): 9 errors, none in a changed file. All are in files that import `@spaarke/auth` or `@spaarke/sdap-client`, which are not built in this worktree (`AccessGrantModal/types.ts`, `document-upload/*`, `EntityCreationService.ts`, `useWizardPageBootstrap.ts`); round 1 built those packages first.
+
+**Server paths that copy field values from one record into another (the sweep).**
+
+| Path | What is copied | Under this rule |
+|---|---|---|
+| `Services/RecordCreation/RecordCreationService.Mapping.cs:274` `MapFieldsAsync` (create) | mapped business values | gated (step 3 and the owner check, rounds 2–3) |
+| `Services/RecordCreation/RecordCreationService.Repair.cs:649` `SourceMayBeCopiedAsync` (Repair) | mapped business values | gated (032b) |
+| `Api/FieldMappings/FieldMappingEndpoints.cs:1295` `ApplyMappingsToChildRecordsAsync` + `FieldMappingPushFamily.PreviewAsync` (push) | mapped business values | gated (this round) |
+| `Services/Communication/CommunicationService.cs:2976` `CopyRegardingFromSourceAsync` (reply / forward draft) | the source message's filing: regarding lookups, pair id, name, url, number, type | filing display of the record the draft is filed under; email-communication-intelligence's writer; reported |
+| `Services/Communication/CommunicationService.cs:1259` `ApplyTargetThreadAsync` (message into a thread) | the thread's regarding lookup, name, url | filing display; same project; reported |
+| `Services/Signals/Actions/DecisionActionExecutors.cs:1264` `FileUnderAsync` (a decision creates a To Do / event / work assignment) | the core's filing lookup, pair id, name, type | filing display; Signals' writer; reported |
+| `Api/Finance/InvoiceSubmissionEndpoints.cs:524` `RefileBodyAsync` | the core's lookup and resolver fields (id, name, url) | filing display; ebilling-r1's writer; reported |
+| `Infrastructure/ExternalAccess/ExternalDataService.cs` external To Do create (~:2515-2640) | the root's name, url, type into the regarding display | filing display; external access's writer; reported |
+| `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:793`, `EventEndpoints.cs:957`, `DataverseWebApiService.cs:681`, `TodoRegardingBuilder.cs` | the regarding record's name / number into the row's regarding display | filing display; reported |
+| `Services/Dataverse/CoreAncestorRestamper.cs` (`PlanStamp`, `RestampChildAsync`, `AfterWriteAsync`) and `CoreAncestorStampReconciliationJob` | the parent's core-ancestor lookups (ids only) | structural (ids); not a value copy |
+| `Services/Communication/CommunicationService.cs:2893` (association fields) | request-supplied name and url | no record read; not a copy |
+
+The mapping engine (`CreateTimeFieldMapping.ApplyFillOnly` / `ApplyCopyOverwrite`) has no caller outside create, Repair and the push, and all three are gated. Every other path copies the display of the record the target row is filed under, or ids only, and belongs to another area; none is gated here. The list is with the coordinator for those owners. (Inventory from a search-led pass; the line numbers are the methods' declarations at this branch's head.)
+
+**Scope of the gate.** The push gate decides on the owner the child holds when the push reaches it. A push that also changes the child's filing re-derives its owner in the write (`ReparentAsync`, with the secure-exit check on the caller); how the rule applies to that owner is an open owner question, raised with the coordinator.
+
+rework: fix-round-4 task 022 (push gate: the mapping-source rule on the push apply and preview, stable codes, client wording; copy-path sweep)
