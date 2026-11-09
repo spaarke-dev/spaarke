@@ -107,7 +107,8 @@ The change adds no endpoint, DI registration, package or background work.
   never says "already have the current values". The Assigned To info bar now says access can change "on records where
   these fields grant access".
 - **The invoice's `sprk_assignedto1` and `sprk_assignedto2`** are now plain data and are not display copies. A Manual
-  Refresh rule onto them would push. No seeded profile targets them.
+  Refresh rule onto them would push. No seeded profile targets them. (Superseded in part by 032b-1b: they also target
+  people, without conferring access; see `task-032b-1b-notes.md`.)
 
 ## 5. Inventory: creators with no calling user
 
