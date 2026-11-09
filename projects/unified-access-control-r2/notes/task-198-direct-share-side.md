@@ -213,7 +213,7 @@ Must-fire: an 11-case theory (each mutation of the live file yields its named fi
 - Content rows are capped at 250 per table; a capped read is logged and the outcome is incomplete.
 
 **The existing-job question: yes.** `ChildAccessPermissionReconciler`, inside `SecureChildReconciliationJob` (2-minute schedule), already keeps a communication's `sprk_accesspermission` equal to what it inherits, so it sees a root becoming Restricted. It was extended rather than a new job built:
-- When it writes Restricted on a communication, or finds a carried communication already Restricted, it calls the bar's `RemoveBarredSharesAsync`.
+- ~~When it writes Restricted on a communication, or finds a carried communication already Restricted, it calls the bar's `RemoveBarredSharesAsync`.~~ Superseded by fix round 1 R3 (§7.3): it calls the bar on EVERY communication it examines whose own (filed under nothing) or inherited value is Restricted, bounded per run.
 - An incomplete result carries the row to the next run and adds a problem line.
 - It never runs in a report-only run.
 
@@ -245,7 +245,7 @@ No follow-up job is needed.
   - the job harness registers the share seam, as the host does;
   - `LinkColumnSecurity` answers the user-flag read.
 
-**Not covered here:** a communication created directly under an already-Restricted record, with shares granted at create, is not re-filed and is not written by the job (its value is already correct). Today no create path grants a participant share on a filed communication: Part B grants only on Direct-team-owned (unfiled) messages. Part C's re-grant must not grant a barred user on a Restricted filing (use the same predicate).
+**Not covered here (corrected in fix round 1, R3, §7.3):** a communication created directly under an already-Restricted record, with shares granted at create, is not re-filed and is not written by the job (its value is already correct). ~~Today no create path grants a participant share on a filed communication: Part B grants only on Direct-team-owned (unfiled) messages.~~ **That premise was false** (adversarial review pass 1, finding 4): the record-anchored grant (`DirectThreadAccessService.GrantMessageAccessAsync`, the `AnchorRecordMembers` branch, via `ThreadMembershipDerivationService.DeriveAnchorGranteeUserIdsAsync`) grants the anchor record's members on a FILED communication at create, with no Restricted filter. R3 bars it at grant time and makes the job bar every Restricted communication it examines, so a legacy share is removed by the sweep. Part C's re-grant must not grant a barred user on a Restricted filing (use the same predicate).
 ## §6 Secure owner-team accent fix (Q6, F1)
 
 **Rule:** whether a team can be the Secure Record owner team is decided by Dataverse's own `name` match, never by a name comparison in code. Dataverse's `name eq` ignores case and accents, so a code comparison (ordinal or `OrdinalIgnoreCase`) can answer "another name" for the team Dataverse matches.
@@ -419,6 +419,48 @@ Adversarial review pass 1; coordinator rulings 2026-11-09. R2 (the participant s
 - Full `Spaarke.ArchTests`: 2119 passed.
 - BFF build: 0 warnings, 0 errors.
 
+### §7.3 Fix round 1, R3 (the Restricted bar's durability and the record-anchored grant)
+
+Adversarial review pass 1, findings 3, 4 and 9; coordinator rulings 2026-11-09.
+
+**Findings:**
+- **3 (F):** a re-file whose bar did not finish was never retried. `SecureChildReconciler.AfterRefileCoreAsync` discarded `AfterFilingAsync`'s outcome, and the re-file writer stamps Restricted BEFORE the after-filing step, so the job found the stored value equal to the inherited one and barred only ids it carried itself (in memory, lost on a restart).
+- **4 (F):** the record-anchored grant (`AnchorRecordMembers`) granted anchor members with no Restricted filter. A message created under an already-Restricted record is stamped at create, never re-filed, and its value never changes, so no bar ever ran. (The §5 premise "no create path grants a participant share on a filed communication" was false; corrected there.)
+- **9 (K, covered here):** a message whose OWN value becomes Restricted (filed under nothing) was never barred: the job skips parentless rows.
+
+**Ruling 1 — the job is the durable backstop.** `ChildAccessPermissionReconciler` runs the bar (`RestrictedFilingShareBar.RemoveBarredSharesAsync`) on EVERY communication a writing run examines whose value is Restricted: inherited through its filing (the same `InheritedAccessPermission.ResolveAsync` over the run's `ParentLineageWalk` the bar uses; written now, already stored, deferred by the write cap, or a failed write), or its own stored value when it is filed under nothing. Changed-since rows, their descendants, carried rows and sweep rows alike. Undetermined rows are not barred (they are carried, as before). A row the bar does not finish is carried; after a restart the new instance's sweep finds it again.
+- "Own" means a parentless row's stored value. A filed communication's value is the copy of what it inherits (round 81), so a filed row whose stored value is Restricted but whose inheritance is not is NOT barred (the job writes its inherited value).
+- **Bounds (kept, and applied to the bar):** at most `maxWrites` bar calls per run (`SecureChild:Reconciliation:MaxAccessPermissionWritesPerRun`, default 500), counted apart from the writes. Rows are taken in this order: written to Restricted this run (never more than `maxWrites`, so never capped), carried, listed as changed, from the sweep, then rows listed only because something above them changed. Past the budget: a warning log and a problem line; capped rows of the first four kinds are carried while the carry stays under `MaxCarriedRows` (carried ones always); the last kind, and any past the carry cap, are counted as `left` and are barred at their next listing (their own change, a parent's change, or the sweep a restart begins). The bar never pushes the carry over its cap by itself, so it never holds the watermark; this avoids a livelock in which a large Restricted matter that keeps changing re-lists the same descendants every run. `ResultJson.accessPermission.restrictedBar` reports `ran`, `incomplete`, `capped`, `left`, `capReached`; the run log line has the same fields. The run's `Success` is unchanged by the bar.
+- `SecureChildReconciler.AfterRefileCoreAsync` now logs a Warning when the re-file's bar does not finish (it still does not retry; the job does).
+
+**Ruling 2 — the grant-time bar (coordinator ruling, a deliberate narrowing of AC6).** In `DirectThreadAccessService.GrantMessageAccessAsync`, the `AnchorRecordMembers` branch clears the derived grantees through `ClearAnchorGranteesAsync`:
+- New `RestrictedFilingShareBar.RestrictedForGrantAsync` (the private `TargetIsRestrictedAsync` with `includeOwnValue: true`, the same rule `EligibleForGrantAsync` applies). `false` → every grantee, exactly as before, and no user is read.
+- `true` or `null` (undecidable) → `RestrictedFilingShareBar.EligibleForGrantAsync` (the one predicate, `InternalShareEndpoints.IsBarredOnRestricted`): a user flagged external is not granted; internal and blank-flag users are. Undecidable: flagged-external not granted, internal granted.
+- The Restricted invariant wins over AC6 here (owner rounds 67/76). Every other record-anchored behaviour is unchanged: the Direct branch, the per-user master thread, secure messages, the team skip, the gate-record mirror.
+- **Residual, reported:** `EligibleForGrantAsync` is fail closed on the user read. On a Restricted (or undecidable) filing, a user-flag read that faults grants NOBODY, and a grantee the read does not return (for example a disabled user, if the read filters them) is not granted. No job re-grants record-anchored members, so that internal user misses the share until something else grants it. This is limited to Restricted or undecidable filings under a read fault; on any other filing nothing is read and nothing changes.
+- Test compositions that build `DirectThreadAccessService` by hand now pass the user reader and the core-ancestor resolver the host always injects (`DirectThreadAccessServiceTests.BuildSut`/`RealDerivationSut`, `SecureChildShareMirrorTests.MessageAccess`, `SecureChildOwnershipAiToolTests.RefileThreadCaller`). No assertion changed. Without the probe the filing is undecidable, and without the reader nobody can be cleared, so those compositions granted nobody (19 failures) until they matched the host.
+
+**§11:** `RestrictedForGrantAsync` is new surface in an existing class. (1) *Existing:* `EligibleForGrantAsync` and the private `TargetIsRestrictedAsync`. (2) *Extension:* it exposes the private check with the own value included, so the anchor grant can skip the user read on a non-Restricted filing; `EligibleForGrantAsync` reads users first, which would change behaviour for internal users on non-Restricted filings under a read fault. (3) *Cost of doing nothing:* the anchor grant could not keep AC6 exact on non-Restricted filings. The run fields and the result-JSON object extend existing reports.
+
+**Tests:**
+- `RestrictedFilingShareBarTests` (through the real re-file step and the real `SecureChildReconciliationJob`, a NEW instance per call = a restart):
+  - must-fire: re-file with a user-read fault → nothing removed → restart → the sweep removes it (value already stored, no write); an unread user left at the re-file → restart → removed once it reads external (ruling 3: both "next pass" tests now drive the real job); a message under an already-Restricted record → the external anchor member is not granted (inherited, and own value stamped at create); a legacy external share under an already-Restricted record → removed by the sweep.
+  - must-not-fire: internal and blank-flag users keep everything on a Restricted filing (job); a Standard filing grants every anchor member, the external one included, and reads no user (AC6); a Secure message under a Standard root: the bar does not run.
+  - fail closed: the filing cannot be read → the external member is not granted, the internal one is.
+- `ChildAccessPermissionReconcileTests.Task198`: finding 9 (a parentless message with its own value Restricted → removed by the sweep, nothing written); must-not-fire (parentless Standard keeps the external share); bounds (write cap 2, five Restricted messages: 2 barred, 3 capped and carried with a problem line, then 2, then 1; every share removed; nothing written).
+- **Fail-first** (on the tests commit `191a85e7e3`, with the two new call sites disabled: the reconciler's bar selection reverted to "written or carried" and `ClearAnchorGranteesAsync` returning the grantees unchanged): 9 of the 10 new or changed R3 tests failed. These were all 8 must-fire tests (restart after a user-read fault, restart after an unread user, the legacy share removed by the sweep, grant time inherited, grant time own value, grant time undecidable, finding 9, bounds), plus the job's internal-keep test, which also asserts that the bar ran once. The must-not-fire pins passed both ways: AC6 with no user read, a Secure Standard message not barred, and a parentless Standard message kept. All Part D tests passed too. The source was restored to the commit.
+
+**Counts** (base `fba722b868` → after):
+
+| Run | Before | After |
+|---|---|---|
+| Brief filter `DirectMessageOwnerTeam\|DirectThreadAccess\|RestrictedFilingShareBar\|SecureChild\|SecureOwnerTeamNameMatch\|ThreadResolver\|ChildAccessPermission\|DirectMessageParticipantShares` | 2902 (derived: after − 10 new) | 2912/2912 |
+| The same plus `MembershipReconcile` (the §7.1/§7.2 filter; the brief's "2916") | 2916 | 2926/2926 |
+| `tests/Spaarke.ArchTests` (full) | 2119 | 2119/2119 |
+| BFF build | 0 warnings | 0 warnings, 0 errors |
+
+Before the test compositions matched the host, the brief filter showed 19 failures. All were record-anchored grants in hand-built compositions with no probe and no user reader (see ruling 2).
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
@@ -434,7 +476,7 @@ Adversarial review pass 1; coordinator rulings 2026-11-09. R2 (the participant s
 
 **Part C open (coordinator):**
 - **C-a:** a secure exit to an ORDINARY record (not back to the Direct team) is not re-granted to the participants. Re-deriving them there would trust the message's thread lookup on a row the record team's members can write. Only an unfile or a secure exit back to the Direct team is covered.
-- **C-b (rule 6 vs AC6):** the record-anchored anchor-grantee grant path does not apply the Restricted bar. Adding it changes record-anchored behaviour (AC6), so it is left for a ruling. Part D removes a barred share on filing and on the job's Restricted pass.
+- **C-b (rule 6 vs AC6): resolved by coordinator ruling (fix round 1, R3, §7.3).** The earlier text said the record-anchored grant path was left without the Restricted bar for a ruling, and that Part D covered it on filing and on the job's Restricted pass. The second half was wrong: a message created under an already-Restricted record is never re-filed and its value never changes, so neither Part D path reached it (finding 4). Ruling: the record-anchored grant applies the bar AT GRANT TIME (a user flagged external is not granted on a Restricted filing, own or inherited; undecidable: flagged-external not granted, internal granted as before). This is a deliberate narrowing of AC6: the Restricted invariant wins (owner rounds 67/76). Every other record-anchored behaviour is unchanged.
 - **C-c (residual):** a writer of a FILED message could change its thread lookup before an unfile; after the unfile, that thread's participants are granted. This sits in fm's owner rule area (who may write a filed message's thread lookup).
 - **C-d (throughput):** roughly 6–10 reads per message; at most 200 messages per run (2-minute schedule). A large backlog drains over several runs, each logged.
 
