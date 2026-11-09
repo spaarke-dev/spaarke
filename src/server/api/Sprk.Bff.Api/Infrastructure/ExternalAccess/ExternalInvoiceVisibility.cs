@@ -110,6 +110,16 @@ internal static class ExternalInvoiceVisibility
     internal static bool IsInvoiceFamilyTable(string? logicalName) =>
         logicalName is not null && FamilyTables.ContainsKey(logicalName);
 
+    /// <summary>
+    /// Task 130-0b step 2: a CHILD table with an invoice link (<see cref="InvoiceLinks.Tables"/>, derived from the registries): not a
+    /// root (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; a root is never hidden by its invoice link) and not in the invoice family
+    /// (<see cref="FamilyTables"/>, which keeps its own path). A row of such a table is hidden when any invoice it links to is.
+    /// </summary>
+    internal static bool IsInvoiceLinkedChildTable(string? logicalName) =>
+        InvoiceLinks.HasInvoiceLink(logicalName)
+        && !InvoiceLinks.IsRootWithInvoiceLink(logicalName)
+        && !IsInvoiceFamilyTable(logicalName);
+
     /// <summary>The columns a source document is read with: 188's narrowing columns, the marker, the root links and the
     /// live-parent lookups (whose live roots join the roots term).</summary>
     internal static IReadOnlyList<string> SourceSelectColumns { get; } =
@@ -1213,6 +1223,11 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
 /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. <paramref name="caller"/> is the tool call's caller
 /// (<see cref="InvoiceFamilyCaller"/>, one per tool call), whose firms are read at most once for every call of the seam in that
 /// tool call. No firm, or firms that cannot be read, hide every asked row.
+/// Task 130-0b step 2: <paramref name="table"/> may also be a CHILD table with an invoice link
+/// (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>: a to-do, event, document, communication, analysis, memo...).
+/// Such a row is hidden when ANY invoice it links to is not visible (the same invoice decision, with the caller's firms) or cannot be
+/// decided; a row with no invoice link is not hidden. On a child table a fault does not throw: a failed link read hides every asked
+/// row, and a failed decision (or firms that cannot be read) hides every asked row that links to an invoice.
 /// </summary>
 public delegate Task<IReadOnlySet<Guid>> AppOnlyInvoiceFamilyHiding(
     InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, CancellationToken ct);

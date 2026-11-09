@@ -41,7 +41,7 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     private readonly AppOnlyDocumentWorld _appOnly = new();
 
     /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
-    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.ChildTablesShown;
 
     public DataverseSearchDataHandlerTests()
     {
@@ -570,6 +570,162 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         firms.FirmReads.Should().Be(0);
         firms.MembershipReads.Should().Be(0);
         firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only read");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b step 2: a CHILD hit is decided by the invoices it links to (InvoiceLinks)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The search returns a matter hit and one hit per entry of <paramref name="hits"/>, and every other guard on those tables passes: a
+    /// document is visible to the document predicate (app-only), an analysis has no source document.
+    /// </summary>
+    private void ArrangeLinkedHits(params (Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase Linked, Guid Id)[] hits)
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(hits.Select(h => (h.Linked.Table, h.Id)).ToArray()))));
+        foreach (var (linked, id) in hits.Where(h => h.Linked.Table == "sprk_document"))
+            _appOnly.Document(id);
+        var analyses = hits.Where(h => h.Linked.Table == "sprk_analysis").Select(h => h.Id).ToList();
+        if (analyses.Count > 0)
+        {
+            _dataverse
+                .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises?")), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"value\": [ "
+                    + string.Join(", ", analyses.Select(id => "{ \"sprk_analysisid\": \"" + id.ToString("D") + "\" }")) + " ] }")));
+        }
+    }
+
+    private static List<string> ResultIds(ToolResult result) =>
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString()!).ToList();
+
+    [Theory(DisplayName = "130-0b step 2 search_data must fire: a child hit linked to another firm's invoice is hidden")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildHitOfAnotherFirmsInvoice_IsHidden(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeLinkedHits((linked, row));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 2 search_data must not fire: a child hit linked to the caller's own firm's invoice is shown")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildHitOfTheCallersOwnInvoice_IsShown(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        ArrangeLinkedHits((linked, row));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(MatterHit.ToString("D"), row.ToString("D"));
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 2 search_data must not fire: a child hit with no invoice link is shown, and no firm is read")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildHitWithNoInvoiceLink_IsShown(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.UnlinkedRow(linked);
+        ArrangeLinkedHits((linked, row));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(MatterHit.ToString("D"), row.ToString("D"));
+        firms.FirmReads.Should().Be(0, "no hit links to an invoice, so no firm is needed");
+    }
+
+    [Theory(DisplayName = "130-0b step 2 search_data fault: a failed link read hides every hit of the table; a failed decision hides every invoice-linked hit")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeysAndFaults), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AFault_HidesEveryInvoiceLinkedHit(string key, string fault)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        var unlinked = firms.UnlinkedRow(linked);
+        ArrangeLinkedHits((linked, own), (linked, unlinked));
+        firms.Fail(linked, fault);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(fault == "decision"
+            ? new[] { MatterHit.ToString("D"), unlinked.ToString("D") }
+            : new[] { MatterHit.ToString("D") }, "a link read that fails cannot tell an unlinked hit from a linked one (fail closed)");
+    }
+
+    [Fact(DisplayName = "130-0b step 2 search_data: a root (work assignment) hit is unchanged in this step (the seam is not called)")]
+    public async Task ExecuteChatAsync_Task130_0b_S2_ARootHit_IsUnchanged()
+    {
+        AsExternalCaller();
+        var root = Guid.NewGuid();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_workassignment", root)))));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(MatterHit.ToString("D"), root.ToString("D"));
+    }
+
+    [Fact(DisplayName = "130-0b step 2 search_data: the caller's firms are read exactly once per tool call, across invoice-family and child tables on the page")]
+    public async Task ExecuteChatAsync_Task130_0b_S2_TheCallersFirmsAreReadOncePerToolCall()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var todo = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo"), invoice);
+        var document = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("document-relatedinvoice"), invoice);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(
+            ("sprk_invoice", invoice), ("sprk_todo", todo), ("sprk_document", document)))));
+        _appOnly.Document(document);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice", "sprk_todo", "sprk_document");
+        firms.FirmReads.Should().Be(1, "three seam calls in one tool call share one caller");
+        firms.MembershipReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 2 search_data: an internal systemuser's child hits are unchanged, and no link or firm is read")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AnInternalCaller_IsUnchanged_AndReadsNoLinkOrFirm(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeLinkedHits((linked, row));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(MatterHit.ToString("D"), row.ToString("D"));
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only link read");
     }
 
     [Fact]

@@ -144,6 +144,7 @@ public static class ExternalAccessModule
                 caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
         // Task 130-0b (design.md:414): with the firms of the tool call's systemuser, through the same contact-keyed core
         // (ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync), read at most once per tool call (InvoiceFamilyCaller).
+        // Step 2: the same seam also decides rows of a child table with an invoice link (InvoiceLinks), by the invoices they link to.
         services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
             (caller, table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
                 caller, table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,

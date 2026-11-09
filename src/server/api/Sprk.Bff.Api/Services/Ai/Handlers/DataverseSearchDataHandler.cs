@@ -294,6 +294,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var hiddenDocumentIds = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
             var hiddenInvoiceFamilyRows = 0;
+            var hiddenInvoiceLinkedRows = 0;
             DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
@@ -357,8 +358,11 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 // ebilling-r1 task 098 ((a')): for an external caller, an invoice-family hit whose invoice the predicate hides
                 // (or cannot decide) is dropped silently. One hide-only app-only call per family table on the page; a fault
                 // throws into the error result below (no data).
+                // Task 130-0b step 2: a hit on a CHILD table with an invoice link (to-do, event, document, analysis, memo...) goes
+                // through the same seam, which hides it when any invoice it links to is hidden (a fault there hides, never throws).
                 var hiddenFamily = new Dictionary<string, IReadOnlySet<Guid>>(StringComparer.OrdinalIgnoreCase);
-                var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)).ToList();
+                var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)
+                    || ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(h.EntityName)).ToList();
                 if (familyHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
                     // Task 130-0b: one caller for the tool call, so the caller's firms are read once for every family table.
@@ -374,7 +378,10 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 {
                     if (hiddenFamily.TryGetValue(entityName, out var hiddenRows) && hiddenRows.Contains(recordId))
                     {
-                        hiddenInvoiceFamilyRows++;
+                        if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(entityName))
+                            hiddenInvoiceLinkedRows++;
+                        else
+                            hiddenInvoiceFamilyRows++;
                         continue;
                     }
 
@@ -451,6 +458,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 _logger.LogInformation(
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     "invoice-family", $"invoice_hidden={hiddenInvoiceFamilyRows}", context.DecisionId);
+            }
+            if (hiddenInvoiceLinkedRows > 0)
+            {
+                // ADR-015: a reason code and a count only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "invoice-linked", $"invoice_hidden={hiddenInvoiceLinkedRows}", context.DecisionId);
             }
             if (hiddenDerivedSources.Count > 0)
             {

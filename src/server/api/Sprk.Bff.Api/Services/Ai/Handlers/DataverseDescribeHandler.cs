@@ -376,16 +376,26 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         var guardDocument = false;
         var guardDerived = false;
         var guardInvoice = false;
+        var guardInvoiceLinks = false;
         // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
         InvoiceFamilyCaller? familyCaller = null;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName) ||
-             ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName)) &&
+             ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName) ||
+             ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(logicalName)) &&
             await CallerExternality.ClassifyCallerAsync(
                 _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, ct).ConfigureAwait(false)
                 is { IsExternal: true } verdict)
         {
+            // Task 130-0b step 2: a record of a CHILD table with an invoice link (to-do, event, document, communication, analysis,
+            // memo...) is ALSO decided by the invoices it links to, through the same seam, on top of any guard below.
+            if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(logicalName))
+            {
+                guardInvoiceLinks = true;
+                familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
+            }
+
             if (ExternalCallerCommunicationGuard.IsDocumentTable(logicalName))
             {
                 guardDocument = true;
@@ -401,17 +411,17 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                 guardInvoice = true;
                 familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
             }
-            else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
+            else if (ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
+            {
+                guardCommunication = true;
+            }
+            else if (ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName))
             {
                 _logger.LogInformation(
                     "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
                     logicalName, "family_table_refused");
                 return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
                     DataverseUserClientErrorCodes.AccessDenied, startedAt);
-            }
-            else
-            {
-                guardCommunication = true;
             }
         }
 
@@ -435,7 +445,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         {
             // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
             // record below, so the answer never tells an external caller that a hidden record exists.
-            if ((guardCommunication || guardDocument || guardDerived || guardInvoice) &&
+            if ((guardCommunication || guardDocument || guardDerived || guardInvoice || guardInvoiceLinks) &&
                 recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
             {
                 return RecordNotVisible(tool, startedAt);
@@ -490,6 +500,19 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                     logicalName, "record_hidden");
                 return RecordNotVisible(tool, startedAt);
             }
+        }
+
+        // Task 130-0b step 2: a record of a child table with an invoice link is hidden when any invoice it links to is hidden or
+        // cannot be decided; the hide-only seam reads its links and the decision app-only by id (a fault there hides). A hidden
+        // record answers exactly as a hidden invoice-family record above.
+        if (guardInvoiceLinks &&
+            (await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), logicalName, new[] { recordId }, ct).ConfigureAwait(false))
+                .Contains(recordId))
+        {
+            _logger.LogInformation(
+                "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
+                logicalName, "record_hidden");
+            return RecordNotVisible(tool, startedAt);
         }
 
         // Strip OData annotations; keep business columns.

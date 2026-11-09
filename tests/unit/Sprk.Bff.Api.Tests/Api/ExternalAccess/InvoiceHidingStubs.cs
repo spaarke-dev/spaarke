@@ -67,6 +67,18 @@ internal static class InvoiceFamilyHidingStubs
     public static AppOnlyInvoiceFamilyHiding NeverCalled { get; } = (_, _, _, _) =>
         throw new InvalidOperationException("The invoice-family hiding was not expected to run (test).");
 
+    /// <summary>
+    /// Task 130-0b step 2: the handler tests' default. An invoice-family table may not reach the seam (any call fails, as
+    /// <see cref="NeverCalled"/>); a CHILD table with an invoice link (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>)
+    /// now does for every external caller, and here hides nothing, so a test about another guard on a document, analysis or
+    /// communication is unchanged. The step 2 tests set the real seam (<see cref="InvoiceFamilyFirmWorld.Seam"/>) or
+    /// <see cref="NeverCalled"/> explicitly.
+    /// </summary>
+    public static AppOnlyInvoiceFamilyHiding ChildTablesShown { get; } = (_, table, _, _) =>
+        ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table)
+            ? Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>())
+            : throw new InvalidOperationException("The invoice-family hiding was not expected to run (test).");
+
     /// <summary>Hides exactly <paramref name="rows"/> (of any table); records each call as "table:count".</summary>
     public static AppOnlyInvoiceFamilyHiding Hiding(List<string>? calls, params Guid[] rows)
     {
@@ -185,6 +197,27 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
         return submission;
     }
 
+    // ── Task 130-0b step 2: child rows with an invoice link ────────────────────────────────────────────────────────────
+
+    /// <summary>A row of <paramref name="linked"/>'s table whose link column names <paramref name="invoice"/> (a GUID, or raw text).</summary>
+    public Guid LinkedRow(InvoiceLinkedCase linked, object invoice) =>
+        World.LinkedChildRow(linked.Table, (linked.LinkColumn, invoice));
+
+    /// <summary>A row of <paramref name="linked"/>'s table with no invoice link.</summary>
+    public Guid UnlinkedRow(InvoiceLinkedCase linked) => World.LinkedChildRow(linked.Table);
+
+    /// <summary>
+    /// The fault <paramref name="kind"/>: "link-read" (the app-only read of the table's invoice links fails) or "decision" (the invoice
+    /// decision's Stored File read fails, after the links and the firm hold are read).
+    /// </summary>
+    public void Fail(InvoiceLinkedCase linked, string kind) =>
+        World.Faults[kind switch
+        {
+            "link-read" => linked.EntitySet,
+            "decision" => "sprk_storedfiles",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown fault (test)."),
+        }] = System.Net.HttpStatusCode.InternalServerError;
+
     /// <summary>The seam <c>AddExternalAccess</c> registers, resolved from one provider over this world.</summary>
     public AppOnlyInvoiceFamilyHiding Seam
     {
@@ -224,5 +257,67 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
             await scope.DisposeAsync();
         if (_provider is not null)
             await _provider.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// Task 130-0b step 2: one class of CHILD row with an invoice link, as the handler tests name it: its table and the one link column
+/// the test sets (a document twice: through <c>sprk_invoice</c> and through <c>sprk_relatedinvoice</c>). The read shape comes from
+/// <see cref="InvoiceLinks.Tables"/>, never from the test.
+/// </summary>
+internal sealed record InvoiceLinkedCase(string Key, string Table, string LinkColumn)
+{
+    /// <summary>Every class: to-do, event, document (both links), communication, analysis, memo.</summary>
+    public static IReadOnlyList<InvoiceLinkedCase> All { get; } = new InvoiceLinkedCase[]
+    {
+        new("todo", "sprk_todo", "sprk_regardinginvoice"),
+        new("event", "sprk_event", "sprk_regardinginvoice"),
+        new("document-invoice", "sprk_document", "sprk_invoice"),
+        new("document-relatedinvoice", "sprk_document", "sprk_relatedinvoice"),
+        new("communication", "sprk_communication", "sprk_regardinginvoice"),
+        new("analysis", "sprk_analysis", "sprk_regardinginvoice"),
+        new("memo", "sprk_memo", "sprk_regardinginvoice"),
+    };
+
+    /// <summary>The class named <paramref name="key"/>.</summary>
+    public static InvoiceLinkedCase Of(string key) => All.Single(c => c.Key == key);
+
+    /// <summary>Every class's key (the tools that can return every class: read_query and describe).</summary>
+    public static TheoryData<string> Keys => Data(All);
+
+    /// <summary>
+    /// Every class but the communication: search_data drops every communication-family hit for an external caller (ISS-010) before any
+    /// invoice rule, so it never returns one.
+    /// </summary>
+    public static TheoryData<string> SearchableKeys => Data(All.Where(c => c.Table != "sprk_communication"));
+
+    /// <summary>Every class crossed with each fault ("link-read", "decision").</summary>
+    public static TheoryData<string, string> KeysAndFaults => Faults(All);
+
+    /// <summary><see cref="SearchableKeys"/> crossed with each fault.</summary>
+    public static TheoryData<string, string> SearchableKeysAndFaults => Faults(All.Where(c => c.Table != "sprk_communication"));
+
+    public string EntitySet => InvoiceLinks.Tables[Table].EntitySet!;
+
+    public string IdColumn => InvoiceLinks.Tables[Table].IdColumn;
+
+    private static TheoryData<string> Data(IEnumerable<InvoiceLinkedCase> cases)
+    {
+        var data = new TheoryData<string>();
+        foreach (var c in cases)
+            data.Add(c.Key);
+        return data;
+    }
+
+    private static TheoryData<string, string> Faults(IEnumerable<InvoiceLinkedCase> cases)
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var c in cases)
+        {
+            data.Add(c.Key, "link-read");
+            data.Add(c.Key, "decision");
+        }
+
+        return data;
     }
 }

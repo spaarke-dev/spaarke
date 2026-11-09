@@ -2029,6 +2029,24 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public void SetStoredFile(Guid id, string column, object? value) =>
         SetRow("sprk_storedfiles", "sprk_storedfileid", id, column, value);
 
+    /// <summary>
+    /// Task 130-0b step 2: a row of a CHILD table with an invoice link (<see cref="InvoiceLinks.Tables"/>), read by the seam app-only,
+    /// with each named link column (logical name, written as <c>_col_value</c>) set to its value as text (a GUID, or any raw text);
+    /// every other link column is unset. Returns its id.
+    /// </summary>
+    public Guid LinkedChildRow(string table, params (string Column, object? Value)[] links)
+    {
+        var linked = InvoiceLinks.Tables[table];
+        var id = Guid.NewGuid();
+        var row = new Dictionary<string, object?> { [linked.IdColumn] = id.ToString() };
+        foreach (var column in linked.LinkColumns)
+            row[$"_{column}_value"] = null;
+        foreach (var (column, value) in links)
+            row[$"_{column}_value"] = value?.ToString();
+        Seed(linked.EntitySet!, row);
+        return id;
+    }
+
     /// <summary>Sets <paramref name="column"/> on the row <paramref name="id"/> of <paramref name="set"/>.</summary>
     public void SetRow(string set, string idColumn, Guid id, string column, object? value)
     {

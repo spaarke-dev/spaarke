@@ -2024,6 +2024,8 @@ public class ExternalDataService
     /// own-firms rule (the firm hold decides first, firm_missing; then firm_not_callers; a submission row is also hidden when its own
     /// firm is not one of the caller's). A caller with no firm, and firms that cannot be read (a throw, a null answer,
     /// <see cref="CallerFirmsState.Unknown"/>), hide every asked row, with no row read.
+    /// Task 130-0b step 2: rows of a CHILD table with an invoice link go to <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by
+    /// the invoices they link to; a fault there hides rather than throws).
     /// </summary>
     internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
         InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags,
@@ -2036,6 +2038,11 @@ public class ExternalDataService
         var asked = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (asked.Count == 0)
             return new HashSet<Guid>();
+
+        // Task 130-0b step 2: a child row with an invoice link (to-do, event, document, communication, analysis, memo...) is decided by
+        // its invoices; it does not take the family path below.
+        if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table))
+            return await HideInvoiceLinkedChildRowsAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
 
         var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
             .ConfigureAwait(false);
@@ -2052,6 +2059,85 @@ public class ExternalDataService
         _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
             AssistantPlane, table, asked.Count, hidden.Count);
         return hidden;
+    }
+
+    /// <summary>
+    /// Task 130-0b step 2 (design.md:414): of <paramref name="asked"/> (rows of a CHILD table with an invoice link,
+    /// <see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>), the rows hidden because an invoice they link to is. The links
+    /// are read app-only through <see cref="InvoiceLinks.ReadLinkedInvoicesAsync"/> (one read per chunk); then ONE invoice decision over
+    /// the union of the linked invoices, with the caller's firms from <paramref name="caller"/> (the same decision as
+    /// <see cref="HideInvoicesForAsync"/>: firm hold, firm_not_callers, (a′)). A row is hidden when ANY linked invoice is not visible or
+    /// cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>); a row with no invoice link is not hidden, and the firms
+    /// are not read when no asked row has one. Fail closed without throwing: a failed link read hides every asked row (which of them link
+    /// to an invoice is unknown); firms that are not known, and a failed or faulted decision, hide every asked row that links to one.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> linksOf;
+        try
+        {
+            linksOf = await InvoiceLinks.ReadLinkedInvoicesAsync(table, asked, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The invoice links of {Count} {Table} row(s) could not be read. Failing CLOSED: every one is hidden (plane={Plane}).",
+                asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        var linked = linksOf.Where(kv => kv.Value.Count > 0).ToList();
+        if (linked.Count == 0)
+            return new HashSet<Guid>();
+        var linkedRows = linked.Select(kv => kv.Key).ToHashSet();
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} invoice-linked {Table} row(s) hidden (plane={Plane}).",
+                firms.State, linkedRows.Count, table, AssistantPlane);
+            return linkedRows;
+        }
+
+        var invoices = linked.SelectMany(kv => kv.Value).Where(id => id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
+        InvoiceVisibilityResult? decision = null;
+        if (invoices.Count > 0)
+        {
+            try
+            {
+                decision = await ExternalInvoiceVisibility.DecideAsync(invoices, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[EXT-INVOICE-VISIBILITY] The decision for {Count} invoice(s) linked from {Table} failed. Failing CLOSED: every invoice-linked row is hidden (plane={Plane}).",
+                    invoices.Count, table, AssistantPlane);
+                return linkedRows;
+            }
+
+            LogInvoiceVisibilityCost(AssistantPlane, invoices.Count, decision);
+            if (decision.Faulted)
+                return linkedRows;
+        }
+
+        return linked
+            .Where(kv => kv.Value.Any(invoice => invoice == ExternalDocumentNarrowing.UnreadableLink
+                || decision is null || !decision.IsVisible(invoice)))
+            .Select(kv => kv.Key)
+            .ToHashSet();
     }
 
     /// <summary>
