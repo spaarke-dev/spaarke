@@ -47,7 +47,7 @@ public class ExternalInvoiceVisibilityGuardTests
     /// <summary>External-plane types outside those namespaces, by name (they need not exist yet), with their owning task.</summary>
     private static readonly IReadOnlyDictionary<string, string> NamedExternalTypes = new Dictionary<string, string>
     {
-        ["Sprk.Bff.Api.Api.Finance.FirmOutcomeEndpoints"] = "ebilling-r1 task 130: the firm findings routes (external).",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints"] = "ebilling-r1 task 130: the firm findings routes (external).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection"] = "ebilling-r1 task 130: the firm-visible findings projection.",
     };
 
@@ -119,7 +119,8 @@ public class ExternalInvoiceVisibilityGuardTests
             + "(ExternalInvoiceHiding) to this one invoice and fails closed: asking it again here would double the reads for the same answer.",
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetSubmissionOutcomeAsync"] =
             "Reviewed 130b. As GetInvoiceOutcomeAsync, for the submission id the filter admitted after ExternalInvoiceSubmissionEndpoints."
-            + "VisibleSubmissionsAsync (the submission seam, which also decides the submission's own invoice).",
+            + "VisibleSubmissionsAsync (the submission seam) AND, once the submission's derived invoice exists, after the same invoice decision "
+            + "the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1).",
         // The projection is the reader BEHIND those two handlers. It takes an id and returns what a firm may see (ADR-008: it makes no
         // caller decision); its only external caller is FirmOutcomeEndpoints, and no other route may use it without the same filter
         // (the ratchet: a method here that starts reaching the predicate, or stops being a surface, is removed).
@@ -130,7 +131,8 @@ public class ExternalInvoiceVisibilityGuardTests
             + "which applied the (a') predicate to it. Fails closed (a fault is a status-only Degraded outcome).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForSubmissionAsync"] =
             "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetSubmissionOutcomeAsync: the submission id was admitted by the route's filter "
-            + "(the submission seam). It reads the submission's own invoice only when the submission is Accepted; the seam decided that invoice too.",
+            + "(the submission seam). It reads the submission's derived invoice (its billed total while Received or Processing, its outcome once "
+            + "Accepted); the filter decided that invoice exactly as the invoice route does (fix round 1).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSubmissionAsync"] =
             "Reviewed 130b. Reads the status of the submission GetForSubmissionAsync was given (already admitted); returns its processing status and tracking number only.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildItemsAsync"] =
@@ -146,7 +148,7 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Cite"] =
             "Reviewed 130b. A private helper shaping a citation from rows already read; no read.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Excerpt"] =
-            "Reviewed 130b. A private helper trimming a clause excerpt; no read.",
+            "Reviewed 130b. An internal static helper trimming the line description to the excerpt a firm sees; no read.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::RuleRead"] =
             "Reviewed 130b. A private record of a rule's name and number; no read.",
     };
@@ -262,7 +264,7 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.False(NamesAFamilyTable("sprk_documents"));
     }
 
-    // ── The 093 / 130 / 152 entries (not on this branch): named so they fail until they reach the predicate ─────────────
+    // ── The 093 / 152 entries (not on this branch): named so they fail until they reach the predicate (130 landed in 130b) ───
 
     /// <summary>
     /// The model 9.1 surfaces later tasks build, each with what makes the guard see it. They are not on this branch; when they
@@ -273,26 +275,26 @@ public class ExternalInvoiceVisibilityGuardTests
     {
         ["093"] = "The firm file routes (GET /api/v1/external/invoices/{id}/files and …/content) in ExternalInvoiceSubmissionEndpoints / "
             + "ExternalInvoiceSubmissionAuthorizationFilter: external-plane namespace; they read sprk_storedfile through StoredFileService.",
-        ["130"] = "The firm findings projection (FirmFindingsProjection, FirmOutcomeEndpoints): named external types; they read "
-            + "sprk_signal / sprk_decisionrecord.",
         ["152"] = "External invoice-index retrieval: InvoiceSearchService is a family reader; a call from the external plane is a surface.",
     };
 
-    [Fact(DisplayName = "Task 098: the 093, 130 and 152 surfaces are covered by the guard's primitives before they land")]
+    [Fact(DisplayName = "Task 098: the 093 and 152 surfaces are covered by the guard's primitives before they land")]
     public void TheLaterSurfaces_AreCoveredByThePrimitives()
     {
-        Assert.Equal(new[] { "093", "130", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "093", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("Sprk.Bff.Api.Services.Finance.Files.StoredFileService", FamilyReaderTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Services.Finance.InvoiceSearchService", FamilyReaderTypes.Keys);
         Assert.Contains(typeof(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService), FamilyReaderInterfaces.Value); // F3: 152 calls it so
         Assert.Contains("Sprk.Bff.Api.Services.Finance.FirmFindingsProjection", NamedExternalTypes.Keys);
-        Assert.Contains("Sprk.Bff.Api.Api.Finance.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
+        Assert.Contains("Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace.");
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionAuthorizationFilter)), "093's gate lives in the external-plane namespace.");
 
-        // The readers named before their owners land must name real types where they exist (a typo would hide a surface).
-        foreach (var reader in FamilyReaderTypes.Keys.Where(r => !r.EndsWith(".FirmFindingsProjection", StringComparison.Ordinal)))
+        // The readers named must name real types (a typo would hide a surface); 130's projection has landed, so it is checked too.
+        foreach (var reader in FamilyReaderTypes.Keys)
             Assert.True(typeof(Program).Assembly.GetType(reader) is not null, $"{reader} should exist in the BFF — check the name.");
+        foreach (var named in NamedExternalTypes.Keys)
+            Assert.True(typeof(Program).Assembly.GetType(named) is not null, $"{named} should exist in the BFF — check the name.");
     }
 
     // ── 090's flagged-external refusals (model 4.3, 5.3; uac-r2 F1-3, F1-e): listed and verified, not reimplemented ───────
