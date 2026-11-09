@@ -45,7 +45,8 @@ internal static class MappingSourceCopyGate
     /// <summary>The source's owner did not come back in the read.</summary>
     internal const string ReasonSourceOwnerMissing = "source_owner_missing";
 
-    /// <summary>A team owns the source (or a flagged source meets a team-owned row) and the Secure Record owner team is missing.</summary>
+    /// <summary>A team owns the source (or a flagged source meets a team-owned row), the Secure Record business unit exists, and
+    /// its Secure Record owner team is missing.</summary>
     internal const string ReasonSecureTeamMissing = "secure_team_missing";
 
     /// <summary>As <see cref="ReasonSecureTeamMissing"/>, with the Secure Record owner team ambiguous.</summary>
@@ -62,13 +63,19 @@ internal static class MappingSourceCopyGate
     /// Whether the source's data may be copied into the row. Not when the source is a secure-flagged root whose flag is not an
     /// explicit <c>false</c> (empty reads as flagged), or is owned by the Secure Record owner team, unless the row is owned by
     /// that Secure team. Anything that cannot be told — an owner that did not come back, a fault deciding the team, or (review
-    /// pass 3) a Secure Record owner team that is missing or ambiguous when a team owns the source — is
-    /// <see cref="MappingSourceCopyVerdict.Unknown"/> (fail closed). Cancellation is rethrown.
+    /// pass 3) a Secure Record owner team that is set up but missing or ambiguous when a team owns the source — is
+    /// <see cref="MappingSourceCopyVerdict.Unknown"/> (fail closed). Task 022 fix round 6: in an environment with no Secure
+    /// Record setup (no Secure Record business unit: <paramref name="secureOwnerTeam"/> answers <c>(null, null)</c>) no team
+    /// can own a secure record, so the source's flag alone decides: a flagged source is secure and no row is isolated with
+    /// it; an unflagged source is not secure. Cancellation is rethrown.
     /// </summary>
     /// <param name="sourceTable">The source's table.</param>
     /// <param name="read">The source row, read with at least <see cref="SourceGateColumns"/>.</param>
     /// <param name="rowOwner">The owner of the row the data would be copied into, or <c>null</c>.</param>
-    /// <param name="secureOwnerTeam">The Secure Record owner team (<c>SecureChildShareSynchronizer.SecureOwnerTeamAsync</c>).</param>
+    /// <param name="secureOwnerTeam">The Secure Record owner team
+    /// (<c>SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync</c>): the id; <c>(null, null)</c> when this
+    /// environment has no Secure Record business unit; <c>(null, refusal)</c> when it is set up and the team cannot be told
+    /// (<c>SecureChildShareSynchronizer.SecureOwnerTeamNotFoundRefusal</c> for a missing team).</param>
     /// <param name="ct">Cancellation.</param>
     internal static async Task<MappingSourceCopyDecision> DecideAsync(
         string sourceTable,
@@ -90,16 +97,24 @@ internal static class MappingSourceCopyGate
             Guid? secureTeam = null;
             if (sourceTeamOwned || (flagged && rowTeamOwned))
             {
-                // Review pass 3: a Secure Record owner team that is missing or ambiguous cannot tell a Secure-team owner
-                // from any other, so the source's owner cannot be told: fail closed.
+                // Review pass 3, task 022 fix round 6: a Secure Record owner team that is set up but missing, ambiguous or
+                // unreadable cannot tell a Secure-team owner from any other, so the source's owner cannot be told: fail
+                // closed. An environment with no Secure Record setup at all ((null, null)) has no team that can own a secure
+                // record: the flag alone decides (a flagged source is still secure, and no row is isolated with it).
                 var resolved = await secureOwnerTeam(ct).ConfigureAwait(false);
-                if (resolved.TeamId is not { } known || known == Guid.Empty)
+                if (resolved.TeamId is { } known)
+                {
+                    if (known == Guid.Empty)
+                        return MappingSourceCopyDecision.Unknown(ReasonSecureTeamMissing);
+                    secureTeam = known;
+                }
+                else if (resolved.Refusal is { } refusal)
                 {
                     return MappingSourceCopyDecision.Unknown(
-                        resolved.Refusal is null ? ReasonSecureTeamMissing : ReasonSecureTeamAmbiguous);
+                        refusal == SecureChildShareSynchronizer.SecureOwnerTeamNotFoundRefusal
+                            ? ReasonSecureTeamMissing
+                            : ReasonSecureTeamAmbiguous);
                 }
-
-                secureTeam = known;
             }
 
             var sourceSecureTeam = sourceTeamOwned && sourceOwner.Id == secureTeam;

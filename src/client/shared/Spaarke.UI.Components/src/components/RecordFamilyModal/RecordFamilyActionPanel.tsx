@@ -46,8 +46,11 @@ import {
   groupRowsByTable,
   isNoFilingEdgeRefusal,
   isNoProfileRefusal,
+  isSourceRuleSkip,
   PUSH_FAILED_TEXT,
+  pushErrorText,
   pushFieldMappings,
+  sourceRuleSkipText,
   type IPushError,
   type IPushPreviewChange,
   type IPushSource,
@@ -102,6 +105,11 @@ interface IReview {
    * (task 032b-1) a display copy such as an invoice's attorney columns. Their fields are set only when a record is created.
    */
   skippedRuleCount: number;
+  /**
+   * Task 022 fix round 4 (the mapping-source rule): records the preview returned with a source-rule code. Their values are not
+   * listed and the apply does not write them.
+   */
+  sourceRuleSkips: IPushError[];
 }
 
 /** Task 032b-1 (review F1): one fixed line when the push skips rules, so "already have the current values" is never said for them. */
@@ -189,6 +197,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
           unsupportedTables: [],
           noProfileTables: [],
           skippedRuleCount: 0,
+          sourceRuleSkips: [],
         };
         for (const { table, ids } of groupRowsByTable(rows)) {
           let response;
@@ -217,6 +226,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
           review.truncated = review.truncated || response.truncated;
           review.refusedCount += response.refusedChildIds.length;
           review.skippedRuleCount += response.skippedRuleCount;
+          review.sourceRuleSkips.push(...response.errors.filter(isSourceRuleSkip));
         }
         if (!run.cancelled) setPhase({ kind: 'review', ...review });
       } catch (error) {
@@ -239,6 +249,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
       unsupportedTables: phase.unsupportedTables,
       noProfileTables: phase.noProfileTables,
       skippedRuleCount: phase.skippedRuleCount,
+      sourceRuleSkips: phase.sourceRuleSkips,
     };
     setPhase({ kind: 'applying', ...review });
     // Each table is applied on its own: a table whose request fails is named, and what the other tables wrote is still
@@ -373,6 +384,11 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
               </Text>
             ))}
             {phase.skippedRuleCount > 0 && <Text className={styles.muted}>{SKIPPED_RULES_TEXT}</Text>}
+            {sourceRuleSkipText(phase.sourceRuleSkips).map(line => (
+              <MessageBar key={line} intent="warning">
+                <MessageBarBody>{line}</MessageBarBody>
+              </MessageBar>
+            ))}
             {valueCount === 0 ? (
               <Text>
                 {phase.skippedRuleCount > 0
@@ -380,7 +396,8 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                   : phase.refusedCount > 0 ||
                       phase.unsupportedTables.length > 0 ||
                       phase.noProfileTables.length > 0 ||
-                      phase.skippedNoWriteCount > 0
+                      phase.skippedNoWriteCount > 0 ||
+                      phase.sourceRuleSkips.length > 0
                     ? 'Nothing to update among the records that can be updated.'
                     : 'Nothing to update: the selected records already have the current values.'}
               </Text>
@@ -468,7 +485,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                   {phase.errors.map(e => (
                     <TableRow key={e.recordId}>
                       <TableCell>{phase.names.get(e.recordId.toLowerCase()) ?? e.recordId}</TableCell>
-                      <TableCell>{e.error}</TableCell>
+                      <TableCell>{pushErrorText(e)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -37,13 +37,11 @@ import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { describeHeldBackForSecure, provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
 import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
@@ -117,7 +115,6 @@ async function associateProjectWithAccount(
     // Use fallback column name
   }
 
-  const _orgUrl = window.location.origin;
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
   });
@@ -228,19 +225,6 @@ export interface ICreateProjectWizardProps {
    * Called when the wizard opens. If not provided, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
-  /**
-   * Optional callback to resolve BU-derived cascade defaults
-   * (`sprk_containerid`, `sprk_searchindexname`) at finish time.
-   * Called once just before the Project record is created so the wizard can
-   * stamp both fields from the current user's owning Business Unit
-   * (FR-WIZ-02 / G2 latent-gap fix). When omitted, the cascade step is skipped
-   * and the BFF backfill chain handles the fields server-side.
-   *
-   * Implementations typically resolve `userId` from
-   * `Xrm.Utility.getGlobalContext().userSettings.userId` and call
-   * {@link EntityCreationService.resolveUserBuDefaults}.
-   */
-  resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
   /**
    * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
    * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
@@ -365,7 +349,6 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
-  resolveUserBuDefaults,
   tenantId,
   initialFormValues,
   initialFileRefs,
@@ -441,6 +424,48 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
     }
   }, [open, seededFormState]);
 
+  // ── Secure parent (preview only) ────────────────────────────────────────
+  // A project under a secure matter is secure too: when the Matter chosen in "Associate To" is secure, the Secure
+  // toggle is turned on and locked. A non-secure matter, an account, no association or a failed read leaves it
+  // editable; the server still decides the create. Only the latest association's answer is applied.
+  const [parentSecure, setParentSecure] = React.useState(false);
+  const associationRequestRef = React.useRef(0);
+  const handleAssociationChange = React.useCallback(
+    (association: AssociationResult | null) => {
+      const request = ++associationRequestRef.current;
+      setParentSecure(false);
+      if (association?.entityType !== 'sprk_matter' || !association.recordId) return;
+      void (async () => {
+        try {
+          const matter = (await dataService.retrieveRecord(
+            'sprk_matter',
+            association.recordId,
+            '?$select=sprk_issecure'
+          )) as { sprk_issecure?: unknown } | null;
+          if (request === associationRequestRef.current) setParentSecure(matter?.sprk_issecure === true);
+        } catch {
+          // Unknown: leave the toggle editable (the server's rule still applies).
+        }
+      })();
+    },
+    [dataService]
+  );
+
+  // Task 022 fix round 4: the lock forces Secure on (CreateProjectStep); when a parent change releases it, Secure goes back
+  // to the value it had before the lock (off if it was never set). A choice made while unlocked is that value, so it is
+  // kept. Held here, not in the step: the step remounts with the wizard's values, and the parent changes on another step.
+  const secureBeforeLockRef = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (parentSecure) {
+      if (secureBeforeLockRef.current === null) secureBeforeLockRef.current = formValuesRef.current.isSecure === true;
+      return;
+    }
+    if (secureBeforeLockRef.current === null) return;
+    const restored = secureBeforeLockRef.current;
+    secureBeforeLockRef.current = null;
+    setFormValues(prev => (prev.isSecure === restored ? prev : { ...prev, isSecure: restored }));
+  }, [parentSecure]);
+
   // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
@@ -495,6 +520,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               navigationService,
               initialAssociation,
               lockAssociation,
+              onAssociationChange: handleAssociationChange,
             },
           }
         : {}),
@@ -513,6 +539,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             authenticatedFetch={authFetch}
             bffBaseUrl={bffBaseUrl}
             navigationService={navigationService}
+            parentSecure={parentSecure}
           />
         ),
       },
@@ -560,30 +587,20 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const currentFormValues = formValuesRef.current;
         const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
-        // 1. Resolve BU-derived cascade defaults (FR-WIZ-02 / G2 fix).
-        // Non-fatal: if resolution fails, we still create the project — the BFF
-        // backfill chain handles `sprk_containerid` / `sprk_searchindexname` server-side.
-        let cascadeDefaults: IUserBuCascadeDefaults | undefined;
-        if (resolveUserBuDefaults) {
-          try {
-            cascadeDefaults = await resolveUserBuDefaults();
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            console.warn('[CreateProjectWizard] BU cascade resolution failed (non-fatal):', message);
-            warnings.push(
-              `Could not resolve Business Unit defaults for container/index (${message}). ` +
-                'The project was still created — fields will be populated by server-side backfill.'
-            );
-          }
-        }
+        // 1. No BU-derived defaults are resolved (task 022, FR-16, FR-38/FR-40): the project's index and container
+        // columns are the server's, and the uploaded files are indexed without naming an index.
 
-        // 2. Create sprk_project record (with INV-5-safe BU cascade applied inside the service)
-        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl + the AssociateToStep
-        // selection so ProjectService can drive the Field Mapping Framework
-        // engine (graceful no-op when the host omits either, there's no
-        // association, or no configured profile for the pair).
+        // 2. Create the sprk_project record through the BFF child-records route (task 022, FR-16): only the user's
+        // values travel; the server maps (fill-only), owns and numbers the project. The AssociateToStep selection is the
+        // explicit mapping source, and a secure request is created secure from creation (task 049 fix round 2). Without
+        // authFetch/bffBaseUrl the service refuses the create (it never falls back to Xrm.WebApi).
         const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
-        const result = await projectService.createProject(mergedFormValues, cascadeDefaults, context.association);
+        const result = await projectService.createProject(
+          mergedFormValues,
+          undefined,
+          context.association,
+          parentSecure
+        );
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
@@ -593,10 +610,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         warnings.push(...result.warnings);
 
         // 1a. Provision Secure Project infrastructure when the Secure Project toggle is enabled — FIRST, before any
-        //     child record or file (task 150). The server marks the project secure (sprk_issecure is field-secured;
-        //     this client never writes it), shares it to the creator (task 061; task 133 issues it BEFORE the move and
-        //     proves it after), assigns it to the Secure Record business unit's named owner team, then provisions its
-        //     own SPE container and records it. No business unit or account is created (BFF task 021).
+        //     child record or file (task 150). Since task 022 every secure-requested project is created secure from
+        //     creation (task 049 fix round 2: flagged, owned by the Secure Record business unit's named owner team and
+        //     shared to the creator in the create itself), so this call does only what is left — normally nothing
+        //     (`already_provisioned`, success), else the container the create could not finish. A failure keeps the
+        //     hold-back below. No business unit or account is created (BFF task 021).
         let provisioningWarning: string | undefined;
         let provisioningSucceeded = false;
         // Task 133: a failure the SAME caller can finish is rendered with its "Try securing again" action instead of
@@ -638,16 +656,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               provisioningWarning = provisionResult.errorMessage;
             }
           }
-        } else if (mergedFormValues.isSecure) {
-          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
-          // authenticated fetch or a base URL. This branch used to fall through silently and then
-          // announce "Secure Project created!", which named a designation the record did not have.
-          // Same user-visible situation as an unconfigured environment, so it gets the same
-          // treatment: say what did not happen, in copy written for the person reading it.
-          // (Task 150: now literally true — the client no longer writes the flag, so the record is not marked secure.)
-          provisioningWarning =
-            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
         }
+        // Task 022: "secure requested but no BFF to ask" cannot reach this point — `ProjectService.createProject` refuses
+        // the create without `authFetch`/`bffBaseUrl` (no Xrm.WebApi fallback), so the condition above only narrows types.
+        // Were it ever reached, `provisioningSucceeded` stays false: the hold-back below holds and the title is not
+        // "Secure Project created!".
 
         // Task 150 — THE ORDERING TRAP. The client no longer writes sprk_issecure, so a secure-requested project whose
         // provisioning stopped BEFORE the server marked it secure is an ordinary record: an upload or a child created
@@ -809,13 +822,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           }
         }
 
-        // 1e. Task 142 (owner Q5 + A3): a project created SECURE is synced only now, after provisioning, so the
-        //     Assigned-To rule sees the secure flag and suggests its people in Manage Access instead of granting them
-        //     before the record was secured. (A non-secure project was synced by ProjectService at create.) Task 150
-        //     moved provisioning to step 1a, first; this sync still runs after it.
-        if (mergedFormValues.isSecure) {
-          await syncAssignedAccess(authFetch, bffBaseUrl, 'project', projectId);
-        }
+        // 1e. No client access sync (task 022). The "Assigned *" pass is the server's, run by the create itself: on a
+        //     secure-from-creation project it runs once the record is secured, so the Assigned-To rule sees the secure
+        //     flag and suggests its people in Manage Access (task 142, owner A3); when the create could not finish the
+        //     securing, the assigned-access reconciliation job runs it (task 049 fix round 1). The client's
+        //     `/assigned-access/sync` call that stood here only repeated that pass.
 
         // 2. Upload files to SPE + create document records
         //
@@ -857,7 +868,9 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
               // Trigger RAG indexing per file (canonical sync OBO path via
               // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
-              // file uploads already succeeded; indexing is best-effort.
+              // file uploads already succeeded; indexing is best-effort. No index is named (task 022, as task 021
+              // fix round 1): the server's FileIndexRequest has no searchIndexName, the index follows the content
+              // type (FR-40).
               const indexingWarnings = await entityService.indexUploadedFiles(
                 uploadResult.uploadedFiles,
                 tenantId ?? '',
@@ -866,8 +879,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                   entityId: projectId,
                   entityName: projectName,
                 },
-                docResult.createdDocumentIds,
-                cascadeDefaults?.searchIndexName
+                docResult.createdDocumentIds
               );
               if (indexingWarnings.length > 0) {
                 warnings.push(...indexingWarnings);
@@ -998,11 +1010,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       bffBaseUrl,
       navigationService,
       resolveSpeContainerId,
-      resolveUserBuDefaults,
       webApiAdapter,
       handoffFiles,
       initialAssociation,
       lockAssociation,
+      handleAssociationChange,
+      parentSecure,
     ]
   );
 

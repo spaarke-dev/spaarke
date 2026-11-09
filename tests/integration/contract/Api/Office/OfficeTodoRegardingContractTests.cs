@@ -605,7 +605,7 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                 dataverseMock
                     .Setup(d => d.RetrieveAsync(source, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken __) =>
-                        SourceRows.TryGetValue((entity, id), out var row) ? row : null!);
+                        SourceRows.TryGetValue((entity, id), out var row) ? row.WithGate() : null!);
             }
             // Task 156 (verifier round 1 item 8): a carrier-only To Do is stamped from its carrier, so the carrier is READ.
             // A carrier not seeded in CarrierRows names no root (an empty row); one in CarrierFaults is unreadable.

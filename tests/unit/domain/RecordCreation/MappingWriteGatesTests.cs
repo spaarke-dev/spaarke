@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.RecordCreation;
@@ -82,7 +83,7 @@ public class MappingWriteGatesTests
     }
 
     [Theory]
-    [InlineData(null, MappingSourceCopyGate.ReasonSecureTeamMissing)]
+    [InlineData(SecureChildShareSynchronizer.SecureOwnerTeamNotFoundRefusal, MappingSourceCopyGate.ReasonSecureTeamMissing)]
     [InlineData("secure_owner_team_ambiguous", MappingSourceCopyGate.ReasonSecureTeamAmbiguous)]
     public async Task DecideAsync_ASecureTeamThatCannotBeTold_IsUnknown(string? refusal, string reason)
     {
@@ -93,6 +94,86 @@ public class MappingWriteGatesTests
 
         decision.Verdict.Should().Be(MappingSourceCopyVerdict.Unknown);
         decision.Reason.Should().Be(reason);
+    }
+
+    // ── Task 022 fix round 6: no Secure Record setup is not "cannot be told" ──
+
+    public static TheoryData<string, bool?, EntityReference, EntityReference?, string> NotSetUpCases() => new()
+    {
+        // must not fire: an unflagged team-owned source, whatever owns the row
+        { Event, null, new("team", OtherTeam), null, nameof(MappingSourceCopyVerdict.Allowed) },
+        { Event, null, new("team", OtherTeam), new("team", OtherTeam), nameof(MappingSourceCopyVerdict.Allowed) },
+        { Matter, false, new("team", OtherTeam), new("team", OtherTeam), nameof(MappingSourceCopyVerdict.Allowed) },
+        // must fire: a flagged source is still secure, and no row is isolated with it
+        { Matter, true, new("team", OtherTeam), new("team", OtherTeam), nameof(MappingSourceCopyVerdict.Secure) },
+        { Matter, true, new("team", SecureTeam), new("team", SecureTeam), nameof(MappingSourceCopyVerdict.Secure) },
+        { Matter, null, new("systemuser", User), new("team", OtherTeam), nameof(MappingSourceCopyVerdict.Secure) },
+        { Matter, true, new("team", OtherTeam), null, nameof(MappingSourceCopyVerdict.Secure) },
+    };
+
+    [Theory]
+    [MemberData(nameof(NotSetUpCases))]
+    public async Task DecideAsync_WithNoSecureRecordSetUp_TheFlagAloneDecides(
+        string table, bool? flag, EntityReference sourceOwner, EntityReference? rowOwner, string expected)
+    {
+        Task<(Guid?, string?)> NotSetUp(CancellationToken _) => Task.FromResult<(Guid?, string?)>((null, null));
+
+        var decision = await MappingSourceCopyGate.DecideAsync(table, Source(table, flag, sourceOwner), rowOwner, NotSetUp, CancellationToken.None);
+
+        decision.Verdict.ToString().Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ResolveForCopyGate_TellsNotSetUp_FromSetUpButNotFound_AndAmbiguous()
+    {
+        var configuration = SecureChildShareWorld.Configuration();
+        Task<(Guid? TeamId, string? Refusal)> Resolve(SecureChildShareWorld world) =>
+            SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync(
+                SecureChildShareWorld.EntitiesOver(() => world).Object, configuration, CancellationToken.None);
+
+        (await Resolve(SecureChildShareWorld.Standard())).Should().Be(((Guid?)SecureChildShareWorld.SecureTeam, (string?)null));
+        (await Resolve(SecureChildShareWorld.WithoutSecureBusinessUnit())).Should().Be(((Guid?)null, (string?)null),
+            "no Secure Record business unit: not set up");
+        (await Resolve(SecureChildShareWorld.Standard().Remove("team", SecureChildShareWorld.SecureTeam)))
+            .Should().Be(((Guid?)null, (string?)SecureChildShareSynchronizer.SecureOwnerTeamNotFoundRefusal), "set up, the team not found");
+        (await Resolve(SecureChildShareWorld.Standard().Team(Guid.NewGuid(), SecureChildShareWorld.SecureBu,
+                SecureChildShareWorld.SecureOwnerTeamName, isDefault: false, teamType: 0)))
+            .Refusal.Should().NotBeNull("two named teams: ambiguous");
+        (await Resolve(SecureChildShareWorld.Standard().Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName))))
+            .Refusal.Should().NotBeNull("two Secure Record business units: ambiguous");
+    }
+
+    [Fact]
+    public async Task ResolveForCopyGate_AFault_Propagates()
+    {
+        var world = SecureChildShareWorld.Standard().FailingQueriesOf("team");
+
+        var act = () => SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync(
+            SecureChildShareWorld.EntitiesOver(() => world).Object, SecureChildShareWorld.Configuration(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<Exception>();
+    }
+
+    [Fact]
+    public async Task DecideAsync_OverTheResolution_SetUpButNotFound_OrFaulting_IsUnknown_NotSetUp_IsDecidedByTheFlag()
+    {
+        var configuration = SecureChildShareWorld.Configuration();
+        Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> Over(SecureChildShareWorld world) =>
+            ct => SecureChildShareSynchronizer.ResolveSecureOwnerTeamForCopyGateAsync(
+                SecureChildShareWorld.EntitiesOver(() => world).Object, configuration, ct);
+        var teamOwned = Source(Event, null, new("team", OtherTeam));
+
+        (await MappingSourceCopyGate.DecideAsync(Event, teamOwned, null, Over(SecureChildShareWorld.WithoutSecureBusinessUnit()), CancellationToken.None))
+            .Verdict.Should().Be(MappingSourceCopyVerdict.Allowed);
+        (await MappingSourceCopyGate.DecideAsync(Event, teamOwned, null,
+                Over(SecureChildShareWorld.Standard().Remove("team", SecureChildShareWorld.SecureTeam)), CancellationToken.None))
+            .Should().Be(MappingSourceCopyDecision.Unknown(MappingSourceCopyGate.ReasonSecureTeamMissing));
+        (await MappingSourceCopyGate.DecideAsync(Event, teamOwned, null,
+                Over(SecureChildShareWorld.Standard().FailingQueriesOf("team")), CancellationToken.None))
+            .Reason.Should().Be(MappingSourceCopyGate.ReasonFault);
+        (await MappingSourceCopyGate.DecideAsync(Matter, Source(Matter, true, new("team", OtherTeam)), new("team", OtherTeam),
+                Over(SecureChildShareWorld.WithoutSecureBusinessUnit()), CancellationToken.None))
+            .Verdict.Should().Be(MappingSourceCopyVerdict.Secure);
     }
 
     [Fact]

@@ -205,6 +205,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var nameRule = TextRule("sprk_indexname", NameColumn);
 
         var (updated, failed, _, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [descriptionRule, nameRule, IndexLookupRule],
             new Dictionary<string, object?>
             {
@@ -248,6 +249,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         };
 
         await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_note", "sprk_description"), aliasRule],
             new Dictionary<string, object?> { ["sprk_note"] = "From the source", ["sprk_sourceindex"] = Index },
             "sprk_matter", [Row], Caller, log, CancellationToken.None,
@@ -270,6 +272,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Row, [("sprk_regardingmatter", "sprk_matter", Matter)]);
 
         var (_, failed, _, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_indexname", NameColumn), IndexLookupRule],
             new Dictionary<string, object?> { ["sprk_indexname"] = "source-index", ["sprk_sourceindex"] = Index },
             "sprk_event", [Row], Caller, new CapturingLog<object>(), CancellationToken.None,
@@ -292,6 +295,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var log = new CapturingLog<object>();
 
         var (updated, _, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_indexname", NameColumn)],
             new Dictionary<string, object?> { ["sprk_indexname"] = "kept" },
             "sprk_todo", [Row], Caller, log, CancellationToken.None,

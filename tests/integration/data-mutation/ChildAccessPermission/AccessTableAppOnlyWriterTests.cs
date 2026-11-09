@@ -1045,6 +1045,7 @@ public class AccessTableAppOnlyWriterTests
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string table, params FieldMappingRuleDto[] rules) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object,
             new StampWorld().Restamper,
             rules,

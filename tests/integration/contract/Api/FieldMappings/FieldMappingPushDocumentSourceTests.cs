@@ -65,6 +65,7 @@ public class FieldMappingPushDocumentSourceTests
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_analysises");
         host.Entities.Setup(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+        host.ArrangeSourceGateRead("sprk_document", secureFlag: null);
         host.FieldMappings
             .Setup(f => f.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))

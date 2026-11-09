@@ -49,6 +49,15 @@ const SECURE_CREATE_DENIED_CODES: ReadonlySet<string> = new Set([
   'sdap.access.deny.delegation_check_failed',
 ]);
 
+/** `DelegationRuleFilter.DenyShareRequired`: the caller has Write but not the table's Share privilege. */
+const SECURE_CREATE_SHARE_REQUIRED = 'sdap.access.deny.delegation_share_required';
+
+/**
+ * `RecordCreationRefusal.MappingSourceSecureFilingCode`: a value copied from a secure record files the new record, and the
+ * new record would not be secure. The same request is refused every time, so the sentence never suggests retrying.
+ */
+const MAPPING_SOURCE_SECURE_FILING = 'record_creation.mapping_source_secure_filing';
+
 /** `DelegationRuleFilter.DenyCheckFailed`: the rights check could not be completed (a fault, not a refusal of access). */
 const SECURE_CREATE_CHECK_FAILED = 'sdap.access.deny.delegation_check_failed';
 
@@ -122,6 +131,12 @@ function messageOf(err: unknown): string {
 export interface IDescribeCreateErrorOptions {
   /** True when the record is created with no parent (a root create, for example a matter): the route's "filed under" not-found text does not apply. */
   rootCreate?: boolean;
+  /**
+   * The parent record's noun ("matter") when the selected parent is secure, so the record is secure too and Secure cannot
+   * be turned off. A refusal of the rights a secure create needs then names that rule and what to do, never "create it
+   * without Secure".
+   */
+  secureParent?: string;
 }
 
 /**
@@ -154,9 +169,29 @@ export function describeWebApiCreateError(
     };
   }
 
+  if (reason === MAPPING_SOURCE_SECURE_FILING) {
+    return {
+      message: `This ${recordNoun} can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.`,
+      isAccessDenied: false,
+    };
+  }
+
+  const secureParent = options?.secureParent;
+
   if (reason === SECURE_CREATE_CHECK_FAILED) {
     return {
-      message: `Whether you can create a secure ${recordNoun} could not be checked. Try again in a moment, or create it without Secure.`,
+      message: secureParent
+        ? `Whether you can create a ${recordNoun} under a secure ${secureParent} could not be checked. Try again in a moment.`
+        : `Whether you can create a secure ${recordNoun} could not be checked. Try again in a moment, or create it without Secure.`,
+      isAccessDenied: true,
+    };
+  }
+
+  if (secureParent && reason !== undefined && SECURE_CREATE_DENIED_CODES.has(reason)) {
+    return {
+      message: `Creating a ${recordNoun} under a secure ${secureParent} needs permission to ${
+        reason === SECURE_CREATE_SHARE_REQUIRED ? 'share' : 'edit and share'
+      } secure records. Ask an administrator.`,
       isAccessDenied: true,
     };
   }

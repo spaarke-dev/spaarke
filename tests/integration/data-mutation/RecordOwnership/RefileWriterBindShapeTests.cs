@@ -344,6 +344,53 @@ public sealed class RefileWriterBindShapeTests
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
+    // ── task 022 fix round 4 (UAC-r2 (a)): a push from a secure source never changes a child's filing ──────────────────
+
+    [Fact(DisplayName = "022 r4: a push from a secure matter binding an isolated child's matter elsewhere skips the child whole, with the re-file code")]
+    public async Task FieldMappingPush_FromASecureSource_ThatWouldRefileTheChild_SkipsItWhole_WithTheRefileCode()
+    {
+        ASecureCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({OrdinaryMatter})", Scopes(), sourceGate: SourceGateFrom(SecureMatter));
+
+        (updated, failed).Should().Be((0, 1));
+        var error = errors.Should().ContainSingle().Which;
+        error.RecordId.Should().Be(Communication);
+        error.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        error.Error.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedMessage);
+        AssertNothingMoved();
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingmatter")!.Id.Should().Be(SecureMatter);
+        _world.OwnerWrites.Should().BeEmpty("no re-file step ran");
+    }
+
+    [Fact(DisplayName = "022 r4: a push from a secure matter binding the matter an isolated child already holds writes it")]
+    public async Task FieldMappingPush_FromASecureSource_ThatBindsTheFilingTheChildHolds_IsWritten()
+    {
+        ASecureCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({SecureMatter})", Scopes(), sourceGate: SourceGateFrom(SecureMatter));
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        _writes.Should().ContainSingle();
+        _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
+    }
+
+    [Fact(DisplayName = "022 r4: a push from an ordinary matter re-filing a child into a secure matter re-owns it as before")]
+    public async Task FieldMappingPush_FromAnOrdinarySource_ThatRefilesTheChild_IsUnchanged()
+    {
+        AnOrdinaryCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({SecureMatter})", Scopes(), sourceGate: SourceGateFrom(OrdinaryMatter));
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        AssertMovedIntoSecure();
+    }
+
     [Fact(DisplayName = "#2091 r4: a 500-child no-op push from a secure matter costs a few Dataverse calls per child, never a descendant pass")]
     public async Task FieldMappingPush_A500ChildNoOpPush_CostsAFewCallsPerChild()
     {
@@ -485,6 +532,7 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [first, second],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -602,6 +650,7 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [matterRule, threadRule],
             new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid(), ["sprk_threadsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -818,6 +867,7 @@ public sealed class RefileWriterBindShapeTests
                     SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
                 };
                 var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                     _write.Object, Restamper(), [rule],
                     new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
                     "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
@@ -987,7 +1037,8 @@ public sealed class RefileWriterBindShapeTests
 
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string bindKey, string bindValue, IServiceScopeFactory? scopes, string? targetField = null, Guid[]? children = null,
-        CoreAncestorRestamper? restamper = null, IGenericEntityService? appOnly = null, IImpersonatedCommunicationQuery? callerQuery = null)
+        CoreAncestorRestamper? restamper = null, IGenericEntityService? appOnly = null, IImpersonatedCommunicationQuery? callerQuery = null,
+        FieldMappingPushSourceGate? sourceGate = null)
     {
         var rule = new FieldMappingRuleDto
         {
@@ -995,12 +1046,39 @@ public sealed class RefileWriterBindShapeTests
             SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
         };
         return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            sourceGate ?? Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, restamper ?? Restamper(), [rule],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", children ?? [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
             scopes, rootFiling: null,
             lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan> { [rule] = new(bindKey, bindValue, null) },
             appOnlyEntities: appOnly ?? AppOnlyReader(), callerQuery: callerQuery ?? CallerQuery().Object);
+    }
+
+    /// <summary>
+    /// The push's mapping-source gate (task 022 fix round 4) for a push from <paramref name="sourceMatter"/>, reading the world
+    /// app-only. The world keeps owners as <c>owningteam</c>/<c>owninguser</c>; a read of <c>ownerid</c> answers the owner, as
+    /// Dataverse does.
+    /// </summary>
+    private FieldMappingPushSourceGate SourceGateFrom(Guid sourceMatter)
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                var row = _world.Retrieve(table, id, columns);
+                if (columns.Contains("ownerid") && _world.OwnerOf(table, id) is { } owner)
+                {
+                    row["ownerid"] = new EntityReference(
+                        owner.Kind == DataversePrincipalKind.Team ? "team" : "systemuser", owner.Id);
+                }
+
+                return Task.FromResult(row);
+            });
+        return new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", sourceMatter,
+            _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((SecureChildShareWorld.SecureTeam, null)));
     }
 
     /// <summary>The push's app-only reader over the world, as the endpoint passes its <c>IGenericEntityService</c> (task 045b:
