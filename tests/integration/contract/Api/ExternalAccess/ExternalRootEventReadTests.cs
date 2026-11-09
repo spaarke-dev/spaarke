@@ -898,17 +898,20 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads), and the same
         /// record in the filing world (task 187 D4: an invoice route walks its own invoice, so both reads see one record).
         /// </summary>
-        public void AddInvoice(Guid id, Guid? matter, Guid? project)
+        public void AddInvoice(Guid id, Guid? matter, Guid? project, Guid? workAssignment = null)
         {
             Seed("sprk_invoices", new Dictionary<string, object?>
             {
                 ["sprk_invoiceid"] = id.ToString(),
                 ["_sprk_matter_value"] = matter?.ToString(),
                 ["_sprk_project_value"] = project?.ToString(),
+                // Task 130-0 fix round 2 (K3, D-28): the work-assignment core record.
+                ["_sprk_regardingworkassignment_value"] = workAssignment?.ToString(),
             });
             var lookups = new List<(string Column, string Target, Guid Id)>();
             if (matter is { } m) lookups.Add(("sprk_matter", "sprk_matter", m));
             if (project is { } p) lookups.Add(("sprk_project", "sprk_project", p));
+            if (workAssignment is { } w) lookups.Add(("sprk_regardingworkassignment", "sprk_workassignment", w));
             AddFilingRow("sprk_invoice", id, lookups.ToArray());
         }
 

@@ -167,6 +167,32 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         body.Truncated.Should().BeTrue();
     }
 
+    [Fact(DisplayName = "130-0 fix2 (must fire): a caller known to be in no firm sees no invoice-linked row, and it is an answer, not a fault (not truncated)")]
+    public async Task Todos_ForACallerInNoFirm_HideEveryInvoiceLinkedRow_WithoutAFault()
+    {
+        _world.CallerFirmsAnswer = CallerFirms.From(Array.Empty<Guid>(), unreadable: false);
+        _fixture.Data.AddTodoWith("matters", Matter, "Own firm's invoice", ("_sprk_regardinginvoice_value", _own.ToString()));
+        _fixture.Data.AddTodo("matters", Matter, "No invoice");
+
+        var body = await List<ExternalTodoDto>("todos");
+
+        body.Value.Select(t => t.SprkName).Should().Equal("No invoice");
+        body.Truncated.Should().BeFalse("no firm is a decided answer (hide all), not a read failure");
+    }
+
+    [Fact(DisplayName = "130-0 fix2 (must fire): a fault deciding one invoice, with the caller's firms known, hides that invoice's row; a row with no invoice stays")]
+    public async Task TheFilter_APerInvoiceFault_HidesThatRow()
+    {
+        ExternalInvoiceHiding faultOnOne = (_, _, _) => Task.FromResult(InvoiceVisibilityResult.ReadFailed(new[] { _other }));
+
+        var (visible, truncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            CallerOn(Matter), new[] { ("faulted", (IReadOnlyList<Guid>)new[] { _other }), ("plain", Array.Empty<Guid>()) },
+            r => r.Item2, faultOnOne, NullLogger.Instance, "test", CancellationToken.None);
+
+        visible.Select(r => r.Item1).Should().Equal("plain");
+        truncated.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "130-0 fix1: a page with no invoice-linked row asks no invoice decision")]
     public async Task Lists_WithNoInvoiceLink_AskNothing()
     {
@@ -263,21 +289,207 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         _hiding.Calls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "130-0 fix1 root: a work assignment's record read is returned even when its invoice is another firm's, and never returns the link")]
-    public async Task WorkAssignmentRecordRead_IsReturned_WithoutAnotherFirmsInvoiceLink()
+    // Task 130-0 fix round 2 (F3): the production work-assignments module does not admit sprk_regardinginvoice (nor the regarding
+    // resolver columns), so on /data/record the redaction is defence in depth. These tests drive /data/record with a TEST registry whose
+    // work-assignments module admits them, so the redaction itself runs on the route's path.
+    [Fact(DisplayName = "130-0 fix2 F3 root record read (must fire): with a module that admits the link, another firm's invoice link and the regarding resolver columns naming it are blanked; the root is returned")]
+    public async Task WorkAssignmentRecordRead_ThroughAModuleThatAdmitsTheLink_BlanksAnotherFirmsInvoice()
     {
         var workAssignment = Guid.NewGuid();
-        var caller = CallerOnWorkAssignment(workAssignment);
 
-        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
-            "sprk_workassignment", workAssignment, select: null, caller, Registry(),
-            (_, _, _, _) => Task.FromResult<IReadOnlyDictionary<string, object?>>(WorkAssignmentRow("WA", _other)),
-            NullLogger.Instance, CancellationToken.None, _hiding.Seam);
+        var row = await ReadWorkAssignmentAsync(workAssignment, WithRegardingPair(WorkAssignmentRow("WA", _other), _other));
 
-        var row = result.Should().BeOfType<Ok<IReadOnlyDictionary<string, object?>>>().Subject.Value!;
         row["sprk_name"].Should().Be("WA");
-        row.Where(kv => kv.Key.Contains("regardinginvoice", StringComparison.OrdinalIgnoreCase))
-            .Should().NotContain(kv => kv.Value != null, "another firm's invoice is never named on a root read");
+        row["sprk_regardinginvoice"].Should().BeNull("another firm's invoice is never named on a root read");
+        foreach (var column in Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns)
+            row[column].Should().BeNull($"{column} names the hidden invoice (its number among them)");
+    }
+
+    [Fact(DisplayName = "130-0 fix2 F3 root record read (must not fire): the caller's own firm's invoice link and resolver columns are shown")]
+    public async Task WorkAssignmentRecordRead_ThroughAModuleThatAdmitsTheLink_ShowsTheCallersOwnInvoice()
+    {
+        var workAssignment = Guid.NewGuid();
+
+        var row = await ReadWorkAssignmentAsync(workAssignment, WithRegardingPair(WorkAssignmentRow("WA", _own), _own));
+
+        row["sprk_regardinginvoice"].Should().NotBeNull();
+        row["sprk_regardingrecordnumber"].Should().Be("INV-0001");
+        row["sprk_regardingrecordid"].Should().Be(_own.ToString());
+    }
+
+    [Fact(DisplayName = "130-0 fix2 F3 root record read (must not fire): a regarding pair that names another record is left alone when the link is blanked")]
+    public async Task WorkAssignmentRecordRead_ARegardingPairNamingAnotherRecord_IsNotBlanked()
+    {
+        var workAssignment = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+
+        var row = await ReadWorkAssignmentAsync(workAssignment, WithRegardingPair(WorkAssignmentRow("WA", _other), matter));
+
+        row["sprk_regardinginvoice"].Should().BeNull();
+        row["sprk_regardingrecordid"].Should().Be(matter.ToString(), "the pair names a matter, not the hidden invoice");
+    }
+
+    private async Task<IReadOnlyDictionary<string, object?>> ReadWorkAssignmentAsync(
+        Guid workAssignment, IReadOnlyDictionary<string, object?> stored)
+    {
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_workassignment", workAssignment,
+            select: "sprk_name,sprk_regardinginvoice,sprk_regardingrecordid,sprk_regardingrecordtype,sprk_regardingrecordname,sprk_regardingrecordurl,sprk_regardingrecordnumber",
+            CallerOnWorkAssignment(workAssignment), RegistryAdmittingTheWorkAssignmentLink(),
+            (_, _, _, _) => Task.FromResult(stored), NullLogger.Instance, CancellationToken.None, _hiding.Seam);
+        return result.Should().BeOfType<Ok<IReadOnlyDictionary<string, object?>>>().Subject.Value!;
+    }
+
+    private static IReadOnlyDictionary<string, object?> WithRegardingPair(Dictionary<string, object?> row, Guid target)
+    {
+        row["sprk_regardingrecordid"] = target.ToString();
+        row["sprk_regardingrecordtype"] = new Dictionary<string, object?> { ["id"] = Guid.NewGuid(), ["logicalName"] = "sprk_recordtype_ref", ["name"] = "Invoice" };
+        row["sprk_regardingrecordname"] = "INV-0001 name";
+        row["sprk_regardingrecordurl"] = "/main.aspx?etn=sprk_invoice";
+        row["sprk_regardingrecordnumber"] = "INV-0001";
+        return row;
+    }
+
+    /// <summary>A TEST registry: the work-assignments module admitting its invoice link and the regarding resolver columns (the production
+    /// module admits neither), so a /data/record read returns them and the redaction runs.</summary>
+    private static ExternalModuleRegistry RegistryAdmittingTheWorkAssignmentLink()
+    {
+        var registry = new ExternalModuleRegistry();
+        registry.Register(new ExternalModuleDescriptor
+        {
+            Name = "work-assignments",
+            RecordEntity = "sprk_workassignment",
+            RecordIdAttribute = "sprk_workassignmentid",
+            AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "sprk_workassignmentid", "sprk_name", "sprk_regardinginvoice", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+                "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber",
+            },
+        });
+        return registry;
+    }
+
+    // =====================================================================
+    // Task 130-0 fix round 2 (K3, D-28): the invoices module scopes through matter, project and work assignment
+    // =====================================================================
+
+    private const string InvoiceGridFetch =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/></entity></fetch>";
+
+    [Fact(DisplayName = "130-0 fix2 K3 invoices module: an invoice under the caller's work assignment is listed; one under another (or a deactivated) work assignment, or under a secure one the caller holds no named grant on, is not; the column is projected server-side and not returned unasked")]
+    public async Task InvoicesModuleFetch_ScopesThroughTheWorkAssignment()
+    {
+        var assignment = Guid.NewGuid();
+        var otherAssignment = Guid.NewGuid();
+        var secureAssignment = Guid.NewGuid();
+        _fixture.Data.AddSecureRoot(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType.WorkAssignment, secureAssignment);
+        var underAssignment = _world.OwnedInvoice();
+        var underOther = _world.OwnedInvoice();
+        var underSecure = _world.OwnedInvoice();
+        var caller = CallerOn(Matter);
+        caller = new CallerPrincipal
+        {
+            Plane = caller.Plane, ContactId = caller.ContactId, Email = caller.Email, ProjectAccess = caller.ProjectAccess,
+            MatterAccess = caller.MatterAccess,
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [assignment] = AccessRights.Read },
+        };
+
+        var (body, executed) = await RunFetchAsync(
+            "sprk_invoice", InvoiceGridFetch, caller,
+            InvoiceRow("Under the caller's work assignment", underAssignment, ("sprk_regardingworkassignment", assignment)),
+            InvoiceRow("Under another work assignment", underOther, ("sprk_regardingworkassignment", otherAssignment)),
+            InvoiceRow("Under the matter and a secure work assignment", underSecure,
+                ("sprk_matter", Matter), ("sprk_regardingworkassignment", secureAssignment)));
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Under the caller's work assignment");
+        executed.Should().Contain("name=\"sprk_regardingworkassignment\"", "the scope and the secure-roots rule read it server-side");
+        body.Entities.Should().OnlyContain(r => !r.ContainsKey("sprk_regardingworkassignment"), "it is returned only when the grid asks");
+    }
+
+    [Fact(DisplayName = "130-0 fix2 K3 invoices module (readable column): asked for, the work assignment is returned only on rows that passed the secure-roots rule, in the same form as sprk_matter, and filters and sorts as sprk_matter does")]
+    public async Task InvoicesModuleFetch_TheWorkAssignmentColumn_WhenAsked_FollowsTheSecureRootsRule_LikeTheMatter()
+    {
+        var assignment = Guid.NewGuid();
+        var secureAssignment = Guid.NewGuid();
+        _fixture.Data.AddSecureRoot(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType.WorkAssignment, secureAssignment);
+        var underAssignment = _world.OwnedInvoice();
+        var underSecure = _world.OwnedInvoice();
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [Matter] = AccessRights.Read },
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [assignment] = AccessRights.Read },
+        };
+        const string asked =
+            "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/>"
+            + "<attribute name='sprk_matter'/><attribute name='sprk_regardingworkassignment'/>"
+            + "<filter><condition attribute='sprk_regardingworkassignment' operator='not-null'/><condition attribute='sprk_matter' operator='not-null'/></filter>"
+            + "<order attribute='sprk_regardingworkassignment'/><order attribute='sprk_matter'/></entity></fetch>";
+
+        var (body, _) = await RunFetchAsync("sprk_invoice", asked, caller,
+            InvoiceRow("Under the caller's work assignment", underAssignment, ("sprk_matter", Matter), ("sprk_regardingworkassignment", assignment)),
+            InvoiceRow("Under a secure work assignment the caller holds no named grant on", underSecure,
+                ("sprk_matter", Matter), ("sprk_regardingworkassignment", secureAssignment)));
+
+        var row = body.Entities.Should().ContainSingle("a row filed to a secure work assignment the caller cannot read never returns").Subject;
+        row["sprk_name"].Should().Be("Under the caller's work assignment");
+        row.Keys.Where(k => k.Contains("regardingworkassignment", StringComparison.OrdinalIgnoreCase))
+            .Should().Equal(new[] { "sprk_regardingworkassignment" }, "the same single lookup form as sprk_matter, no name or URL form");
+        row.Keys.Where(k => k.Contains("sprk_matter", StringComparison.OrdinalIgnoreCase)).Should().Equal("sprk_matter");
+        body.Entities.SelectMany(r => r.Values).Should().NotContain(v => Equals(v, secureAssignment));
+    }
+
+    [Fact(DisplayName = "130-0 fix2 K3 invoices module (must not fire): matter-only and project-only scoping are unchanged")]
+    public async Task InvoicesModuleFetch_MatterScopingIsUnchanged()
+    {
+        var invoice = _world.OwnedInvoice();
+
+        var (body, _) = await RunFetchAsync("sprk_invoice", InvoiceGridFetch, CallerOn(Matter),
+            InvoiceRow("Under the matter", invoice, ("sprk_matter", Matter)));
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Under the matter");
+    }
+
+    private static IReadOnlyDictionary<string, object?> InvoiceRow(string name, Guid id, params (string Column, Guid Value)[] links)
+    {
+        var row = new Dictionary<string, object?>
+        {
+            ["@logicalName"] = "sprk_invoice",
+            ["sprk_invoiceid"] = id,
+            ["sprk_name"] = name,
+        };
+        foreach (var (column, value) in links) row[column] = value;
+        return row;
+    }
+
+    private async Task<(FetchResponseDto Body, string Executed)> RunFetchAsync(
+        string entity, string fetch, CallerPrincipal caller, params IReadOnlyDictionary<string, object?>[] rows)
+    {
+        var executed = string.Empty;
+        var data = _fixture.Data.NewService();
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto(entity, fetch, PagingCookie: null),
+            caller, Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = request.FetchXml;
+                var names = System.Xml.Linq.XDocument.Parse(request.FetchXml).Descendants("attribute")
+                    .Select(a => (string?)a.Attribute("name")).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+                return Task.FromResult(new FetchResponseDto(
+                    rows.Select(r => (IReadOnlyDictionary<string, object?>)r
+                            .Where(kv => kv.Key == "@logicalName" || (kv.Value is not null && names.Contains(kv.Key)))
+                            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase))
+                        .ToList(),
+                    MoreRecords: false, PagingCookie: null));
+            },
+            data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
+            data.GetLiveParentRootsAsync, _hiding.Seam);
+        return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 
     // =====================================================================

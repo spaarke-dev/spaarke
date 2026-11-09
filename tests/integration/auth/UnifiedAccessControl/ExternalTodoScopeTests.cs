@@ -1982,6 +1982,13 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             return Task.FromResult(LiveParents);
         }
 
+        /// <summary>ebilling-r1 task 130-0 fix round 2 (F1): the PATCH reads the to-do's invoice links through the delete-own row read;
+        /// here the to-do links to no invoice (the invoice rule's own tests are <c>ExternalInvoiceLinkedWriteTests</c>).</summary>
+        public override Task<ExternalDataService.DeleteTarget?> GetDeleteTargetAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CancellationToken ct = default) =>
+            Task.FromResult<ExternalDataService.DeleteTarget?>(new ExternalDataService.DeleteTarget(
+                null, null, Array.Empty<ExternalDataService.DeleteTargetParent>(), InvoiceLinks: Array.Empty<Guid>()));
+
         public int UpdateCallCount { get; private set; }
         public Guid? LastUpdatedTodoId { get; private set; }
         public UpdateExternalTodoRequest? LastRequest { get; private set; }

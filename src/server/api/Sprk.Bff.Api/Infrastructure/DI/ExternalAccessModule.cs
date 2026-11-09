@@ -521,10 +521,16 @@ public static class ExternalAccessModule
             Name = "invoices",
             RecordEntity = "sprk_invoice",
             RequireReadOnSecureRoots = true,
+            // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work
+            // assignment, so it is also reached through its work assignment, and that work assignment joins the secure-roots rule
+            // (RootLinks only maps the typed root names; sprk_regardingworkassignment is named here). Projected server-side with the
+            // other rule attributes, never a readable column.
+            AdditionalRootLookups = new[] { new RootLookup("sprk_regardingworkassignment", ExternalGrantRootType.WorkAssignment) },
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+                new ScopeDimension { Attribute = "sprk_regardingworkassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
             },
             // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
@@ -538,6 +544,9 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // ebilling-r1 task 130-0 fix round 2 (K3): a scope dimension must be readable (ExternalModuleRegistry.ValidateReadableColumns),
+                // like its matter and project siblings. Not on the grid; projected server-side for the scope and the secure-roots rule.
+                "sprk_regardingworkassignment",
                 // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
                 // grid-derived. The invoice status is statuscode; the SPA record detail reads it. The retired invoice-status
                 // column was removed from this list by r3 task 002 (#2450) with ebilling's OK on 2026-10-29 (grid 3ff4102c moved

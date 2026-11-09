@@ -567,10 +567,17 @@ public static class ExternalModuleDataEndpoints
         var result = rows
             .Select((row, i) =>
             {
-                var hidden = links[i].Where(l => !Shown(l.Invoice)).Select(l => l.Column).ToList();
+                var hiddenLinks = links[i].Where(l => !Shown(l.Invoice)).ToList();
+                var hidden = hiddenLinks.Select(l => l.Column).ToList();
                 if (hidden.Count == 0)
                     return row;
-                blanked += hidden.Count;
+                // Task 130-0 fix round 2 (130-0b review): when the polymorphic regarding pair names a hidden invoice, its resolver
+                // columns (id, type, name, URL and number; CreateTimeFieldMapping.RegardingPairAndResolverColumns) name it too, so
+                // they are blanked with the link. A pair that names another record is left alone.
+                if (LinkValueOf(row, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn) is { } pairRaw
+                    && RootLinkIdOf(pairRaw) is { } pairId && hiddenLinks.Any(l => l.Invoice == pairId))
+                    hidden.AddRange(Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns);
+                blanked += hiddenLinks.Count;
                 var copy = row.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
                 foreach (var key in row.Keys.Where(k => hidden.Any(column => IsFormOfLink(k, column))))
                     copy[key] = null;

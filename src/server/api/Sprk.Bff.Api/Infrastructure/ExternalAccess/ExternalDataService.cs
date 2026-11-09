@@ -1206,13 +1206,18 @@ public class ExternalDataService
     /// never null — the same rule as <see cref="GetServiceRequestRequesterAsync"/>.
     /// </remarks>
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
-    public virtual async Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(
+    public virtual async Task<(Guid? MatterId, Guid? ProjectId, Guid? WorkAssignmentId)?> GetInvoiceParentsAsync(
         Guid invoiceId, CancellationToken ct = default)
     {
-        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select=_sprk_matter_value,_sprk_project_value";
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work-assignment core record.
+        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})" +
+                  "?$select=_sprk_matter_value,_sprk_project_value,_sprk_regardingworkassignment_value";
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
-        return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
+        return row is null
+            ? null
+            : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"),
+                GuidValue(row, "_sprk_regardingworkassignment_value"));
     }
 
     /// <summary>
@@ -3071,10 +3076,13 @@ public class ExternalDataService
     /// <remarks>
     /// <paramref name="HasUnreadableParentLink"/> (fix round for task 039): a parent lookup carried a value that is not a
     /// GUID. The delete is refused (fail closed): the row names a parent the caller's rights cannot be checked against.
+    /// <para><paramref name="InvoiceLinks"/> (ebilling-r1 task 130-0 fix round 2, F1): the invoices the row links to, through every
+    /// invoice link column of its table (<see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.LinkColumnsOf"/>). Null means
+    /// the links were not read, and the write is refused as if one linked an invoice the caller cannot see (fail closed by type).</para>
     /// </remarks>
     public sealed record DeleteTarget(
         Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents,
-        bool HasUnreadableParentLink = false);
+        bool HasUnreadableParentLink = false, IReadOnlyList<Guid>? InvoiceLinks = null);
 
     /// <summary>
     /// Reads a deletable row's creator stamps and parent lookups, app-only (FR-26). Null when the row does not exist
@@ -3102,8 +3110,11 @@ public class ExternalDataService
     internal static string BuildDeleteTargetUrl(string apiUrl, DeletableKind kind, Guid id)
     {
         var binding = GetDeletableBinding(kind);
+        // Task 130-0 fix round 2 (F1): and every invoice link column of the table, so a write can follow the invoice.
         var columns = new[] { CreatedByPersonValueAttribute, CreatedByContactValueAttribute }
-            .Concat(binding.Parents.Select(p => p.LookupValueAttribute));
+            .Concat(binding.Parents.Select(p => p.LookupValueAttribute))
+            .Concat(InvoiceLinks.LinkColumnsOf(binding.EntityLogicalName).Select(c => $"_{c}_value"))
+            .Distinct(StringComparer.Ordinal);
         return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
     }
 
@@ -3126,7 +3137,8 @@ public class ExternalDataService
             GuidValue(row, CreatedByPersonValueAttribute),
             GuidValue(row, CreatedByContactValueAttribute),
             parents,
-            unreadable);
+            unreadable,
+            InvoiceLinksOf(GetDeletableBinding(kind).EntityLogicalName, row));
     }
 
     /// <summary>

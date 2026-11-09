@@ -105,19 +105,51 @@ public sealed class ExternalInvoiceLinkedDocumentRouteTests : IClassFixture<Exte
         _hiding.Calls.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "130-0 fix1 single document (fault): the caller's firms cannot be read, so an invoice-linked document is refused as not under the record")]
+    [Theory(DisplayName = "130-0 fix2 single document (fault, must fire): the caller's firms cannot be read, so an invoice-linked document is the invoice-unreadable 503, never the refusal")]
     [MemberData(nameof(LinksAndRoutes))]
-    public async Task WhenTheFirmReadFails_AnInvoiceLinkedDocument_IsRefused(string link, string route)
+    public async Task WhenTheFirmReadFails_AnInvoiceLinkedDocument_IsThe503(string link, string route)
     {
-        var reference = await RefusalOf(route);
-        _fixture.ResetCalls();
         _world.CallerFirmsFault = new TimeoutException("The caller-firm read failed (test).");
         var id = _fixture.Data.AddDocument("matters", Matter, "Own firm's invoice", (link, _own));
 
         using var response = await Get(id, route);
 
-        (await Summarise(response)).Should().Be(reference);
-        _fixture.PointerResolutions.Should().Be(0);
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        using var problem = JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.PointerResolutions.Should().Be(0, "nothing is served while the invoice decision is unknown");
+        _fixture.FileReads.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "130-0 fix2 single document (fault, must not fire): a document with no invoice link is served while the caller's firms cannot be read")]
+    [InlineData("content")]
+    [InlineData("versions")]
+    public async Task WhenTheFirmReadFails_ADocumentWithNoInvoiceLink_IsServed(string route)
+    {
+        _world.CallerFirmsFault = new TimeoutException("The caller-firm read failed (test).");
+        var id = _fixture.Data.AddDocument("matters", Matter, "No invoice");
+
+        using var response = await Get(id, route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _hiding.Calls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "130-0 fix2 single document (fault, order): an invoice-linked document not under the record is the uniform refusal, not the 503")]
+    [MemberData(nameof(LinksAndRoutes))]
+    public async Task WhenTheFirmReadFails_AnInvoiceLinkedDocumentElsewhere_IsTheRefusal(string link, string route)
+    {
+        var reference = await RefusalOf(route);
+        _fixture.ResetCalls();
+        _world.CallerFirmsFault = new TimeoutException("The caller-firm read failed (test).");
+        var id = _fixture.Data.AddDocument("matters", OtherMatter, "Another record's invoice", (link, _own));
+
+        using var response = await Get(id, route);
+
+        (await Summarise(response)).Should().Be(reference, "the record check precedes the invoice decision");
+        _hiding.Calls.Should().BeEmpty();
     }
 
     private async Task<string> RefusalOf(string route)

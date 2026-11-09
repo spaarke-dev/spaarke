@@ -1731,7 +1731,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             params DeleteTargetParent[] parents)
         {
             var id = Guid.NewGuid();
-            Data.Targets[(kind, id)] = new DeleteTarget(person, contact, parents);
+            // Task 130-0 fix round 2 (F1): no invoice link (links that were not read refuse the delete).
+            Data.Targets[(kind, id)] = new DeleteTarget(person, contact, parents, InvoiceLinks: Array.Empty<Guid>());
             if (kind == DeletableKind.Document)
                 AddDocument(id, DriveOf(id));
             return id;
@@ -1741,7 +1742,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         public Guid Seed(DeletableKind kind, Guid? contact, DeleteTargetParent parents, string driveId)
         {
             var id = Guid.NewGuid();
-            Data.Targets[(kind, id)] = new DeleteTarget(null, contact, new[] { parents });
+            Data.Targets[(kind, id)] = new DeleteTarget(null, contact, new[] { parents }, InvoiceLinks: Array.Empty<Guid>());
             AddDocument(id, driveId);
             return id;
         }
