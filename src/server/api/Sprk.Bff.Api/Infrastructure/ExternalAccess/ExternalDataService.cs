@@ -2026,6 +2026,8 @@ public class ExternalDataService
     /// <see cref="CallerFirmsState.Unknown"/>), hide every asked row, with no row read.
     /// Task 130-0b step 2: rows of a CHILD table with an invoice link go to <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by
     /// the invoices they link to; a fault there hides rather than throws).
+    /// Task 130-0b step 3: rows of a ROOT with an invoice link go to <see cref="RootRowsWithInvoiceLinkBlankedAsync"/>; for such a table
+    /// the returned ids are the rows whose invoice link is blanked, never rows to hide.
     /// </summary>
     internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
         InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags,
@@ -2043,6 +2045,11 @@ public class ExternalDataService
         // its invoices; it does not take the family path below.
         if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table))
             return await HideInvoiceLinkedChildRowsAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
+
+        // Task 130-0b step 3: a ROOT with an invoice link (InvoiceLinks; today the work assignment) is never hidden by it. The rows
+        // returned are the ones whose invoice link the tool blanks; the row itself is shown (a root is decided by its grant).
+        if (InvoiceLinks.IsRootWithInvoiceLink(table))
+            return await RootRowsWithInvoiceLinkBlankedAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
 
         var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
             .ConfigureAwait(false);
@@ -2071,9 +2078,33 @@ public class ExternalDataService
     /// are not read when no asked row has one. Fail closed without throwing: a failed link read hides every asked row (which of them link
     /// to an invoice is unknown); firms that are not known, and a failed or faulted decision, hide every asked row that links to one.
     /// </summary>
-    private async Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
+    private Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
         InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
-        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct)
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "hidden", ct);
+
+    /// <summary>
+    /// Task 130-0b step 3 (design.md:414): of <paramref name="asked"/> (rows of a ROOT with an invoice link,
+    /// <see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; today the work assignment), the rows whose invoice link the tool must BLANK. A
+    /// root is decided by its grant and is never hidden by its invoice link; its invoice link is shown only when that invoice is visible.
+    /// The decision is the child rule's, with the same reads (one app-only link read, then ONE invoice decision with the firms from
+    /// <paramref name="caller"/>): a row whose linked invoice is not visible or cannot be decided is returned; a row with no invoice
+    /// link is not, and the firms are not read when no asked row has one. Fail closed without throwing: a failed link read returns
+    /// every asked row; firms that are not known, and a failed or faulted decision, return every asked row that links to an invoice.
+    /// </summary>
+    private Task<IReadOnlySet<Guid>> RootRowsWithInvoiceLinkBlankedAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "shown with the invoice link blanked", ct);
+
+    /// <summary>
+    /// Task 130-0b steps 2 and 3: of <paramref name="asked"/> (rows of a table with an invoice link), the rows that link to an invoice
+    /// that is not visible or cannot be decided, or whose links cannot be read. <paramref name="consequence"/> only labels the log
+    /// lines (a child row is hidden; a root row is shown with its invoice link blanked).
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> RowsLinkedToAnInvoiceNotVisibleAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, string consequence, CancellationToken ct)
     {
         IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> linksOf;
         try
@@ -2087,8 +2118,8 @@ public class ExternalDataService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[EXT-INVOICE-VISIBILITY] The invoice links of {Count} {Table} row(s) could not be read. Failing CLOSED: every one is hidden (plane={Plane}).",
-                asked.Count, table, AssistantPlane);
+                "[EXT-INVOICE-VISIBILITY] The invoice links of {Count} {Table} row(s) could not be read. Failing CLOSED: every one is {Consequence} (plane={Plane}).",
+                asked.Count, table, consequence, AssistantPlane);
             return asked.ToHashSet();
         }
 
@@ -2102,8 +2133,8 @@ public class ExternalDataService
         if (firms.State != CallerFirmsState.Known)
         {
             _logger.LogInformation(
-                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} invoice-linked {Table} row(s) hidden (plane={Plane}).",
-                firms.State, linkedRows.Count, table, AssistantPlane);
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} invoice-linked {Table} row(s) {Consequence} (plane={Plane}).",
+                firms.State, linkedRows.Count, table, consequence, AssistantPlane);
             return linkedRows;
         }
 
@@ -2123,8 +2154,8 @@ public class ExternalDataService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
-                    "[EXT-INVOICE-VISIBILITY] The decision for {Count} invoice(s) linked from {Table} failed. Failing CLOSED: every invoice-linked row is hidden (plane={Plane}).",
-                    invoices.Count, table, AssistantPlane);
+                    "[EXT-INVOICE-VISIBILITY] The decision for {Count} invoice(s) linked from {Table} failed. Failing CLOSED: every invoice-linked row is {Consequence} (plane={Plane}).",
+                    invoices.Count, table, consequence, AssistantPlane);
                 return linkedRows;
             }
 

@@ -62,6 +62,38 @@ public sealed class InvoiceLinkedChildRowsTests
         world.CallerFirmReads.Should().Be(1);
     }
 
+    /// <summary>Task 130-0b step 3: every ROOT with an invoice link that <see cref="InvoiceLinks"/> lists (today the work assignment).</summary>
+    public static TheoryData<string> RootTables
+    {
+        get
+        {
+            var data = new TheoryData<string>();
+            foreach (var table in InvoiceLinks.Tables.Keys.Where(InvoiceLinks.IsRootWithInvoiceLink).OrderBy(t => t, StringComparer.Ordinal))
+                data.Add(table);
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "130-0b step 3 seam: on every root with an invoice link, the seam returns the row linked to another firm's invoice (its link is blanked), never its own firm's or an unlinked row; one firm read")]
+    [MemberData(nameof(RootTables))]
+    public async Task EveryRoot_ReturnsTheRowWhoseLinkIsBlanked_AndOnlyThatRow(string table)
+    {
+        var world = new InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, InvoiceFamilyFirmWorld.OtherFirm);
+        var column = InvoiceLinks.LinkColumnsOf(table)[0];
+        var ownRow = world.LinkedChildRow(table, (column, own));
+        var otherRow = world.LinkedChildRow(table, (column, other));
+        var unlinked = world.LinkedChildRow(table);
+
+        var blanked = await HideAsync(world, world.NewFamilyCaller(), table, ownRow, otherRow, unlinked);
+
+        blanked.Should().BeEquivalentTo(new[] { otherRow });
+        world.CallerFirmReads.Should().Be(1);
+        InvoiceLinks.Tables.Should().ContainKey("sprk_workassignment").WhoseValue.IsRoot.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "130-0b step 2 seam: one link read and one invoice decision per call, over the union of the rows' invoices")]
     public async Task OneLinkRead_AndOneDecision_PerCall()
     {

@@ -765,22 +765,157 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         ShouldAnswerLikeAMissingRecord(await DescribeLinkedAsync(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("document-invoice"), mixed));
     }
 
-    [Fact(DisplayName = "130-0b step 2 describe: a root (work assignment) is unchanged in this step (the seam is not called)")]
-    public async Task ExecuteChatAsync_Task130_0b_S2_ARootRecord_IsUnchanged()
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b step 3: a ROOT record is returned; every form of its invoice link is blanked when that invoice is not visible
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Every form of the work assignment's invoice link a describe record can carry (describe drops the <c>@OData.Community</c>
+    /// annotations itself; the other annotations pass through).
+    /// </summary>
+    private static readonly string[] RootLinkForms =
     {
-        AsExternalCaller();
-        var root = Guid.NewGuid();
+        "_sprk_regardinginvoice_value",
+        "_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname",
+        "_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.associatednavigationproperty",
+        "sprk_regardingrecordid",
+        "sprk_regardingrecordname",
+        "sprk_regardingrecordurl",
+    };
+
+    /// <summary>
+    /// Describes the work assignment <paramref name="root"/> as the user reads it, linked to <paramref name="invoice"/> in every form
+    /// (when not null), with the regarding id/name/URL naming that invoice.
+    /// </summary>
+    private Task<ToolResult> DescribeRootAsync(Guid root, Guid? invoice)
+    {
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_workassignment')")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"EntitySetName\": \"sprk_workassignments\", \"PrimaryIdAttribute\": \"sprk_workassignmentid\" }")));
+        var link = invoice is { } id
+            ? "\"_sprk_regardinginvoice_value\": \"" + id.ToString("D") + "\", "
+              + "\"_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue\": \"INV-0042\", "
+              + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname\": \"sprk_invoice\", "
+              + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.associatednavigationproperty\": \"sprk_RegardingInvoice\", "
+              + "\"sprk_regardingrecordid\": \"" + id.ToString("D") + "\", \"sprk_regardingrecordname\": \"INV-0042\", "
+              + "\"sprk_regardingrecordurl\": \"https://org.test/main.aspx?id=" + id.ToString("D") + "\", "
+            : "\"_sprk_regardinginvoice_value\": null, ";
         _dataverse
-            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_workassignments(")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", \"sprk_name\": \"REC-1\" }")));
-        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_workassignments({root:D})")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", " + link + "\"sprk_name\": \"REC-1\" }")));
 
-        ShouldReturnTheRecord(await CreateHandler().ExecuteChatAsync(
+        return CreateHandler().ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: "{\"path\":\"tables/sprk_workassignment/records/" + root.ToString("D") + "\"}"),
-            BuildDescribeTool(), CancellationToken.None));
+            BuildDescribeTool(), CancellationToken.None);
+    }
+
+    private static void ShouldReturnTheRootWithTheLinkBlank(ToolResult result)
+    {
+        ShouldReturnTheRecord(result);
+        var fields = result.Data!.Value.GetProperty("fields");
+        foreach (var form in RootLinkForms)
+        {
+            fields.TryGetProperty(form, out var value).Should().BeTrue($"{form} is still returned (blank)");
+            value.ValueKind.Should().Be(JsonValueKind.Null, $"{form} carries the invoice link");
+        }
+
+        result.Data!.Value.GetRawText().Should().NotContain("INV-0042");
+    }
+
+    [Fact(DisplayName = "130-0b step 3 describe must fire: a root linked to another firm's invoice is returned with every link form blank")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootOfAnotherFirmsInvoice_IsReturnedWithEveryLinkFormBlank()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeRootAsync(root, invoice);
+
+        ShouldReturnTheRootWithTheLinkBlank(result);
+        result.Data!.Value.GetProperty("fields").GetRawText().Should().NotContain(invoice.ToString("D"));
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b step 3 describe must not fire: a root linked to the caller's own firm's invoice shows the link")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootOfTheCallersOwnInvoice_ShowsTheLink()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeRootAsync(root, invoice);
+
+        ShouldReturnTheRecord(result);
+        var fields = result.Data!.Value.GetProperty("fields");
+        fields.GetProperty("_sprk_regardinginvoice_value").GetString().Should().Be(invoice.ToString("D"));
+        fields.GetProperty("_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname").GetString().Should().Be("sprk_invoice");
+        fields.GetProperty("sprk_regardingrecordname").GetString().Should().Be("INV-0042");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 3 describe fault: a failed link read or a failed decision returns the root with every link form blank")]
+    [InlineData("link-read")]
+    [InlineData("decision")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AFault_ReturnsTheRootWithTheLinkBlank(string fault)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        firms.Fail(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, fault);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldReturnTheRootWithTheLinkBlank(await DescribeRootAsync(root, invoice));
+    }
+
+    [Theory(DisplayName = "130-0b step 3 describe must fire: a root link that cannot be decided (not a GUID, or not returned by the app-only read) is blank")]
+    [InlineData("not-a-guid")]
+    [InlineData("not-returned")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnUnreadableLink_IsBlank(string kind)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = kind == "not-a-guid"
+            ? firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, "not-a-guid")
+            : Guid.NewGuid();
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldReturnTheRootWithTheLinkBlank(await DescribeRootAsync(root, invoice));
+    }
+
+    [Fact(DisplayName = "130-0b step 3 describe must not fire: a root with no invoice link is unchanged, and no firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootWithNoInvoiceLink_IsUnchanged()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.UnlinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldReturnTheRecord(await DescribeRootAsync(root, invoice: null));
+        firms.FirmReads.Should().Be(0, "the root links to no invoice, so no firm is needed");
+    }
+
+    [Fact(DisplayName = "130-0b step 3 describe: an internal systemuser's root is unchanged, and no link or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnInternalCaller_IsUnchanged_AndReadsNothing()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeRootAsync(root, invoice);
+
+        ShouldReturnTheRecord(result);
+        result.Data!.Value.GetProperty("fields").GetProperty("_sprk_regardinginvoice_value").GetString().Should().Be(invoice.ToString("D"));
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only link read");
     }
 
     [Theory(DisplayName = "130-0b step 2 describe: an internal systemuser's child record is unchanged, and no link or firm is read")]

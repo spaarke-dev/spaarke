@@ -674,18 +674,150 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
             : new[] { MatterHit.ToString("D") }, "a link read that fails cannot tell an unlinked hit from a linked one (fail closed)");
     }
 
-    [Fact(DisplayName = "130-0b step 2 search_data: a root (work assignment) hit is unchanged in this step (the seam is not called)")]
-    public async Task ExecuteChatAsync_Task130_0b_S2_ARootHit_IsUnchanged()
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b step 3: a ROOT hit is kept; its content is blanked when its invoice link is not visible
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private const string RootSnippet = "Review of INV-0042 for the panel";
+
+    /// <summary>The search returns a matter hit and a work-assignment hit for <paramref name="root"/> carrying a highlight snippet.</summary>
+    private void ArrangeRootHit(Guid root) =>
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(
+            "{ \"value\": [ "
+            + "{ \"@search.score\": 9.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+            + "{ \"@search.score\": 5.0, \"entityname\": \"sprk_workassignment\", \"objectid\": \"" + root.ToString("D") + "\", "
+            + "\"highlights\": { \"sprk_name\": [\"" + RootSnippet + "\"] } } ] }")));
+
+    /// <summary>The root hit's content (null when blanked); the hit itself must be present.</summary>
+    private static string? RootContent(ToolResult result, Guid root)
+    {
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(new[] { MatterHit.ToString("D"), root.ToString("D") }, "a root hit is never dropped by its invoice link");
+        var hit = result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Single(r => r.GetProperty("recordId").GetString() == root.ToString("D"));
+        return hit.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String ? content.GetString() : null;
+    }
+
+    [Fact(DisplayName = "130-0b step 3 search_data must fire: a root hit linked to another firm's invoice is kept with its content blank")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootHitOfAnotherFirmsInvoice_IsKeptWithContentBlank()
     {
         AsExternalCaller();
-        var root = Guid.NewGuid();
-        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_workassignment", root)))));
-        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root,
+            firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeRootHit(root);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().BeNull();
+        result.Data!.Value.GetRawText().Should().NotContain("INV-0042");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b step 3 search_data must not fire: a root hit linked to the caller's own firm's invoice keeps its content")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootHitOfTheCallersOwnInvoice_KeepsItsContent()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root,
+            firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        ArrangeRootHit(root);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().Be(RootSnippet);
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 3 search_data fault: a failed link read or a failed decision keeps the root hit with its content blank")]
+    [InlineData("link-read")]
+    [InlineData("decision")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AFault_KeepsTheRootHitWithContentBlank(string fault)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root,
+            firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        ArrangeRootHit(root);
+        firms.Fail(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, fault);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "130-0b step 3 search_data must fire: a root hit whose link cannot be decided (not a GUID, or not returned by the app-only read) keeps no content")]
+    [InlineData("not-a-guid")]
+    [InlineData("not-returned")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnUnreadableLink_BlanksTheContent(string kind)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = kind == "not-a-guid"
+            ? firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, "not-a-guid")
+            : Guid.NewGuid();
+        ArrangeRootHit(root);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "130-0b step 3 search_data must not fire: a root hit with no invoice link keeps its content, and no firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootHitWithNoInvoiceLink_KeepsItsContent()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.UnlinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root);
+        ArrangeRootHit(root);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().Be(RootSnippet);
+        firms.FirmReads.Should().Be(0, "the root links to no invoice, so no firm is needed");
+    }
+
+    [Fact(DisplayName = "130-0b step 3 search_data: an internal systemuser's root hit is unchanged, and no link or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnInternalCaller_IsUnchanged_AndReadsNothing()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root,
+            firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeRootHit(root);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        RootContent(result, root).Should().Be(RootSnippet);
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only link read");
+    }
+
+    [Fact(DisplayName = "130-0b step 3 search_data: the caller's firms are read exactly once per tool call, across invoice-family, child and root hits")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_TheCallersFirmsAreReadOncePerToolCall()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var todo = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo"), invoice);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root,
+            firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(
+            ("sprk_invoice", invoice), ("sprk_todo", todo), ("sprk_workassignment", root)))));
+        _hideInvoiceFamily = firms.Seam;
 
         var result = await SearchAsync();
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        ResultIds(result).Should().Equal(MatterHit.ToString("D"), root.ToString("D"));
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice", "sprk_todo", "sprk_workassignment");
+        firms.FirmReads.Should().Be(1, "three seam calls in one tool call share one caller");
+        firms.MembershipReads.Should().Be(1);
     }
 
     [Fact(DisplayName = "130-0b step 2 search_data: the caller's firms are read exactly once per tool call, across invoice-family and child tables on the page")]

@@ -120,6 +120,59 @@ internal static class ExternalInvoiceVisibility
         && !InvoiceLinks.IsRootWithInvoiceLink(logicalName)
         && !IsInvoiceFamilyTable(logicalName);
 
+    /// <summary>
+    /// Task 130-0b step 3: the columns the regarding resolver derives from a record's regarding target (the target's id as text, its
+    /// name, its URL). Every regarding target shares them, so on a root they carry the invoice only when the target IS the linked invoice.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> RegardingTargetColumns =
+        new[] { "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl" };
+
+    /// <summary>
+    /// Task 130-0b step 3: blanks (sets to null) every form of the invoice link in <paramref name="fields"/>, a row of the ROOT
+    /// <paramref name="table"/> as a tool returns it, when the seam says that root's linked invoice is not visible to the caller (or
+    /// cannot be decided). The link columns come from <see cref="InvoiceLinks.LinkColumnsOf"/>, never from a hand list. Blanked: the
+    /// lookup in its plain and <c>_col_value</c> forms, its name columns (<c>colname</c>, <c>colyominame</c>), and every annotation on
+    /// any of them (<c>key@…</c>: formatted value, lookup logical name, navigation property). The <see cref="RegardingTargetColumns"/>
+    /// (and their annotations) are blanked too unless the row shows they hold ANOTHER target: a regarding id that reads as a GUID that
+    /// is not one of the row's linked invoices. When that cannot be told (no regarding id, no linked invoice in the row), they are
+    /// blanked (fail closed). The row itself is kept.
+    /// </summary>
+    internal static void BlankRootInvoiceLink(string? table, IDictionary<string, object?> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var linkColumns = InvoiceLinks.LinkColumnsOf(table);
+        if (linkColumns.Count == 0)
+            return;
+
+        var valueForms = linkColumns.SelectMany(c => new[] { c, $"_{c}_value" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var linkForms = valueForms.Concat(linkColumns.SelectMany(c => new[] { c + "name", c + "yominame" }))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var invoices = fields.Where(kv => valueForms.Contains(kv.Key)).Select(kv => GuidOf(kv.Value)).OfType<Guid>().ToHashSet();
+        var regardingTarget = fields
+            .Where(kv => string.Equals(kv.Key, RegardingTargetColumns[0], StringComparison.OrdinalIgnoreCase))
+            .Select(kv => GuidOf(kv.Value))
+            .FirstOrDefault();
+        var regardingIsAnotherRecord = invoices.Count > 0 && regardingTarget is { } target && !invoices.Contains(target);
+
+        foreach (var key in fields.Keys.ToList())
+        {
+            var column = key.Split('@', 2)[0];
+            if (linkForms.Contains(column)
+                || (!regardingIsAnotherRecord && RegardingTargetColumns.Contains(column, StringComparer.OrdinalIgnoreCase)))
+            {
+                fields[key] = null;
+            }
+        }
+    }
+
+    private static Guid? GuidOf(object? value) => value switch
+    {
+        Guid id => id,
+        string text when Guid.TryParse(text, out var id) => id,
+        JsonElement { ValueKind: JsonValueKind.String } element when Guid.TryParse(element.GetString(), out var id) => id,
+        _ => null,
+    };
+
     /// <summary>The columns a source document is read with: 188's narrowing columns, the marker, the root links and the
     /// live-parent lookups (whose live roots join the roots term).</summary>
     internal static IReadOnlyList<string> SourceSelectColumns { get; } =
@@ -1228,6 +1281,10 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
 /// Such a row is hidden when ANY invoice it links to is not visible (the same invoice decision, with the caller's firms) or cannot be
 /// decided; a row with no invoice link is not hidden. On a child table a fault does not throw: a failed link read hides every asked
 /// row, and a failed decision (or firms that cannot be read) hides every asked row that links to an invoice.
+/// Task 130-0b step 3: <paramref name="table"/> may also be a ROOT with an invoice link (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>;
+/// today the work assignment). A root is decided by its grant and is NEVER hidden by its invoice link: for a root the returned ids are
+/// the rows whose invoice link the tool must blank (<see cref="ExternalInvoiceVisibility.BlankRootInvoiceLink"/>), under the child
+/// rule's decision and fault rule (not visible, undecidable, or a fault: blank).
 /// </summary>
 public delegate Task<IReadOnlySet<Guid>> AppOnlyInvoiceFamilyHiding(
     InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, CancellationToken ct);

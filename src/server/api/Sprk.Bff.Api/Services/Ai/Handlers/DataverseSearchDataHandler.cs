@@ -295,6 +295,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var hiddenDerivedSources = new List<Guid>();
             var hiddenInvoiceFamilyRows = 0;
             var hiddenInvoiceLinkedRows = 0;
+            var blankedRootLinkHits = 0;
             DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
@@ -360,9 +361,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 // throws into the error result below (no data).
                 // Task 130-0b step 2: a hit on a CHILD table with an invoice link (to-do, event, document, analysis, memo...) goes
                 // through the same seam, which hides it when any invoice it links to is hidden (a fault there hides, never throws).
+                // Task 130-0b step 3: a hit on a ROOT with an invoice link (today the work assignment) goes through the same seam with
+                // the same caller, but is never dropped: for a root the seam's answer is the hits whose invoice link is not visible (or
+                // cannot be decided; a fault counts as that), and such a hit is kept with its content blanked below.
                 var hiddenFamily = new Dictionary<string, IReadOnlySet<Guid>>(StringComparer.OrdinalIgnoreCase);
                 var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)
-                    || ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(h.EntityName)).ToList();
+                    || ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(h.EntityName)
+                    || InvoiceLinks.IsRootWithInvoiceLink(h.EntityName)).ToList();
                 if (familyHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
                     // Task 130-0b: one caller for the tool call, so the caller's firms are read once for every family table.
@@ -376,13 +381,24 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
 
                 foreach (var (hit, entityName, recordId) in hits)
                 {
+                    var blankRootLink = false;
                     if (hiddenFamily.TryGetValue(entityName, out var hiddenRows) && hiddenRows.Contains(recordId))
                     {
-                        if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(entityName))
-                            hiddenInvoiceLinkedRows++;
+                        if (InvoiceLinks.IsRootWithInvoiceLink(entityName))
+                        {
+                            // Task 130-0b step 3: a root is decided by its grant; the hit stays, its snippets do not (fail
+                            // closed: a snippet may come from any matching field, so the whole content is blanked).
+                            blankRootLink = true;
+                            blankedRootLinkHits++;
+                        }
                         else
-                            hiddenInvoiceFamilyRows++;
-                        continue;
+                        {
+                            if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(entityName))
+                                hiddenInvoiceLinkedRows++;
+                            else
+                                hiddenInvoiceFamilyRows++;
+                            continue;
+                        }
                     }
 
                     if (narrowing is not null &&
@@ -425,6 +441,11 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                         if (string.IsNullOrWhiteSpace(matchedContent)) matchedContent = null;
                     }
 
+                    if (blankRootLink)
+                    {
+                        matchedContent = null;
+                    }
+
                     results.Add(new
                     {
                         path = DataverseRecordCitations.RecordPath(entityName, recordId),
@@ -465,6 +486,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 _logger.LogInformation(
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     "invoice-linked", $"invoice_hidden={hiddenInvoiceLinkedRows}", context.DecisionId);
+            }
+            if (blankedRootLinkHits > 0)
+            {
+                // ADR-015: a reason code and a count only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "root", $"root_invoice_link_blanked={blankedRootLinkHits}", context.DecisionId);
             }
             if (hiddenDerivedSources.Count > 0)
             {

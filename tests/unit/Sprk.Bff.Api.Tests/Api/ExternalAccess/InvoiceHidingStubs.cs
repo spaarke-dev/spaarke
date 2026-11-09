@@ -279,6 +279,12 @@ internal sealed record InvoiceLinkedCase(string Key, string Table, string LinkCo
         new("memo", "sprk_memo", "sprk_regardinginvoice"),
     };
 
+    /// <summary>
+    /// Task 130-0b step 3: the ROOT with an invoice link (the work assignment through <c>sprk_regardinginvoice</c>). Not in
+    /// <see cref="All"/>: a root row is never hidden; its invoice link is blanked when that invoice is not visible.
+    /// </summary>
+    public static InvoiceLinkedCase Root { get; } = new("workassignment", "sprk_workassignment", "sprk_regardinginvoice");
+
     /// <summary>The class named <paramref name="key"/>.</summary>
     public static InvoiceLinkedCase Of(string key) => All.Single(c => c.Key == key);
 
