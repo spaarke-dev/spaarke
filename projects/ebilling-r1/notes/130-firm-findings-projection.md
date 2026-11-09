@@ -117,10 +117,10 @@ Branch `task/ebilling-130b` (from `task/ebilling-130a` head `60a2b64dc0`).
 | Unauthenticated | 401 | the host's challenge |
 | Group filter cannot resolve the caller | 403 | the resolver's |
 | Internal systemuser, no principal, caller with no active firm | 403 | `ebilling.firm-outcome.forbidden` |
-| Firm read faults, is unreadable, or returns null | 403 (logged as a system failure) | same |
+| Firm read faults, is unreadable, or returns null | 503 (logged as a system failure; was 403 until fix round 4) | `ebilling.firm-outcome.unavailable` |
 | Item's firm is not one of the caller's active firms (a shared matter changes nothing); no Read on the item's core record; hidden by the (a') predicate; no (a') predicate registered | 403 | same |
 | Item does not exist | 403 | same body as another firm's |
-| Invoice/submission read faults, or the visibility decision cannot be made | 503 | `ebilling.firm-outcome.unavailable` |
+| Invoice/submission read faults, the secure-root status cannot be read (fix round 5), or the visibility decision cannot be made | 503 | `ebilling.firm-outcome.unavailable` |
 | eBilling flag off, caller authorized | 503 | `ebilling.disabled` |
 | Projection `Degraded` or `Kind == Unavailable` (a read FAULTED, the invoice has no status, or an Accepted submission's invoice was not decided by the filter: fix round 2) | 503 | `ebilling.firm-outcome.unavailable` |
 | Projection `Kind == Closed` (a closed state at the time of the request; fix round 1) | 200 | status label and tracking number only |
@@ -331,3 +331,13 @@ Branch `task/ebilling-130b-fix4` from `task/ebilling-130b-fix1` at `fc68d0b44a`.
   - The "exactly one core record" rule (FR-05, D-28) is owned by `InvoiceFamilyCoreRecordGuard` (`Check` refuses none and several, `MultipleCoreRecordsCode`). It is called on the BFF create and update paths: the submission persister and service (`Check`, `RequireFiled`), `RecordCreationService`'s pre-write step and `OwnedChildWrite.RefileAsync` (`CheckWriteAsync`), and the three generic update paths (`CheckGenericUpdateAsync`: the playbook update, the output orchestrator, the field-mapping push). Behaviour tests: `InvoiceFamilyCoreRecordGuardTests`, `RecordCreationServiceInvoiceFamilyRuleSeamTests`, `InvoiceFamilyGenericUpdatePathTests`, `SecureChildOwnershipAiToolTests.InvoiceFamilyGuard`.
   - No ArchTest pins that every writer of the three lookups asks the guard (the completeness of the writer set is not pinned), so the answer is partial.
   - The external `invoices` module has no precedence to copy: it ORs its scope dimensions (`ExternalAccessModule.cs` invoices registration, `ExternalModuleRegistry.ScopeRows`, "OR across dimensions", owner decision D2 option A) and adds a Read requirement on secure roots. The filter's union matches the module's row scope. Choosing a precedence (or requiring Read on every set core) is a design decision for the owner; no filter change was made.
+
+## 130b fix round 5 (review ruling on Q1)
+
+Branch `task/ebilling-130b-fix5` from `task/ebilling-130b-fix1` at `ecf694a8d1`.
+
+- **Ruling.** The core-record union (Read on the matter, the project or the work assignment) stays: it matches the external invoices module's OR-across-dimensions row scope. The module also requires Read on every SECURE root a row names (`RequireReadOnSecureRoots`, `ExternalMultiRootRule`); the filter now applies that rule explicitly.
+- **Step 1 (does the (a') seam already do it?): no.** `ExternalInvoiceHiding` (`ExternalDataService.HideInvoicesForAsync` -> `ExternalInvoiceVisibility.DecideAsync`) decides from the invoice's Submit Invoice source and its own root flags; it is not the module's per-caller secure-roots rule. So the rule is applied explicitly in the filter.
+- **Step 2 (the change).** `FirmOutcomeAuthorizationFilter.DecideSecureRootsAsync`, called right after the core-record union and before the (a') call, so before any projection read. It calls the module's own functions and forks nothing: `ExternalMultiRootRule.ReadLiveParentsAsync` (through `ExternalDataService.ReadLiveParentRootsAsync`), `ChildRowRoots.Of` over the invoice's core lookups, `ReadFlagsAsync` (through `ReadSecureRootFlagsAsync`) and `ChildRowReadable`. The invoice read now also selects the parent lookups the module's rule takes in (`LiveParentLookupsOf("sprk_invoice")`). A root the caller cannot read that is secure, or whose status is unknown, answers the uniform 403 (nothing says which root). A status read that faulted or was cut short answers `FirmOutcomeErrors.Unavailable()` (503, retryable), as the other faults do. The firm decision and the existing checks still run first. The submission route's own invoice goes through the same invoice rule.
+- **Tests** (`FirmOutcomeScopeTests`): must-fire `Invoice_WithASecureUnreadableSecondCore_Is403_AndNothingIsProjected` (two cores set, one readable and one secure and unreadable: 403, no projection read); must-not-fire `Invoice_WithOneReadableCore_Is200_AndNoSecureStatusIsRead` and `Invoice_WithAnOrdinaryUnreadableSecondCore_Is200` (known not secure: 200); `ASecureRootStatusReadThatFaults_Is503_AndNothingIsProjected`. The test double gained an overridable root-status read.
+- The ledger's `AddFirmOutcomeAuthorizationFilter` credited form was re-cited to the edited line numbers.

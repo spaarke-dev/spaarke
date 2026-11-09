@@ -123,6 +123,12 @@ public class ExternalInvoiceVisibilityGuardTests
             + "invoice decision the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1). It passes the "
             + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
             + "that invoice is read (in progress: no billed total; Accepted: 503).",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::.cctor"] =
+            "Reviewed 130b fix round 5. Static column list (the invoice's lookups, incl. the parents the secure-roots rule takes in); reads nothing.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::DecideSecureRootsAsync"] =
+            "Reviewed 130b fix round 5. The invoices module's secure-roots rule (ExternalMultiRootRule) over the invoice's own lookups and its "
+            + "parents' live roots, returning a refusal or nothing; no family row. Its only caller, DecideInvoiceAsync in the same filter, applies "
+            + "THE (a') predicate to the same invoice right after it, and fails closed.",
         // The projection is the reader BEHIND those two handlers. It takes an id and returns what a firm may see (ADR-008: it makes no
         // caller decision); its only external caller is FirmOutcomeEndpoints, and no other route may use it without the same filter
         // (the ratchet: a method here that starts reaching the predicate, or stops being a surface, is removed).

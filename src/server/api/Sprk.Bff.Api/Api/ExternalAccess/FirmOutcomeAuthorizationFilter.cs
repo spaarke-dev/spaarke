@@ -64,7 +64,8 @@ internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid Subject
 /// <para><b>The rule (closed set).</b> The caller sees an invoice's (or submission's) outcome only when ALL hold: it is not a workforce
 /// systemuser; it has at least one active firm (<see cref="ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync"/>, the one
 /// definition 044 and <c>/me</c> use); the invoice's (submission's) firm (<c>sprk_vendororg</c>) is one of them; the caller holds Read on the
-/// core record (the principal's post-veto rights, <see cref="CallerPrincipal.RightsOn"/>); and the invoice (submission) is not hidden from it
+/// core record (the principal's post-veto rights, <see cref="CallerPrincipal.RightsOn"/>); the invoice's secure roots are ones it can read (the
+/// invoices module's own rule, <see cref="ExternalMultiRootRule"/>, applied explicitly); and the invoice (submission) is not hidden from it
 /// by the (a') predicate (<see cref="ExternalInvoiceHiding"/> / <see cref="ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync"/>,
 /// the same decisions every other external invoice read applies). A submission's invoice, once it exists, must ALSO pass the invoice rule. A
 /// caller of several firms sees each of its firms' items; another firm's item is refused even on a shared matter.</para>
@@ -72,7 +73,7 @@ internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid Subject
 /// id that does not exist all answer the SAME 403 <see cref="FirmOutcomeErrors.Forbidden"/> with the same body, so the status says nothing about
 /// which. <b>Not-found is 403 too, not 404:</b> an id that does not exist has no firm, so the firm check can never pass for it, and a 404 for it
 /// beside a 403 for another firm's item would let a caller learn which ids exist. A read that cannot decide (the caller's firms, the invoice or
-/// submission, or the visibility decision, faulted or came back unreadable) is a retryable 503 <see cref="FirmOutcomeErrors.Unavailable"/>
+/// submission, the secure-root status, or the visibility decision, faulted or came back unreadable) is a retryable 503 <see cref="FirmOutcomeErrors.Unavailable"/>
 /// (EB-D-169), never a 200 and never a denial that blames the caller. The firm read is decided before any item is read.</para>
 /// <para><b>Order.</b> The group's workforce ceiling (id-independent), then principal, systemuser, firms, record read, firm, core record, visibility
 /// (a submission: then its invoice's); the kill switch after this filter. App-only reads (ADR-028 A1/A3), no OBO; no principal denies.</para>
@@ -84,9 +85,13 @@ internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid Subject
 /// </remarks>
 internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 {
-    /// <summary>The columns of an invoice that decide its firm and its core record.</summary>
+    /// <summary>
+    /// The columns of an invoice that decide its firm, its core record and its secure roots (the parents whose live roots join the
+    /// invoices module's secure-roots rule are read with it).
+    /// </summary>
     private static readonly string[] InvoiceScopeColumns =
-        ["sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
+        ["sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
+            .. ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Select(l => l.Column)];
 
     private readonly FirmOutcomeSubject _subject;
     private readonly ExternalParticipationService _participations;
@@ -236,6 +241,14 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return (FirmOutcomeErrors.Forbidden(), false);
         }
 
+        // The invoices module's other row rule, applied explicitly: Read on every SECURE root the invoice names (ExternalMultiRootRule, the
+        // one the module registers through RequireReadOnSecureRoots). Before any projection read; the answer is the same 403.
+        var secure = await DecideSecureRootsAsync(principal, invoice, ct);
+        if (secure is not null)
+        {
+            return (secure, false);
+        }
+
         // THE (a') decision every external invoice read applies: a hidden invoice is another firm's, refused and never projected. No
         // predicate registered denies (fail closed); a decision that could not be made is a retryable 503 (EB-D-169).
         if (_hideInvoices is null)
@@ -268,6 +281,51 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
         return (null, true);
     }
+
+    /// <summary>
+    /// The secure-roots rule of the external invoices module (<c>RequireReadOnSecureRoots</c>), over the invoice as read: the SAME
+    /// functions the module grid and the record gate call (<see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/>,
+    /// <c>ChildRowRoots.Of</c>, <see cref="ExternalMultiRootRule.ReadFlagsAsync"/>, <see cref="ExternalMultiRootRule.ChildRowReadable"/>) over the invoice's core
+    /// lookups (matter, project, work assignment) and its parents' live roots. Null when the caller may see the invoice; the uniform 403
+    /// when it may not (nothing says which root); a retryable 503 when the answer rests on a read that failed (fail closed).
+    /// </summary>
+    private async Task<IResult?> DecideSecureRootsAsync(CallerPrincipal principal, IReadOnlyDictionary<string, object?> invoice, CancellationToken ct)
+    {
+        try
+        {
+            static string? Link(IReadOnlyDictionary<string, object?> row, string column) =>
+                !row.TryGetValue(column, out var value) || value is null ? null : value is Guid id ? id.ToString() : value.ToString();
+
+            var live = await _data.ReadLiveParentRootsAsync(
+                [ExternalMultiRootRule.LiveParentsOf(InvoiceTable, invoice)], ct);
+            var rule = ChildRowRoots.Of(
+                InvoiceTable, invoice,
+                ExternalMultiRootRule.Stamps(
+                    Link(invoice, "sprk_project"), Link(invoice, "sprk_matter"), Link(invoice, "sprk_regardingworkassignment")),
+                live);
+            var flags = await _data.ReadSecureRootFlagsAsync(principal, [(IEnumerable<(ExternalGrantRootType, string?)>)rule], ct);
+            if (ExternalMultiRootRule.ChildRowReadable(principal, flags, rule))
+            {
+                return null;
+            }
+
+            if (live.Faulted || !flags.IsComplete)
+            {
+                _logger.LogError("[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the invoice's secure-root status could not be read; answering 503.");
+                return FirmOutcomeErrors.Unavailable();
+            }
+
+            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice names a root the caller cannot read.");
+            return FirmOutcomeErrors.Forbidden();
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[EBILLING-FIRM-OUTCOME] SYSTEM FAILURE: the invoice's secure-root status could not be read; answering 503.");
+            return FirmOutcomeErrors.Unavailable();
+        }
+    }
+
+    private const string InvoiceTable = "sprk_invoice";
 
     /// <summary>The core record lookups of an invoice and the grant root each is checked against.</summary>
     private static readonly (string Column, ExternalGrantRootType Type)[] CoreRoots =

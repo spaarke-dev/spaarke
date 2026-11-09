@@ -1336,14 +1336,16 @@ public partial class RouteAuthorizationGuardTests
             + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
             + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
         new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
-            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:130); the invoice's (or submission's) firm "
-            + "must be among the caller contact's ACTIVE firms (:222, :296; an unreadable or faulting firm read is a retryable 503, never "
-            + "'no firm' and never a pass, :145-148 and :178-184; a decided empty set is the 403, :150-153) AND the caller holds Read on its "
-            + "core record from the evaluator's post-veto rights (principal.RightsOn, :232, :302), AND the item is not hidden by the (a') "
-            + "predicate (:241-266, :313-323); every refusal, a missing item included, is the same 403 (:213), and a missing principal "
-            + "denies (:122-125). A submission's derived invoice is then decided by the same invoice rule (:337; fix round 1). The "
-            + "InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes UNDECIDED (:213), the decision is "
-            + "stored with the admitted id (:163), and the projection then reads nothing of that invoice "
+            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "
+            + "must be among the caller contact's ACTIVE firms (:227, :354; an unreadable or faulting firm read is a retryable 503, never "
+            + "'no firm' and never a pass, :150-153 and :183-189; a decided empty set is the 403, :155-158) AND the caller holds Read on its "
+            + "core record from the evaluator's post-veto rights (principal.RightsOn, :237, :360), AND (an invoice) every secure root it "
+            + "names is one the caller can read, by the invoices module's own rule (ExternalMultiRootRule, :244-250; a status read that "
+            + "failed is a 503, never a pass), AND the item is not hidden by the (a') "
+            + "predicate (:254-279, :371-381); every refusal, a missing item included, is the same 403 (:218), and a missing principal "
+            + "denies (:127-130). A submission's derived invoice is then decided by the same invoice rule (:395; fix round 1). The "
+            + "InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes UNDECIDED (:218), the decision is "
+            + "stored with the admitted id (:168), and the projection then reads nothing of that invoice "
             + "(in progress: no billed total; Accepted: 503)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "

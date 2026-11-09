@@ -53,6 +53,7 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     private static readonly Guid FirmC = Guid.Parse("13000000-0000-4000-8000-0000000000c1");
     private static readonly Guid SharedMatter = Guid.Parse("13000000-0000-4000-8000-00000000aa01");
     private static readonly Guid OtherMatter = Guid.Parse("13000000-0000-4000-8000-00000000aa02");
+    private static readonly Guid SecureProject = Guid.Parse("13000000-0000-4000-8000-00000000bb01");
     private static readonly Guid ContactId = Guid.Parse("13000000-0000-4000-8000-0000000000e1");
     private static readonly Guid WriterId = Guid.Parse("13000000-0000-4000-8000-0000000000f1");
     private static readonly Guid UserId = Guid.Parse("13000000-0000-4000-8000-0000000000f9");
@@ -519,6 +520,47 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _data.Invoices[invoice].Remove("sprk_matter");
 
         await AssertRefusedAndNothingProjectedAsync(await Invoice(invoice));
+    }
+
+    [Fact(DisplayName = "130b fix 5 (must-fire): an invoice with two core records set, the caller reading the ordinary one and the other secure and unreadable, is 403 and nothing is projected")]
+    public async Task Invoice_WithASecureUnreadableSecondCore_Is403_AndNothingIsProjected()
+    {
+        var invoice = SeedInvoice(FirmA);
+        SeedReducedLine(invoice, Reason);
+        _data.Invoices[invoice]["sprk_project"] = SecureProject;
+
+        await AssertRefusedAndNothingProjectedAsync(await Invoice(invoice));
+        _data.FlagReads.Should().Be(1, "the secure status of the unreadable root was asked");
+    }
+
+    [Fact(DisplayName = "130b fix 5 (must-not-fire): an invoice whose only core is readable is 200, and no secure status is read")]
+    public async Task Invoice_WithOneReadableCore_Is200_AndNoSecureStatusIsRead()
+    {
+        var invoice = SeedInvoice(FirmA);
+
+        (await Invoice(invoice)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _data.FlagReads.Should().Be(0, "every root the invoice names is readable, so no flag is needed");
+    }
+
+    [Fact(DisplayName = "130b fix 5 (must-not-fire): a second core the caller cannot read but that is KNOWN not secure does not hide the invoice: 200")]
+    public async Task Invoice_WithAnOrdinaryUnreadableSecondCore_Is200()
+    {
+        var invoice = SeedInvoice(FirmA);
+        _data.Invoices[invoice]["sprk_project"] = SecureProject;
+        _data.NonSecureRoots.Add((ExternalGrantRootType.Project, SecureProject));
+
+        (await Invoice(invoice)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "130b fix 5: a secure-root status read that faults is a retryable 503, never a pass, and nothing is projected")]
+    public async Task ASecureRootStatusReadThatFaults_Is503_AndNothingIsProjected()
+    {
+        var invoice = SeedInvoice(FirmA);
+        _data.Invoices[invoice]["sprk_project"] = SecureProject;
+        _data.FlagFault = new TimeoutException("the root status is down");
+
+        await AssertRefusedAsync(await Invoice(invoice), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().BeEmpty("a refused request projects nothing");
     }
 
     [Fact(DisplayName = "130b: a caller with NO firm is 403 and no invoice is read")]
@@ -1330,6 +1372,25 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         private int _reads;
 
         public int Reads => Volatile.Read(ref _reads);
+
+        /// <summary>The roots the root-status read answers as NOT secure; any other unreadable root counts as secure.</summary>
+        public HashSet<(ExternalGrantRootType Root, Guid Id)> NonSecureRoots { get; } = new();
+
+        /// <summary>When set, the root-status read throws it.</summary>
+        public Exception? FlagFault { get; set; }
+
+        private int _flagReads;
+
+        public int FlagReads => Volatile.Read(ref _flagReads);
+
+        public override Task<NonSecureRootsRead> GetNonSecureRootsAsync(
+            IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _flagReads);
+            return FlagFault is { } fault
+                ? Task.FromException<NonSecureRootsRead>(fault)
+                : Task.FromResult(new NonSecureRootsRead(roots.Where(NonSecureRoots.Contains).ToHashSet()));
+        }
 
         public override Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
             Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
