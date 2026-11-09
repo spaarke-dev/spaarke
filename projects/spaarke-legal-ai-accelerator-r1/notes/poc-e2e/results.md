@@ -436,3 +436,37 @@ Results: pending.
 - **Owner's Copilot custom instruction found stale:** it named "Spaarke NDA – Mutual v1.0" at
   `Legal Knowledge/Playbooks/NDA/`. A generic replacement is in the quick card, and W3 tests whether Word follows it.
 - **Script:** W0 now tests the step lists; W5 is an optional policy check, with its key in `answer-key/`.
+
+### Act 7 results (owner, Word desktop, 2026-11-09)
+
+Screenshots: OneDrive `Documents/Cowork/Test/POC-Act2/screens/` (W1a-*, W1b-explicit-instructions, W3-*, W5-*),
+plus the owner's in-chat screenshots of the protocol run. Scored against `answer-key/legal-hold-answer-key.md`
+(draft A: 6 RED, 2 YELLOW, 5 GREEN).
+
+| Test | Setup | Route | Result |
+|---|---|---|---|
+| W1a | Draft A + table playbook attached, "Review this against the attached playbook", mode **Allow editing** | Word's **editing-suggestion cards** (7 suggestions in 3 categories Copilot invented); no playbook card, no ratings | All 6 REDs found, including automatic deletion (planted by absence). Acknowledgment found as "Clarify". **Missed** other custodians (YELLOW). No false positives. 7/8 issues |
+| W1a (follow-up) | Owner asked why it was not a review | Copilot apologised and recommended an Agent Builder agent; it also cited stale Cowork skill files from OneDrive (`standards-protocol`, `SKILL`, `review-checklist`, three `mutual-nda-review-playbook` copies) | See gaps #33, #34 |
+| W1b (as run) | Same table playbook; explicit prompt naming the four columns and asking for "topic by topic output"; mode **Chat only** | Chat answer: **topic-by-topic table** (Topic / Assessment / Analysis / Recommended action) | First rows match the key. The requirement-list variant was not run |
+| Protocol run | Owner's protocol file `OneDrive/Documents/Copilot/playbook-document-review.md` v1.0 (verification code PBR-1109-A), referenced from the custom instruction; prompt "analyze using this playbook" | Chat: header block, 13-row table, overall conclusion with reconciled totals | Custom instruction followed (tracking phrase and verification code echoed). Totals **Meets 5 / Acceptable fallback 2 / Escalate 6** = key 5 GREEN / 2 YELLOW / 6 RED; the six escalations are exactly the six REDs. Copilot found the protocol by search, not at the instructed path (`Copilot/Skills/`; the file is in `Copilot/`) |
+| W3 | Draft A, nothing attached, "review this" (earlier custom instruction) | Editing-suggestion cards after a **web search** (FRCP 37(e), exterro); did **not** ask for a playbook | Improvised: 7 suggestions; the clean-up conflict was softened to "contact Legal if unsure" rather than removed |
+| W3 (Claude add-in, benchmark only) | Same draft, Claude for Word pane, "review this" | Chat, severity-grouped | Without any playbook: 7 of 8 key issues (clean-up, date range, expiry, merits, data sources, acknowledgment, auto-delete as "Medium"); missed departures |
+| W5 | Draft A + Acme policy attached, "review based on this policy", Allow editing | Editing-suggestion cards: 8 suggestions in 3 categories | First card = RLH-3.5/3.9 clean-up conflict (correct). Remaining 7 not captured |
+| W0, W1b (requirements), W1c, W2, W4 | — | — | Not run |
+
+**Findings.**
+1. **The route depends on the pane's mode and the prompt, not on the playbook's shape.** In *Allow editing*, a
+   non-contract playbook review becomes Word's editing suggestions (good content, no per-topic ratings, one topic
+   missed). In *Chat only*, or with a stated review method, Word returns a complete topic-by-topic assessment.
+2. **A review protocol fixes it.** A short method file (extract every topic, rate each, reconcile totals, don't
+   edit) produced a 13/13-count match with the key. Copilot followed the custom instruction that points at it.
+3. **Enterprise search pulls stray files into reviews.** Old Cowork skill copies in OneDrive were cited as sources
+   (gap #34). The governed library is not the only grounding Copilot uses.
+4. **Without a playbook Word improvises** (web search; no ask), so the "ask me to attach" line did not hold in W3
+   (earlier instruction text; retest with the protocol instruction).
+
+**Gaps.** #33: the Word pane's *Allow editing* mode turns a non-contract playbook review into editing suggestions
+(no ratings, incomplete coverage). #34: stale skill and playbook copies in the user's OneDrive are retrieved as
+sources during reviews (`Cowork/MVP-Evidence/T-02/skills-folder-copy/`, `Cowork/Skills/nda-library-review/`,
+`Microsoft Copilot Chat Files/playbook-format.md`, `Copilot/Created/_before-Act2/`). #35: the W1a findings table may
+have been inserted into draft A (W1a.4 shows it in the document body); check draft A before further tests.
