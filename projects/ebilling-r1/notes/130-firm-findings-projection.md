@@ -39,11 +39,11 @@ Enums serialize as strings. No caller check: the caller establishes that the inv
 | Submission Received / Processing | status, tracking number, billed total (from the submission's own derived invoice once it exists, else null); no reads of lines, records or Signals |
 | Submission Accepted | the invoice's outcome |
 | Submission Rejected | status only (see open question 1) |
-| Submission Failed, unknown | `Unavailable` |
+| Submission Failed, unknown | `Closed`, status only, not degraded (130b fix round 1; was `Unavailable`) |
 | Invoice In Review | status, billed total, reviewer-added lines, Reduced and Disallowed lines with the reviewer's reason; no approved total; no invoice-level adjustment |
 | Invoice Approved / Sent to AP / Paid | the same items plus invoice-level adjustments, and the approved total; Approved with a Reduced, Disallowed or Adjustment item is `ApprovedWithAdjustments` |
 | Invoice Rejected / Returned to Firm | status and billed total only (reject and return reasons are not in 130's contract) |
-| Invoice Cancelled / Superseded / unknown code | `Unavailable` |
+| Invoice Cancelled / Superseded / unknown code | `Closed`, status only, not degraded (130b fix round 1; was `Unavailable`) |
 
 Never projected: Pending, Flagged, Clean and Accepted lines, overridden findings, AI observations, a forged reviewer marker, a line or record of another invoice.
 
@@ -105,7 +105,7 @@ Branch `task/ebilling-130b` (from `task/ebilling-130a` head `60a2b64dc0`).
 - `Api/ExternalAccess/FirmOutcomeEndpoints.cs` (new): `MapFirmOutcomeEndpoints`, mounted in `ExternalAccessEndpoints.cs` on the external collaboration group (one line, after the invoice-submission mount). Two GET routes:
   - `/api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome`
   - `/api/v1/external/ebilling/submissions/{submissionId:guid}/outcome`
-  - Each chain: `AddFirmOutcomeAuthorizationFilter(subject)`, then `RequireWorkforceCeiling(ReadInvoiceSubmissions)`, then `RequireEbillingEnabled()` (the flag never replaces the authorization decision, so it runs after it).
+  - Each chain: `AddFirmOutcomeAuthorizationFilter(subject)`, then `RequireEbillingEnabled()` (the flag never replaces the authorization decision, so it runs after it). Corrected in fix round 1: `RequireWorkforceCeiling(...)` is endpoint metadata, not a filter in that chain. The workforce ceiling is the external GROUP's filter (`WorkforceCeilingEndpointFilter`, after the caller-principal filter), so it runs FIRST, before the route's filter, and its answer does not depend on the id. The sets are `ReadInvoiceOutcome` and `ReadSubmissionOutcome` since fix round 1 (see below).
 - `Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs` (new): the decision. The handlers read the projection only for the id the filter admitted (stored in the request's items); a handler reached without that decision answers 403.
 - `Services/Finance/FirmFindingsProjection.cs`: the writer-created hardening (below). `Infrastructure/DI/FinanceModule.cs`: the registration became a factory that passes `BillingDecisionRecorder.WriterUserIdAsync`.
 
@@ -121,7 +121,8 @@ Branch `task/ebilling-130b` (from `task/ebilling-130a` head `60a2b64dc0`).
 | Item does not exist | 403 | same body as another firm's |
 | Invoice/submission read faults, or the visibility decision cannot be made | 503 | `ebilling.firm-outcome.unavailable` |
 | eBilling flag off, caller authorized | 503 | `ebilling.disabled` |
-| Projection `Degraded` or `Kind == Unavailable` | 503 | `ebilling.firm-outcome.unavailable` |
+| Projection `Degraded` or `Kind == Unavailable` (a read FAULTED) | 503 | `ebilling.firm-outcome.unavailable` |
+| Projection `Kind == Closed` (a permanent state; fix round 1) | 200 | status label and tracking number only |
 | Otherwise | 200, `Cache-Control: no-store`, the `FirmOutcome` JSON (the kind is a string) | |
 
 A multi-firm caller sees the items of each of its firms.
@@ -142,7 +143,7 @@ The Decision Record query now carries `WriterCreatedRecord.AddConditions` (creat
 ### Decisions taken inside the brief (for review)
 
 1. The filter does every check, including the (a') decision, and the handlers do none. The alternative (the handler re-asking the predicate) doubles the reads.
-2. A submission whose invoice exists is projected by the submission route only for an Accepted submission; the submission seam (`VisibleSubmissionsAsync`) decides the submission's own invoice as well.
+2. A submission whose invoice exists is projected by the submission route only for an Accepted submission; the submission seam (`VisibleSubmissionsAsync`) decides the submission's own invoice as well. Superseded by fix round 1 (F1): the seam alone was not enough, because the projection reads the DERIVED invoice id. The filter now decides that invoice exactly as the invoice route does.
 3. The refusal body of every 403 is identical and carries no item data (asserted in the tests), so the status says nothing about why.
 4. The same `ReadCallerFirmsAsync` / `IsSystemUser` helpers of the invoice-submission filter are reused, not copied.
 
@@ -171,3 +172,80 @@ The `FirmFindingsProjection` DI factory registration: Existing: `BillingDecision
 - Seeding proof 2 (writer-created filter): the `WriterCreatedRecord.AddConditions` call replaced by `_ = writer;`. 3 of 78 failed: the unit must-fire test (a record the writer did not create is never projected), the empty-id Degraded test, and the route-level forged-reason test. Restored from a copy; SHA-256 matched (`4a1c7aec...40240`).
 - ArchTests (full, once): 2181 total; the first full run had 2180 passed and 1 failed (`166 K4 C1`, the filter naming `sprk_vendororg`, fixed by listing it as a reader). The four affected classes were re-run after the fix (121 passed). At the 130a tip the suite was 2180 of 2181 (the 098 test, which this task resolves).
 - Publish size: `dotnet publish -c Release` of this branch tip against the same tree with the 130b source changes reverted to `60a2b64dc0`: 137,934,313 bytes against 137,913,813 bytes, a delta of +20,500 bytes (+20 KB; `Sprk.Bff.Api.dll` 25,905,664 against 25,888,256, +17 KB). No package changed. Raw publish folder size with symbols, not the compressed artifact. Against master the 130a delta (+54 KB) adds to this one.
+
+## 130b fix round 1 (adversarial pass 1)
+
+Branch `task/ebilling-130b-fix1` from `task/ebilling-130b` at `34f6188cb5`. The rule throughout: a firm sees only its own firms' invoice outcomes.
+
+### Fixed
+
+- **F1, the submission route decides the submission's invoice too.** `FirmOutcomeAuthorizationFilter.DecideSubmissionAsync`, after the submission's own firm, core record and seam checks, runs `DecideInvoiceAsync` on `InvoiceSubmissionPersister.InvoiceIdFor(submissionId)`. That is the id the projection reads. The invoice gets the same firm, core-record and (a') checks as on the invoice route. No invoice yet (`RecordNotFoundException`) passes; a refusal is the same 403 and a fault the same 503. A submission is shown only when it is the caller's AND its invoice is visible to the caller (uac-r2's rule). Its firm and core record are the submission's own columns, which say nothing about the invoice.
+  - Tests: `ASubmission_WhoseInvoiceIsAnotherFirms_IsTheSame403AsAForeignSubmission` (the probe: byte-identical body, nothing projected), `ASubmission_WhoseInvoiceIsNotVisible_Is403` (another firm, an unreadable record, hidden by (a')), `AReceivedSubmission_WhoseExistingInvoiceIsAnotherFirms_Is403`.
+  - Must-not-fire: `AnOwnSubmission_WithAnOwnInvoice_Is200` and `AReceivedSubmission_WithNoInvoiceYet_Is200_StatusOnly`.
+- **F1, permanent states are not faults (a contract change).** A new `FirmOutcomeKind.Closed`. A Failed submission, a Cancelled invoice, a Superseded invoice (also reached through an Accepted submission whose invoice a correction replaced) and an unknown status code are `Closed`: status label and tracking number only, no items, no totals, `Degraded = false`, so the route answers **200**. An unknown code is logged as a warning. `Unavailable` / `Degraded` (503) now mean a FAULT only. Authorization has already passed, so the 200 tells the caller nothing new about the item.
+  - Labels: `Failed`, `Cancelled`, `Replaced by a correction`, and `Closed` for an unknown code.
+  - An Accepted submission whose invoice cannot be found is still 503 (not a permanent state the brief names: the data is inconsistent, not closed).
+  - Tests changed to the new contract: `SubmissionStates_MapToTheirStatus` (Failed: 200 Closed) and `AnUnavailableProjection_Is503` (header fault only; Cancelled moved to `APermanentInvoiceState_Is200_StatusOnly`). Unit: `PermanentStates_AndUnknownCodes_AreClosed_StatusOnly_NotDegraded`, `RejectedSubmission_ProjectsStatusOnly_FailedIsClosed_AndMissingProjectsNothing`, `AnAcceptedSubmission_WhoseInvoiceWasSuperseded_IsClosed`.
+  - SPA (134): one new `kind` value, `Closed`; no other field changed. No client code reads the outcome yet (no match in `src/client` or `src/solutions`).
+- **F2, a failed billed-total read is not swallowed.** A Received or Processing submission whose invoice total read faults is status-only `Degraded` (503 at the route), never a 200 with a null total. Tests: `ASubmissionWhoseBilledTotalReadFaults_IsDegraded_NeverANullTotal` (unit) and `AReceivedSubmission_WhoseBilledTotalReadFaults_Is503` (route).
+- **F3 (i), two firms, one clause.** `ACallerInTwoFirms_GetsTheClauseOfTheInvoicesFirmOnly`: a caller in firms A and B views firm A's invoice through a clause reader keyed by the invoice's firm. It gets A's clause and label only, and the reader is asked only about A's invoice.
+- **F3 (ii), a submission-seam fault.** `ASubmissionDecisionThatFaults_Is503_AfterTheRecordChecks` covers a failed-read result (the seam's contract) and a thrown exception: both give 503. Another firm's submission is still 403 before the seam is asked. The filter now also turns an exception the seam throws into a 503; before, it was an unhandled 500.
+- **F4, the workforce ceiling declares what each route returns** (owner-approved edit to `WorkforceRoleCeilingGate.cs`, in the file's own pattern). Changes:
+  - `BillingEventTable = "sprk_billingevent"`.
+  - `ReadInvoiceOutcome` = Read on `sprk_invoice` + `sprk_billingevent` (the invoice route).
+  - `ReadSubmissionOutcome` = Read on `sprk_invoicesubmission` + `sprk_invoice` + `sprk_billingevent` (the submission route).
+
+  Tests in `FirmOutcomeScopeTests`, whose test group now runs the real `AddWorkforceCeilingFilter` after the principal filter, as the production group does:
+  - must-fire: `AWorkforceContact_WithoutReadOnAReturnedTable_IsRefusedByTheCeiling`, five cases: invoice route without invoice or line Read; submission route without submission, invoice or line Read. Each is the ceiling's 403, with no membership read, no record read and no projection read.
+  - must-not-fire: `AWorkforceContact_WithEveryDeclaredRead_IsServed`, 200 on both routes.
+  - the declared sets are pinned in `TheRoutes_DeclareTheReadsTheyReturn`.
+
+  The owner-table test double (`WorkforceCeilingDouble.OwnerPrerequisite`, `tests/integration/auth/UnifiedAccessControl/ExternalCollaborationTestFixture.cs`) gains `sprk_billingevent` Read. Without it `TheFixtureDefault_IsEveryRoutesPrivilege` fails, since the owner table must equal the union of the declared sets. The dev Workforce role needs that privilege for workforce contacts to keep these routes (being checked on dev by the lead, not here).
+- **K3, the projection test double.** `FirmFindingsProjectionTests.World` now applies the line query's nested filters (`ExcludeInactiveAdjustments`: not an Adjustment, no cost type, or `statecode` Active). An operator it cannot evaluate throws, so no criterion is silently ignored. Top-level conditions stay unevaluated, so the "another invoice's line" test still proves the projection's own check. New test: `ARemovedAdjustment_AndItsReason_NeverReachTheFirm`.
+- **K4, stale text.**
+  - `ExternalInvoiceVisibilityGuardTests`: `NamedExternalTypes` now names `Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints` (it said `Api.Finance`).
+  - The `PendingSurfaces["130"]` entry is removed, since 130b landed. Only `TheLaterSurfaces_AreCoveredByThePrimitives` depended on it: it now expects `{093, 152}` and checks that every named reader and named external type exists, the projection included.
+  - The `Excerpt` reason now says it is an internal static helper trimming the line description.
+  - The two submission-route reasons name the new invoice decision.
+  - The filter-order claim above is corrected.
+
+### Workforce-ceiling census (F4): external routes returning `sprk_invoice` or `sprk_billingevent` content
+
+| Route | Declared | Status |
+|---|---|---|
+| `GET /ebilling/invoices/{id}/outcome` | `ReadInvoiceOutcome` | fixed here |
+| `GET /ebilling/submissions/{id}/outcome` | `ReadSubmissionOutcome` | fixed here |
+| `GET /invoice-submissions/{id}` (`ExternalInvoiceSubmissionEndpoints.cs:64-66`; reads the invoice's status at :152 for the hold warning and the replaced-by-correction note) | `ReadInvoiceSubmissions` | handled in 130-0 fix1 (it will declare `sprk_invoice` Read) |
+| `GET /invoice-submissions` (`:75-77`; same read at :298) | `ReadInvoiceSubmissions` | handled in 130-0 fix1 |
+| `GET /invoices/{id}/documents`, `/content`, `/versions`, upload (`ExternalProjectDataEndpoints.cs:386-420`) | `ReadInvoiceDocuments` / `UploadInvoiceDocument` (Read on `sprk_invoice`) | already declared |
+| `GET/POST /invoices/{id}/messages` | `ReadMessagesOn` / `PostMessageOn("sprk_invoice")` | already declared |
+| Module-data seam (`invoices` module) | Read on the module's own table, in the handler | already declared |
+| Notification feed | filtered per table (`CanRead`) | already declared |
+
+No other external route returns `sprk_billingevent` content.
+
+### Known limits (no fix this round)
+
+- K1: Signals and the line status, amount and adjustment columns are trusted without a writer filter. This is the same native-write limit as 085. `WriterCreatedRecord` on Signals waits for a single Signal writer.
+- K2: since the 130-0 merge, the invoice route reads and compares the caller's firms twice (the filter, then the seam). A fault on the second read gives 503 where a fault on the first gives 403.
+- A Received or Processing submission with no invoice passes the invoice decision. If the processing job creates the invoice between the filter and the projection's total read, that one total is read without the invoice decision. The invoice is the submission's own derived one, and the window is one request.
+- `WorkforceCeilingRouteFamilyTests.Routes` (uac-r2's per-route table) does not list the two outcome routes. Their ceiling is pinned in `FirmOutcomeScopeTests` instead.
+
+### Seeding proof (F1 submission fix)
+
+See "Results (fix round 1)".
+
+### Results (fix round 1)
+
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `ExternalInvoiceVisibility`, `InvoiceSubmission`, `WorkforceCeiling`, `ExternalNotificationFeed`): 2177 passed, 0 failed. `FirmOutcomeScopeTests` and `FirmFindingsProjectionTests` together: 104 (78 before; 26 new).
+- Seeding proof (F1, the submission's invoice decision): the `DecideInvoiceAsync` call at the end of `DecideSubmissionAsync` was replaced by `return null;`. 6 of 55 `FirmOutcomeScopeTests` failed: the probe (`ASubmission_WhoseInvoiceIsAnotherFirms_IsTheSame403AsAForeignSubmission`), the three `ASubmission_WhoseInvoiceIsNotVisible_Is403` cases, `AReceivedSubmission_WhoseExistingInvoiceIsAnotherFirms_Is403`, and the must-not-fire `AnOwnSubmission_WithAnOwnInvoice_Is200` (it asserts that the invoice decision was asked). The file was restored from a copy; its SHA-256 matched (`41406900...be83408`).
+- Fail-before check for the other changes, in one mutated build:
+  - `Closed` built as the old `Unavailable`;
+  - the billed-total fault swallowed again;
+  - both routes back on `ReadInvoiceSubmissions`;
+  - the filter's catch of a thrown seam exception removed;
+  - the test double ignoring nested criteria.
+
+  19 of 104 failed: every permanent-state, F2, K3 and seam-throw test, and the four ceiling must-fire cases the old declaration did not cover. The submission-table case passed, as expected (it was always declared). All four files were restored; their SHA-256 matched.
+- ArchTests (full, once): 2181 total, 2181 passed, 0 failed.
+- Broader unit run (`ExternalAccess`, `UnifiedAccessControl` name filters, for the owner-table double): 5022 passed, 0 failed.
