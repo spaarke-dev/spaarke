@@ -330,6 +330,10 @@ public class ExternalMessageSendTests
         // (an absent column would read as an unread link, which is never visible).
         foreach (var column in InvoiceLinks.LinkColumnsOf("sprk_communication"))
             result.TryAdd($"_{column}_value", El<object?>(null));
+        // Fix round 3c: and every live-parent lookup column (an absent one reads as unreadable).
+        // The thread lookup is left to AppOnlySelectProjection.WithOpenThread, which gives a row without one the Open thread.
+        foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_communication").Where(c => c != "_sprk_communicationthread_value"))
+            result.TryAdd(column, El<object?>(null));
 
         return result;
     }

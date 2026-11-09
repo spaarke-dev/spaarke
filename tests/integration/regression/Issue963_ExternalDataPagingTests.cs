@@ -87,21 +87,27 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
                         ["sprk_documentid"] = id, ["sprk_documentname"] = $"Doc {i}", ["_sprk_project_value"] = Root.ToString(),
                     };
                     // The Web API returns every selected root link, an unset one as an explicit null (task 130-0 fix round 3b).
-                    foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns)
-                        document.TryAdd(column, null);
+                    foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns.Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document")))
+                        document.TryAdd(column, null); // fix round 3c: and every live-parent lookup column
                     _dataverse.Add("sprk_documents", document);
                     break;
                 case "todos":
-                    _dataverse.Add("sprk_todos", new JsonObject
+                    var todo = new JsonObject
                     {
                         ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
-                    });
+                    };
+                    foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_todo"))
+                        todo.TryAdd(column, null); // fix round 3c: an unset selected lookup is an explicit null
+                    _dataverse.Add("sprk_todos", todo);
                     break;
                 case "events":
-                    _dataverse.Add("sprk_events", new JsonObject
+                    var calendarEvent = new JsonObject
                     {
                         ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
-                    });
+                    };
+                    foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_event"))
+                        calendarEvent.TryAdd(column, null); // fix round 3c: an unset selected lookup is an explicit null
+                    _dataverse.Add("sprk_events", calendarEvent);
                     break;
                 case "contacts":
                     _dataverse.Add("sprk_externalrecordaccesses", new JsonObject { ["_sprk_contact_value"] = id });

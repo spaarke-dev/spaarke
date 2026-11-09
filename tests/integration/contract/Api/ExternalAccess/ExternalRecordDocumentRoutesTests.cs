@@ -2461,8 +2461,11 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// </summary>
         public static DocumentRootLinks NoLinks { get; } = new DocumentRootLinks(null, null, null, null, null, null)
         {
-            Row = InvoiceLinks.LinkColumnsOf("sprk_document").ToDictionary(
-                c => $"_{c}_value", _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
+            // Fix round 3c: and every live-parent lookup column as an explicit null (an absent one reads as unreadable).
+            Row = InvoiceLinks.LinkColumnsOf("sprk_document").Select(c => $"_{c}_value")
+                .Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+                .Distinct()
+                .ToDictionary(c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
         };
 
         // The real seam's body without the transport: build the payload, stamp it (task 030), store it.

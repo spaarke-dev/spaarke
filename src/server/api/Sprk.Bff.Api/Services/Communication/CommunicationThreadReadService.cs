@@ -544,7 +544,7 @@ public sealed class CommunicationThreadReadService
     /// <paramref name="includeContent"/> adds the body, its format and the subject: the task 033 thread read returns them;
     /// the notification feed never uses them, so it projects without (task 037 review K3, least data).
     /// </summary>
-    private static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
+    internal static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
     {
         // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
         // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.

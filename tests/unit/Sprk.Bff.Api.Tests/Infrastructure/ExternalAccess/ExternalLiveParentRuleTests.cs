@@ -49,9 +49,16 @@ public sealed class ExternalLiveParentRuleTests
         Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType, Guid)>()));
 
     /// <summary>A to-do row as the Web API returns it, filed under communication <paramref name="communication"/> (none: no parent).</summary>
-    private static Dictionary<string, JsonElement> TodoUnder(Guid? communication) => communication is { } c
-        ? new() { ["_sprk_regardingcommunication_value"] = JsonSerializer.SerializeToElement(c.ToString()) }
-        : new();
+    private static Dictionary<string, JsonElement> TodoUnder(Guid? communication)
+    {
+        // Task 130-0 fix round 3c: the Web API answers a selected lookup that is not set as an explicit null, and a live-parent
+        // column absent from a row reads as unreadable, so every live-parent column is present (null unless set below).
+        var row = ExternalMultiRootRule.LiveParentSelect("sprk_todo")
+            .ToDictionary(column => column, _ => JsonSerializer.SerializeToElement<string?>(null));
+        if (communication is { } c)
+            row["_sprk_regardingcommunication_value"] = JsonSerializer.SerializeToElement(c.ToString());
+        return row;
+    }
 
     /// <summary>The parents the rule derives from a to-do row (the live-parent read's input).</summary>
     private static LiveParentLookup[] CommunicationParent(Guid id) => ExternalMultiRootRule.LiveParentsOf("sprk_todo", TodoUnder(id));
@@ -179,13 +186,26 @@ public sealed class ExternalLiveParentRuleTests
 
     // ---- AC5: messages and notifications share SecureRootsFilter ----
 
+    /// <summary>
+    /// A communication row as a read that selected every live-parent column answers it (task 130-0 fix round 3c): an unset lookup is an
+    /// explicit null, and the regarding invoice is <paramref name="invoice"/> when given.
+    /// </summary>
+    private static Dictionary<string, JsonElement> CommunicationRow(Guid? invoice)
+    {
+        var row = ExternalMultiRootRule.LiveParentSelect("sprk_communication")
+            .ToDictionary(column => column, _ => JsonSerializer.SerializeToElement<string?>(null));
+        if (invoice is { } i)
+            row["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(i.ToString());
+        return row;
+    }
+
     [Fact]
     public async Task AMessageWhoseLiveParentIsUnderSecureX_IsWithheld_FromAnMOnlyReader()
     {
         // Task 130-0 fix round 3: the row of a read that selected the invoice link and found it unset carries an explicit null; an absent
         // key would read as an unread link (never visible).
-        var plain = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement<object?>(null) });
-        var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
+        var plain = new MessageRootLookups(null, M.ToString(), null, CommunicationRow(null));
+        var carrier = new MessageRootLookups(null, M.ToString(), null, CommunicationRow(C));
 
         // ebilling-r1 task 098: the carrier regards an invoice; the (a') predicate hides nothing here (this is the root rule).
         var noneHidden = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden().Seam;
@@ -204,7 +224,7 @@ public sealed class ExternalLiveParentRuleTests
     [Fact]
     public async Task AMessageNamingAParent_WithNoLiveReader_IsWithheld_FailClosed()
     {
-        var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
+        var carrier = new MessageRootLookups(null, M.ToString(), null, CommunicationRow(C));
 
         var filter = await ExternalMessageEndpoints.SecureRootsFilter(Reader(M), NothingOpen, NullLogger.Instance)(new[] { carrier }, default);
 

@@ -611,7 +611,8 @@ public class ExternalDataService
         /// Task 187: the document row as read. Its parent lookups that are NOT root links
         /// (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/> of <c>sprk_document</c>: the related event, communication,
         /// to-do, agreement, invoice, the parent and canonical document ...) join the rule with their LIVE roots; the rule
-        /// derives them from the row itself (<see cref="ChildRowRoots"/>). <c>null</c>: no such column came back.
+        /// derives them from the row itself (<see cref="ChildRowRoots"/>). <c>null</c>: no such column came back, so every one is
+        /// unreadable (fix round 3c: a parent lookup column that is absent from the row was not read).
         /// </summary>
         public IReadOnlyDictionary<string, JsonElement>? Row { get; init; }
 

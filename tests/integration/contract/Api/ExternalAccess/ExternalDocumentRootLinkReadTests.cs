@@ -157,9 +157,11 @@ public sealed class ExternalDocumentRootLinkReadTests : IClassFixture<ExternalMu
     public void From_AnAbsentColumn_IsUnreadable_AnExplicitNull_IsNotFiled()
     {
         var caller = Holding("projects");
-        var allNull = ExternalDataService.DocumentRootLinks.SelectColumns.ToDictionary(c => c, _ => NullElement());
+        // Fix round 3c: the live-parent lookup columns are read from the same row, so they are present (explicit nulls) here too.
+        var allNull = ExternalDataService.DocumentRootLinks.SelectColumns.Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+            .ToDictionary(c => c, _ => NullElement());
         var link = RecordB.ToString();
-        var all = ExternalDataService.DocumentRootLinks.SelectColumns.ToDictionary(c => c, _ => NullElement());
+        var all = new Dictionary<string, JsonElement>(allNull);
         all["_sprk_matter_value"] = JsonSerializer.SerializeToElement(link);
 
         var explicitNulls = ExternalDataService.DocumentRootLinks.From(allNull);

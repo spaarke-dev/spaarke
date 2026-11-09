@@ -568,3 +568,32 @@ Seeding proofs (production files restored to `ed11b30f95`, plus one `Unreadable`
 | `ExternalModuleDataEndpoints.cs` | `0711f22c429b86344ca8b142cf1b7d3c2e6d465fb8360d9c58d8bd1342e40753` |
 | `ExternalMessageEndpoints.cs` | `825ee8132ad0d2c31313e70636e692927c1e0ba7649ac94b3892d6d7a2a4cb87` |
 | `ExternalInvoiceSubmissionEndpoints.cs` | `a7d98508ed3492c2fc6913fa4accf112ca2cdbadf0bd1fcbff15ea56dc25e980` |
+
+## Fix round 3c
+
+### A live-parent lookup column that was not read is unreadable
+
+`ExternalMultiRootRule.LiveParentsOf` (the Web API / `JsonElement` overload) is the one reader of a child row's parent lookups (`LiveParentLookupsOf(table)`, as `_<column>_value`). Before this round a column that was ABSENT from the row (or a `null` row) read as "not filed there", so a read whose select left a column out skipped that parent's live-root check. Now an absent column enters as `ExternalMultiRootRule.UnresolvedParent` (not a GUID, the same value a malformed lookup takes), which the secure-roots rule already withholds; an explicit JSON null is still "not filed". No new path: the existing malformed-link handling does the refusing.
+
+- Single reads and writes (`CheckLiveParentsAsync` for to-do PATCH and to-do, event and document delete-own; the document download and versions scoping read): the row is not readable, so the route gives the same refusal it gives for a document or row that is not under the record.
+- Lists (to-dos, events, documents, messages): the row is hidden.
+- FetchXML overload (module rows): unchanged, "absent = not filed", because the SDK omits a null attribute so absence cannot be told from null. It is reached only with the columns projected: `ExternalModuleDataEndpoints.cs:351` (the module fetch) and `ExternalMessageEndpoints.cs:803` (the record gate) project `ExternalModuleDescriptor.RootRuleAttributes`, which includes `LiveParentAttributes` (`ExternalModuleRegistry.cs:205`, from `LiveParentLookupsOf(RecordEntity)`). Pinned for every secure-roots module.
+
+Callers and their selects (every select already named every column; none needed a fix; all are now pinned by `EveryCaller_SelectsEveryLiveParentColumn_OfItsTable`, whose expected set is derived from `LiveParentLookupsOf(table)`, so a lookup added to the lineage map breaks the pin until the select carries it):
+
+| Caller (`LiveParentsOf` use) | Table | Select source | Behaviour test |
+|---|---|---|---|
+| `GetTodosAsync` (`ExternalDataService.cs` ~1725, `ChildRowRoots.Of` ~1727) | `sprk_todo` | `BuildTodoListUrl` (`LiveParentSelectSuffix`) | `TodoList_ColumnNotReturned_HidesTheRow` (per column) |
+| `ReadableEventsAsync` (~1844, ~1846) | `sprk_event` | `BuildEventsQuery` (`LiveParentSelectSuffix`) | `EventList_ColumnNotReturned_HidesTheRow` |
+| `GetDocumentsAsync` (`DocumentRootLinks.LiveParents`, `RuleInput`) | `sprk_document` | `BuildDocumentListUrl` (`LiveParentSelectSuffix`) | `DocumentList_ColumnNotReturned_HidesTheRow` |
+| `GetDocumentParentAndNameAsync` then `IsDocumentReadableUnderAsync` (`ExternalProjectDataEndpoints.cs` ~1583) | `sprk_document` | inline column list (`LiveParentSelect`) | `SingleDocument_ColumnNotReturned_IsNotReadableUnderTheRecord`, and the content / versions routes (`ExternalLiveParentColumnDocumentRouteTests`) |
+| `CheckLiveParentsAsync` (~2659, ~2660) | `sprk_todo`, `sprk_event`, `sprk_document` | `BuildLiveParentCheckUrl` | `LiveParentCheck_ColumnNotReturned_IsWithheld`, PATCH to-do, DELETE own to-do / event |
+| `ExternalMessageEndpoints.SecureRootsFilter` (`:530`, `:606`) | `sprk_communication` | `CommunicationThreadReadService.ExternalSelect` (thread read and notification feed; now `internal` so the pin calls it) | `MessageFilter_ColumnNotReturned_IsWithheld_ExplicitNullsAreListed` |
+| `ExternalInvoiceVisibility.DecideSourceDocumentsAsync` (`:338`, `:345`) | `sprk_document` | `SourceSelectColumns` | `Unreadable_ALiveParentColumnTheSourceReadDidNotReturn_HidesTheInvoice` |
+| `ExternalModuleRegistry.LiveParents` / `ChildRowRoots.Of` FetchXML (`:259`, `:374`) | module `RecordEntity` | `RootRuleAttributes` (server-side projection) | `EveryFetchXmlModule_ProjectsEveryLiveParentAttribute`; `FetchXmlOverload_AbsentAttribute_IsNotFiled` (must not fire) |
+
+Test doubles changed to return explicit nulls for unset live-parent lookups: `ExternalLiveParentRuleTests.TodoUnder` and the new `CommunicationRow` helper (the message-filter rows), and `InvoiceWorld.Document` in `ExternalInvoiceVisibilityTests`. `ExternalRootEventReadTests.FakeDataverse` already answered a selected unset lookup as an explicit null (round 3), so the route-level tests needed no change.
+
+### Known limits (reported, not changed)
+
+- The stamp columns (`_sprk_regardingproject_value` and the other two root stamps on a to-do, event or communication) are still read with "absent = not filed" (`ExternalDataService.CheckLiveParentsAsync` `RawLookup`, `CommunicationThreadReadService.RootStamp`, and the typed `TodoRow` / `EventRow` properties). Every read selects them; a pin for them is a follow-up in the same class.

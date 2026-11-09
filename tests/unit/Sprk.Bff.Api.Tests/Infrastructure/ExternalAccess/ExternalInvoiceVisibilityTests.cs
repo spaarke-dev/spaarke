@@ -249,6 +249,24 @@ public sealed partial class ExternalInvoiceVisibilityTests
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Unreadable_ALiveParentColumnTheSourceReadDidNotReturn_HidesTheInvoice(string caller)
+    {
+        // Task 130-0 fix round 3c: a source whose read did not return a live-parent lookup column is unreadable; an explicit null is no parent.
+        var control = _world.OwnedInvoice();
+        _world.Source(control);
+        await ShouldBeVisible(caller, control);
+
+        foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+        {
+            var invoice = _world.OwnedInvoice();
+            var source = _world.Source(invoice);
+            _world.DropDocumentColumn(source, column);
+
+            await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.RootUnresolved);
+        }
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
     public async Task Roots_ALiveParentFiledUnderARestrictedRoot_HidesTheInvoice(string caller)
     {
         var invoice = _world.OwnedInvoice();
@@ -1811,6 +1829,9 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         // is absent from a row reads as unreadable, so every root link column is seeded (null unless set above).
         foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns)
             row.TryAdd(column, null);
+        // Task 130-0 fix round 3c: the same for every live-parent lookup column (an absent one reads as unreadable).
+        foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+            row.TryAdd(column, null);
         if (extra is { } e) row[e.Column] = e.Value;
         Seed("sprk_documents", row);
         Filed("sprk_document", id, parent is { } p ? new[] { ("sprk_parentdocument", "sprk_document", p) } : Array.Empty<(string, string, Guid)>());
@@ -2056,6 +2077,13 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     {
         lock (_sets)
             _sets[set].Single(r => (string?)r[idColumn] == id.ToString())[column] = value;
+    }
+
+    /// <summary>Task 130-0 fix round 3c: the document <paramref name="id"/> as a read that did not return <paramref name="column"/> answers it.</summary>
+    public void DropDocumentColumn(Guid id, string column)
+    {
+        lock (_sets)
+            _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString()).Remove(column);
     }
 
     /// <summary>The Stored File <paramref name="id"/> as a reader without the field-security profile reads it: every secured
