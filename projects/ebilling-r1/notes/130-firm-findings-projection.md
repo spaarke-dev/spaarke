@@ -471,3 +471,22 @@ Tests (`FirmFindingsProjectionTests`, 114 to 119; `StoredFindingValueBoundaryTes
   - K-a and K-b mutated off (the AI check back to the ordinal `BillingFieldNames.IsAiAssigned`, the rejecting-entry count removed, the empty-list outcome without the count): 7 of 119 `FirmFindingsProjectionTests` fail (the K-a test, the three new K-b must-fire tests, and the three existing tests that gained the count assertion); the must-not-fire test passes. Both production files were restored from copies and their SHA-256 matched (`78900960...232872`, `1dd83fce...cc4f233`).
   - G: one reference value in `ApprovedRateHandler` temporarily given an extracted field: the ApprovedRate case fails ("approvedRate is reference data"). One fixture key (Duplicate) removed: the Duplicate case and the fixtures-equal-the-catalogue test fail. The handler (SHA-256 `6941eb94...2106ca`) and the test file (`942d6c86...cfa8`) were restored and verified.
 - ArchTests (full, from the worktree's own path): 2183 total, 2183 passed, 0 failed.
+
+### 130c fix round 4
+
+Branch `task/ebilling-130c-f4` from `task/ebilling-130c` at `a357a5c7e1`, pushed to `task/ebilling-130c` (fast-forward). A hardening round; no new service, package or registration, and `BillingFieldNames` is unchanged.
+
+- **The value filter is an allow-list.** Before: a value with a non-empty `field` was shown unless the field was AI-assigned, so a field name the projection did not recognise was shown. After: a value is shown only when its trimmed `field` equals, `OrdinalIgnoreCase`, a `BillingFieldNames` constant that names a field of the firm's invoice (not `ObservationPrefix`, not AI-assigned). The AI-assigned skip stays as well (defence in depth). The empty-value rule is unchanged: an allowed field with no text shows with an empty value.
+- **Where the allowed set comes from.** `BillingFieldNames` exposes no set of extracted names, so `FirmRejectionFindings` builds one static read-only set once from the `public const string` fields of `BillingFieldNames` (reflection, the approach `StoredFindingValueBoundaryTests` already uses), minus the observation prefix and the AI-assigned names. A constant added to `BillingFieldNames` is allowed with no second list to keep in step. `StoredFindingValueBoundaryTests` keeps its own independent derivation and is unchanged.
+- **Tests (`FirmFindingsProjectionTests`, 119 to 121).**
+  - must-fire: an entry whose values carry fields `line.internalScore`, a truncated `Rat` and the bare observation prefix still shows (its line number), while those values do not; the allowed `Rate` value beside them does.
+  - must-not-fire: every extracted-field constant, as named, upper-cased and lower-cased with padding, still shows its value.
+  - The fix round 3 K-a test now also expects a name that only resembles an AI-assigned one (`observationx`) not to show, because it is not an extracted field.
+
+### Results (130c fix round 4)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- `FirmFindingsProjectionTests`: 121 passed, 0 failed (119 before; 2 new).
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `FirmRejection`, `Billing`, `SubmissionRejectionRule`, `StoredFindingValueBoundary`): 2422 passed, 0 failed (2420 before; 2 new). `StoredFindingValueBoundaryTests` is unchanged.
+- Fail-before: with the allow-list mutated off (the check reduced to the AI-assigned skip alone; a non-constant mutation), 2 of 121 `FirmFindingsProjectionTests` fail (the new must-fire test and the updated K-a test); the must-not-fire test passes before and after by design. The production file was restored from a copy; its SHA-256 matched (`d56b2f11368e1d69...`).
+- ArchTests (full, from the worktree's own path): 2183 total, 2183 passed, 0 failed.

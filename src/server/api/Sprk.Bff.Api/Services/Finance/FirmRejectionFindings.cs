@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -14,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <para><b>An allow-list parse.</b> Only the members named here are read: <c>kind</c>, <c>findings[]</c> and, per finding, <c>ruleType</c>,
 /// <c>rejects</c>, <c>policyVersionId</c>, <c>subject</c>, <c>line</c>, <c>reasonCode</c>, <c>detailWithheld</c> and <c>valuesRead[]</c> (<c>name</c>,
 /// <c>value</c> and whether <c>field</c> is present). A value is shown only when it was extracted from the firm's own invoice (the entry names
-/// its field, and the field is not one the AI assigned: <see cref="BillingFieldNames.IsAiAssigned"/>) and its text is not an identifier. Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
+/// its field, the field is a known extracted field of the invoice (a <see cref="BillingFieldNames"/> constant) and it is not one the AI assigned: <see cref="BillingFieldNames.IsAiAssigned"/>) and its text is not an identifier. Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
 /// through <see cref="RuleSetService.GetFirmClauseAsync"/>), <c>policyId</c> and <c>policyCode</c> (internal identifiers), confidence and the
 /// reliability flag (NFR-10), <c>suggestedAdjustment</c>, the Signal plan (its sentences are the internal wording) and the Procedure snapshot.</para>
 /// <para><b>Which findings.</b> Only the findings that REJECTED the submission (<c>rejects</c> true) of an <c>AutoRejected</c> outcome. A
@@ -177,6 +178,22 @@ internal static class FirmRejectionFindings
             || BillingFieldNames.AiAssigned.Any(ai => string.Equals(ai, name, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// The extracted-field names a value may carry to be shown: every <see cref="BillingFieldNames"/> constant that names a field of the firm's
+    /// own invoice (not <see cref="BillingFieldNames.ObservationPrefix"/>, not AI-assigned), compared without regard to case. Built once from the
+    /// constants, so a field added to <see cref="BillingFieldNames"/> is allowed with no second list to keep in step.
+    /// </summary>
+    private static readonly IReadOnlySet<string> ExtractedFieldNames = typeof(BillingFieldNames)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+        .Select(f => (string)f.GetRawConstantValue()!)
+        .Where(name => name != BillingFieldNames.ObservationPrefix && !BillingFieldNames.IsAiAssigned(name))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when the trimmed <paramref name="field"/> names an extracted field of the invoice that is not AI-assigned (an allow-list).</summary>
+    private static bool IsShownField(string field) =>
+        ExtractedFieldNames.Contains(field.Trim()) && !IsAiAssignedField(field);
+
     internal static void LogUnreadable(ILogger logger, Guid submissionId) =>
         logger.LogWarning("[{Code}] Submission {Id}: the stored findings could not be read; none is shown.", UnreadableCode, submissionId);
 
@@ -292,8 +309,9 @@ internal static class FirmRejectionFindings
                     : null;
                 var extracted = !string.IsNullOrWhiteSpace(fieldName);
 
-                // A value the AI assigned (a code, an observation) is the model's output, not something on the firm's invoice: never shown.
-                if (!extracted || IsAiAssignedField(fieldName!)
+                // Only a value whose field is a known extracted field of the invoice is shown (an allow-list); a value the AI assigned
+                // (a code, an observation) is the model's output, not something on the firm's invoice, and an unrecognised field is not shown.
+                if (!extracted || !IsShownField(fieldName!)
                     || withheld || ruleType == RuleType.Duplicate || values.Count >= MaxValuesPerFinding)
                 {
                     continue;

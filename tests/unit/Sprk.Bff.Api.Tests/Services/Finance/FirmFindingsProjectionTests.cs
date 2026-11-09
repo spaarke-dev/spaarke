@@ -2222,7 +2222,7 @@ public sealed class FirmFindingsProjectionTests
     // 130c fix round 3
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "130c fix 3 (K-a, must-fire): an AI-assigned field is skipped whatever its casing; a name that only resembles one is projected")]
+    [Fact(DisplayName = "130c fix 3 (K-a, must-fire): an AI-assigned field is skipped whatever its casing; a name that only resembles one is not an extracted field, so it is not projected either (fix 4)")]
     public async Task Rejected_TheAiAssignedSkip_IgnoresCase_ButNeedsTheExactNameOrPrefix()
     {
         var entry = Stored("ApprovedRate", VersionA, 0, values:
@@ -2248,8 +2248,73 @@ public sealed class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
         outcome!.Items.Single().ValuesRead.Should().Equal(
-            new FirmOutcomeValueRead("line.noDot", "NO-DOT"), new FirmOutcomeValueRead("line.billed", "L110"), new FirmOutcomeValueRead("line.rate", "450.00"));
-        JsonSerializer.Serialize(outcome).Should().NotContain("AI-");
+            new FirmOutcomeValueRead("line.billed", "L110"), new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("AI-").And.NotContain("NO-DOT");
+    }
+
+    [Fact(DisplayName = "130c fix 4 (must-fire): a value whose field is not a known extracted field is not shown, while its entry still is")]
+    public async Task Rejected_AValueWithAnUnknownField_IsNotProjected_ButTheEntryStillIs()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 4, values:
+        [
+            ("line.internalScore", "UNKNOWN-FIELD-VALUE"),
+            ("line.rate", "450.00"),
+            ("line.blank", "BLANK-FIELD-VALUE"),
+            ("line.prefixOnly", "PREFIX-VALUE"),
+        ]);
+        var fields = new[] { "line.internalScore", "Rate", "Rat", BillingFieldNames.ObservationPrefix };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.LineNumber.Should().Be(5);
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("UNKNOWN-FIELD-VALUE").And.NotContain("BLANK-FIELD-VALUE").And.NotContain("PREFIX-VALUE");
+    }
+
+    [Fact(DisplayName = "130c fix 4 (must-not-fire): every extracted field constant still shows its value, whatever its case or padding")]
+    public async Task Rejected_EveryExtractedFieldConstant_StillShows_IncludingCaseAndPaddingVariants()
+    {
+        var extracted = typeof(BillingFieldNames)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(n => n != BillingFieldNames.ObservationPrefix && !BillingFieldNames.IsAiAssigned(n))
+            .ToList();
+        extracted.Should().NotBeEmpty().And.Contain([BillingFieldNames.Rate, BillingFieldNames.Hours, BillingFieldNames.BilledTaskCode]);
+
+        // Each constant three ways: as named, upper-cased, and lower-cased with padding. Entries hold at most MaxValuesPerFinding values.
+        var fields = extracted.SelectMany(n => new[] { n, n.ToUpperInvariant(), "  " + n.ToLowerInvariant() + " " }).ToList();
+        var chunks = fields.Chunk(FirmRejectionFindings.MaxValuesPerFinding).ToList();
+        var entries = new List<JsonNode?>();
+        var expected = new List<string>();
+        for (var c = 0; c < chunks.Count; c++)
+        {
+            var entry = Stored("ApprovedRate", VersionA, c, values: chunks[c].Select((f, i) => ($"c{c}v{i}", (string?)$"SHOWN-{c}-{i}")).ToArray());
+            var array = (JsonArray)entry["valuesRead"]!;
+            for (var i = 0; i < chunks[c].Length; i++)
+            {
+                ((JsonObject)array[i]!)["field"] = chunks[c][i];
+                expected.Add($"c{c}v{i}");
+            }
+
+            entries.Add(entry);
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entries.ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.SelectMany(item => item.ValuesRead ?? []).Select(v => v.Name).Should().Equal(expected);
     }
 
     [Fact(DisplayName = "130c fix 3 (K-b, must-fire): 3 valid and 1 malformed rejecting entry show 3 and count 1 not shown")]
