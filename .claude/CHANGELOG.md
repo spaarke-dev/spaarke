@@ -7,6 +7,16 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-09 — The Stop quality gate now blocks
+
+`scripts/quality/task-quality-gate.sh` never stopped Claude: it exited `1` (Claude Code only blocks a Stop on exit `2`, reading stderr), its error trap exited `0` mid-run, and its report went to stdout. Found while evaluating an external quality-recommendations document.
+
+- **`scripts/quality/task-quality-gate.sh`** (rewritten): exit `2` with the report on stderr on definite code failures only — compiler errors in any project owning a changed `.cs` file (was: BFF only), TypeScript errors located in a changed file (new `tsc --noEmit` gate), failing `Spaarke.ArchTests`, a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. Loop guard: with `stop_hook_active` it never blocks again and shows the user a `systemMessage` instead. Includes untracked files. Drops the CLI `-warnaserror`: `Directory.Build.props` owns the warning policy, including the sanctioned `WarningsNotAsErrors` CS0618 sites, and CI tier1 `compile` omits the flag for the same reason. No bare `python3` (WindowsApps stub hazard). The error trap logs and continues instead of exiting `0`.
+- **`.claude/settings.json`**: Stop hook `timeout: 420` (the gate's own budget stops starting new checks at 240 s).
+- **Root `CLAUDE.md` §16**: states the blocking behaviour (+104 bytes, line count unchanged at 218 — owner OK requested in the PR).
+- **`docs/procedures/testing-and-code-quality.md`**: the hooks table said `TaskCompleted` (not a real event, FAILURE-MODES G-1); now `Stop`, with the blocking contract.
+
+---
 ###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
 
 On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees` hung VS Code and Claude sessions opened there.

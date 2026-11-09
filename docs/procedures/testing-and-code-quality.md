@@ -817,13 +817,13 @@ Claude Code hooks provide real-time quality feedback during AI-assisted developm
 
 | Hook Event | Matcher | Script | Purpose |
 |-----------|---------|--------|---------|
-| `PostToolUse` | `Edit` | `scripts/quality/post-edit-lint.sh` | Runs lint checks after every file edit |
-| `TaskCompleted` | (all) | `scripts/quality/task-quality-gate.sh` | Runs quality gate when a task completes |
+| `PostToolUse` | `Edit\|Write` | `scripts/quality/post-edit-lint.sh` | Returns lint findings for the edited file (advisory) |
+| `Stop` | (all) | `scripts/quality/task-quality-gate.sh` | Blocking quality gate over the session's changes when Claude ends a turn |
 
 ### How They Work
 
-- **PostToolUse (Edit)**: After Claude edits any file, the post-edit lint hook runs relevant linters on the changed file. This provides immediate feedback without waiting for Step 9.5.
-- **TaskCompleted**: When Claude marks a task as complete, the quality gate hook runs a final check. This complements the Step 9.5 quality gates in the task-execute protocol.
+- **PostToolUse (Edit/Write)**: After Claude edits a file, the hook runs the matching linter and returns findings to Claude as `additionalContext`. Advisory; never blocks.
+- **Stop**: When Claude is about to end its turn, the gate checks the session's changes (edits vs `HEAD` plus untracked files): it builds each project that owns a changed `.cs` file, runs `tsc --noEmit` for each `tsconfig.json` that owns a changed `.ts`/`.tsx` file, lints changed files (advisory), and runs `tests/Spaarke.ArchTests` when C# changed. It **blocks** (exit 2, report on stderr) only on definite code failures: compiler errors, TypeScript errors located in a changed file, failing arch tests, or a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. It blocks at most once per stop (`stop_hook_active`); a failure that persists after that becomes a warning to the user. The build omits `-warnaserror` because `Directory.Build.props` owns the warning policy (as CI tier1 `compile` does). Run it by hand with `bash scripts/quality/task-quality-gate.sh </dev/null`. This complements, and does not replace, the `task-execute` Step 9.5 quality gates.
 
 ---
 
