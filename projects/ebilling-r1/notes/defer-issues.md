@@ -80,7 +80,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | In Progress |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-08 |
 | **Source** | ebilling-r1 task 165b-4 design note §7.8 / §7.12 (uac-r2 answer 4) |
@@ -93,6 +93,8 @@
 **Entry-points**: `src/dataverse/solutions/SpaarkeMaster/**/Roles/Spaarke Ontology Service.xml`; `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`; the provisioning role-assignment step; `projects/ebilling-r1/notes/165b-integrity-checks.md` §7.8.
 
 **Fails without it**: in an environment where the BFF identity has no broader role, counted spend for every core record is unknown, and spend-based Signals stop evaluating.
+
+**Resolution (2026-11-09, in progress)**: new role `Spaarke Decision Record Reader` with one privilege, `prvReadsprk_DecisionRecord` at Global, in `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Decision Record Reader.xml` (pinned by `FeatureRolePrivilegeGuardTests.ExactPrivilegeSets`), assigned to the BFF application users only by `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1` (`-Verify` exits 1 on drift); the live dev import and assignment follow under the owner's approval.
 
 ---
 
