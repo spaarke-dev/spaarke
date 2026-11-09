@@ -174,7 +174,13 @@ Must-fire: an 11-case theory (each mutation of the live file yields its named fi
 - Must-fire: accent-only pair → `-Verify` exits 1; the same pair with `-Apply` refuses with no write; non-default-name Direct unit refused by name (with `-Apply`, no write) and by id.
 - Must-not-fire: ordinary customer unit plans (exit 0) and the Direct-role unit is not listed beside it; a lone unit that differs by case only still verifies (exit 0); the existing Direct-mode clean-unit tests unchanged.
 
-**Left open (same class, outside R6):** two other places compare a unit name in code with `-eq`: the Secure Record lookup (`$secureUnits`) and customer mode's `-CustomerBusinessUnitName` lookup. Both would have the same accent gap. The customer one is low-risk (an operator picking a name, and the unit's id then decides every later check); the Secure one is worth the same Dataverse-filter treatment. Not changed here.
+**Class fix (coordinator follow-up, same branch).** The two remaining unit-name comparisons in code are gone: the Secure Record lookup (`$secureUnits`) and customer mode's `-CustomerBusinessUnitName` lookup now use Dataverse's `name eq` filter and decide by the ids returned (0 → the existing not-found handling; more than 1 → the existing ambiguous refusal, exit 1, before any write). Every business unit named by a parameter is now found that way. The by-id lookup is an id compare and stays.
+- Pester: 33 → 36. Fail-first against the previous script: 34 pass, 2 fail (the two must-fire accent-pair tests, one for `-SecureBusinessUnitName`, one for `-CustomerBusinessUnitName` under `-Apply`, no write). Third new test, must-not-fire: `CUSTOMER ONE` (case only) resolves to the one unit, exit 0. Full run after: 36/36 (Pester 5.7.1).
+- Audit of the script for `-eq`/`-ne`/`-like`/`-match`/`-contains`/`.Equals` on a unit, team or role name: none left on Dataverse-read data. Kept, with the reason:
+  - `$privs[0].Name -cne $t.privilegeName` (privilege schema name against the config): deliberately case-SENSITIVE, a casing check of the config against metadata, not an identity lookup of a unit, team or role.
+  - `Group-Object` on the config files' `teamName` / `roleName` and table names (duplicate declarations across the repo's own config files): config against config, never Dataverse data.
+  - `Sort-Object name` and the names in messages: ordering and display only.
+  Team and role lookups already use `name eq` filters, and their results are compared by id.
 
 ## §5 Part D — keep on filing, and the Restricted bar
 
