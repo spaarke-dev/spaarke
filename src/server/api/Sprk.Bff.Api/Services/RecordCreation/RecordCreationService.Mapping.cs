@@ -77,6 +77,10 @@ internal sealed partial class RecordCreationService
     private sealed record MappingStep(
         DataverseWriteItemMapper.MappedItem? Item, IReadOnlyDictionary<string, JsonElement> Values, RecordCreationRefusal? Refusal)
     {
+        /// <summary>Task 022 fix round 2: the source the values were mapped from and its app-only gate read, for the check before
+        /// the create (<see cref="EnforceMappingSourceOwnerAsync"/>). Set whenever a value was mapped.</summary>
+        public MappedSourceGate? Gate { get; init; }
+
         public static MappingStep Unmapped(DataverseWriteItemMapper.MappedItem caller) => new(caller, NoMappedValues, null);
 
         public static MappingStep Refused(RecordCreationRefusal refusal) => new(null, NoMappedValues, refusal);
@@ -84,6 +88,20 @@ internal sealed partial class RecordCreationService
 
     /// <summary>One target column as the table's metadata declares it (read as the caller).</summary>
     private sealed record TargetAttribute(string Type, bool ValidForCreate);
+
+    /// <summary>A mapping source's table and its app-only read, holding at least <see cref="MappingSourceCopyGate.SourceGateColumns"/>.</summary>
+    private sealed record MappedSourceGate(string SourceTable, Entity? Read);
+
+    /// <summary>The words for a secure source whose fields are not copied (step 3): the create is neither secure from creation
+    /// nor filed by the caller under that source.</summary>
+    internal const string MappingSourceSecureNotMapped =
+        "No fields were copied from the related record: a secure record's fields are copied only into a record that is " +
+        "secure from creation or filed under it.";
+
+    /// <summary>The words for mapped values removed before the create: the row is not owned by the source's secure owner.</summary>
+    internal const string MappingSourceSecureStripped =
+        "The fields copied from the related record were not written: a secure record's fields are written only into a " +
+        "record that its secure owner owns.";
 
     /// <summary>
     /// True for a lookup of <paramref name="table"/> that FILES the row under a record (FR-08 amendment, owner 2026-10-20,
@@ -256,7 +274,8 @@ internal sealed partial class RecordCreationService
     private async Task<MappingStep> MapFieldsAsync(
         string table, RecordTableRule rule, RecordCreationRequest request, RecordCreationMapping mapping,
         IDataverseUserClient user, DataverseWriteItemMapper.MappedItem callerItem,
-        List<RecordCreationWarning> warnings, MappingReadsPrefetch? prefetched, CancellationToken ct)
+        List<RecordCreationWarning> warnings, MappingReadsPrefetch? prefetched,
+        Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> secureOwnerTeam, CancellationToken ct)
     {
         var unmapped = MappingStep.Unmapped(callerItem);
         var target = CallerEntity(table, callerItem);
@@ -285,10 +304,11 @@ internal sealed partial class RecordCreationService
 
         // #2188 (DI-004): the app-only read ignores field-level security, so it is masked down to the columns the CALLER can
         // read (one caller read of the same row) before any rule sees it; a caller read that cannot be made or answered makes
-        // the source unavailable — the same single warning as FR-04's, never the app-read values. A Default-only profile read
-        // nothing, so there is nothing to mask. Masked here, beside the engine call, so the #2188 guard sees both.
+        // the source unavailable — the same single warning as FR-04's, never the app-read values. A Default-only profile maps
+        // no source column (the read holds only the gate's columns), so there is nothing to mask. Masked here, beside the
+        // engine call, so the #2188 guard sees both.
         Entity? masked = null;
-        if (reads.AppRead is { } appRead)
+        if (reads.AppRead is { } appRead && reads.SourceColumns.Count > 0)
         {
             masked = await MappingSourceCallerMask
                 .ApplyAsync(user, source.EntityLogicalName, source.RecordId, appRead, reads.SourceColumns, _logger, ct)
@@ -299,6 +319,22 @@ internal sealed partial class RecordCreationService
                     MappingSourceReadProbe.SourceUnavailableWarning));
                 return unmapped;
             }
+        }
+
+        // Task 022 fix round 2 (the mapping-source rule): a secure source maps only into a create that is secure from creation
+        // or that the caller files under that source (record-first ownership then owns the row by the source's secure owner).
+        // "Secure" is the 032b copy gate's own predicate, asked app-only of the columns read with the source, once the source is
+        // available to the caller (an unavailable source keeps its one warning). A source whose answer cannot be told maps
+        // nothing (fail closed). The owner is checked again before the create, on every path (EnforceMappingSourceOwnerAsync).
+        var gate = new MappedSourceGate(source.EntityLogicalName, reads.AppRead);
+        var early = await DecideMappingSourceAsync(gate, rowOwner: null, secureOwnerTeam, ct).ConfigureAwait(false);
+        if (!SourceMapsBeforeOwner(early.Verdict, request.SecureFromCreation, SourceIsCallersFilingParent(table, resolution, target)))
+        {
+            _logger.LogInformation(
+                "[RECORD-CREATE] the mapping source of a {Table} is {Verdict} ({Reason}); nothing was mapped",
+                table, early.Verdict, early.Reason);
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null, MappingSourceSecureNotMapped));
+            return unmapped;
         }
 
         // The target columns, read beside the source: answered only now, after the source, as when they were read after it.
@@ -351,8 +387,155 @@ internal sealed partial class RecordCreationService
 
         return values.Count == 0
             ? unmapped
-            : await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false);
+            : (await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false)) with { Gate = gate };
     }
+
+    /// <summary>
+    /// Task 022 fix round 2: the 032b copy gate (<see cref="MappingSourceCopyGate.DecideAsync"/>) over a mapping source's gate
+    /// read, for a row owned by <paramref name="rowOwner"/> (none: a row in no isolation). A read that did not come back, or a
+    /// fault, is <see cref="MappingSourceCopyVerdict.Unknown"/> (fail closed). Cancellation is rethrown.
+    /// </summary>
+    private static async Task<MappingSourceCopyDecision> DecideMappingSourceAsync(
+        MappedSourceGate gate, EntityReference? rowOwner,
+        Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> secureOwnerTeam, CancellationToken ct)
+    {
+        if (gate.Read is not { } read)
+            return MappingSourceCopyDecision.Unknown(MappingSourceCopyGate.ReasonSourceOwnerMissing);
+
+        try
+        {
+            return await MappingSourceCopyGate.DecideAsync(gate.SourceTable, read, rowOwner, secureOwnerTeam, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return MappingSourceCopyDecision.Unknown(MappingSourceCopyGate.ReasonFault, ex);
+        }
+    }
+
+    /// <summary>
+    /// Task 022 fix round 2 (the mapping-source rule, step 3's narrowing): whether a source the 032b copy gate answered
+    /// <paramref name="verdict"/> for (a row in no isolation) may be mapped before the owner is decided. A source that is not
+    /// secure: yes. A secure one: only (a) into a create that is secure from creation, or (b) into a row the caller files under
+    /// that source. A source whose answer cannot be told: no (fail closed).
+    /// </summary>
+    internal static bool SourceMapsBeforeOwner(MappingSourceCopyVerdict verdict, bool secureFromCreation, bool filedUnderSource) =>
+        verdict switch
+        {
+            MappingSourceCopyVerdict.Allowed => true,
+            MappingSourceCopyVerdict.Secure => secureFromCreation || filedUnderSource,
+            _ => false,
+        };
+
+    /// <summary>
+    /// Task 022 fix round 2: whether the mapping source is a record the CALLER's own row is filed under — the regarding pair or
+    /// the single typed parent the source was resolved from (FR-03, from the caller's payload before anything is mapped), or an
+    /// explicit source that one of those same filing parents names. Never a mapped lookup.
+    /// </summary>
+    internal static bool SourceIsCallersFilingParent(string table, MappingSourceResolution resolution, Entity callerRow)
+    {
+        if (resolution.Origin is MappingSourceOrigin.RegardingPair or MappingSourceOrigin.TypedParent)
+            return true;
+        if (resolution is not { Origin: MappingSourceOrigin.Explicit, Source: { } source })
+            return false;
+
+        var row = callerRow.Attributes.Where(a => a.Value is not null).ToArray();
+        if (RecordOwnershipContext.ParentsOf(row, table).Any(p =>
+                p.RecordId == source.RecordId
+                && string.Equals(p.EntityLogicalName, source.EntityLogicalName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return callerRow.Attributes.TryGetValue(SecureRootInheritance.PairIdColumn, out var pairId)
+               && pairId is string text && Guid.TryParse(text.Trim(), out var id) && id == source.RecordId;
+    }
+
+    /// <summary>
+    /// Task 022 fix round 2 (the mapping-source rule, the invariant): values mapped from a secure source are written only into
+    /// a row owned by that source's secure owner. Asked after step 7, before the create, on EVERY path that mapped a value: the
+    /// 032b copy gate over the source's gate read for a row owned by <paramref name="owningTeam"/>. Allowed: nothing changes.
+    /// Otherwise (secure, or not told — fail closed) every mapped value is removed and the caller's values stay, with the
+    /// adapter's own defaults (a default copied from a mapped value is removed with it), and one warning. A removed value that
+    /// files the row (a lineage, ownership-parent or stamp lookup, or the regarding pair) was read by steps 6 to 7, so the
+    /// create is refused instead (nothing is written). The pre-write rules are asked again on the row as it will be written.
+    /// </summary>
+    private async Task<(RecordCreationRefusal? Refusal, DataverseWriteItemMapper.MappedItem Item, IReadOnlyDictionary<string, JsonElement> Values)>
+        EnforceMappingSourceOwnerAsync(
+            string table, RecordTableRule rule, IDataverseUserClient user, MappedSourceGate gate, Guid owningTeam,
+            DataverseWriteItemMapper.MappedItem callerItem, DataverseWriteItemMapper.MappedItem item,
+            IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> defaultColumns,
+            IReadOnlyCollection<(string Column, string Source)> copiedDefaults,
+            Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> secureOwnerTeam,
+            List<RecordCreationWarning> warnings, string noun, CancellationToken ct)
+    {
+        var decision = await DecideMappingSourceAsync(gate, new EntityReference("team", owningTeam), secureOwnerTeam, ct)
+            .ConfigureAwait(false);
+        if (decision.Verdict == MappingSourceCopyVerdict.Allowed)
+            return (null, item, mappedValues);
+
+        var mapped = mappedValues.Keys.Where(k => !defaultColumns.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removed = mappedValues.Keys
+            .Where(k => mapped.Contains(k) || copiedDefaults.Any(c => string.Equals(c.Column, k, StringComparison.OrdinalIgnoreCase)
+                                                                      && mapped.Contains(c.Source)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (removed.Count == 0)
+            return (null, item, mappedValues);
+
+        _logger.LogWarning(decision.Fault,
+            "[RECORD-CREATE] the mapping source of a {Table} is {Verdict} ({Reason}) and the row's owner is not its secure owner; " +
+            "{Count} mapped value(s) removed before the create", table, decision.Verdict, decision.Reason, removed.Count);
+
+        var filing = removed.FirstOrDefault(c => FilesTheRow(table, item, c));
+        if (filing is not null)
+        {
+            _logger.LogWarning("[RECORD-CREATE] a removed mapped value of a {Table} files the row ({Column}); refused", table, filing);
+            return (MappingSourceOwnerRefused(noun), item, mappedValues);
+        }
+
+        var kept = mappedValues.Where(kv => !removed.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        var stripped = callerItem;
+        if (kept.Count > 0)
+        {
+            var remapped = await DataverseWriteItemMapper.MapAsync(user, table, MergedItem(callerItem, kept.Keys, kept), ct)
+                .ConfigureAwait(false);
+            if (remapped.Item is not { } withDefaults)
+                return (MappingSourceOwnerRefused(noun), item, mappedValues);
+            stripped = withDefaults;
+        }
+
+        warnings.RemoveAll(w => w.Column is { } column && removed.Contains(column));
+        warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null, MappingSourceSecureStripped));
+
+        if (rule.PreWriteRules.Count > 0
+            && await RunPreWriteRulesAsync(table, rule, user, stripped, noun, ct).ConfigureAwait(false) is { } preWriteRefusal)
+        {
+            return (preWriteRefusal, item, mappedValues);
+        }
+
+        return (null, stripped, kept);
+    }
+
+    /// <summary>Whether <paramref name="column"/> of <paramref name="item"/> files the row: the regarding pair, or a lookup
+    /// Repair's own test (<see cref="WouldFileTheRow"/>) says files it.</summary>
+    private static bool FilesTheRow(string table, DataverseWriteItemMapper.MappedItem item, string column)
+    {
+        if (string.Equals(column, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var lookup = item.Lookups.FirstOrDefault(l => string.Equals(l.Column, column, StringComparison.OrdinalIgnoreCase));
+        return WouldFileTheRow(table, column, lookup is null ? column : new EntityReference(lookup.RelatedTable, lookup.RecordId));
+    }
+
+    private static RecordCreationRefusal MappingSourceOwnerRefused(string noun) => new(
+        RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.CheckFailedCode,
+        $"A check before the {noun} was created could not be completed, so it was not created.");
 
     /// <summary>
     /// What step 3 reads before it maps anything (task 049c: the first half of <see cref="MapFieldsAsync"/>, moved here
@@ -436,8 +619,14 @@ internal sealed partial class RecordCreationService
 
         // FR-04: Read as the caller FIRST, then app-only. Missing, denied, unmapped type, a failed probe or read: ONE outcome —
         // nothing mapped (not even a Default rule), one warning that names nothing.
+        // Task 022 fix round 2: the columns the 032b copy gate reads to tell whether the source is secure are read in the same
+        // one app-only read (never copied: step 3 masks the read down to the rules' own columns before the engine sees it).
+        var readColumns = sourceColumns
+            .Concat(MappingSourceCopyGate.SourceGateColumns(source.EntityLogicalName))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         using var attributesCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var sourceTask = MappingSourceReadProbe.ReadAsync(mapping.Reader, source, sourceColumns, _entities, _logger, ct);
+        var sourceTask = MappingSourceReadProbe.ReadAsync(mapping.Reader, source, readColumns, _entities, _logger, ct);
         var attributesTask = targetColumns.Length == 0
             ? Task.FromResult<IReadOnlyDictionary<string, TargetAttribute>?>(NoAttributes)
             : TargetAttributesAsync(user, table, targetColumns, attributesCancel.Token);

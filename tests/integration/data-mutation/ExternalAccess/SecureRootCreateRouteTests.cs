@@ -535,6 +535,11 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                 {
                     ["sprk_matterid"] = id.ToString("D"),
                     ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", _mappedType ?? Guid.Empty),
+                    // Task 022 fix round 2: the mapping-source gate's columns, as the seeded matter holds them.
+                    ["ownerid"] = OwningTeamOf(id) is { } team
+                        ? new EntityReference("team", team)
+                        : new EntityReference("systemuser", OwningUserOf(id) ?? CallerSystemUserId),
+                    ["sprk_issecure"] = IsSecureOf(id) ?? false,
                 }));
 
         // The owning team's business unit and its search defaults (step 8 reads team -> business unit app-only), so a create

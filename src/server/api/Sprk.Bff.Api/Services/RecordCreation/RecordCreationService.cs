@@ -501,6 +501,14 @@ internal sealed partial class RecordCreationService
         var mappingWarnings = new List<RecordCreationWarning>();
         var callerItem = item;
         IReadOnlyDictionary<string, JsonElement> mappedValues = NoMappedValues;
+
+        // Task 022 fix round 2: the mapping source's gate read (when a value was mapped), checked again after step 7; and the
+        // Secure Record owner team, asked at most once per create, so step 3 and that check read the same answer (a fault too).
+        MappedSourceGate? mappingGate = null;
+        Task<(Guid? TeamId, string? Refusal)>? secureOwnerTeamAnswer = null;
+        Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamOnce(CancellationToken token) =>
+            secureOwnerTeamAnswer ??= _shares.SecureOwnerTeamAsync(token);
+        var copiedDefaults = new List<(string Column, string Source)>();
         if (rule.MappingExclusion is { } exclusion)
         {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
@@ -516,7 +524,8 @@ internal sealed partial class RecordCreationService
             try
             {
                 mapped = await MapFieldsAsync(
-                        table, rule, request, mapping, mappingClient!, callerItem, mappingWarnings, earlyMappingReads, ct)
+                        table, rule, request, mapping, mappingClient!, callerItem, mappingWarnings, earlyMappingReads,
+                        SecureOwnerTeamOnce, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -536,6 +545,8 @@ internal sealed partial class RecordCreationService
             // ebilling-r1's review of 013, item 1: the SAME local — the pre-write rules (5½) and the create (11) read this item.
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
+            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped.
+            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(table, null) : null;
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
                 $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
         }
@@ -550,6 +561,7 @@ internal sealed partial class RecordCreationService
         if (user is not null)
         {
             (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
+            copiedDefaults.AddRange(copied.Select(c => (c.Column, c.Source)));
             var serverSetCopies = copied
                 .Where(c => request.ServerSetLookupColumns?.Contains(c.Source) == true)
                 .Select(c => c.Column)
@@ -856,6 +868,21 @@ internal sealed partial class RecordCreationService
         var owningTeam = isolatedTeam ?? owner!.OwningTeamId!.Value;
         trace.Record(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp,
             "the index follows the content type (#2502); nothing written");
+
+        // Task 022 fix round 2 (the mapping-source rule, the invariant): values mapped from a secure source are written only into
+        // a row owned by that source's secure owner. Asked here, with the owner decided and before anything is built from the
+        // item, on every path that mapped a value; step 3's early answer only narrows it. Never changes the owner or the filing.
+        if (mappingGate is { } sourceGate && mappedValues.Count > 0 && user is not null)
+        {
+            var enforced = await EnforceMappingSourceOwnerAsync(
+                    table, rule, user, sourceGate, owningTeam, callerItem, item, mappedValues, defaultColumns, copiedDefaults,
+                    SecureOwnerTeamOnce, mappingWarnings, noun, ct)
+                .ConfigureAwait(false);
+            if (enforced.Refusal is { } ownerCheckRefusal)
+                return Decision.Refuse(ownerCheckRefusal);
+            item = enforced.Item;
+            mappedValues = enforced.Values;
+        }
 
         // ── Step 9: the creator person ("for" person and table defaults: the adapters', owner-review item 3) ─────────────
         var fields = owner is not null
@@ -2584,6 +2611,10 @@ internal sealed record RecordCreationWarning(string Code, string? Column, string
     /// type could be told from the row's own lookups, so the type (with any display columns sent) was not written: the row
     /// holds neither half of the pair. Filling the id from the one record that agrees is silent.</summary>
     internal const string RegardingTypeClearedCode = "record_creation.regarding_type_cleared";
+
+    /// <summary>Task 022 fix round 2 (the mapping-source rule): the source is secure, or whether it is secure could not be told,
+    /// and the row is not created in that source's isolation, so nothing mapped from it is written. The row is still created.</summary>
+    internal const string MappingSourceSecureCode = "record_creation.mapping_source_secure";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>

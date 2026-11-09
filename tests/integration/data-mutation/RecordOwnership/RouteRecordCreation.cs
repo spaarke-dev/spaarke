@@ -24,6 +24,9 @@ internal static class RouteRecordCreation
     /// <summary>The business unit every team in <see cref="Entities"/> reports, and whose search-index defaults are empty.</summary>
     internal static readonly Guid TeamBusinessUnit = OwnershipDirectory.ChildBu;
 
+    /// <summary>The user every row read back here is owned by (an ordinary owner, not the Secure team).</summary>
+    internal static readonly Guid OrdinarySourceOwner = Guid.Parse("02200000-0000-4000-8000-0000000000d2");
+
     /// <summary>The service over the route's collaborators.</summary>
     internal static RecordCreationService Over(
         IRecordOwnershipResolver ownership,
@@ -78,6 +81,12 @@ internal static class RouteRecordCreation
                 {
                     foreach (var column in columns)
                         row[column] = $"N-{id:N}";
+                    // Task 022 fix round 2: a mapping source's owner and secure flag (the mapping-source rule's columns) come
+                    // back as Dataverse types: an ordinary user owner, not secure.
+                    if (row.Contains("ownerid"))
+                        row["ownerid"] = new EntityReference("systemuser", OrdinarySourceOwner);
+                    if (row.Contains(AccessFollowsParent.SecureFlagColumn))
+                        row[AccessFollowsParent.SecureFlagColumn] = false;
                 }
 
                 return row;
