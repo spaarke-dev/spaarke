@@ -120,10 +120,92 @@ internal sealed class RestrictedFilingShareBar
     }
 
     /// <summary>
-    /// <c>true</c> when the message is filed under a Restricted record (inherited through its filing); <c>false</c> when it is
-    /// filed under none or the inherited value is not Restricted; <c>null</c> when that cannot be decided (logged).
+    /// uac-r2 task 198 Part C: the users among <paramref name="candidates"/> who may be GRANTED a share on this communication —
+    /// every grant path of a Direct message (the live grant, the re-grant after a re-file, the scheduled backstop) asks here,
+    /// so a barred user is never granted. A user is eligible when the user-flag read returned them and
+    /// <see cref="InternalShareEndpoints.IsBarredOnRestricted"/> is false against the message's OWN Access Permission or the one
+    /// it inherits through its filing (the same predicate and inherited rule <see cref="RemoveBarredSharesAsync"/> enforces).
+    /// Fail closed: a user the read does not return is not eligible; a user-flag read fault makes nobody eligible; when an
+    /// external-flagged candidate exists and whether the message is Restricted cannot be decided, that user is barred
+    /// (<c>rootIsRestricted: null</c>). Each of those reports <c>Complete = false</c>, so the caller retries. Never throws
+    /// (cancellation aside).
     /// </summary>
-    private async Task<bool?> TargetIsRestrictedAsync(Guid communicationId, CancellationToken ct)
+    internal async Task<(IReadOnlyList<Guid> Eligible, bool Complete)> EligibleForGrantAsync(
+        Guid communicationId, IReadOnlyList<Guid> candidates, CancellationToken ct)
+    {
+        var ids = candidates.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0)
+            return ([], true);
+
+        if (_webApi is null)
+        {
+            _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id}: no user reader is available, so no user is granted.",
+                CommunicationTable, communicationId);
+            return ([], false);
+        }
+
+        Dictionary<Guid, InternalShareEndpoints.SystemUserRow> users;
+        try
+        {
+            users = await RestrictedExternalShareRemover.ReadUsersAsync(_webApi, ids, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[RESTRICTED-FILING] {Table} {Id}: the users to be granted could not be read; no user is granted.",
+                CommunicationTable, communicationId);
+            return ([], false);
+        }
+
+        var complete = true;
+        foreach (var unread in ids.Where(id => !users.ContainsKey(id)))
+        {
+            complete = false;
+            _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id}: user {UserId} could not be read; it is not granted.",
+                CommunicationTable, communicationId, unread);
+        }
+
+        var read = ids.Where(users.ContainsKey).ToList();
+
+        // Only a user flagged external can be barred, so the message's Access Permission is read only when one is a candidate.
+        bool? restricted = false;
+        if (read.Any(id => users[id].IsExternal == true))
+        {
+            try
+            {
+                restricted = await TargetIsRestrictedAsync(communicationId, includeOwnValue: true, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[RESTRICTED-FILING] {Table} {Id}: whether it is Restricted could not be read; no user flagged " +
+                    "external is granted.", CommunicationTable, communicationId);
+                restricted = null;
+            }
+
+            if (restricted is null)
+                complete = false;
+        }
+
+        var eligible = read
+            .Where(id => !InternalShareEndpoints.IsBarredOnRestricted(users[id].IsExternal, restricted))
+            .ToList();
+        if (eligible.Count < read.Count)
+        {
+            _logger.LogInformation("[RESTRICTED-FILING] {Table} {Id}: {Barred} user(s) flagged external are not granted (Restricted " +
+                "{Restricted}).", CommunicationTable, communicationId, read.Count - eligible.Count, restricted);
+        }
+
+        return (eligible, complete);
+    }
+
+    /// <summary>
+    /// <c>true</c> when the message is filed under a Restricted record (inherited through its filing) — or, with
+    /// <paramref name="includeOwnValue"/>, when its own <c>sprk_accesspermission</c> is Restricted; <c>false</c> when it is
+    /// filed under none or the value is not Restricted; <c>null</c> when that cannot be decided (logged).
+    /// </summary>
+    private async Task<bool?> TargetIsRestrictedAsync(Guid communicationId, CancellationToken ct) =>
+        await TargetIsRestrictedAsync(communicationId, includeOwnValue: false, ct).ConfigureAwait(false);
+
+    private async Task<bool?> TargetIsRestrictedAsync(Guid communicationId, bool includeOwnValue, CancellationToken ct)
     {
         if (_probe is null)
         {
@@ -139,6 +221,10 @@ internal sealed class RestrictedFilingShareBar
             _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id} was not found; no share was removed.", CommunicationTable, communicationId);
             return null;
         }
+
+        if (includeOwnValue
+            && row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value == InheritedAccessPermission.Restricted)
+            return true;
 
         var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
         if (parents.Count == 0)

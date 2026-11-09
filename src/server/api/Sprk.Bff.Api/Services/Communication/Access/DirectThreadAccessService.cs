@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication.Access;
 
@@ -41,6 +42,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private readonly ILogger<DirectThreadAccessService> _logger;
     private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
     private readonly DirectMessageOwnerTeam _directMessageOwnerTeam;
+    private readonly DataverseWebApiClient? _webApi;
+    private readonly CoreAncestorResolver? _coreAncestors;
 
     /// <param name="membershipDerivation">
     /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
@@ -56,6 +59,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// that team is a secure child, and its shares are <see cref="SecureChildShareSynchronizer"/>'s alone.</param>
     /// <param name="gateDecisionRecords">Ontology task 042b (D-169): an unfiled communication's gate Decision Records follow its shares.</param>
     /// <param name="directMessageOwnerTeam">fm task 054a: the Direct-message owner team lookup (uac-r2 task 198 Part B).</param>
+    /// <param name="webApi">uac-r2 task 198 Part C: the user-flag read of the Restricted bar every Direct grant applies
+    /// (<see cref="RestrictedFilingShareBar.EligibleForGrantAsync"/>). Optional so the test compositions keep compiling; the host
+    /// registers it. Without it no participant of a Direct-team-owned message is granted here (fail closed; the share job
+    /// grants them).</param>
+    /// <param name="coreAncestors">uac-r2 task 198 Part C: the column probe of the bar's filing walk. Optional; without it a
+    /// participant flagged external is not granted here.</param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
         IDataverseRecordShareService accessGrant,
@@ -63,8 +72,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         IConfiguration configuration,
         ILogger<DirectThreadAccessService> logger,
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
-        DirectMessageOwnerTeam directMessageOwnerTeam)
+        DirectMessageOwnerTeam directMessageOwnerTeam,
+        DataverseWebApiClient? webApi = null,
+        CoreAncestorResolver? coreAncestors = null)
     {
+        _webApi = webApi;
+        _coreAncestors = coreAncestors;
         _directMessageOwnerTeam = directMessageOwnerTeam ?? throw new ArgumentNullException(nameof(directMessageOwnerTeam));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
@@ -218,10 +231,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 switch (await IsDirectMessageOwnerTeamAsync(owningTeam, ct))
                 {
                     case null:
+                        // Task 198 Part C: the durable trace is the row itself — a Direct-team-owned message whose participants
+                        // lack a share — which the two-minute share job (SecureChildShareReconciliationJob) lists and re-grants.
                         _logger.LogWarning(
                             "Message {CommunicationId} is team-owned and whether that team is the Direct-message owner team " +
-                            "cannot be determined; no participant is granted (ThreadId={ThreadId}).", communicationId, threadId);
-                        // TODO(task 198 Part C): enqueue the durable re-grant for this message.
+                            "cannot be determined; no participant is granted now, and the share reconciliation retries it " +
+                            "(ThreadId={ThreadId}).", communicationId, threadId);
                         return;
                     case true:
                         await GrantDirectTeamMessageAsync(communicationId, assignment, owningTeam, ct);
@@ -270,26 +285,11 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// the caller's one fail-closed branch (nothing granted; the message is queued for re-grant, Part C). This is the ONE place
     /// the decision is made, so a change to the lookup's answer shape changes only this method.
     /// </summary>
-    private async Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct)
-    {
-        try
-        {
-            if (await _directMessageOwnerTeam.CannotBeDirectOwnerTeamAsync(owningTeam, ct))
-                return false;
-
-            var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct);
-            if (direct.IsResolved)
-                return direct.TeamId == owningTeam;
-            if (direct.Refusal == DirectMessageOwnerTeamRefusal.NotConfigured && direct.Fault is null)
-                return false;
-            return null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Whether team {TeamId} is the Direct-message owner team could not be read; treated as unknown.", owningTeam);
-            return null;
-        }
-    }
+    /// <remarks>Task 198 Part C: the decision itself lives in <see cref="DirectMessageParticipantShares.IsDirectOwnerTeamAsync"/>,
+    /// shared with the re-grant, so the live grant and the re-grant can never decide differently (K3: ids compared only when
+    /// resolved and non-empty).</remarks>
+    private Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct) =>
+        DirectMessageParticipantShares.IsDirectOwnerTeamAsync(_directMessageOwnerTeam, owningTeam, _logger, ct);
 
     /// <summary>
     /// Task 198 Part B: the content rows of a Direct-team-owned message that its readers need, each as (table, the lookup to
@@ -326,6 +326,24 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         }
 
         var participants = await ReadDirectParticipantsForGrantAsync(threadId, ct);
+        if (participants.Count == 0)
+            return;
+
+        // Task 198 Part C (ruling 6): every Direct grant applies the Restricted bar — the message's own or inherited Access
+        // Permission, through the one predicate. A participant it does not clear (barred, unread, or undecidable) is not granted
+        // here; the share job retries the message.
+        var bar = new RestrictedFilingShareBar(
+            _entityService, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _accessGrant, _webApi, _logger);
+        var (eligible, complete) = await bar.EligibleForGrantAsync(communicationId, participants, ct);
+        if (!complete)
+        {
+            _logger.LogWarning(
+                "Message {CommunicationId}: {NotCleared} of its {Participants} participant(s) could not be cleared by the Restricted " +
+                "bar; they are not granted now, and the share reconciliation retries it (ThreadId={ThreadId}).",
+                communicationId, participants.Count - eligible.Count, participants.Count, threadId);
+        }
+
+        participants = eligible;
         if (participants.Count == 0)
             return;
 
@@ -433,10 +451,11 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var (secure, undetermined) = await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(_entityService, _configuration, owningTeam, ct);
         if (secure is null)
         {
-            // TODO(task 198 Part C): enqueue the durable re-grant for this message.
+            // Task 198 Part C: a Direct-team-owned message is retried by the share job (SecureChildShareReconciliationJob),
+            // which re-asks this same check; any other team's message is not granted here.
             _logger.LogWarning(
                 "Message {CommunicationId} is team-owned and the Secure Record team cannot be determined ({Refusal}); no " +
-                "participant is granted (ThreadId={ThreadId}).", communicationId, undetermined, threadId);
+                "participant is granted now (ThreadId={ThreadId}).", communicationId, undetermined, threadId);
             return (false, null);
         }
 

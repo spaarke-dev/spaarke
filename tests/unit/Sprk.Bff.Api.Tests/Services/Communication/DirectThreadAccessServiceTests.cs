@@ -617,16 +617,21 @@ public class DirectThreadAccessServiceTests
             .WithDirectTeam(DirectTeamId)
             .Team(OtherTeamId, "Some Owner Team", DirectMessageOwnerTeamDouble.RootUnitId);
 
-    /// <summary>A SUT over the real Direct-team lookup, configured, reading <paramref name="directory"/>.</summary>
+    /// <summary>
+    /// A SUT over the real Direct-team lookup, configured, reading <paramref name="directory"/>. The participants are read through
+    /// <paramref name="users"/> (Part C: the Restricted bar on the grant); by default every test user is internal.
+    /// </summary>
     private DirectThreadAccessService DirectTeamSut(
-        DirectMessageOwnerTeamDouble? directory = null, ILogger<DirectThreadAccessService>? logger = null) => new(
+        DirectMessageOwnerTeamDouble? directory = null, ILogger<DirectThreadAccessService>? logger = null,
+        UserFlagDirectoryDouble? users = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         logger ?? Mock.Of<ILogger<DirectThreadAccessService>>(),
         new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-        (directory ?? DirectDirectory()).Lookup());
+        (directory ?? DirectDirectory()).Lookup(),
+        users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
     /// <summary>The message is owned by a non-default Owner team that is not the Secure team (the Direct team's shape).</summary>
     private void MessageOwnedByOwnerTeam(Guid teamId)
@@ -809,6 +814,36 @@ public class DirectThreadAccessServiceTests
         await act.Should().NotThrowAsync();
         VerifyGrant("sprk_communicationattachments", AttachmentRowId, Other);
         VerifyGrant("sprk_documents", DocumentRowId, Caller);
+    }
+
+    [Fact(DisplayName = "198 C must-not-fire: an external participant is not granted when whether the message is Restricted cannot be decided")]
+    public async Task DirectTeamMessage_AnExternalParticipant_WhenRestrictedIsUndecidable_IsNotGranted()
+    {
+        // No column probe here, so the message's Access Permission cannot be read: an external-flagged participant is barred
+        // (rootIsRestricted null), the internal one is granted.
+        DirectTeamMessageWorld();
+        var users = new UserFlagDirectoryDouble().Internal(Caller);
+        users.Flags[Other] = true;
+
+        await DirectTeamSut(users: users).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "198 C must-not-fire: when the participants' user flags cannot be read, nobody is granted")]
+    public async Task DirectTeamMessage_WhenTheUserFlagsCannotBeRead_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        var users = new UserFlagDirectoryDouble().Internal(Caller, Other);
+        users.Faults = true;
+
+        var act = () => DirectTeamSut(users: users).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        await act.Should().NotThrowAsync();
+        VerifyNoGrantAtAll();
     }
 
     [Fact]

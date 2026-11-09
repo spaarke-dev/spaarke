@@ -50,15 +50,23 @@ internal sealed class DirectMessageOwnerTeamDouble
         return this;
     }
 
-    /// <summary>The lookup configured with <see cref="BusinessUnitName"/> and <see cref="OwnerTeamName"/>.</summary>
-    public DirectMessageOwnerTeam Lookup() => new(
+    /// <summary>Task 198 Part C: the Direct unit holds no user again (a refusal that recovers).</summary>
+    public DirectMessageOwnerTeamDouble WithoutUsersInDirectUnit()
+    {
+        _users.RemoveAll(u => u.Unit == DirectUnitId);
+        return this;
+    }
+
+    /// <summary>The lookup configured with <see cref="BusinessUnitName"/> and <see cref="OwnerTeamName"/>; its verdict cache runs
+    /// on <paramref name="time"/> (the system clock by default).</summary>
+    public DirectMessageOwnerTeam Lookup(TimeProvider? time = null) => new(
         new Directory(this),
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [DirectMessageOwnerTeam.BusinessUnitNameConfigKey] = BusinessUnitName,
             [DirectMessageOwnerTeam.OwnerTeamNameConfigKey] = OwnerTeamName,
         }).Build(),
-        TimeProvider.System,
+        time ?? TimeProvider.System,
         NullLogger<DirectMessageOwnerTeam>.Instance);
 
     /// <summary>The lookup with no Direct-message settings: it reads nothing and refuses (not_configured).</summary>

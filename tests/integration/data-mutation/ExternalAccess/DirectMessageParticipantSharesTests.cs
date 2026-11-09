@@ -1,0 +1,559 @@
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+
+/// <summary>
+/// unified-access-control-r2 task 198 Part C: the participants of a Direct 1:1 message owned by the Direct-message owner team
+/// (fm 054a) hold Read on it and on its content rows, and nobody else holds a direct user share on the message. Driven over the REAL
+/// <see cref="SecureChildShareReconciliationJob"/> (the scheduled backstop and retry), the REAL <see cref="SecureChildReconciler"/>
+/// (its <c>AfterRefileAsync</c>, the step after an unfile or a secure exit), the REAL <see cref="DirectMessageOwnerTeam"/> lookup,
+/// one in-memory Dataverse (<see cref="SecureChildShareWorld"/>) and the strict share double (<see cref="FakeRecordShareTable"/>).
+/// <list type="bullet">
+/// <item>The audience is the message's own thread's user owner and its systemuser sharees; nobody else is ever granted.</item>
+/// <item>Every unknown (a grant fault, the Direct team refused or faulted, the Secure check undecided) grants nothing and is
+/// retried by the next run until the grant lands; a run after that writes nothing.</item>
+/// <item>A Secure-owned message is never granted here. The Restricted bar applies to every grant.</item>
+/// <item>Record-anchored, secure, the per-user master thread, unfiled inbound email and user-owned Direct messages are unchanged.</item>
+/// </list>
+/// </summary>
+public class DirectMessageParticipantSharesTests
+{
+    private const int Read = 1;
+    private const int ThreadTypeDirect = 100000001;
+    private const int ThreadTypeRecordAnchored = 100000000;
+
+    private static readonly Guid DirectTeam = Guid.Parse("d1980000-0000-4000-8000-0000000000d1");
+    private static readonly Guid Caller = Guid.Parse("c1980000-0000-4000-8000-0000000000a1");
+    private static readonly Guid Other = Guid.Parse("c1980000-0000-4000-8000-0000000000a2");
+    private static readonly Guid Outsider = Guid.Parse("c1980000-0000-4000-8000-0000000000a3");
+    private static readonly Guid AnchorGrantee = Guid.Parse("c1980000-0000-4000-8000-0000000000a4");
+
+    private static readonly string[] ContentTables =
+        ["sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_document"];
+
+    private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
+    private readonly FakeRecordShareTable _shares = new();
+    private readonly UserFlagDirectoryDouble _users = new UserFlagDirectoryDouble().Internal(Caller, Other, Outsider, AnchorGrantee);
+    private readonly DirectMessageOwnerTeamDouble _directory = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero));
+    private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["SecureRecord:BusinessUnitName"] = SecureChildShareWorld.SecureBuName,
+        ["SecureRecord:OwnerTeamName"] = SecureChildShareWorld.SecureOwnerTeamName,
+    }).Build();
+
+    private DirectMessageOwnerTeam? _lookup;
+
+    public DirectMessageParticipantSharesTests()
+    {
+        var directUnit = Guid.Parse("d1980000-0000-4000-8000-0000000000b1");
+        _world.Add("businessunit", directUnit, ("name", DirectMessageOwnerTeamDouble.BusinessUnitName),
+            ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.GeneralBu)));
+        _world.Team(DirectTeam, directUnit, DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false, teamType: 0);
+    }
+
+    /// <summary>One lookup per test (its verdict cache runs on the test clock), as the host's singleton.</summary>
+    private DirectMessageOwnerTeam Lookup() => _lookup ??= _directory.Lookup(_time);
+
+    // ── The world ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A Direct thread owned by <see cref="Caller"/> and shared to <see cref="Other"/> (the two-party list).</summary>
+    private Guid DirectThread(bool isDefault = false, int type = ThreadTypeDirect)
+    {
+        var thread = Guid.NewGuid();
+        _world.Add("sprk_communicationthread", thread,
+            ("ownerid", new EntityReference("systemuser", Caller)),
+            ("sprk_threadtype", new OptionSetValue(type)),
+            ("sprk_isdefaultthread", isDefault));
+        _shares.Seed("sprk_communicationthread", thread, DataversePrincipalRef.User(Other), Read);
+        return thread;
+    }
+
+    /// <summary>A message owned by <paramref name="owner"/> in <paramref name="thread"/>, with one row per content table owned by the
+    /// same owner, filed through <paramref name="filing"/>.</summary>
+    private (Guid Message, IReadOnlyList<(string Table, Guid Id)> Rows) Message(
+        Guid thread, (string Column, object Value) owner, params (string Column, string Target, Guid Id)[] filing)
+    {
+        var message = Guid.NewGuid();
+        var columns = new List<(string, object)> { owner, ("sprk_communicationthread", new EntityReference("sprk_communicationthread", thread)) };
+        columns.AddRange(filing.Select(f => (f.Column, (object)new EntityReference(f.Target, f.Id))));
+        _world.Add("sprk_communication", message, columns.ToArray());
+        var rows = new List<(string Table, Guid Id)> { ("sprk_communication", message) };
+        foreach (var table in ContentTables)
+        {
+            var id = Guid.NewGuid();
+            var lookup = table == "sprk_document" ? "sprk_relatedcommunication" : "sprk_communication";
+            _world.Add(table, id, owner, (lookup, new EntityReference("sprk_communication", message)));
+            rows.Add((table, id));
+        }
+
+        return (message, rows);
+    }
+
+    private static (string, object) OwnedBy(Guid team) => ("owningteam", new EntityReference("team", team));
+
+    private (Guid Message, IReadOnlyList<(string Table, Guid Id)> Rows) DirectMessage(params (string Column, string Target, Guid Id)[] filing) =>
+        Message(DirectThread(), OwnedBy(DirectTeam), filing);
+
+    private bool Holds(string table, Guid id, Guid user) => (_shares.MaskOf(table, id, DataversePrincipalRef.User(user)) ?? 0) != 0;
+
+    private int Grants() => _shares.WriteLog.Count(w => w.Action == "GrantAccess");
+
+    private int Revokes() => _shares.WriteLog.Count(w => w.Action == "RevokeAccess");
+
+    private Guid Matter(int accessPermission)
+    {
+        var matter = Guid.NewGuid();
+        _world.OrdinaryRoot("sprk_matter", matter);
+        _world.Set("sprk_matter", matter, InheritedAccessPermission.Column, new OptionSetValue(accessPermission));
+        return matter;
+    }
+
+    // ── The scheduled job ────────────────────────────────────────────────────────────────────────────────────────────
+
+    private SecureChildShareReconciliationJob Job()
+    {
+        var services = new ServiceCollection()
+            .AddSingleton(_world.Synchronizer(_shares))
+            .AddSingleton(SecureChildShareWorld.EntitiesOver(() => _world).Object)
+            .AddSingleton<IDataverseRecordShareService>(_shares)
+            .AddSingleton(Lookup())
+            .AddSingleton<IConfiguration>(_configuration)
+            .AddSingleton(SecureChildShareWorld.CoreAncestorsOver(() => _world))
+            .AddSingleton<DataverseWebApiClient>(_users)
+            .BuildServiceProvider();
+        return new SecureChildShareReconciliationJob(
+            services.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), _time,
+            NullLogger<SecureChildShareReconciliationJob>.Instance);
+    }
+
+    private static JobRunContext RunContext() =>
+        new(Guid.NewGuid(), "corr-198c", JobRunTrigger.Scheduled, new Dictionary<string, object>());
+
+    // ── The re-file step ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    private SecureChildReconciler Reconciler() =>
+        SecureChildShareWorld.ReconcilerOver(() => _world, _shares, _users, directMessageOwnerTeam: Lookup());
+
+    private Task RefileAsync(Guid message, bool wasIsolated = false) =>
+        Reconciler().AfterRefileAsync("sprk_communication", message, () => Task.FromResult(wasIsolated), CancellationToken.None);
+
+    /// <summary>The unfile fm's writer makes: the filing lookup cleared and the owner moved to the Direct team.</summary>
+    private void UnfileToDirect(Guid message, string filingColumn)
+    {
+        _world.Set("sprk_communication", message, filingColumn, null);
+        _world.MoveOwner("sprk_communication", message, DataversePrincipalRef.Team(DirectTeam));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // K3: the Direct-team identity never matches on a null id
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "198 C K3 must-fire: a refusal with no id never matches any owner, Guid.Empty included")]
+    public void K3_ARefusalWithNoId_NeverMatches_GuidEmptyIncluded()
+    {
+        var refused = new DirectMessageOwnerTeamResolution(null, DirectMessageOwnerTeamRefusal.NotConfigured, null);
+        var faulted = new DirectMessageOwnerTeamResolution(null, "unreadable", new HttpRequestException("x"));
+
+        DirectMessageParticipantShares.Matches(refused, Guid.Empty).Should().BeFalse();
+        DirectMessageParticipantShares.Matches(refused, DirectTeam).Should().BeFalse();
+        DirectMessageParticipantShares.Matches(faulted, Guid.Empty).Should().BeFalse();
+        DirectMessageParticipantShares.Matches(faulted, DirectTeam).Should().BeFalse();
+        // An id carried beside a refusal is not an answer.
+        DirectMessageParticipantShares.Matches(new DirectMessageOwnerTeamResolution(DirectTeam, "bu_has_users", null), DirectTeam)
+            .Should().BeFalse();
+        // A resolved empty id names no team.
+        DirectMessageParticipantShares.Matches(new DirectMessageOwnerTeamResolution(Guid.Empty, null, null), Guid.Empty)
+            .Should().BeFalse();
+        // Resolved: exactly its own id.
+        var resolved = new DirectMessageOwnerTeamResolution(DirectTeam, null, null);
+        DirectMessageParticipantShares.Matches(resolved, DirectTeam).Should().BeTrue();
+        DirectMessageParticipantShares.Matches(resolved, Guid.Empty).Should().BeFalse();
+        DirectMessageParticipantShares.Matches(resolved, Other).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "198 C K3 must-fire: a refused lookup answers unknown for a team and no for an empty owner, never yes")]
+    public async Task K3_ARefusedLookup_IsUnknownForATeam_AndNoForAnEmptyOwner()
+    {
+        _directory.WithUserInDirectUnit(Outsider); // the lookup refuses: bu_has_users
+
+        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(Lookup(), DirectTeam, NullLogger.Instance, CancellationToken.None))
+            .Should().BeNull("a refusal is unknown, never a match");
+        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(Lookup(), Guid.Empty, NullLogger.Instance, CancellationToken.None))
+            .Should().BeFalse("an empty owner is no team");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // The scheduled backstop: grants what is missing, retries every unknown until it lands
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "198 C must-fire: the backstop grants every participant on a Direct message and its content rows")]
+    public async Task Job_GrantsEveryParticipant_OnTheMessageAndItsContentRows()
+    {
+        var (_, rows) = DirectMessage();
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue($"the thread's owner reads {table}");
+            Holds(table, id, Other).Should().BeTrue($"the thread's sharee reads {table}");
+        }
+
+        run.ResultJson.Should().Contain("\"directMessages\"").And.Contain("\"granted\":10");
+    }
+
+    [Fact(DisplayName = "198 C must-fire: the backstop grants a missing content-row share, and only that one")]
+    public async Task Job_GrantsAMissingContentRowShare_AndOnlyThatOne()
+    {
+        var (_, rows) = DirectMessage();
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        foreach (var (table, id) in rows)
+        foreach (var user in new[] { Caller, Other })
+        {
+            if (id != attachment || user != Other)
+                _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
+        }
+
+        await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        _shares.WriteLog.Should().ContainSingle()
+            .Which.Should().Be(("GrantAccess", "sprk_communicationattachments", attachment, DataversePrincipalRef.User(Other), (string?)"ReadAccess"));
+    }
+
+    [Fact(DisplayName = "198 C must-fire: a failed grant is retried by the next run and lands; a run after that writes nothing")]
+    public async Task Job_AFailedGrant_IsRetried_AndLands_AndTheNextRunWritesNothing()
+    {
+        var (message, rows) = DirectMessage();
+        _shares.FailWritesOnRecord = ("sprk_communications", message);
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeFalse("the message grant failed");
+        first.ErrorMessage.Should().Contain("Direct messages");
+        Holds("sprk_communication", message, Caller).Should().BeFalse();
+
+        _shares.FailWritesOnRecord = null;
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue();
+            Holds(table, id, Other).Should().BeTrue();
+        }
+
+        var writes = _shares.WriteLog.Count;
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var third = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        third.Success.Should().BeTrue();
+        _shares.WriteLog.Count.Should().Be(writes, "every participant already holds Read: idempotent");
+    }
+
+    [Fact(DisplayName = "198 C must-fire: the Direct-team lookup faults, nothing is granted; once it recovers, the participants are granted")]
+    public async Task Job_WhenTheDirectLookupFaults_GrantsNothing_ThenGrantsOnceItRecovers()
+    {
+        var (message, _) = DirectMessage();
+        _directory.Faults = true;
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeFalse();
+        first.ResultJson.Should().Contain(SecureChildShareReconciliationJob.DirectMessageRun.StatusTeamUnknown);
+        Grants().Should().Be(0);
+
+        _directory.Faults = false;
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C must-fire: the Direct team is refused, nothing is granted; once the refusal clears, the participants are granted")]
+    public async Task Job_WhenTheDirectTeamIsRefused_GrantsNothing_ThenGrantsOnceTheRefusalClears()
+    {
+        var (message, _) = DirectMessage();
+        _directory.WithUserInDirectUnit(Outsider);
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeFalse();
+        Grants().Should().Be(0);
+
+        _directory.WithoutUsersInDirectUnit();
+        _time.Advance(DirectMessageOwnerTeam.CacheLifetime + TimeSpan.FromSeconds(1));
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C must-fire: whether the owner is the Secure team cannot be told, nothing is granted; once it is known ordinary, it is granted")]
+    public async Task Job_WhenSecureIsUnknown_GrantsNothing_ThenGrantsOnceKnownOrdinary()
+    {
+        var (message, _) = DirectMessage();
+        _configuration["SecureRecord:OwnerTeamName"] = "Secure Owners That Do Not Exist";
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeFalse();
+        Grants().Should().Be(0);
+
+        _configuration["SecureRecord:OwnerTeamName"] = SecureChildShareWorld.SecureOwnerTeamName;
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C must-fire: a capped run says so and carries the rest to the next run")]
+    public async Task Job_ACappedRun_SaysSo_AndCarriesTheRestToTheNextRun()
+    {
+        var thread = DirectThread();
+        var recent = _time.GetUtcNow().UtcDateTime.AddMinutes(-5);
+        var messages = new List<Guid>();
+        for (var i = 0; i < SecureChildShareReconciliationJob.MaxDirectMessagesPerRun + 1; i++)
+        {
+            var message = Guid.NewGuid();
+            _world.Add("sprk_communication", message, OwnedBy(DirectTeam),
+                ("sprk_communicationthread", new EntityReference("sprk_communicationthread", thread)), ("modifiedon", recent));
+            messages.Add(message);
+        }
+
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.ResultJson.Should().Contain("\"capReached\":true").And.Contain("\"carried\":1");
+        messages.Count(m => Holds("sprk_communication", m, Caller)).Should().Be(SecureChildShareReconciliationJob.MaxDirectMessagesPerRun);
+
+        _time.Advance(TimeSpan.FromMinutes(2));
+        await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        messages.Should().OnlyContain(m => Holds("sprk_communication", m, Caller) && Holds("sprk_communication", m, Other));
+    }
+
+    // ── Must-not-fire ──
+
+    [Fact(DisplayName = "198 C must-not-fire: a non-participant is never granted, and a non-participant's share on the message is removed")]
+    public async Task Job_NeverGrantsANonParticipant()
+    {
+        var (message, rows) = DirectMessage();
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        _shares.WriteLog.Where(w => w.Action == "GrantAccess")
+            .Should().OnlyContain(w => w.Principal == DataversePrincipalRef.User(Caller) || w.Principal == DataversePrincipalRef.User(Other));
+        foreach (var (table, id) in rows)
+            Holds(table, id, Outsider).Should().BeFalse($"{table}: the Outsider is not on the thread");
+    }
+
+    [Fact(DisplayName = "198 C must-not-fire: an external participant on a message filed under a Restricted record (inherited) is never granted")]
+    public async Task Job_AnExternalParticipant_UnderAnInheritedRestrictedFiling_IsNeverGranted()
+    {
+        var matter = Matter(InheritedAccessPermission.Restricted);
+        var evt = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_event", evt, ("sprk_regardingmatter", "sprk_matter", matter));
+        var (_, rows) = DirectMessage(("sprk_regardingevent", "sprk_event", evt));
+        _users.Flags[Other] = true;
+
+        var job = Job();
+        await job.ExecuteAsync(RunContext(), CancellationToken.None);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Other).Should().BeFalse($"{table} inherits Restricted and the user is flagged external");
+            Holds(table, id, Caller).Should().BeTrue($"an internal participant reads {table}");
+        }
+    }
+
+    [Fact(DisplayName = "198 C must-not-fire: an external participant on a message whose own Access Permission is Restricted is never granted")]
+    public async Task Job_AnExternalParticipant_OnAMessageRestrictedByItsOwnValue_IsNeverGranted()
+    {
+        var (message, _) = DirectMessage();
+        _world.Set("sprk_communication", message, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        _users.Flags[Other] = true;
+
+        await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        Holds("sprk_communication", message, Other).Should().BeFalse();
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C must-not-fire: a message the Secure team owns is never granted by the Direct pass")]
+    public async Task Refile_ASecureOwnedMessage_IsNeverGrantedByTheDirectStep()
+    {
+        // The Direct lookup itself names the Secure team (a misconfiguration): the Secure answer still wins.
+        var directory = new DirectMessageOwnerTeamDouble().WithDirectTeam(_world.OwnerTeam);
+        var secureRoot = Guid.NewGuid();
+        _world.SecureRoot("sprk_matter", secureRoot);
+        var thread = DirectThread();
+        var message = Guid.NewGuid();
+        _world.SecureChild("sprk_communication", message, ("sprk_regardingmatter", "sprk_matter", secureRoot));
+        _world.Set("sprk_communication", message, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+
+        var shares = new DirectMessageParticipantShares(
+            SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, directory.Lookup(_time), _configuration,
+            SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance);
+        var outcome = await shares.AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Secure);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "198 C AC6 pin: the per-user master thread grants and revokes nothing, and is not retried")]
+    public async Task Job_ThePerUserMasterThread_IsUnchanged()
+    {
+        var (message, _) = Message(DirectThread(isDefault: true), OwnedBy(DirectTeam));
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _shares.WriteLog.Should().BeEmpty();
+        Holds("sprk_communication", message, Outsider).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C AC6 pin: a record-anchored thread's message under the Direct team grants and revokes nothing")]
+    public async Task Job_ARecordAnchoredThread_IsUnchanged()
+    {
+        var (message, _) = Message(DirectThread(type: ThreadTypeRecordAnchored), OwnedBy(DirectTeam));
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "198 C AC6 pin: user-owned Direct messages (before fm 054a) and unfiled inbound email are never listed or touched")]
+    public async Task Job_UserOwnedMessages_AreUnchanged()
+    {
+        var thread = DirectThread();
+        var (preDirect, _) = Message(thread, ("owninguser", new EntityReference("systemuser", Caller)));
+        var (inbound, _) = Message(DirectThread(type: ThreadTypeRecordAnchored), ("owninguser", new EntityReference("systemuser", Other)));
+        _shares.Seed("sprk_communication", preDirect, DataversePrincipalRef.User(Outsider), Read);
+        _shares.Seed("sprk_communication", inbound, DataversePrincipalRef.User(Outsider), Read);
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "198 C: with no Direct team configured the pass reports not-configured and writes nothing")]
+    public async Task Job_WithNoDirectTeamConfigured_WritesNothing()
+    {
+        DirectMessage();
+        _lookup = DirectMessageOwnerTeamDouble.Unconfigured();
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        run.ResultJson.Should().Contain(SecureChildShareReconciliationJob.DirectMessageRun.StatusNotConfigured);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // The re-file step: unfile or secure exit back to the Direct team
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "198 C must-fire: unfiled back to the Direct team, the anchor record's grantees lose the message; the participants keep it")]
+    public async Task Refile_UnfiledBackToDirect_RevokesTheAnchorGrantees_AndKeepsTheParticipants()
+    {
+        var matter = Matter(InheritedAccessPermission.Standard);
+        var (message, rows) = Message(DirectThread(), OwnedBy(SecureChildShareWorld.GeneralTeam), ("sprk_regardingmatter", "sprk_matter", matter));
+        foreach (var user in new[] { Caller, Other, AnchorGrantee })
+            _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(user), Read);
+        foreach (var (table, id) in rows.Skip(1))
+            _world.MoveOwner(table, id, DataversePrincipalRef.Team(DirectTeam));
+
+        UnfileToDirect(message, "sprk_regardingmatter");
+        await RefileAsync(message);
+
+        Holds("sprk_communication", message, AnchorGrantee).Should().BeFalse("the anchor record's grantee is not on the thread");
+        _shares.WriteLog.Should().Contain(w => w.Action == "RevokeAccess" && w.Principal == DataversePrincipalRef.User(AnchorGrantee));
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue($"a participant keeps {table}");
+            Holds(table, id, Other).Should().BeTrue($"a participant keeps {table}");
+        }
+    }
+
+    [Fact(DisplayName = "198 C must-fire: a secure exit back to the Direct team leaves exactly the participants")]
+    public async Task Refile_ASecureExitBackToDirect_LeavesExactlyTheParticipants()
+    {
+        var secureRoot = Guid.NewGuid();
+        _world.SecureRoot("sprk_matter", secureRoot);
+        _shares.Seed("sprk_matter", secureRoot, DataversePrincipalRef.User(AnchorGrantee), Read);
+        var thread = DirectThread();
+        var message = Guid.NewGuid();
+        _world.SecureChild("sprk_communication", message, ("sprk_regardingmatter", "sprk_matter", secureRoot));
+        _world.Set("sprk_communication", message, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(AnchorGrantee), Read); // the mirror
+
+        UnfileToDirect(message, "sprk_regardingmatter");
+        await RefileAsync(message, wasIsolated: true);
+
+        Holds("sprk_communication", message, AnchorGrantee).Should().BeFalse();
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 C AC6 pin: a record-anchored re-file (to an ordinary record) is unchanged by the Direct step")]
+    public async Task Refile_ToAnOrdinaryRecord_IsUnchangedByTheDirectStep()
+    {
+        var matter = Matter(InheritedAccessPermission.Standard);
+        var (message, rows) = Message(DirectThread(), OwnedBy(SecureChildShareWorld.GeneralTeam), ("sprk_regardingmatter", "sprk_matter", matter));
+        foreach (var (table, id) in rows)
+            _shares.Seed(table, id, DataversePrincipalRef.User(AnchorGrantee), Read);
+
+        await RefileAsync(message);
+
+        foreach (var (table, id) in rows)
+            Holds(table, id, AnchorGrantee).Should().BeTrue($"{table} is filed under an ordinary record: its grantees stay");
+        Holds("sprk_communication", message, Caller).Should().BeFalse("the Direct step grants only Direct-team-owned messages");
+        Revokes().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "198 C AC6 pin: a user-owned message re-filed is unchanged by the Direct step")]
+    public async Task Refile_AUserOwnedMessage_IsUnchangedByTheDirectStep()
+    {
+        var (message, _) = Message(DirectThread(), ("owninguser", new EntityReference("systemuser", Caller)));
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        var outcome = await new DirectMessageParticipantShares(
+            SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, Lookup(), _configuration,
+            SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.NotDirect);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+}

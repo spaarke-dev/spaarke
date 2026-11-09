@@ -1,14 +1,10 @@
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using Azure.Core;
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -36,7 +32,7 @@ public class RestrictedFilingShareBarTests
 
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
     private readonly FakeRecordShareTable _shares = new();
-    private readonly UserDirectory _users = new();
+    private readonly UserFlagDirectoryDouble _users = new();
 
     public RestrictedFilingShareBarTests()
     {
@@ -202,54 +198,5 @@ public class RestrictedFilingShareBarTests
         Holds("sprk_communication", message, Internal).Should().BeTrue("the root shares it");
         Holds("sprk_communication", message, BlankFlag).Should().BeFalse("the root does not share it: the mirror takes it off");
         _users.Queries.Should().BeEmpty("a Secure target that is not Restricted is the synchronizer's alone");
-    }
-
-    /// <summary>The <c>systemusers</c> flag read (<c>sprk_isexternal</c>); every other Web API read answers nothing.</summary>
-    private sealed class UserDirectory : DataverseWebApiClient
-    {
-        private static readonly Regex UserId = new(@"systemuserid eq ([0-9a-fA-F-]{36})");
-
-        public UserDirectory()
-            : base(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
-            }).Build(), NullLogger<DataverseWebApiClient>.Instance, new NoCredential())
-        {
-        }
-
-        /// <summary>Each user's stored flag (<c>null</c> = blank); a user absent here is not returned.</summary>
-        public Dictionary<Guid, bool?> Flags { get; } = new();
-
-        public bool Faults { get; set; }
-
-        public List<string> Queries { get; } = new();
-
-        public override Task<List<T>> QueryAsync<T>(
-            string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
-            CancellationToken cancellationToken = default)
-        {
-            if (entitySetName != "systemusers")
-                return Task.FromResult(new List<T>());
-
-            Queries.Add(filter ?? string.Empty);
-            if (Faults)
-                throw new HttpRequestException("Test: the users could not be read.");
-
-            var rows = UserId.Matches(filter ?? string.Empty)
-                .Select(m => Guid.Parse(m.Groups[1].Value))
-                .Where(Flags.ContainsKey)
-                .Select(id => new Dictionary<string, object?> { ["systemuserid"] = id, ["sprk_isexternal"] = Flags[id] })
-                .ToList();
-            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
-        }
-
-        private sealed class NoCredential : TokenCredential
-        {
-            public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-                throw new InvalidOperationException("Test: this double never authenticates.");
-
-            public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-                throw new InvalidOperationException("Test: this double never authenticates.");
-        }
     }
 }

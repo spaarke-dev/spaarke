@@ -449,6 +449,11 @@ public sealed class SecureChildReconciler
     /// unconditionally. Without it the bar removes nothing (logged).</summary>
     private readonly IDataverseRecordShareService? _recordShares;
 
+    /// <summary>uac-r2 task 198 Part C: fm 054a's Direct-message owner team lookup, for the re-grant after a re-file
+    /// (<see cref="DirectMessageParticipantShares"/>). Optional so the test compositions keep compiling; the host registers it
+    /// (<c>CommunicationModule</c>). Without it the step decides nothing and the share job re-grants.</summary>
+    private readonly Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? _directMessageOwnerTeam;
+
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
@@ -485,9 +490,11 @@ public sealed class SecureChildReconciler
         DocumentContainerRelocator? relocator = null,
         CoreAncestorResolver? coreAncestors = null,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
-        IDataverseRecordShareService? recordShares = null)
+        IDataverseRecordShareService? recordShares = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         _recordShares = recordShares;
+        _directMessageOwnerTeam = directMessageOwnerTeam;
         _relocator = relocator;
         _coreAncestors = coreAncestors;
         _links = links;
@@ -1353,10 +1360,43 @@ public sealed class SecureChildReconciler
                 _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the Restricted filing bar faulted; no " +
                     "share was removed by it.", CommunicationTable, childId);
             }
+
+            // uac-r2 task 198 Part C: a message the re-file returned to the Direct-message owner team (unfiled, from an ordinary
+            // or a secure record) is read by exactly its thread's participants — they are granted (the Restricted bar applied),
+            // and every other user's direct share on it (the anchor record's grantees) is revoked and read back. Any other message
+            // is left as it is. What this cannot finish, the two-minute share job finishes. Never thrown. Without the lookup (a
+            // test composition) the step does not run; the host always registers it.
+            if (_directMessageOwnerTeam is not null)
+                await DirectParticipantsAfterRefileAsync(childId, ct).ConfigureAwait(false);
         }
 
         return report;
     }
+
+    /// <summary>uac-r2 task 198 Part C: the Direct participant step of a re-filed communication. Never throws (cancellation aside).</summary>
+    private async Task DirectParticipantsAfterRefileAsync(Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var outcome = await DirectParticipantShares().AfterRefileAsync(communicationId, ct).ConfigureAwait(false);
+            if (!outcome.Complete)
+            {
+                _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed; its Direct participant shares are not yet " +
+                    "complete ({Detail}); the share reconciliation job retries it.", CommunicationTable, communicationId,
+                    outcome.Detail ?? outcome.Status.ToString());
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its Direct participant step faulted; the " +
+                "share reconciliation job retries it.", CommunicationTable, communicationId);
+        }
+    }
+
+    /// <summary>uac-r2 task 198 Part C: the Direct participant shares over this reconciler's reads, probe, user reader and share seam.</summary>
+    private DirectMessageParticipantShares DirectParticipantShares() =>
+        new(_dataverse, _recordShares, _directMessageOwnerTeam, _configuration,
+            _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _webApi, _logger);
 
     /// <summary>uac-r2 task 198 Part D: the Restricted filing bar over this reconciler's reads, probe and share seam.</summary>
     private RestrictedFilingShareBar RestrictedFilingBar() =>
