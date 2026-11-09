@@ -152,13 +152,43 @@ New surface:
   
   Not guessed. Handed back.
 
-## Open questions
+## §6 Secure owner-team accent fix (Q6, F1)
+
+**Rule:** whether a team can be the Secure Record owner team is decided by Dataverse's own `name` match, never by a name comparison in code. Dataverse's `name eq` ignores case and accents, so a code comparison (ordinal or `OrdinalIgnoreCase`) can answer "another name" for the team Dataverse matches.
+
+**Fix** (`Services/Access/SecureChildShareSynchronizer.cs`, `CannotBeSecureOwnerTeamAsync`):
+- Read 1: `team` with `teamid eq <id>` AND `name eq <SecureRecord:OwnerTeamName>` (QueryExpression condition, so Dataverse binds the value; no string building), selecting `isdefault`, `teamtype`. A row: ruled out only when it is a default team or not an Owner team; otherwise `false` (the full resolution compares ids).
+- No row: read 2 by id. The row exists → `true` (Dataverse says another name). Not found → `false`.
+- The name is no longer selected or compared in code. Callers (`DirectThreadAccessService.ReadMessageOwnershipAsync`, `ThreadResolver.ThreadOwnerMayBeSecureAsync`, the synchronizer's scoped run) are unchanged: `false` still means "resolve and compare ids".
+
+**Grep** (Grep tool over `src/`; patterns: `OwnerTeamName\(|BusinessUnitName\(|*NameConfigKey`; the owner-team literals `Restricted Content Owners|Customer Configuration Owners|Direct Message Owners|Secure Record Owners|"Secure Record"`; `Equals(...name...)` / `==` on bu/team/owner names; `GetAttributeValue<string>("name")`; TS/JS/PS `===` on team/BU names):
+
+| Match | Owner | Kind | Action |
+|---|---|---|---|
+| `Services/Access/SecureChildShareSynchronizer.cs:1360` `string.Equals(name.Trim(), OwnerTeamName(...), OrdinalIgnoreCase)` | uac | in-code team-name compare; fails open (answers "cannot be Secure" for the real Secure team) | **Fixed** (above) |
+| `Infrastructure/Dataverse/DirectMessageOwnerTeam.cs:140` `CannotBeDirectOwnerTeamAsync`: `string.Equals(name.Trim(), teamName, OrdinalIgnoreCase)` | fm | the same pattern for the Direct team: an accent variant answers "not the Direct team" for the real Direct team (participants then get the ordinary grant path, not the Direct one) | **Not edited (fm's file).** Reported to fm. |
+| `Infrastructure/Dataverse/DirectMessageOwnerTeam.cs:83` `string.Equals(buName, SecureRecordOwnerTeam.BusinessUnitName(...), OrdinalIgnoreCase)` | fm | in-code BU-name compare; an accent variant of the Secure unit's name escapes the `bu_is_secure_record` refusal (the later lookup would then resolve the Secure unit as the Direct unit unless another check refuses) | **Not edited (fm's file).** Reported to fm; fix = compare resolved BU ids. |
+| `Infrastructure/Dataverse/SecureRecordOwnerTeam.cs` | fm | no in-code compare: BU and team are found with `name eq` (OData-escaped via `EscapeODataStringLiteral`) and `ResolveSecureBusinessUnitAsync` uses a `name` condition | none |
+| `Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs:178` (Secure BU by name) and `:834` (owner team by name), fed by `Services/ExternalAccess/SecureRecordIsolationCensus.cs:69-70` | not in the uac-owned list (Infrastructure/Dataverse) | census: reads every BU/team, then picks the Secure unit/team by `OrdinalIgnoreCase` in code. An accent variant finds no Secure unit, so the census reports it missing (fails loud, not open) | **Not edited** (outside the listed paths). Listed for the owner. |
+| `Services/Dataverse/RecordOwnershipResolver.cs:4409-4418`, `Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs:109` | uac / shared | `name` is a QueryExpression condition; ids compared after | none |
+| `Services/Registration/RegistrationDataverseService.cs:955`, `Infrastructure/ExternalAccess/ContactIdentityBinder.cs:1263`, `Api/ExternalAccess/ExternalRegistrationEndpoints.cs:201` | uac / registration | Secure BU found by a Dataverse name filter, then compared by id | none |
+| `src/server/services/Sprk.Provisioning.ControlPlane.Core/.../CustomerBusinessUnitIntake.cs:68` | control plane | intake refuses a customer unit named like the Secure unit, `OrdinalIgnoreCase` | **Not edited** (another service). Listed. |
+| `Customer Configuration Owners` | — | no match in `src/` | none |
+| TS / JS / PS1 under `src/` | — | no name comparison (only comments and test fixtures) | none |
+
+**Tests** (`tests/unit/Sprk.Bff.Api.Tests/`):
+- New `Services/Access/SecureOwnerTeamNameMatchTests.cs` (11): a Dataverse double that evaluates `team` / `businessunit` conditions with a case- and accent-insensitive collation and returns only the selected columns. Must fire: three accent variants of the team setting are not ruled out; accent variants of the team and/or BU setting resolve the real team id; the name is a query condition, not a selected column. Must not fire: another team is ruled out (also under an accent-variant setting); a setting that names no team rules out the Secure team and the resolver finds none; a default team and an Access team are ruled out; a team not found is not ruled out.
+- New `DirectThreadAccessServiceTests.ASecureMessage_WithAnAccentVariantOfTheSecureTeamSetting_GrantsNothing` (caller level).
+- Updated mocks: `DirectThreadAccessServiceTests.MessageOwnedByOwnerTeam` / `MessageOwnedByOrdinaryTeam` answered every `team` read with one row, whatever its `name` condition. They now evaluate the conditions through the same helper the new caller test uses. No assertion was changed.
+- Fail-first, against the previous synchronizer: 7 of the 12 new tests fail (6 in `SecureOwnerTeamNameMatchTests`, plus the caller test). The 5 must-not-fire tests pass. Affected suites on the old code (filter `ExternalAccess|.Access.|Communication|SecureChild|RecordOwnership|DirectMessageOwnerTeam`): 8913 pass, 7 fail (exactly the new tests), 2 skipped.
+- After: the same filter gives 8920 pass, 0 fail, 2 skipped. ArchTests (`SecureRecordOwnerRoleSetParity`, `RouteAuthorizationGuard`, `RecordOwnerAssignmentCensus`, `PoaShareClientSingletonGuard`, `DocumentAccessPermissionWriterGuard`): 191/191. BFF build: 0 warnings, 0 errors.
+- A full unconfined run of `Sprk.Bff.Api.Tests` on this machine hung in an HTTP contract test after about 35 minutes, and was stopped. Its web-host contract failures (Office, Insights and others) do not touch this change; the filtered suites above are the evidence.
 
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
 - **Q2:** Restricted target (Part D): extend `RestrictedExternalShareRemover` to communications filed under a Restricted root, or add a step in `SecureChildReconciler.AfterRefileCoreAsync`? Direct messages only, or every communication?
 - **Q5:** `NotConfigured` is read as "not Direct". The coordinator's rule (2026-11-09) is that "a Refusal never settles not-Direct". Applied literally, every team-owned message (every record thread) gets no grant in any environment without `DirectMessage:*` settings, because `CannotBeDirectOwnerTeamAsync` answers false when unset. This needs a ruling before fm's fix sha changes the API.
-- **Q6:** the Secure twin's accent bug (`SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync` :1346 compares names in code). It is not started in this run; see the report.
+- **Q6:** the Secure twin's accent bug (`SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync` compared names in code). Fixed in §6 (branch `task/uac-198-secure-accent`); fm's two matches in `DirectMessageOwnerTeam.cs` are listed there for fm.
 - **Q4:** Should the customer-unit mode refuse the Direct-message unit (it is a direct child of the root, so today it passes as a customer top unit)?
 - **Q3:** The Read depth the internal roles hold on `sprk_communicationattachment` / `sprk_communicationparticipant` / `sprk_document` was not checked live (no live reads in this run). Part B grants the shares regardless.
