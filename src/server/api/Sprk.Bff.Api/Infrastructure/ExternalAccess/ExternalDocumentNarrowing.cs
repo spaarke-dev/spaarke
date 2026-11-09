@@ -95,8 +95,9 @@ internal static class ExternalDocumentNarrowing
     internal static readonly Guid UnreadableLink = CommunicationOpenThreadGate.UnreadableLink;
 
     /// <summary>
-    /// The Web API <c>$select</c> columns every surface that decides a document must read (pinned by test: a dropped column
-    /// reads as "not set" and would open the leg it feeds).
+    /// The Web API <c>$select</c> columns every surface that decides a document must read (pinned by test). A dropped link column
+    /// reads as unreadable since fix round 3d (the document is hidden); the permission choice column is not a lookup and reads
+    /// as "not set" as before (every caller selects it; the pin is the boundary).
     /// </summary>
     internal static IReadOnlyList<string> SelectColumns { get; } =
         new[] { AccessPermissionField, RelatedCommunicationValue, ParentDocumentValue };
@@ -208,9 +209,10 @@ internal static class ExternalDocumentNarrowing
             documentId, own, JsonLink(valueOf(RelatedCommunicationValue)), JsonLink(valueOf(ParentDocumentValue)));
     }
 
-    /// <summary>Absent or null: <see cref="Guid.Empty"/> (not set); a non-empty GUID string: that id; anything else unreadable.</summary>
+    /// <summary>An explicit JSON null: <see cref="Guid.Empty"/> (not set); a non-empty GUID string: that id; anything else, and a
+    /// column that is ABSENT from the row (it was not read; fix round 3d), unreadable.</summary>
     private static Guid JsonLink(JsonElement? value) => value is not { } v
-        ? Guid.Empty
+        ? UnreadableLink
         : v.ValueKind switch
         {
             JsonValueKind.Null or JsonValueKind.Undefined => Guid.Empty,

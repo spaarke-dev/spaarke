@@ -590,8 +590,10 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         {
             _dataverse
                 .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises?")), It.IsAny<CancellationToken>()))
+                // Fix round 3d: the source-link read selects these columns and the Web API answers an unset one as an explicit null.
                 .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"value\": [ "
-                    + string.Join(", ", analyses.Select(id => "{ \"sprk_analysisid\": \"" + id.ToString("D") + "\" }")) + " ] }")));
+                    + string.Join(", ", analyses.Select(id => "{ \"sprk_analysisid\": \"" + id.ToString("D")
+                        + "\", \"_sprk_documentid_value\": null, \"_sprk_outputfileid_value\": null, \"_sprk_regardingdocument_value\": null }")) + " ] }")));
         }
     }
 

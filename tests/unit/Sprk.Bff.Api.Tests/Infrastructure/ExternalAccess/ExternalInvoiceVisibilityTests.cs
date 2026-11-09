@@ -262,7 +262,11 @@ public sealed partial class ExternalInvoiceVisibilityTests
             var source = _world.Source(invoice);
             _world.DropDocumentColumn(source, column);
 
-            await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.RootUnresolved);
+            // Fix round 3d: a narrowing link column (the parent document, the related communication) is read by the source's own
+            // narrowing first, which now hides the source when the column was not returned; any other live-parent column is the root rule's.
+            await ShouldBeHidden(caller, invoice, ExternalDocumentNarrowing.SelectColumns.Contains(column)
+                ? InvoiceHiddenReason.SourceHidden
+                : InvoiceHiddenReason.RootUnresolved);
         }
     }
 
@@ -1406,6 +1410,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var id = Guid.NewGuid();
         var row = ExternalDocumentNarrowing.FromWebApi(id, Row(
             ("sprk_documentid", id.ToString()), ("sprk_accesspermission", Restricted),
+            ("_sprk_relatedcommunication_value", null), ("_sprk_parentdocument_value", null), // fix round 3d: explicit nulls (an absent link is unreadable)
             ("sprk_isemailarchive", true), ("sprk_restrictedbysubmission", true)), readSubmissionMarker: true);
         CommunicationOpenThreadGate.RowQuery noReads = (_, _, _) => throw new InvalidOperationException("no read expected");
 
@@ -2155,7 +2160,14 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
         // A Stored File always carries its purpose (the writer requires it): here a sourceless supporting file, not a source.
         if (table == "sprk_storedfile")
+        {
             row["sprk_purpose"] = InvoiceSupportingFile;
+            // Fix round 3d: the Web API answers a selected source column that is not set as an explicit null; an absent one was not read.
+            row["_sprk_sourcedocument_value"] = null;
+            row["_sprk_sourcecommunication_value"] = null;
+            row["sprk_sourceattachmentidentity"] = null;
+        }
+
         Seed(family.EntitySet, row);
         return id;
     }

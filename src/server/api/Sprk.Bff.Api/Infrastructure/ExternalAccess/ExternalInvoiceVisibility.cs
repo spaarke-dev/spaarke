@@ -884,8 +884,10 @@ internal static class ExternalInvoiceVisibility
         list.Add(source);
     }
 
+    /// <summary>Whether a column is set. A column that is ABSENT from the row was not read, so it counts as set (the caller then
+    /// refuses the shape it cannot check); only an explicit JSON null is "not set" (fix round 3d).</summary>
     private static bool IsSet(IReadOnlyDictionary<string, JsonElement> row, string column) =>
-        row.TryGetValue(column, out var value) && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
+        !row.TryGetValue(column, out var value) || value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
 
     /// <summary>A text column: <c>null</c> when absent, null or not a string.</summary>
     private static string? TextOf(IReadOnlyDictionary<string, JsonElement> row, string column) =>
@@ -1125,11 +1127,15 @@ internal static class ExternalInvoiceVisibility
     /// <summary>Task 130-0: the invoice's firm, read with the firm hold (<see cref="ReadFirmHeldInvoicesAsync"/>).</summary>
     internal const string InvoiceFirmColumn = Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg;
 
-    /// <summary>Absent or null: <c>null</c> (not set); a non-empty GUID string: that id; anything else
-    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>. Also read by <see cref="InvoiceLinks"/> (task 130-0b).</summary>
+    /// <summary>An explicit JSON null: <c>null</c> (not set); a non-empty GUID string: that id; anything else, and a column that is
+    /// ABSENT from the row (it was not read; fix round 3d), <see cref="ExternalDocumentNarrowing.UnreadableLink"/>. A key column that
+    /// is absent reads as the sentinel too, which no chunk, filter or asked set contains, so those readers refuse it as before.
+    /// Also read by <see cref="InvoiceLinks"/> (task 130-0b).</summary>
     internal static Guid? LinkOf(IReadOnlyDictionary<string, JsonElement> row, string column)
     {
-        if (!row.TryGetValue(column, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        if (!row.TryGetValue(column, out var value))
+            return ExternalDocumentNarrowing.UnreadableLink; // not read: never "not set"
+        if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             return null;
         return value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id) && id != Guid.Empty
             ? id

@@ -334,6 +334,9 @@ public class ExternalMessageSendTests
         // The thread lookup is left to AppOnlySelectProjection.WithOpenThread, which gives a row without one the Open thread.
         foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_communication").Where(c => c != "_sprk_communicationthread_value"))
             result.TryAdd(column, El<object?>(null));
+        // Fix round 3d: and the three root stamp columns (the post sets one; the read answers the others as explicit nulls).
+        foreach (var column in new[] { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" })
+            result.TryAdd(column, El<object?>(null));
 
         return result;
     }

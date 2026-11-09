@@ -283,6 +283,7 @@ public sealed class ExternalDocumentNarrowingTests
     {
         var doc = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
         {
+            ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3d: explicit null (absent is unreadable)
             ["_sprk_parentdocument_value"] = JsonSerializer.SerializeToElement(42),
         });
 
@@ -897,10 +898,12 @@ public sealed class ExternalDocumentNarrowingTests
     {
         var badParent = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
         {
+            ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3d: explicit null (absent is unreadable)
             ["_sprk_parentdocument_value"] = JsonSerializer.SerializeToElement(42),
         });
         var badLink = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
         {
+            ["_sprk_parentdocument_value"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3d: explicit null (absent is unreadable)
             ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement("not-a-guid"),
         });
         (await FindLink(badParent)).Unknowable.Should().Be(DocumentNarrowingReason.ParentUnreadable);

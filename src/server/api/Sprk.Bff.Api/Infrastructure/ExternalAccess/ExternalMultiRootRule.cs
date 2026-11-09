@@ -93,6 +93,36 @@ internal static class ExternalMultiRootRule
         };
 
     /// <summary>
+    /// The rule input standing for a lookup column that was not read (absent from a Web API row, or a stamp the typed row never
+    /// received). Not a GUID, so <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
+    /// withholds the row exactly as it withholds a malformed lookup: an unread column is never "not filed there".
+    /// </summary>
+    internal const string UnreadableLookup = "unreadable-lookup";
+
+    /// <summary>
+    /// One lookup column of a Web API row as rule input (fix round 3d): an explicit JSON null is "not filed there"; a string is the
+    /// lookup; a column that is ABSENT from the row (or a <c>null</c> row), and any other JSON value, is <see cref="UnreadableLookup"/>.
+    /// The read's <c>$select</c> is therefore never the boundary: a column it left out is unreadable, not empty.
+    /// </summary>
+    internal static string? LookupOf(IReadOnlyDictionary<string, JsonElement>? row, string column)
+    {
+        if (row is null || !row.TryGetValue(column, out var value))
+            return UnreadableLookup;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            JsonValueKind.String => value.GetString(),
+            _ => UnreadableLookup,
+        };
+    }
+
+    /// <summary>
+    /// A typed row's stamp (fix round 3d): <paramref name="value"/> when its column was present in the row (an explicit null
+    /// included), else <see cref="UnreadableLookup"/>. The typed rows record presence in their setters.
+    /// </summary>
+    internal static string? StampOf(bool columnRead, string? value) => columnRead ? value : UnreadableLookup;
+
+    /// <summary>
     /// The linked roots of one row whose secure flag the rule needs: populated, a GUID, and NOT readable by the caller. A
     /// readable root never needs a lookup; a malformed one is withheld without one.
     /// </summary>

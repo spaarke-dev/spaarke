@@ -502,9 +502,9 @@ public sealed class CommunicationThreadReadService
 
     private static readonly string[] RootStampColumns = { ProjectStampColumn, MatterStampColumn, WorkAssignmentStampColumn };
 
-    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks, or holds as JSON null, reads
-    /// as not filed).</summary>
-    private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
+    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row holds as JSON null reads as not filed, a
+    /// column the row lacks reads as malformed, so the row is withheld).</summary>
+    internal static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
         RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn),
         // Task 187: the row itself, whose other parents (thread, invoice, event ...) the rule derives and takes in LIVE.
         row);
@@ -516,13 +516,17 @@ public sealed class CommunicationThreadReadService
     private const string MalformedRootStamp = "malformed";
 
     /// <summary>
-    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): absent or JSON null is "not filed", a string is the lookup, and
+    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): an explicit JSON null is "not filed", a string is the lookup, and
     /// any other JSON value (a number, object, array, boolean) is malformed, so the row is withheld, as
-    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case.
+    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case. Fix round 3d: a column that is ABSENT from the row
+    /// was not read, so it is malformed too (the row is withheld); the read's <c>$select</c> (<see cref="ExternalSelect"/>) is not the
+    /// boundary.
     /// </summary>
     private static string? RootStamp(Dictionary<string, JsonElement> row, string key)
     {
-        if (!row.TryGetValue(key, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        if (!row.TryGetValue(key, out var v))
+            return MalformedRootStamp;
+        if (v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             return null;
         return v.ValueKind == JsonValueKind.String ? v.GetString() : MalformedRootStamp;
     }

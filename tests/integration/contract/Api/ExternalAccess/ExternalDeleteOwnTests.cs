@@ -239,7 +239,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
               "_sprk_relatedproject_value": ""
             }
             """);
-        var row = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        var row = WithEveryColumn(doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()));
 
         var target = ParseDeleteTarget(DeletableKind.Document, row);
 
@@ -249,9 +249,32 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         foreach (var garbled in new[] { "\"not-a-guid\"", "42", "true" })
         {
             using var bad = JsonDocument.Parse($$"""{ "_sprk_relatedmatter_value": {{garbled}}, "_sprk_project_value": "{{RecordA}}" }""");
-            ParseDeleteTarget(DeletableKind.Document, bad.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()))
+            ParseDeleteTarget(DeletableKind.Document, WithEveryColumn(bad.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone())))
                 .HasUnreadableParentLink.Should().BeTrue($"{garbled} is present but not a GUID");
         }
+    }
+
+    /// <summary>
+    /// Fix round 3d: the Web API returns every selected lookup, an unset one as an explicit null, and a column the row does not
+    /// carry reads as unreadable. This adds an explicit null for every column the document delete-target read selects that
+    /// <paramref name="row"/> does not name.
+    /// </summary>
+    private static Dictionary<string, JsonElement> WithEveryColumn(Dictionary<string, JsonElement> row)
+    {
+        var url = Uri.UnescapeDataString(BuildDeleteTargetUrl("https://org.test/api/data/v9.2", DeletableKind.Document, Guid.NewGuid()));
+        foreach (var column in url.Split("$select=")[1].Split('&')[0].Split(','))
+            row.TryAdd(column, JsonDocument.Parse("null").RootElement.Clone());
+        return row;
+    }
+
+    [Fact(DisplayName = "130-0 fix3d ParseDeleteTarget (must fire): a parent lookup the document delete-target read did not return refuses the delete")]
+    public void ParseDeleteTarget_AParentColumnNotReturned_IsUnreadable()
+    {
+        using var doc = JsonDocument.Parse($$"""{ "_sprk_createdbycontact_value": "{{CallerContact}}", "_sprk_project_value": "{{RecordA}}" }""");
+        var partial = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+
+        ParseDeleteTarget(DeletableKind.Document, partial).HasUnreadableParentLink.Should().BeTrue("the other parent lookups were not returned");
+        ParseDeleteTarget(DeletableKind.Document, WithEveryColumn(partial)).HasUnreadableParentLink.Should().BeFalse("control: explicit nulls");
     }
 
     [Fact]

@@ -206,9 +206,22 @@ public class ExternalDataService
         [JsonPropertyName("statecode")] public int? Statecode { get; set; }
         [JsonPropertyName("statuscode")] public int? Statuscode { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
-        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
-        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
-        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3d: the three root stamps feed the multi-root rule, so each setter records that its column was PRESENT in
+        // the row (an explicit JSON null included); RootStamps() reads a column that was not returned as unreadable, never as "not filed".
+        private string? _regardingProject, _regardingMatter, _regardingWorkAssignment;
+        private bool _regardingProjectRead, _regardingMatterRead, _regardingWorkAssignmentRead;
+        [JsonPropertyName("_sprk_regardingproject_value")]
+        public string? SprkRegardingprojectValue { get => _regardingProject; set { _regardingProject = value; _regardingProjectRead = true; } }
+        [JsonPropertyName("_sprk_regardingmatter_value")]
+        public string? SprkRegardingmatterValue { get => _regardingMatter; set { _regardingMatter = value; _regardingMatterRead = true; } }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")]
+        public string? SprkRegardingworkassignmentValue { get => _regardingWorkAssignment; set { _regardingWorkAssignment = value; _regardingWorkAssignmentRead = true; } }
+
+        /// <summary>The three root stamps as multi-root rule input: a column the row did not carry is <see cref="ExternalMultiRootRule.UnreadableLookup"/>.</summary>
+        internal (ExternalGrantRootType Root, string? LookupValue)[] RootStamps() => ExternalMultiRootRule.Stamps(
+            ExternalMultiRootRule.StampOf(_regardingProjectRead, _regardingProject),
+            ExternalMultiRootRule.StampOf(_regardingMatterRead, _regardingMatter),
+            ExternalMultiRootRule.StampOf(_regardingWorkAssignmentRead, _regardingWorkAssignment));
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
@@ -242,11 +255,24 @@ public class ExternalDataService
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
-        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
         // Task 039: the other two root lookups, read so a list can withhold an event also filed to a record the caller
         // cannot read (see ReadableEvents). Never mapped onto the wire DTO.
-        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
-        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3d: each setter records that its column was PRESENT in the row (an explicit JSON null included);
+        // RootStamps() reads a column that was not returned as unreadable, never as "not filed".
+        private string? _regardingProject, _regardingMatter, _regardingWorkAssignment;
+        private bool _regardingProjectRead, _regardingMatterRead, _regardingWorkAssignmentRead;
+        [JsonPropertyName("_sprk_regardingproject_value")]
+        public string? SprkRegardingprojectValue { get => _regardingProject; set { _regardingProject = value; _regardingProjectRead = true; } }
+        [JsonPropertyName("_sprk_regardingmatter_value")]
+        public string? SprkRegardingmatterValue { get => _regardingMatter; set { _regardingMatter = value; _regardingMatterRead = true; } }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")]
+        public string? SprkRegardingworkassignmentValue { get => _regardingWorkAssignment; set { _regardingWorkAssignment = value; _regardingWorkAssignmentRead = true; } }
+
+        /// <summary>The three root stamps as multi-root rule input: a column the row did not carry is <see cref="ExternalMultiRootRule.UnreadableLookup"/>.</summary>
+        internal (ExternalGrantRootType Root, string? LookupValue)[] RootStamps() => ExternalMultiRootRule.Stamps(
+            ExternalMultiRootRule.StampOf(_regardingProjectRead, _regardingProject),
+            ExternalMultiRootRule.StampOf(_regardingMatterRead, _regardingMatter),
+            ExternalMultiRootRule.StampOf(_regardingWorkAssignmentRead, _regardingWorkAssignment));
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
         // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
@@ -1281,7 +1307,15 @@ public class ExternalDataService
         var lookupsRead = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in columns)
         {
-            if (!row.TryGetValue($"_{column}_value", out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            // Fix round 3d: a lookup column that is ABSENT from the row was not read; it is passed through as a value that is not a GUID
+            // (the gate reads it as malformed and fails closed), never as "not filed there". Only an explicit JSON null is unset.
+            if (!row.TryGetValue($"_{column}_value", out var value))
+            {
+                lookupsRead[column] = ExternalMultiRootRule.UnreadableLookup;
+                continue;
+            }
+
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 continue; // not filed there
             lookupsRead[column] = value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id)
                 ? id
@@ -1661,12 +1695,18 @@ public class ExternalDataService
 
         static Guid? Parse(string? v) => Guid.TryParse(v, out var g) ? g : (Guid?)null;
 
-        var project = Parse(row.SprkRegardingprojectValue);
-        var matter = Parse(row.SprkRegardingmatterValue);
-        var workAssignment = Parse(row.SprkRegardingworkassignmentValue);
-
         // sprk_name is NOT NULL in Dataverse, so a non-null name is a reliable existence signal.
         var name = row.SprkName;
+
+        // Fix round 3d: a root stamp column that the row did not carry, or that is not a GUID, cannot be told from a second root, so the
+        // to-do is Ambiguous (a deny state). An explicit JSON null is "not filed to that root".
+        var stamps = row.RootStamps();
+        if (stamps.Any(s => !string.IsNullOrWhiteSpace(s.LookupValue) && !Guid.TryParse(s.LookupValue, out _)))
+            return (TodoRootKind.Ambiguous, null, name);
+
+        var project = Parse(stamps[0].LookupValue);
+        var matter = Parse(stamps[1].LookupValue);
+        var workAssignment = Parse(stamps[2].LookupValue);
 
         var populated = new (TodoRootKind Kind, Guid? Id)[]
         {
@@ -1725,11 +1765,7 @@ public class ExternalDataService
         // ordinary M, its sprk_regardingcommunication a communication under secure X) and a stale copy are withheld.
         var live = await ReadLiveParentRootsAsync(read.Rows.Select(r => ExternalMultiRootRule.LiveParentsOf(TodoTable, r.Extra)), ct);
         var roots = read.Rows
-            .Select(r => ChildRowRoots.Of(
-                TodoTable, r.Extra,
-                ExternalMultiRootRule.Stamps(
-                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                live))
+            .Select(r => ChildRowRoots.Of(TodoTable, r.Extra, r.RootStamps(), live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
         var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
@@ -1844,11 +1880,7 @@ public class ExternalDataService
         // Task 187: the stamped roots plus the live roots of the event's parents (see GetTodosAsync).
         var live = await ReadLiveParentRootsAsync(rows.Select(r => ExternalMultiRootRule.LiveParentsOf(EventTable, r.Extra)), ct);
         var roots = rows
-            .Select(r => ChildRowRoots.Of(
-                EventTable, r.Extra,
-                ExternalMultiRootRule.Stamps(
-                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                live))
+            .Select(r => ChildRowRoots.Of(EventTable, r.Extra, r.RootStamps(), live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
         return (rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList(), flags, live);
@@ -2655,8 +2687,9 @@ public class ExternalDataService
         var stamps = kind == DeletableKind.Document
             ? DocumentRootLinks.From(row).Links
             : ExternalMultiRootRule.Stamps(
-                RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
-                RawLookup(row, "_sprk_regardingworkassignment_value"));
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingproject_value"),
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingmatter_value"),
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingworkassignment_value")); // fix round 3d: an unread stamp is unreadable, never "not filed"
         var live = await ReadLiveParentRootsAsync(new[] { ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row) }, ct);
         var roots = ChildRowRoots.Of(binding.EntityLogicalName, row, stamps, live);
         var flags = await ReadSecureRootFlagsAsync(caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
@@ -2665,11 +2698,6 @@ public class ExternalDataService
 
         // Withheld for its roots, or only because a read could not decide: a write route answers the second as unavailable.
         return live.Faulted || !flags.IsComplete ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
-
-        static string? RawLookup(IReadOnlyDictionary<string, JsonElement> r, string column) =>
-            !r.TryGetValue(column, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
-                ? null
-                : v.ValueKind == JsonValueKind.String ? v.GetString() : ExternalMultiRootRule.UnresolvedParent;
     }
 
     /// <summary>
@@ -3396,10 +3424,10 @@ public class ExternalDataService
         {
             if (GuidValue(row, lookup.LookupValueAttribute) is { } parentId)
                 parents.Add(new DeleteTargetParent(lookup.Parent, parentId));
-            else if (row.TryGetValue(lookup.LookupValueAttribute, out var raw)
-                     && raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
-                     && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString())))
-                unreadable = true; // present, but not a GUID
+            else if (!row.TryGetValue(lookup.LookupValueAttribute, out var raw)
+                     || (raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                         && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString()))))
+                unreadable = true; // fix round 3d: absent (never read), or present but not a GUID; only an explicit null is "not filed there"
         }
 
         return new DeleteTarget(

@@ -1074,6 +1074,10 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             + (communication
                 ? ", \"sprk_isinternalonly\": false, \"_sprk_communicationthread_value\": \"" + LinkedOpenThread.ToString("D") + "\""
                 : string.Empty)
+            // Fix round 3d: the analysis source-link read selects these columns; the Web API answers an unset one as an explicit null.
+            + (linked.Table == "sprk_analysis"
+                ? ", \"_sprk_documentid_value\": null, \"_sprk_outputfileid_value\": null, \"_sprk_regardingdocument_value\": null"
+                : string.Empty)
             + " }")) + " ] }");
         if (linked.Table == "sprk_document")
         {
