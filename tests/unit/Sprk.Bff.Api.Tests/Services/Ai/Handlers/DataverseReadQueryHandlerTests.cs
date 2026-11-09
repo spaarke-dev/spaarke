@@ -1435,6 +1435,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
                 data.Add(column, $"WHERE {column} < 'M'");
                 data.Add(column, $"WHERE {column} > 'M'");
                 data.Add(column, $"ORDER BY {column} DESC");
+                data.Add(column, $"WHERE {column} IS NOT NULL");
+                data.Add(column, $"WHERE sprk_name = 'x' OR ({column} = 'y')");
+                data.Add(column, $"WHERE {column.ToUpperInvariant()} = 'y'");
             }
 
             return data;
@@ -1473,6 +1476,23 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         _hideInvoiceFamily = firms.Seam;
 
         OnlyRow(await ReadAsync($"{RootQuery} {clause}"));
+    }
+
+    [Fact(DisplayName = "130-0b R1: an external caller on a root (no seam that leaves rows out) keeps the raw row-cap rule and gets no note")]
+    public async Task ExecuteChatAsync_R1_ExternalRoot_KeepsTheRawRule_AndNoNote()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync(RootQuery.Replace("SELECT ", "SELECT TOP 1 ", StringComparison.Ordinal));
+
+        OnlyRow(result);
+        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"), "a root row is never left out, so the raw page decides");
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
     }
 
     [Fact(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: an internal caller's WHERE and ORDER BY on the root link are served")]
