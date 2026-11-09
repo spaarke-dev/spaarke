@@ -163,6 +163,19 @@ Test: `DirectTeamMessage_WhenTheOneRowCheckFaults_IsUnknown_ReachesTheOneFailClo
 
 Must-fire: an 11-case theory (each mutation of the live file yields its named finding). The `todo` field is gone.
 
+## §2e Fix round 1, item R6 (`Set-CustomerOwnerTeams.ps1`)
+
+**Item 1, Direct mode, accents.** The Direct unit was found with `$units | Where-Object { $_.name -eq ... }`. PowerShell `-eq` ignores case but not accents; Dataverse's `name eq` ignores both. Two units that differ only by an accent passed `-Verify` while the BFF refused the name as ambiguous. Now Direct mode reads the unit with `businessunits?$filter=name eq '<Q name>'` (the same escaping as the customer-mode read) and decides by the ids returned: 0 → the existing "no business unit is named ... does not create" refusal; more than 1 → the existing "Expected exactly one business unit" refusal (exit 1, before any write). No name is compared in code on the Direct unit path.
+
+**Item 2, customer mode, non-default Direct name.** The Direct unit was refused only when found by `-DirectMessageBusinessUnitName`. With a non-default name and the parameter omitted, `-Apply` would have created customer teams in it. Now customer mode also resolves the Direct role (`direct-message-owner-role.json`, read with `Read-DirectConfig`, `roleName` used only as a Dataverse `name eq` filter in the root), takes its copies by `_parentrootroleid_value eq <id>`, and reads the teams holding the root role or a copy. Any unit of such a team is refused as the customer unit (exit 1, "holds a team with the Direct-message owner role", before any write) and dropped from the other-units list. No role is matched by name in code. A Direct role that does not exist yet refuses nothing.
+
+**Pester** (`tests/scripts/Set-CustomerOwnerTeams.Tests.ps1`, Pester 5.7.1): 27 before → 33 after. The test mock now folds accents and case in `name eq`, as Dataverse does.
+- Fail-first, against the old script: 28 pass, 5 fail (the 5 must-fire tests below; a sixth new test passes both ways).
+- Must-fire: accent-only pair → `-Verify` exits 1; the same pair with `-Apply` refuses with no write; non-default-name Direct unit refused by name (with `-Apply`, no write) and by id.
+- Must-not-fire: ordinary customer unit plans (exit 0) and the Direct-role unit is not listed beside it; a lone unit that differs by case only still verifies (exit 0); the existing Direct-mode clean-unit tests unchanged.
+
+**Left open (same class, outside R6):** two other places compare a unit name in code with `-eq`: the Secure Record lookup (`$secureUnits`) and customer mode's `-CustomerBusinessUnitName` lookup. Both would have the same accent gap. The customer one is low-risk (an operator picking a name, and the unit's id then decides every later check); the Secure one is worth the same Dataverse-filter treatment. Not changed here.
+
 ## §5 Part D — keep on filing, and the Restricted bar
 
 **Rules:**
