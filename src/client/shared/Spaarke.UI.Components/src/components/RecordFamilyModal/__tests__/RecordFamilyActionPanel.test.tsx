@@ -21,10 +21,14 @@ import {
   buildPushRequest,
   groupRowsByTable,
   isNoProfileRefusal,
+  parsePushResponse,
   PUSH_FAILED_TEXT,
   PUSH_PATH,
+  pushErrorText,
   pushFieldMappings,
   PushRequestError,
+  SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+  SECURE_SOURCE_UNDETERMINED_REASON_CODE,
 } from '../recordFamilyPushService';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
@@ -309,6 +313,70 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
     expect(screen.getByText(refused)).toBeTruthy();
     expect(screen.getAllByText('Hearing B').length).toBeGreaterThan(0);
+  });
+
+  // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a record owned
+  // by that source's isolation owner; a record that is not is returned with a stable code, on the preview and the apply.
+  it('says, on the preview, that fields from a secure source are not copied to a record, and does not list it', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        "Some fields won't be copied to 1 record because the source record is secure, so it is not listed."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('says why when every record the preview found is kept from the push by the source rule', async () => {
+    const { fetchFn } = pushServer({
+      preview: () =>
+        previewBody([], {
+          errors: [{ recordId: EVENT_A, error: 'server text', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE }],
+        }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        '1 record is not listed because it could not be checked whether the source record is secure. Try again later.'
+      )
+    ).toBeTruthy();
+    expect(screen.getByText('Nothing to update among the records that can be updated.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('already have the current values');
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the source rule's wording, never a generic error, for a record the apply did not write", async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(
+      screen.getByText("Some fields weren't copied to this record because the source record is secure.")
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
   });
 
   it.each([403, 404, 500])('shows one fixed text, and no cause, when the preview answers %i', async status => {
@@ -624,6 +692,32 @@ describe('recordFamilyPushService', () => {
     ).toEqual([
       { table: 'sprk_event', ids: [EVENT_A, EVENT_B] },
       { table: 'sprk_invoice', ids: [INVOICE_A] },
+    ]);
+  });
+
+  // Task 022 fix round 4: the mapping-source codes are read from the body and mapped to their wording.
+  it('reads the reason code of an entry and maps each source-rule code to its wording, else keeps the server text', () => {
+    const parsed = parsePushResponse({
+      success: true,
+      errors: [
+        { recordId: EVENT_A, error: 'server text A', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE },
+        { recordId: EVENT_B, error: 'server text B', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE },
+        { recordId: INVOICE_A, error: 'server text C' },
+        { recordId: MATTER, error: 'server text D', reasonCode: 'constructor' },
+      ],
+    });
+
+    expect(parsed.errors.map(e => e.reasonCode)).toEqual([
+      SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+      SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+      undefined,
+      'constructor',
+    ]);
+    expect(parsed.errors.map(pushErrorText)).toEqual([
+      "Some fields weren't copied to this record because the source record is secure.",
+      "Fields weren't copied to this record because it could not be checked whether the source record is secure. Try again later.",
+      'server text C',
+      'server text D',
     ]);
   });
 });
