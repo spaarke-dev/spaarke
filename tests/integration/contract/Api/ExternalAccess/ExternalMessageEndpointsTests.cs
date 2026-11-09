@@ -963,6 +963,59 @@ public class ExternalMessageEndpointsTests
         ShouldBeTheSameAnswer(await Get("invoices", other, Ciam(matter: matter)), await Get("invoices", Guid.NewGuid(), Ciam(matter: matter)));
     }
 
+    // ebilling-r1 task 130-0 fix round 2 (F2): a message withheld because its invoice could not be decided is no longer silent: the
+    // thread read says truncated. Without a fault, truncated is as before.
+    [Theory(DisplayName = "130-0 fix2 F2 thread (must fire / must not fire): an invoice decision fault drops the invoice message and says truncated")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Task130_0_F2_AFaultedInvoiceDecision_OnAMattersThread_SaysTruncated(bool fault)
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var about = Guid.NewGuid();
+        var aboutRow = MessageRow(about, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        aboutRow["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _invoiceHiding = fault ? InvoiceHidingStub.Faulting() : InvoiceHidingStub.NoneHidden();
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), aboutRow);
+
+        var body = (await Get("matters", matter, Ciam(matter: matter)))
+            .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
+
+        body.Truncated.Should().Be(fault, "a fault must not read as 'there are no more messages'");
+        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(
+            fault ? new[] { plain.ToString("D") } : new[] { about.ToString("D"), plain.ToString("D") });
+    }
+
+    // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice whose core record is a work assignment is reached through it.
+    [Fact(DisplayName = "130-0 fix2 K3 thread (must not fire / must fire / fault): an invoice reached only through its work assignment")]
+    public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ItsThreadIsReadThroughIt()
+    {
+        var workAssignment = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_regardingworkassignment"] = Lookup(workAssignment, "sprk_workassignment"),
+        };
+        _invoiceHiding = InvoiceHidingStub.NoneHidden();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        Messages(await Get("invoices", invoice, Ciam(workAssignment: workAssignment))).Should().ContainSingle();
+
+        ShouldBeTheSameAnswer(
+            await Get("invoices", invoice, Ciam(workAssignment: Guid.NewGuid())),
+            await Get("invoices", Guid.NewGuid(), Ciam(workAssignment: Guid.NewGuid())));
+
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        var problem = (await Get("invoices", invoice, Ciam(workAssignment: workAssignment)))
+            .Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+    }
+
     [Fact]
     public async Task Task098_AMessageWithAMalformedInvoiceRegarding_IsWithheld_FailClosed()
     {

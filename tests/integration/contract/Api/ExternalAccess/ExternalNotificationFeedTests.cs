@@ -497,6 +497,9 @@ public class ExternalNotificationFeedTests
         feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
         feed.UnreadCount.Should().Be(1);
         _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(invoice);
+        // ebilling-r1 task 130-0 fix round 2 (F2): a hidden invoice is an answer; a fault says truncated (unreadCount stays the
+        // count of the items returned).
+        feed.Truncated.Should().Be(kind == "fault", "a fault must not read as 'there is nothing more to report'");
     }
 
     [Fact]

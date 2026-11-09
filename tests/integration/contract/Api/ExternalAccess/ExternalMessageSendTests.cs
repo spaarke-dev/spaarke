@@ -632,6 +632,35 @@ public class ExternalMessageSendTests
         _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice));
     }
 
+    // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work assignment. A
+    // caller who reaches the invoice only through its work assignment posts on its thread; a grant on ANOTHER work assignment gives
+    // nothing (the uniform 403); a faulted invoice decision after Read through the work assignment is the 503.
+    [Fact(DisplayName = "130-0 fix2 K3 message POST (must not fire / must fire / fault): an invoice reached only through its work assignment")]
+    public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_IsPostedThroughIt()
+    {
+        var workAssignment = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_regardingworkassignment"] = Lookup(workAssignment, "sprk_workassignment"),
+        };
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Created(await Post("invoices", invoice, Ciam(workAssignment: workAssignment)));
+
+        var otherAssignment = await Post("invoices", invoice, Ciam(workAssignment: Guid.NewGuid()));
+        var missing = await Post("invoices", Guid.NewGuid(), Ciam(workAssignment: Guid.NewGuid()));
+        ShouldBeForbidden(otherAssignment, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ((ProblemHttpResult)otherAssignment).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
+
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        var faulted = await Post("invoices", invoice, Ciam(workAssignment: workAssignment));
+        var problem = faulted.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+    }
+
     [Theory]
     [InlineData("projects")]
     [InlineData("matters")]
