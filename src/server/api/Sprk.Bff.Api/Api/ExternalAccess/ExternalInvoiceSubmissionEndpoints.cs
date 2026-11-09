@@ -63,7 +63,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.ReadOne)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissionsWithInvoice)
             .RequireEbillingEnabled()
             .WithName("GetExternalInvoiceSubmission")
             .WithSummary("Read one of the caller's firm's invoice submissions")
@@ -74,7 +74,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions", ListAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.List)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissionsWithInvoice)
             .RequireEbillingEnabled()
             .WithName("ListExternalInvoiceSubmissions")
             .WithSummary("List the caller's firms' invoice submissions on records the caller can read, newest first")

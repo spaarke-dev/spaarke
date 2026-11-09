@@ -113,6 +113,9 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_workassignment", AccessRights.AppendTo },
         { "GET", $"/invoice-submissions/{Item}", None, "sprk_invoicesubmission", AccessRights.Read },
         { "GET", "/invoice-submissions", None, "sprk_invoicesubmission", AccessRights.Read },
+        // ebilling-r1 task 130-0 fix round 1: both submission reads read the submission's invoice, so they declare Read on it too
+        { "GET", $"/invoice-submissions/{Item}", None, "sprk_invoice", AccessRights.Read },
+        { "GET", "/invoice-submissions", None, "sprk_invoice", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_matter", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_project", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_workassignment", AccessRights.Read },
