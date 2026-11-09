@@ -1,9 +1,8 @@
 {
   "schemaVersion": 1,
-  "description": "The tables the 'Direct Message Owner' role holds Read on, at User (Basic) depth, so that Dataverse accepts the memberless 'Spaarke Direct Message Owners' team as the OWNER of an unfiled Direct 1:1 message and the rows fm task 054a assigns to it. The team lives in the Direct-message business unit: a direct child of the root that holds no users, never the root and never Secure Record. The role is created once in the root (Dataverse copies it into every child unit) and the Direct unit's copy is assigned to the Direct team only. The audience of a Direct-team-owned message is exactly its thread's participants, through per-participant Read shares (uac-r2 task 198); the team grants no one anything because it has no members. Dataverse refuses an owner whose roles lack Read on the table ('Read Privilege Check For Owner failed ... is missing prv<Read> privilege'). This file is the ONE list for the Direct team. scripts/Set-CustomerOwnerTeams.ps1 -DirectMessageBusinessUnitName reads it. Do not copy it anywhere else.",
-  "todo": "TODO-fm (uac-r2 task 198 Part A): fm task 054a sends the final list of tables it owns to the Direct team (content rows such as attachments may join sprk_communication). Until then this file lists sprk_communication only. Add each table here with its metadata Read privilege name, reason and evidence when fm names it.",
+  "description": "The tables the 'Direct Message Owner' role holds Read on, at User (Basic) depth, so that Dataverse accepts the memberless 'Spaarke Direct Message Owners' team as the OWNER of an unfiled Direct 1:1 message and of every child row that follows it (fm task 054a: the message and its attachments, participant rows, email review logs, documents and gate Decision Records). The team lives in the Direct-message business unit: a direct child of the root that holds no users, never the root and never Secure Record. The role is created once in the root (Dataverse copies it into every child unit) and the Direct unit's copy is assigned to the Direct team only. The audience of a Direct-team-owned message and its children is exactly its thread's participants, through per-participant Read shares (uac-r2 task 198); the team grants no one anything because it has no members. Dataverse refuses an owner whose roles lack Read on the table ('Read Privilege Check For Owner failed ... is missing prv<Read> privilege'). This file is the ONE list for the Direct team. scripts/Set-CustomerOwnerTeams.ps1 -DirectMessageBusinessUnitName reads it. Do not copy it anywhere else.",
   "howToExtend": [
-    "The tables are exactly those fm task 054a assigns to the Direct team. Add a table only when fm names it (TODO-fm above).",
+    "The tables are exactly those fm task 054a assigns to the Direct team (confirmed by fm 2026-11-09). Add or remove a table only with fm's writer change.",
     "'privilegeName' is the Read privilege's name from metadata (EntityDefinitions(LogicalName='x')/Privileges, PrivilegeType eq 'Read'). The casing follows the schema name. The script checks it against metadata and refuses a mismatch.",
     "Then run: scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl <url> -DirectMessageBusinessUnitName <name> (dry run), then -Apply (owner go), then -Verify. The script never creates the business unit.",
     "Never add a depth, an access type or a member here. The role grants Read at User (Basic) depth and nothing else; the team has no members, ever, and holds no other role, and the Direct business unit holds no users."
@@ -17,8 +16,43 @@
     {
       "logicalName": "sprk_communication",
       "privilegeName": "prvReadsprk_Communication",
-      "reason": "fm task 054: an unfiled Direct 1:1 message is owned by the Direct team; participants read it through their own Read shares (DirectThreadAccessService).",
-      "evidence": "No refusal of its own is recorded: the probe is a Dataverse write, made only after the owner's go (the team does not exist yet). The Read privilege name prvReadsprk_Communication is the one config/secure-record-owner-role.json records for sprk_communication; the script checks it against metadata before any write.",
+      "reason": "fm task 054a: an unfiled Direct 1:1 message is owned by the Direct team (CommunicationService, ThreadResolver); participants read it through their own Read shares (DirectThreadAccessService).",
+      "evidence": "No refusal of its own is recorded: the probe is a Dataverse write, made only after the owner's go (the team does not exist yet). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
+      "addedBy": "unified-access-control-r2 task 198 Part A"
+    },
+    {
+      "logicalName": "sprk_communicationattachment",
+      "privilegeName": "prvReadsprk_CommunicationAttachment",
+      "reason": "fm task 054a: a Direct message's attachment rows follow the message to the Direct team (CommunicationService, MessageAttachmentMaterializer).",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
+      "addedBy": "unified-access-control-r2 task 198 Part A"
+    },
+    {
+      "logicalName": "sprk_communicationparticipant",
+      "privilegeName": "prvReadsprk_CommunicationParticipant",
+      "reason": "fm task 054a: a Direct message's participant rows (a child of the message, SecureChildLineage) follow it to the Direct team.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
+      "addedBy": "unified-access-control-r2 task 198 Part A"
+    },
+    {
+      "logicalName": "sprk_emailreviewlog",
+      "privilegeName": "prvReadsprk_EmailReviewLog",
+      "reason": "fm task 054a: a Direct message's email review log rows (a child of the message, SecureChildLineage) follow it to the Direct team.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
+      "addedBy": "unified-access-control-r2 task 198 Part A"
+    },
+    {
+      "logicalName": "sprk_document",
+      "privilegeName": "prvReadsprk_Document",
+      "reason": "fm task 054a: a Direct message's documents (attachment files and the archived .eml, sprk_relatedcommunication) follow it to the Direct team.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
+      "addedBy": "unified-access-control-r2 task 198 Part A"
+    },
+    {
+      "logicalName": "sprk_decisionrecord",
+      "privilegeName": "prvReadsprk_DecisionRecord",
+      "reason": "fm task 054a: a Direct message's gate Decision Records follow it to the Direct team (DecisionRecordWriter). Their participant shares are task 198 Part E's (GateDecisionRecordSharing).",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). The Read privilege name is the one config/secure-record-owner-role.json records for this table; the script checks it against metadata before any write.",
       "addedBy": "unified-access-control-r2 task 198 Part A"
     }
   ]
