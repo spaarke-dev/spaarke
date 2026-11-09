@@ -408,6 +408,10 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     /// materializer path reads it; <c>TargetingOnlyColumnsGuardTests</c> fails on an overlap or on any other reader. It is not
     /// operator-configurable, so no setting can turn a targeting column into an access one.
     /// </para>
+    /// <para>
+    /// A record selected through a targeting-only column may be UNREADABLE by the person it targets. Any notification or
+    /// briefing content about it is read as the recipient, or carries only the record's id or link (UAC-r2 032b-1b C1).
+    /// </para>
     /// </summary>
     internal static IReadOnlyDictionary<string, IReadOnlySet<string>> TargetingOnlyColumns { get; } =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)

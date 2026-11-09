@@ -109,3 +109,9 @@ tests that need the list's content.
   the bump only removes the window.
 
 rework: none
+
+## UAC-r2 review (2026-11-09): approved on access, condition C1
+
+- (a) The `TargetingOnlyColumns` doc comment and the `LookupUserMembershipNodeExecutor` header now say: a record selected through a targeting-only column may be unreadable by its target, so notification or briefing content about it is read as the recipient, or carries only the id or link.
+- (b) Read-only dev census (2026-11-09, `sprk_playbooknode` where `sprk_executortype` = 52, LookupUserMembership): 4 nodes in total, all "Lookup My Matters" on `sprk_matter` with `targeting: people`. **None runs on `sprk_invoice`.** Class K: no live path today; the comments carry the rule for any future playbook.
+- The Daily Briefing, portfolio and `BriefingService` consumers read every returned row as the user, so a targeted invoice the user cannot read shows nothing there (UAC-r2's check).
