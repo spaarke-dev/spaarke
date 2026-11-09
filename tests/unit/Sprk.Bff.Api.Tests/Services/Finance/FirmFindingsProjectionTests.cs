@@ -1565,6 +1565,7 @@ public sealed class FirmFindingsProjectionTests
         JsonSerializer.Serialize(outcome).Should().NotContain("SECRET");
         var warning = Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Subject;
         warning.Should().Contain("7 stored finding(s)").And.Contain("7 of an unknown rule type").And.Contain("0 malformed");
+        outcome.NotShownCount.Should().Be(6, "six of the seven refused entries claim to reject");
         Warnings(world).Concat(world.Logger.Lines.Select(l => l.Message)).Should().NotContain(m => m.Contains("SECRET") || m.Contains("450.00"));
     }
 
@@ -1603,6 +1604,7 @@ public sealed class FirmFindingsProjectionTests
         JsonSerializer.Serialize(outcome).Should().NotContain("SECRET");
         var warning = Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Subject;
         warning.Should().Contain("14 stored finding(s)").And.Contain("14 malformed").And.Contain("0 of an unknown rule type");
+        outcome.NotShownCount.Should().Be(9, "nine of the fourteen claim to reject; the 'yes' flag and the four non-objects do not");
         world.Logger.Lines.Select(l => l.Message).Should().NotContain(m => m.Contains("SECRET") || m.Contains("450.00"));
     }
 
@@ -1726,7 +1728,7 @@ public sealed class FirmFindingsProjectionTests
         Warnings(world).Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "130c fix 2 (F1): only valid rejecting findings past the cap are counted as not shown (a malformed entry is not a finding)")]
+    [Fact(DisplayName = "130c fix 2 (F1): past the cap, only valid rejecting findings are counted; an entry that does not claim to reject adds nothing")]
     public async Task Rejected_TheNotShownCount_CountsOnlyValidRejectingFindingsPastTheCap()
     {
         var world = new World();
@@ -2112,7 +2114,7 @@ public sealed class FirmFindingsProjectionTests
 
         var shown = outcome!.Items.Should().ContainSingle("the held ApprovedRate finding is a Flag, not a rejection").Subject;
         shown.ValuesRead.Should().ContainSingle().Which.Name.Should().Be("invoice.firmInvoiceNumber");
-        shown.LineNumber.Should().NotBe(3, "line 3 is the held ApprovedRate finding's line");
+        shown.LineNumber.Should().BeNull("the one shown finding is the RequiredData rejection, which is about the invoice, not a line");
     }
 
     [Fact(DisplayName = "130c fix 2 (K5): a RequiredData missing-field finding with a known confidence rejects through the real decision, and projects the empty value")]
@@ -2198,6 +2200,7 @@ public sealed class FirmFindingsProjectionTests
         outcome.Items.SelectMany(i => i.ValuesRead!).Select(v => v.Value).Should().Equal("450.00", "475.00");
         Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("1 stored finding(s)").And.Contain("1 malformed");
         Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.UnreadableCode));
+        outcome.NotShownCount.Should().Be(1, "the dropped entry was a rejecting one");
     }
 
     [Fact(DisplayName = "130c fix 2 (K6, must-not-fire): a document that is malformed as a whole is still unreadable: status only, the stable UNREADABLE code, no entry shown")]
@@ -2213,5 +2216,133 @@ public sealed class FirmFindingsProjectionTests
         outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
         world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains(FirmRejectionFindings.UnreadableCode));
         Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.DroppedCode) || m.Contains("SECRET"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c fix round 3
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130c fix 3 (K-a, must-fire): an AI-assigned field is skipped whatever its casing; a name that only resembles one is projected")]
+    public async Task Rejected_TheAiAssignedSkip_IgnoresCase_ButNeedsTheExactNameOrPrefix()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 0, values:
+        [
+            ("line.lower", "AI-LOWER"),
+            ("line.upper", "AI-UPPER"),
+            ("line.observation", "AI-OBSERVATION"),
+            ("line.observationUpper", "AI-OBSERVATION-UPPER"),
+            ("line.noDot", "NO-DOT"),
+            ("line.billed", "L110"),
+            ("line.rate", "450.00"),
+        ]);
+        var fields = new[] { "taskcode", "ACTIVITYCODE", "observation.x", " OBSERVATION.BlockBilling ", "observationx", "BilledTaskCode", "Rate" };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead.Should().Equal(
+            new FirmOutcomeValueRead("line.noDot", "NO-DOT"), new FirmOutcomeValueRead("line.billed", "L110"), new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("AI-");
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): 3 valid and 1 malformed rejecting entry show 3 and count 1 not shown")]
+    public async Task Rejected_ADroppedRejectingEntry_IsCounted_NextToTheShownOnes()
+    {
+        var malformed = Stored("ApprovedRate", VersionA, 9, values: ("secret.name", "SECRET-VALUE"));
+        malformed.Remove("policyVersionId");
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0), Stored("ApprovedRate", VersionA, 1), malformed, Stored("ApprovedRate", VersionA, 2)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Select(i => i.LineNumber).Should().Equal(1, 2, 3);
+        outcome.NotShownCount.Should().Be(1);
+        outcome.Degraded.Should().BeFalse();
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":1").And.NotContain("SECRET");
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): every kind of dropped rejecting entry is counted (malformed, unknown type, hold-only type, non-rejecting reason, undecodable)")]
+    public async Task Rejected_EveryKindOfDroppedRejectingEntry_IsCounted()
+    {
+        var undecodable = Stored("ApprovedRate", VersionA, 5, values: ("line.rate", BadSurrogateMarker));
+        var noSubject = Stored("ApprovedRate", VersionA, 6);
+        noSubject.Remove("subject");
+        var document = RejectedDocument(
+            Stored("SECRET-NEW-RULE-TYPE", VersionA, 1),                                                // unknown type
+            Stored("ApprovedTimekeeper", VersionA, 2, reason: "approved_timekeeper.not_approved"),      // hold-only
+            Stored("ApprovedRate", VersionA, 3, reason: BillingReasonCodes.RateNoRateInForce),          // reason cannot reject
+            noSubject,                                                                                  // malformed
+            undecodable)                                                                                // cannot be decoded
+            .Replace(BadSurrogateMarker, "\\ud800");
+        var world = new World();
+        world.AddRejectedSubmission(document);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().BeEmpty();
+        outcome.NotShownCount.Should().Be(5);
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): when every rejecting entry is malformed the outcome shows none and counts them all (status only, not degraded)")]
+    public async Task Rejected_AllRejectingEntriesMalformed_ShowsNone_AndCountsAll()
+    {
+        var entries = Enumerable.Range(0, 4).Select(i =>
+        {
+            var entry = Stored("ApprovedRate", VersionA, i, values: ("secret.name", "SECRET-VALUE"));
+            entry["policyVersionId"] = "not a guid";
+            return (JsonNode?)entry;
+        }).ToArray();
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entries));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false, 4));
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":4").And.NotContain("SECRET");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("4 malformed");
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-not-fire): a held or non-rejecting entry, or a non-rejecting document, adds nothing to the count")]
+    public async Task Rejected_EntriesThatDoNotReject_AreNeverCounted()
+    {
+        var held = Stored("ApprovedRate", VersionA, 1, rejects: false);
+        held["heldBecause"] = "read_field_confidence_unknown";
+        var notRejectingMalformed = Stored("ApprovedRate", VersionA, 2, rejects: false);
+        notRejectingMalformed.Remove("policyVersionId");
+        var noRejectsMember = Stored("ApprovedRate", VersionA, 3);
+        noRejectsMember.Remove("rejects");
+        var rejectsNotBool = Stored("ApprovedRate", VersionA, 4);
+        rejectsNotBool["rejects"] = "yes";
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            held,
+            notRejectingMalformed,
+            noRejectsMember,
+            rejectsNotBool,
+            Stored("SECRET-NEW-NONREJECT", VersionA, 5, rejects: false),                                // unknown type that does not reject
+            JsonValue.Create("not an entry"),
+            Stored("ApprovedRate", VersionA, 6)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(7);
+        outcome.NotShownCount.Should().BeNull();
+        JsonSerializer.Serialize(outcome, WebJson).Should().NotContainEquivalentOf("notShownCount");
+
+        var blocked = new World();
+        var broken = Stored("ApprovedRate", VersionA, 1);
+        broken.Remove("policyVersionId");
+        blocked.AddRejectedSubmission(StoredDocument("Blocked", broken, Stored("SECRET-NEW-RULE-TYPE", VersionA, 2)));
+        var hold = await blocked.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+        hold!.Items.Should().BeEmpty();
+        hold.NotShownCount.Should().BeNull("an internal hold is not a rejection the firm was given");
     }
 }

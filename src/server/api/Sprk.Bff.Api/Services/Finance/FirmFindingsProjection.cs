@@ -76,9 +76,10 @@ public enum FirmOutcomeDecision
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
 /// <param name="StatusLabel">What the firm sees as the status.</param>
 /// <param name="NotShownCount">
-/// A rejected submission only (130c fix round 2): the number of rejection findings the stored copy holds beyond the most that are shown
-/// (200), so the list in <see cref="Items"/> is known to be incomplete. Null (omitted from the
-/// JSON) when every rejection finding is shown, and for every other outcome.
+/// A rejected submission only (130c fix rounds 2 and 3): the number of rejecting findings that could not be shown: those beyond the most that
+/// are shown (200), and stored entries that claim to reject but were dropped as malformed or refused (an unknown rule type, or a type or reason
+/// that cannot reject), so the list in <see cref="Items"/> is known to be incomplete. Null (omitted from the
+/// JSON) when every rejecting finding is shown, and for every other outcome.
 /// </param>
 public sealed record FirmOutcome(
     FirmOutcomeKind Kind,
@@ -886,14 +887,16 @@ public sealed class FirmFindingsProjection
         var findings = parsed.Findings;
         if (findings.Count == 0)
         {
-            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
+            // Nothing could be shown; if the stored copy held rejecting entries that were dropped, the outcome says how many.
+            return new FirmOutcome(
+                FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false, parsed.NotShown > 0 ? parsed.NotShown : null);
         }
 
         try
         {
             var items = await BuildRejectionItemsAsync(submissionId, findings, invoiceDecided, ct).ConfigureAwait(false);
 
-            // Findings past the cap are left out, but the firm is told how many, so a capped list is never read as the whole of it.
+            // Rejecting findings left out (past the cap, or dropped as malformed or refused) are counted, so the list is never read as the whole of it.
             return new FirmOutcome(
                 FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, items, false, parsed.NotShown > 0 ? parsed.NotShown : null);
         }

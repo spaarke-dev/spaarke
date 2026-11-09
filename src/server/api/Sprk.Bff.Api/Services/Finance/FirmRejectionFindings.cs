@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <para><b>Fail closed (FR-24, security-class).</b> A finding whose rule type is not a known Billing type (a name this build does not know, a
 /// number, an Ontology type) is REFUSED, whether or not it rejects. A malformed entry (wrong shape or type, a non-rejecting type claiming a
 /// rejection, a missing or empty policy version, a line subject with no line) is dropped. Neither is surfaced raw: the Warning carries a stable
-/// code and counts only, no content (ADR-015). A Duplicate finding, or one the writer marked <c>detailWithheld</c>, projects no values read: a
+/// code and counts only, no content (ADR-015). A dropped or refused entry that claims to reject is counted in <see cref="ParseResult.NotShown"/>, so
+/// the list is never presented as complete when a rejecting finding could not be shown. A Duplicate finding, or one the writer marked <c>detailWithheld</c>, projects no values read: a
 /// Duplicate quotes an EARLIER invoice's detail the caller may not be allowed to see (D-112, D-176).</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <c>InvoiceReviewReadService.ParsedFindings</c> is the INTERNAL
 /// reader of the same JSON (private; it carries confidence, the stored clause, the suggestion and the Signal plan) and
@@ -54,9 +55,10 @@ internal static class FirmRejectionFindings
     internal sealed record Finding(RuleType RuleType, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
 
     /// <summary>
-    /// The result of a parse: the findings to show and how many rejection findings were valid but not shown because the stored document held
-    /// more than <see cref="MaxFindings"/> of them (<paramref name="NotShown"/>; zero when none). Malformed and refused entries are not
-    /// counted in it: they are not findings this build could show.
+    /// The result of a parse: the findings to show and how many rejecting findings could not be shown (<paramref name="NotShown"/>; zero when
+    /// none): the valid ones past <see cref="MaxFindings"/>, and the entries that claim to reject (<c>rejects</c> true) but were dropped as
+    /// malformed or refused as an unknown or non-rejecting type or reason. An entry that does not reject (<c>rejects</c> false or absent) is
+    /// never counted.
     /// </summary>
     internal sealed record ParseResult(IReadOnlyList<Finding> Findings, int NotShown)
     {
@@ -108,7 +110,7 @@ internal static class FirmRejectionFindings
             }
 
             var found = new List<Finding>();
-            int malformed = 0, unknown = 0, overflow = 0;
+            int malformed = 0, unknown = 0, overflow = 0, droppedRejecting = 0;
             foreach (var entry in list.EnumerateArray())
             {
                 // One entry that cannot be read (for example text that cannot be decoded) is dropped on its own; it does not make the
@@ -135,9 +137,11 @@ internal static class FirmRejectionFindings
                         break;
                     case EntryResult.Malformed:
                         malformed++;
+                        droppedRejecting += ClaimsToReject(entry) ? 1 : 0;
                         break;
                     case EntryResult.UnknownRuleType:
                         unknown++;
+                        droppedRejecting += ClaimsToReject(entry) ? 1 : 0;
                         break;
                 }
             }
@@ -149,13 +153,28 @@ internal static class FirmRejectionFindings
                     DroppedCode, submissionId, malformed + unknown + overflow, malformed, unknown, overflow);
             }
 
-            return new ParseResult(found, overflow);
+            return new ParseResult(found, overflow + droppedRejecting);
         }
         catch (JsonException)
         {
             LogUnreadable(logger, submissionId);
             return ParseResult.Empty;
         }
+    }
+
+    /// <summary>True when the entry is an object whose <c>rejects</c> member is JSON true (reads no other member; never throws).</summary>
+    private static bool ClaimsToReject(JsonElement entry) =>
+        entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("rejects", out var rejects) && rejects.ValueKind == JsonValueKind.True;
+
+    /// <summary>
+    /// <see cref="BillingFieldNames.IsAiAssigned"/> without regard to case, on the trimmed name: the projection must not show a value the AI
+    /// assigned whatever the casing a stored entry carries.
+    /// </summary>
+    private static bool IsAiAssignedField(string field)
+    {
+        var name = field.Trim();
+        return name.StartsWith(BillingFieldNames.ObservationPrefix, StringComparison.OrdinalIgnoreCase)
+            || BillingFieldNames.AiAssigned.Any(ai => string.Equals(ai, name, StringComparison.OrdinalIgnoreCase));
     }
 
     internal static void LogUnreadable(ILogger logger, Guid submissionId) =>
@@ -274,7 +293,7 @@ internal static class FirmRejectionFindings
                 var extracted = !string.IsNullOrWhiteSpace(fieldName);
 
                 // A value the AI assigned (a code, an observation) is the model's output, not something on the firm's invoice: never shown.
-                if (!extracted || BillingFieldNames.IsAiAssigned(fieldName!.Trim())
+                if (!extracted || IsAiAssignedField(fieldName!)
                     || withheld || ruleType == RuleType.Duplicate || values.Count >= MaxValuesPerFinding)
                 {
                     continue;
