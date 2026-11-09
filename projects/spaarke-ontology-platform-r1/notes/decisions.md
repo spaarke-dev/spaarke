@@ -735,3 +735,8 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Ruling (ontology, on D-203 (5a)/(9)):** a Retired Procedure Version opened a window only when it has a Published policy version (as before). Rate cards are not evidence: import accepts only a Draft version and card publish does not check version status, so a card can be Published under a version that was never published. ebilling's 085 fix-1 rule (F1-b, "Retired + Published card = opened") is withdrawn, in both the resolver and the scope lock.
 - **Known limit (extended):** a rate-card-only version that was in force and then Retired without a successor reads as never opened (work in its window is not applicable). Proper fix, offered to ebilling as a follow-up on its own table (schema, owner approval): stamp the version at publish and test that stamp.
 - **Rejected:** making card publish wait for version publish (an in-force window with no approved rate; existing data stays ambiguous); publishing cards inside version publish (a half-done follow-on step).
+
+## D-214 — A decision on a worklist row may close the row's other items through add-on options (owner, 2026-11-08)
+
+- **Owner confirmation:** while testing Create budget on a matter, the owner also closed that row's other open items (including 17 billing "Submission integrity" items) through the decision panel's add-on option, and called it "a good feature; no changes necessary". No change to the commit route's row-level resolution.
+- **Note:** D-207 (held PRs #2580/#2579) still moves billing items out of the Console decision route into Invoice Review once ebilling 112 is on dev; until then a row decision can close billing items with the row.
