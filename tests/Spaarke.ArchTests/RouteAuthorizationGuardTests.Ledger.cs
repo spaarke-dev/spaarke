@@ -588,11 +588,12 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/ExternalAccess/FirmOutcomeEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome "
             + "(ebilling-r1 task 130b, FR-38, NFR-10) on the COLLABORATION group, each chain attaching AddFirmOutcomeAuthorizationFilter "
-            + "(FirmOutcomeEndpoints.cs:26, :37) BEFORE RequireEbillingEnabled (:28, :39). The filter requires a non-systemuser caller, "
+            + "(FirmOutcomeEndpoints.cs:28, :39) BEFORE RequireEbillingEnabled (:30, :41). The filter requires a non-systemuser caller, "
             + "the item's firm among the caller's active firms, Read on the item's core record and that the (a') predicate does not hide the "
             + "item; every refusal and a missing item are the same 403, a firm or visibility read that cannot be completed is 403/503, "
             + "never a pass. The handlers read the FirmFindingsProjection only for the id the filter admitted (a handler that finds no "
-            + "admitted subject answers 403, :53-71); a Degraded or Unavailable outcome is a 503."),
+            + "admitted subject answers 403, :55-75; the submission handler passes the filter's InvoiceDecided to the projection, :75); a "
+            + "Degraded or Unavailable outcome is a 503."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -1335,11 +1336,14 @@ public partial class RouteAuthorizationGuardTests
             + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
             + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
         new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
-            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:125); the invoice's (or submission's) firm "
-            + "must be among the caller contact's ACTIVE firms (:204, :278; an unreadable or faulting firm read is 403, never 'no firm', "
-            + ":166-168) AND the caller holds Read on its core record from the evaluator's post-veto rights (principal.RightsOn, :214, "
-            + ":284), AND the item is not hidden by the (a') predicate (:225-248, :295-305); every refusal, a missing item included, is "
-            + "the same 403 (:195), and a missing principal denies (:117-120)."),
+            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:130); the invoice's (or submission's) firm "
+            + "must be among the caller contact's ACTIVE firms (:215, :289; an unreadable or faulting firm read is 403, never 'no firm', "
+            + ":171-173) AND the caller holds Read on its core record from the evaluator's post-veto rights (principal.RightsOn, :225, "
+            + ":295), AND the item is not hidden by the (a') predicate (:234-259, :306-316); every refusal, a missing item included, is "
+            + "the same 403 (:206), and a missing principal denies (:122-125). A submission's derived invoice is then decided by the same "
+            + "invoice rule (:330; fix round 1). The InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes "
+            + "UNDECIDED (:206), the decision is stored with the admitted id (:156), and the projection then reads nothing of that invoice "
+            + "(in progress: no billed total; Accepted: 503)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "

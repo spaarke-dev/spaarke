@@ -119,8 +119,10 @@ public class ExternalInvoiceVisibilityGuardTests
             + "(ExternalInvoiceHiding) to this one invoice and fails closed: asking it again here would double the reads for the same answer.",
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetSubmissionOutcomeAsync"] =
             "Reviewed 130b. As GetInvoiceOutcomeAsync, for the submission id the filter admitted after ExternalInvoiceSubmissionEndpoints."
-            + "VisibleSubmissionsAsync (the submission seam) AND, once the submission's derived invoice exists, after the same invoice decision "
-            + "the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1).",
+            + "VisibleSubmissionsAsync (the submission seam) AND, when the submission's derived invoice existed at the filter, after the same "
+            + "invoice decision the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1). It passes the "
+            + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
+            + "that invoice is read (in progress: no billed total; Accepted: 503).",
         // The projection is the reader BEHIND those two handlers. It takes an id and returns what a firm may see (ADR-008: it makes no
         // caller decision); its only external caller is FirmOutcomeEndpoints, and no other route may use it without the same filter
         // (the ratchet: a method here that starts reaching the predicate, or stops being a surface, is removed).
@@ -132,7 +134,9 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForSubmissionAsync"] =
             "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetSubmissionOutcomeAsync: the submission id was admitted by the route's filter "
             + "(the submission seam). It reads the submission's derived invoice (its billed total while Received or Processing, its outcome once "
-            + "Accepted); the filter decided that invoice exactly as the invoice route does (fix round 1).",
+            + "Accepted) ONLY when invoiceDecided is true, i.e. the filter decided that invoice by the invoice rule (fix round 2, the InvoiceDecided "
+            + "rule). With it false (the invoice did not exist at the filter) it reads nothing of the invoice: in progress is status only with no "
+            + "billed total, Accepted is Unavailable (503).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSubmissionAsync"] =
             "Reviewed 130b. Reads the status of the submission GetForSubmissionAsync was given (already admitted); returns its processing status and tracking number only.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildItemsAsync"] =
@@ -142,15 +146,25 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSignalsAsync"] =
             "Reviewed 130b. Reads the Signals of the admitted invoice's Decision Records for their policy version and firm-facing reason; nothing internal is projected.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRulesAsync"] =
-            "Reviewed 130b. Reads the rule names a citation shows; the clause text is released only by the clause reader's own gate.",
+            "Reviewed 130b. Reads the rule names and rule sets of the cited versions; a citation is shown only as the clause reader's gate "
+            + "publishes it (fix round 2).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Candidate"] =
             "Reviewed 130b. A private record (the join of a line and its Decision Record); no read.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Cite"] =
             "Reviewed 130b. A private helper shaping a citation from rows already read; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadClauseAsync"] =
+            "Reviewed 130b fix round 2. Asks the clause reader (the flag and the snapshot) about one version on the admitted invoice; a fault is "
+            + "no clause, so the citation is omitted. Reads no invoice-family row itself.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::CitableVersionsAsync"] =
+            "Reviewed 130b fix round 2. Decides which published versions of the admitted invoice may be cited: reads only the rule set's "
+            + "Procedure link and the Procedure's type (never a name), and drops an InternalStandard Procedure's rule; fails closed to no citation.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadByIdsAsync"] =
+            "Reviewed 130b fix round 2. A private helper reading one column of rule sets or Procedures by id for CitableVersionsAsync; no "
+            + "invoice-family row.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Excerpt"] =
             "Reviewed 130b. An internal static helper trimming the line description to the excerpt a firm sees; no read.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::RuleRead"] =
-            "Reviewed 130b. A private record of a rule's name and number; no read.",
+            "Reviewed 130b. A private record of a rule's name, number and rule set; no read.",
     };
 
     /// <summary>
