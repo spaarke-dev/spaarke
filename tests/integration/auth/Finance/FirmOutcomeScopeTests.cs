@@ -1011,6 +1011,18 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _projectionReads.Should().NotContain("sprk_invoice").And.NotContain("sprk_billingevent").And.NotContain("sprk_decisionrecord");
     }
 
+    // This file builds the projection on a NullLogger, so the route test asserts the 503 and the no-read; the Warning that carries
+    // FirmFindingsProjection.AcceptedWithoutInvoiceCode is covered in FirmFindingsProjectionTests
+    // (AnAcceptedSubmission_WithNoInvoice_Undecided_IsUnavailable_AndWarnedWithTheStableCode).
+    [Fact(DisplayName = "130b fix 3 (F2) must-fire: an Accepted submission with no invoice at all is a retryable 503 on the real route, and no invoice is read")]
+    public async Task AnAcceptedSubmission_WithNoInvoice_Is503_AndNothingIsRead()
+    {
+        var submission = SeedSubmission(FirmA, status: InvoiceSubmissionStatus.Accepted);
+
+        await AssertRefusedAsync(await Submission(submission), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().NotContain("sprk_invoice").And.NotContain("sprk_billingevent").And.NotContain("sprk_decisionrecord");
+    }
+
     [Theory(DisplayName = "130b fix 2 (F1) must-fire: the invoice is created between the filter and the projection: no total, no content; an Accepted one is 503 and the retry is decided afresh")]
     [InlineData(InvoiceSubmissionStatus.Processing)]
     [InlineData(InvoiceSubmissionStatus.Accepted)]

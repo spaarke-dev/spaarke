@@ -554,6 +554,40 @@ public sealed class FirmFindingsProjectionTests
             .Which.Message.Should().Contain(FirmFindingsProjection.AcceptedWithoutInvoiceCode);
     }
 
+    [Fact(DisplayName = "130b fix 3 (F2): an Accepted submission whose invoice is missing and was NOT decided is Unavailable, logged at Warning with the stable code, and no invoice is read")]
+    public async Task AnAcceptedSubmission_WithNoInvoice_Undecided_IsUnavailable_AndWarnedWithTheStableCode()
+    {
+        var world = new World();
+        world.Invoices.Clear();
+        world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning)
+            .Which.Message.Should().Contain(FirmFindingsProjection.AcceptedWithoutInvoiceCode);
+        world.Logger.Lines.Should().NotContain(l => l.Level == LogLevel.Information);
+        world.Reads("sprk_invoice").Should().Be(0);
+        world.Reads("sprk_billingevent").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130b fix 3 (K4): the firm reasons are ordered by the creation of the Signal each rule version's reason came from (its first non-blank), not by the version's first Signal")]
+    public async Task TheFirmReasons_AreOrderedByTheChosenSignal_NotTheVersionsFirstSignal()
+    {
+        var world = new World();
+        var pair = world.AddReducedWithCitation(1, "R.", VersionA, null); // version A: Signal 1 is blank
+        pair.Record.Id.Should().NotBeEmpty();
+        world.Signals.Single()["createdon"] = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        var second = world.AddSignal(pair.Record.Id, VersionB, "y", pair.Line.Id, InvoiceId); // version B: "y" on Signal 2
+        second["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc);
+        var third = world.AddSignal(pair.Record.Id, VersionA, "x", pair.Line.Id, InvoiceId); // version A: "x" on Signal 3
+        third["createdon"] = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc);
+
+        var item = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single();
+
+        item.FirmReasons.Should().Equal("y", "x");
+    }
+
     [Fact]
     public async Task AcceptedSubmission_ProjectsItsInvoicesOutcome()
     {

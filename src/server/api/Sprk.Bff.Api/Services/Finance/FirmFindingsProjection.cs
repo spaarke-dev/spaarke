@@ -88,7 +88,8 @@ public sealed record FirmOutcome(
 /// <param name="Reason">The reviewer's reason; null when none is on record for this item (never substituted).</param>
 /// <param name="FirmReasons">
 /// The explanations addressed to the firm (<c>sprk_signal.sprk_firmreason</c>) of the Billing rules the item's decision resolved: one per rule
-/// version that has one (the first non-blank in creation order), duplicates removed, in the order the Signals were created; empty when none
+/// version that has one (the first non-blank in creation order), duplicates removed, in the order those chosen Signals were created (then by id);
+/// empty when none
 /// (never substituted). NOT a citation and not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an
 /// invoice-level adjustment (it resolves no Signal).
 /// </param>
@@ -367,10 +368,11 @@ public sealed class FirmFindingsProjection
             case (int)InvoiceSubmissionStatus.Accepted:
                 if (!invoiceDecided)
                 {
-                    // Accepted since the caller checked (the invoice was created after it): no invoice content without its decision. A 503; the
-                    // retry decides the invoice.
-                    _logger.LogInformation("Submission {Id} is Accepted but its invoice was not decided by the caller; the firm outcome is unavailable.",
-                        submissionId);
+                    // The invoice was not decided: it did not exist when the caller checked (an Accepted submission whose invoice is missing, or an
+                    // invoice created since). No invoice content without its decision. A 503; a retry decides it, or the inconsistency persists. Both
+                    // warrant an alertable signal, so it carries the stable code (fix round 3, F2).
+                    _logger.LogWarning("[{Code}] Submission {Id} is Accepted but its invoice was not decided by the caller (it may not exist); the firm outcome is unavailable.",
+                        AcceptedWithoutInvoiceCode, submissionId);
                     return Unavailable();
                 }
 
@@ -487,7 +489,7 @@ public sealed class FirmFindingsProjection
             var record = records.TryGetValue(row.Id, out var chosen) && string.Equals(
                 chosen.GetAttributeValue<string>("sprk_actioncode"), candidate.ActionCode, StringComparison.Ordinal) ? chosen : null;
             var citations = new List<FirmOutcomeCitation>();
-            var firmReasons = new List<string>();
+            var reasonSignals = new List<Entity>();
             if (record is not null && signalsOf.TryGetValue(record.Id, out var resolved))
             {
                 // Every Billing rule the decision resolved gives its firm reason (not gated: it is addressed to the firm); only a citable one
@@ -496,16 +498,27 @@ public sealed class FirmFindingsProjection
                     .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } v && rules.ContainsKey(v))
                     .GroupBy(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id))
                 {
-                    var firmReason = byVersion.Select(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason"))).FirstOrDefault(t => t is not null);
-                    if (firmReason is not null && !firmReasons.Contains(firmReason, StringComparer.Ordinal))
+                    // The version's reason is its first non-blank Signal's; that Signal's creation (then id) orders the reasons (fix round 3, K4).
+                    var reasonSignal = byVersion.FirstOrDefault(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason")) is not null);
+                    if (reasonSignal is not null)
                     {
-                        firmReasons.Add(firmReason);
+                        reasonSignals.Add(reasonSignal);
                     }
 
                     if (citable.Contains(byVersion.Key))
                     {
                         citations.Add(Cite(rules[byVersion.Key], clauses[byVersion.Key]));
                     }
+                }
+            }
+
+            var firmReasons = new List<string>();
+            foreach (var reasonSignal in reasonSignals.OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id))
+            {
+                var firmReason = NullIfBlank(reasonSignal.GetAttributeValue<string>("sprk_firmreason"))!;
+                if (!firmReasons.Contains(firmReason, StringComparer.Ordinal))
+                {
+                    firmReasons.Add(firmReason);
                 }
             }
 
