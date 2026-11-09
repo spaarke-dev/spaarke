@@ -54,6 +54,7 @@ BeforeAll {
         $global:SetCustomerOwnerTeamsTest_ExtraUnits = @()
         $global:SetCustomerOwnerTeamsTest_DirectUsers = 0
         $global:SetCustomerOwnerTeamsTest_DirectRoleSetUp = $false
+        $global:SetCustomerOwnerTeamsTest_DirectUnitName = 'Spaarke Direct Messages'
     }
 
     # The Direct team, set up exactly as the config declares (team, role, the Direct unit's copy assigned, Read at Basic).
@@ -105,11 +106,13 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
                     [pscustomobject]@{ businessunitid = $directId; name = $global:SetCustomerOwnerTeamsTest_DirectUnitName; _parentbusinessunitid_value = $root }
                     @($global:SetCustomerOwnerTeamsTest_ExtraUnits)
                 )
-                # Task 198 Q4: a read Dataverse filters by name answers only the units of that name (name equality is
-                # case-insensitive in Dataverse, as -eq is here).
+                # Task 198 Q4: a read Dataverse filters by name answers only the units of that name. Dataverse's name match
+                # ignores case AND accents (R6), which PowerShell's -eq does not, so the mock folds both.
                 if ($u -match "filter=name eq '((?:[^']|'')*)'") {
                     $wanted = $Matches[1] -replace "''", "'"
-                    $allUnits = @($allUnits | Where-Object { $_.name -eq $wanted })
+                    $fold = { param($s) (([string]$s).Normalize([Text.NormalizationForm]::FormD).ToCharArray() | Where-Object { [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne [Globalization.UnicodeCategory]::NonSpacingMark }) -join '' }
+                    $wantedFolded = (& $fold $wanted).ToLowerInvariant()
+                    $allUnits = @($allUnits | Where-Object { (& $fold $_.name).ToLowerInvariant() -eq $wantedFolded })
                 }
                 return @{ value = $allUnits }
             }
@@ -136,7 +139,7 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
                 return @{ value = @(if ($n -gt 0) { 1..$n | ForEach-Object { [pscustomobject]@{ systemuserid = [guid]::NewGuid(); fullname = "member $_" } } }) }
             }
             if ($u -match '/roles\(([^)]+)\)/teamroles_association') {
-                if ($setUp -and $Matches[1] -eq $copyId) { return @{ value = @([pscustomobject]@{ teamid = $teamId; name = $global:SetCustomerOwnerTeamsTest_TeamName }) } }
+                if ($setUp -and $Matches[1] -eq $copyId) { return @{ value = @([pscustomobject]@{ teamid = $teamId; name = $global:SetCustomerOwnerTeamsTest_TeamName; _businessunitid_value = $global:SetCustomerOwnerTeamsTest_TeamUnitId }) } }
                 return @{ value = @() }
             }
             if ($u -match '/teams\([^)]+\)/teamroles_association') {
@@ -153,7 +156,7 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
                 if ($u -match '_parentrootroleid_value eq') {
                     return @{ value = @(
                             [pscustomobject]@{ roleid = $roleId; _businessunitid_value = $root }
-                            [pscustomobject]@{ roleid = $copyId; _businessunitid_value = $directId }
+                            [pscustomobject]@{ roleid = $copyId; _businessunitid_value = $global:SetCustomerOwnerTeamsTest_TeamUnitId }
                         )
                     }
                 }
@@ -244,7 +247,87 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
         }
     }
 
+    Context 'Unit names are read by Dataverse name eq, which ignores accents (R6 class fix)' {
+        It 'must fire: two units whose names differ only by an accent, both matching -SecureBusinessUnitName, refuse as ambiguous' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000c'; name = "Secure R$([char]0x00E9)cord"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'More than one business unit is named'
+            $r.Output | Should -Not -Match 'PLAN'
+        }
+
+        It 'must fire: two units whose names differ only by an accent, both matching -CustomerBusinessUnitName, refuse as ambiguous' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000d'; name = "Customer On$([char]0x00E9)"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One'; Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'Expected exactly one business unit'
+            $r.Output | Should -Not -Match 'PLAN'
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must not fire: a customer unit named in another case still resolves to the one unit (exit 0)' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'CUSTOMER ONE' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'Re-run with -Apply'
+        }
+    }
+
+    Context 'Customer mode refuses a unit that holds the Direct-message role, whatever its name (task 198 fix round 1, R6)' {
+        BeforeEach {
+            # The Direct unit has a NON-default name and the operator omits -DirectMessageBusinessUnitName: the name read finds
+            # nothing, so only the Direct role (by id / template id, never by name) can tell the unit.
+            $global:SetCustomerOwnerTeamsTest_DirectUnitName = 'Legal Direct Hub'
+            Use-CleanDirectSetup
+        }
+
+        It 'must fire: such a unit by name is refused as a customer unit, before any write' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Legal Direct Hub'; Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'holds a team with the Direct-message owner role'
+            $r.Output | Should -Not -Match 'PLAN'
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must fire: such a unit by id is refused the same way' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitId = [guid]$global:SetCustomerOwnerTeamsTest_DirectId; Verify = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'holds a team with the Direct-message owner role'
+        }
+
+        It 'must not fire: an ordinary customer unit plans as before and the Direct-role unit is not listed beside it' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'Re-run with -Apply'
+            $r.Output | Should -Not -Match 'holds a team with the Direct-message owner role'
+            $r.Output | Should -Not -Match 'Legal Direct Hub'
+        }
+    }
+
     Context 'Direct-message mode (-DirectMessageBusinessUnitName)' {
+        It 'must fire: two units whose names differ only by an accent are ambiguous (Dataverse ignores accents), -Verify exits 1' {
+            Use-CleanDirectSetup
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000b'; name = "Spaarke Direct M$([char]0x00E9)ssages"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Direct @{ Verify = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'Expected exactly one business unit'
+            $r.Output | Should -Not -Match 'VERIFY PASS'
+        }
+
+        It 'must fire: the same accent-only pair is refused under -Apply, before any write' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000b'; name = "Spaarke Direct M$([char]0x00E9)ssages"; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+            $r = Invoke-Direct @{ Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'Expected exactly one business unit'
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must not fire: a lone unit whose name differs from the given one by case only is the one unit (exit 0)' {
+            Use-CleanDirectSetup
+            $r = Invoke-Direct @{ Verify = $true; DirectMessageBusinessUnitName = 'SPAARKE DIRECT MESSAGES' }
+            $r.Output | Should -Match 'VERIFY PASS'
+            $r.ExitCode | Should -Be 0
+        }
+
         It 'must fire: the root business unit is refused' {
             $r = Invoke-Script @{ EnvironmentUrl = $script:Url; DirectMessageBusinessUnitName = 'Spaarke' }
             $r.ExitCode | Should -Be 1

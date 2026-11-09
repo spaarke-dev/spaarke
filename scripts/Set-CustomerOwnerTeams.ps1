@@ -79,7 +79,11 @@
     Direct-message mode: the Direct-message business unit, by name (exactly one match; a direct child of the root with no
     users). The script does not create it.
     Customer mode (task 198 Q4): the Direct-message unit, refused as a customer unit (decided by id; no unit of that name
-    refuses nothing). Default 'Spaarke Direct Messages'.
+    refuses nothing). Default 'Spaarke Direct Messages'. Customer mode (R6) ALSO refuses any customer unit that holds a team
+    with the Direct-message owner role (found by role id / parentrootroleid, never by role name), so a Direct unit with a
+    non-default name is refused even when this parameter is omitted. Every business unit named by a parameter (this one,
+    -CustomerBusinessUnitName, -SecureBusinessUnitName) is found with Dataverse's own `name eq` filter (case- and
+    accent-insensitive) and decided by the ids returned: two matches refuse as ambiguous.
 
 .PARAMETER SecureBusinessUnitName
     The Secure Record business unit (SecureRecord:BusinessUnitName), refused as a customer unit. Default 'Secure Record'.
@@ -280,18 +284,28 @@ try {
 
     # FAIL CLOSED (R4b-4): the Secure Record unit exists by this step (H7b), so a name that matches no unit is a wrong
     # -SecureBusinessUnitName (a non-default SecureRecord:BusinessUnitName) and would let Secure Record pass as a customer unit.
-    $secureUnits = @($units | Where-Object { $_.name -eq $SecureBusinessUnitName })
+    # Read by Dataverse's own `name eq` filter (case- and accent-insensitive, as the BFF's lookup is) and decided by the ids
+    # that come back; no name is compared in code (R6 class fix).
+    $secureUnits = @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $SecureBusinessUnitName)'")
     if ($secureUnits.Count -eq 0) { throw "No business unit is named '$SecureBusinessUnitName'. The Secure Record unit exists by this step (H7b); pass its name (SecureRecord:BusinessUnitName) as -SecureBusinessUnitName." }
     if ($secureUnits.Count -gt 1) { throw "More than one business unit is named '$SecureBusinessUnitName'; the Secure Record unit cannot be told apart." }
     $secureId = $secureUnits[0].businessunitid
     if (-not $secureId) { throw "The business unit named '$SecureBusinessUnitName' has no id." }
     Write-Host "Secure BU   : $SecureBusinessUnitName ($secureId)"
 
-    $found = if ($IsDirectMode) { @($units | Where-Object { $_.name -eq $DirectMessageBusinessUnitName }) }
+    # R6: the Direct unit and the customer unit named by -CustomerBusinessUnitName are found by Dataverse's own `name eq`
+    # filter and decided by the ids that come back. Dataverse ignores case and accents in that match; PowerShell's -eq ignores
+    # only case, so a name compared in code could pass -Verify while the BFF (which asks Dataverse) refuses the same name as
+    # ambiguous. No unit name is compared in code here.
+    $found = if ($IsDirectMode) {
+        @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $DirectMessageBusinessUnitName)'")
+    }
     elseif ($PSCmdlet.ParameterSetName -eq 'ById') {
         @($units | Where-Object { $_.businessunitid -eq $CustomerBusinessUnitId.ToString() })
     }
-    else { @($units | Where-Object { $_.name -eq $CustomerBusinessUnitName }) }
+    else {
+        @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $CustomerBusinessUnitName)'")
+    }
     $named = if ($IsDirectMode) { "'$DirectMessageBusinessUnitName'" } elseif ($PSCmdlet.ParameterSetName -eq 'ById') { "id $CustomerBusinessUnitId" } else { "'$CustomerBusinessUnitName'" }
     if ($IsDirectMode -and $found.Count -eq 0) {
         throw "Refused: no business unit is named $named. This script does not create the Direct-message business unit; create it (a direct child of the root, with no users) first."
@@ -318,6 +332,29 @@ try {
             throw "Refused: $named is the Direct-message business unit (-DirectMessageBusinessUnitName '$DirectMessageBusinessUnitName'), never a customer unit."
         }
         $customerTops = @($customerTops | Where-Object { $directIds -notcontains [string]$_.businessunitid })
+
+        # R6 item 2: the name above finds the Direct unit only when the operator passes its (non-default) name. The unit is also
+        # told by what it holds: a team with the Direct-message owner role. The role is found in the root by Dataverse's own
+        # `name eq` filter (ids only); then every copy of it (parentrootroleid, the template id) and the teams holding the root
+        # role or a copy. A unit that holds such a team is a Direct unit, never a customer unit. No role is matched by name in
+        # code. A Direct role that does not exist yet (Direct mode not run) refuses nothing.
+        $directRoleConfig = Read-DirectConfig (Join-Path $PSScriptRoot '..' 'config' $DirectMessageRoleFiles[0])
+        $directTemplateIds = @((Get-DvAll "roles?`$select=roleid&`$filter=name eq '$(Q $directRoleConfig.roleName)' and _businessunitid_value eq $rootId") |
+            ForEach-Object { [string]$_.roleid } | Where-Object { $_ })
+        $directRoleUnitIds = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($templateId in $directTemplateIds) {
+            $roleIds = @($templateId) + @(Get-DvAll "roles?`$select=roleid&`$filter=_parentrootroleid_value eq $templateId" |
+                ForEach-Object { [string]$_.roleid } | Where-Object { $_ -and $_ -ne $templateId })
+            foreach ($roleId in ($roleIds | Select-Object -Unique)) {
+                foreach ($tm in @(Get-DvAll "roles($roleId)/teamroles_association?`$select=teamid,_businessunitid_value")) {
+                    if ($tm._businessunitid_value) { [void]$directRoleUnitIds.Add([string]$tm._businessunitid_value) }
+                }
+            }
+        }
+        if ($directRoleUnitIds.Contains([string]$customerId)) {
+            throw "Refused: $named holds a team with the Direct-message owner role ('$($directRoleConfig.roleName)', found by role id), so it is the Direct-message business unit, never a customer unit. Nothing was written."
+        }
+        $customerTops = @($customerTops | Where-Object { -not $directRoleUnitIds.Contains([string]$_.businessunitid) })
     }
 
     if ($IsDirectMode) {
