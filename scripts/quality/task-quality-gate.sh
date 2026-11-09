@@ -56,20 +56,39 @@ fi
 BUDGET_SECONDS=240
 over_budget() { [ "$SECONDS" -ge "$BUDGET_SECONDS" ]; }
 
-# Run a command under a hard time cap, output to a temp file; sets RUN_EXIT and
-# RUN_OUTPUT. Never capture with $(...) here: command substitution waits for
-# EOF on the pipe, which MSBuild nodes / testhost (grandchildren that `timeout`
-# does not kill) hold open, so a 150 s cap measured 500+ s. A file redirect
-# makes bash wait only for `timeout` itself.
+# Run a command under a hard time cap, output to a temp file; sets RUN_EXIT
+# (124 on timeout) and RUN_OUTPUT. Two Windows traps this avoids:
+#  - $(...) waits for EOF on the pipe, which MSBuild nodes / testhost hold
+#    open, so a 150 s cap measured 500+ s. Output goes to a file instead.
+#  - `timeout` kills only the direct child. `dotnet format` then left its
+#    BuildHost running forever (97 orphans found 2026-11-09). On timeout the
+#    whole Windows process tree is killed with taskkill /T.
 GATE_TMP="${TMPDIR:-/tmp}/task-quality-gate.$$.out"
 cleanup_tmp() { rm -f "$GATE_TMP" 2>/dev/null || true; }
 trap cleanup_tmp EXIT
 run_capped() {
   local secs="$1"; shift
+  local pid wp end=$((SECONDS + secs))
   RUN_EXIT=0
-  timeout -k 5 "$secs" "$@" >"$GATE_TMP" 2>&1 </dev/null || RUN_EXIT=$?
+  "$@" >"$GATE_TMP" 2>&1 </dev/null &
+  pid=$!
+  # Wall-clock deadline: counting sleep iterations drifts on a loaded machine.
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$end" ]; then
+      wp=$(cat "/proc/$pid/winpid" 2>/dev/null || true)
+      if [ -n "$wp" ] && command -v taskkill >/dev/null 2>&1; then taskkill //T //F //PID "$wp" >/dev/null 2>&1 || true; fi
+      kill -9 "$pid" 2>/dev/null || true
+      RUN_EXIT=124
+      break
+    fi
+    sleep 1
+  done
+  if [ "$RUN_EXIT" -eq 124 ]; then wait "$pid" 2>/dev/null || true; else wait "$pid" || RUN_EXIT=$?; fi
   RUN_OUTPUT=$(cat "$GATE_TMP" 2>/dev/null || true)
 }
+
+# Run "$@" with $1 as the working directory (for run_capped).
+in_dir() { local d="$1"; shift; cd "$d" && "$@"; }
 
 # --- Python for JSON validation (skip the WindowsApps python3 stub) ---
 PY=""
@@ -206,6 +225,13 @@ if [ "${#TS_FILES[@]}" -gt 0 ]; then
   fi
   for cfg in "${TSCONFIGS[@]}"; do
     if over_budget; then warn "time budget reached; not typechecked: $cfg"; continue; fi
+    # The package that owns the tsconfig must have its own dependencies installed. Otherwise a
+    # parent folder's tsc reports "cannot find module/namespace" for every import, and such an
+    # error in a changed file would block for a reason unrelated to the edit.
+    PKG=$(nearest_up "$(dirname "$cfg")" "package.json") || PKG=""
+    if [ -n "$PKG" ] && [ ! -d "$(dirname "$PKG")/node_modules" ]; then
+      skip "dependencies not installed for $(dirname "$PKG") (npm install there); not typechecked"; continue
+    fi
     TSC=$(nearest_up "$(dirname "$cfg")" "node_modules/.bin/tsc" include-root) || TSC=""
     if [ -z "$TSC" ]; then skip "typescript not installed for $cfg (run npm install there)"; continue; fi
     run_capped 120 "$TSC" --noEmit --pretty false -p "$cfg"
@@ -233,29 +259,65 @@ fi
 # ============================================================================
 # Gate 3 — Lint changed files (advisory, capped)
 # ============================================================================
-LINT_CAP=15
+# C#: `dotnet format whitespace --folder` (no MSBuild workspace, so seconds,
+# not minutes; full style/analyzer formatting stays with CI tier2 `format`).
+# ENDOFLINE is ignored: .gitattributes normalises line endings on commit.
+# TS: ESLint once per config folder, run from that folder with its own
+# eslint, so the package's config and plugins resolve. A timeout is "not
+# checked", never a finding (type-aware configs load the whole TS program).
 if [ "${#CS_FILES[@]}" -gt 0 ] || [ "${#TS_FILES[@]}" -gt 0 ]; then
   echo "--- Gate 3: Lint (advisory) ---"
-  n=0
-  if command -v dotnet &>/dev/null; then
+
+  if command -v dotnet &>/dev/null && [ "${#CS_FILES[@]}" -gt 0 ]; then
+    declare -A FMT_FILES=()
     for f in "${CS_FILES[@]}"; do
       [ -f "$f" ] || continue
-      n=$((n + 1)); [ "$n" -le "$LINT_CAP" ] || break
-      over_budget && break
-      if ! timeout -k 2 10 dotnet format --include "$f" --verify-no-changes >/dev/null 2>&1 </dev/null; then
-        warn "format issue: $f"
-      fi
+      case "$f" in src/*|tests/*) ;; *) continue ;; esac
+      proj=$(nearest_up "$(dirname "$f")" "*.csproj") || continue
+      pdir=$(dirname "$proj")
+      FMT_FILES[$pdir]+="${f#"$pdir"/}"$'\n'
+    done
+    for pdir in "${!FMT_FILES[@]}"; do
+      if over_budget; then skip "time budget reached; C# whitespace not checked: $pdir"; continue; fi
+      mapfile -t rel < <(printf '%s' "${FMT_FILES[$pdir]}")
+      run_capped 60 dotnet format whitespace "$pdir" --folder --verify-no-changes --include "${rel[@]}"
+      FINDINGS=$(printf '%s\n' "$RUN_OUTPUT" | grep -E ': (error|warning) [A-Z]+:' | grep -v 'ENDOFLINE' | head -10 || true)
+      if [ "$RUN_EXIT" -eq 124 ]; then skip "C# whitespace check timed out (60s): $pdir"
+      elif [ -n "$FINDINGS" ]; then warn "C# whitespace findings in $pdir (run: dotnet format whitespace $pdir --folder)"; printf '%s\n' "$FINDINGS"
+      else pass "C# whitespace clean: $pdir"; fi
     done
   fi
-  n=0
-  if command -v npx &>/dev/null; then
+
+  if [ "${#TS_FILES[@]}" -gt 0 ]; then
+    declare -A LINT_FILES=()
     for f in "${TS_FILES[@]}"; do
       [ -f "$f" ] || continue
-      n=$((n + 1)); [ "$n" -le "$LINT_CAP" ] || break
-      over_budget && break
-      if ! timeout -k 2 10 npx eslint "$f" --format compact >/dev/null 2>&1 </dev/null; then
-        warn "eslint issue: $f"
-      fi
+      case "$f" in src/*|tests/*) ;; *) continue ;; esac
+      cfg=""
+      for pat in "eslint.config.*" ".eslintrc.*" ".eslintrc"; do
+        c=$(nearest_up "$(dirname "$f")" "$pat") || continue
+        # keep the deepest match across patterns
+        if [ -z "$cfg" ] || [ "${#c}" -gt "${#cfg}" ]; then cfg="$c"; fi
+      done
+      [ -n "$cfg" ] || continue
+      cdir=$(dirname "$cfg")
+      LINT_FILES[$cdir]+="${f#"$cdir"/}"$'\n'
+    done
+    if [ "${#LINT_FILES[@]}" -eq 0 ]; then skip "no ESLint config covers the changed TS files"; fi
+    for cdir in "${!LINT_FILES[@]}"; do
+      if over_budget; then skip "time budget reached; ESLint not run: $cdir"; continue; fi
+      ESLINT=$(nearest_up "$cdir" "node_modules/.bin/eslint" include-root) || ESLINT=""
+      if [ -z "$ESLINT" ]; then skip "eslint not installed for $cdir (run npm install there)"; continue; fi
+      ESLINT_ABS="$(cd "$(dirname "$ESLINT")" && pwd)/eslint"
+      mapfile -t rel < <(printf '%s' "${LINT_FILES[$cdir]}")
+      # Default "stylish" output: the "compact" formatter left ESLint core in v9
+      # (every `--format compact` call exited 2 before 2026-11-09).
+      run_capped 90 in_dir "$cdir" "$ESLINT_ABS" "${rel[@]}"
+      FINDINGS=$(printf '%s\n' "$RUN_OUTPUT" | grep -E '^[[:space:]]+[0-9]+:[0-9]+[[:space:]]+(error|warning)[[:space:]]' | grep -v 'File ignored because' | head -10 || true)
+      if [ "$RUN_EXIT" -eq 124 ]; then skip "ESLint timed out (90s), not checked: $cdir"
+      elif [ -n "$FINDINGS" ]; then warn "ESLint findings in $cdir"; printf '%s\n' "$RUN_OUTPUT" | grep -E '^[[:space:]]+[0-9]+:[0-9]+[[:space:]]+(error|warning)[[:space:]]|^[A-Za-z]:|^/' | head -20 || true
+      elif [ "$RUN_EXIT" -eq 0 ] || [ "$RUN_EXIT" -eq 1 ]; then pass "ESLint clean: $cdir"
+      else skip "ESLint could not run (exit $RUN_EXIT) in $cdir: $(printf '%s\n' "$RUN_OUTPUT" | grep -v -i 'MODULE_TYPELESS\|Reparsing\|eliminate this warning' | grep -m1 . || true)"; fi
     done
   fi
   echo ""
@@ -322,6 +384,10 @@ if [ "$STOP_ACTIVE" = true ]; then
 fi
 
 echo "[QUALITY GATE: FAILED] ($FAILED_GATES)"
+if [[ "$FAILED_GATES" == *typecheck* ]]; then
+  echo "Note: errors about a sibling @spaarke/* package's exports can mean its local dist/ is stale"
+  echo "(tsconfig paths point at ../<Package>/dist): run 'npm run build' in that package, then recheck."
+fi
 echo "Fix the failures above before finishing. If a failure was not caused by this session's changes"
 echo "(another session's edits in a shared checkout, or a break already on the branch), say so plainly"
 echo "in your reply and stop: the gate blocks only once per stop."

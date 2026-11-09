@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **`.claude/settings.json`**: Stop hook `timeout: 420` (the gate's own budget stops starting new checks at 240 s).
 - **Root `CLAUDE.md` §16**: states the blocking behaviour (+104 bytes, line count unchanged at 218 — owner OK requested in the PR).
 - **`docs/procedures/testing-and-code-quality.md`**: the hooks table said `TaskCompleted` (not a real event, FAILURE-MODES G-1); now `Stop`, with the blocking contract.
+- **Lint steps never worked (same day, both hooks)**: every `--format compact` ESLint call exited 2 because the compact formatter left ESLint core in v9, and `timeout N dotnet format` never finished (it loads the MSBuild workspace) and left its BuildHost child running — 97 orphaned BuildHosts (~650 MB) were found and killed. ESLint now runs once per config folder with that package's own eslint and the default `stylish` output; C# uses `dotnet format whitespace --folder` (seconds, no workspace; ENDOFLINE ignored because `.gitattributes` normalises line endings) in the Stop gate only — `post-edit-lint.sh` no longer lints `.cs`, since nothing fits its 4 s budget. On timeout both hooks kill the whole Windows process tree (`taskkill /T`), not just the direct child.
 
 ---
 ###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
