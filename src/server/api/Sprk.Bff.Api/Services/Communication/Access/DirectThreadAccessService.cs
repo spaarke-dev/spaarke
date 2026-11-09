@@ -397,7 +397,9 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// <summary>
     /// <c>Ordinary</c> is <c>true</c> when the message is NOT a secure child — owned by a user, or by a team that is not
     /// the Secure Record Owners team — so its participants may be granted Read; <c>false</c> for a Secure-team-owned
-    /// message, and whenever that cannot be told (the message is not found, or the Secure Record team is ambiguous).
+    /// message, and whenever that cannot be told (the message is not found, the Secure Record team is ambiguous, or the
+    /// configured Secure Record settings name a unit or team Dataverse does not find —
+    /// <see cref="SecureChildShareSynchronizer.IsSecureOwnerTeamAsync"/>).
     /// <c>OwningTeam</c> is the team that owns an ordinary team-owned message (<c>null</c> when user-owned): the one team
     /// the anchor grant does not expand (#1629 F2). A Dataverse fault propagates to the caller's catch, which grants nothing.
     /// </summary>
@@ -417,19 +419,17 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (message.GetAttributeValue<EntityReference>("owningteam")?.Id is not { } owningTeam || owningTeam == Guid.Empty)
             return (true, null); // user-owned: never a secure child (the synchronizer touches only the Secure team's rows)
 
-        if (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(_entityService, _configuration, owningTeam, ct))
-            return (true, owningTeam);
-
-        var secure = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_entityService, _configuration, ct);
-        if (secure.Refusal is { } refusal)
+        var (secure, undetermined) = await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(_entityService, _configuration, owningTeam, ct);
+        if (secure is null)
         {
+            // TODO(task 198 Part C): enqueue the durable re-grant for this message.
             _logger.LogWarning(
                 "Message {CommunicationId} is team-owned and the Secure Record team cannot be determined ({Refusal}); no " +
-                "participant is granted (ThreadId={ThreadId}).", communicationId, refusal, threadId);
+                "participant is granted (ThreadId={ThreadId}).", communicationId, undetermined, threadId);
             return (false, null);
         }
 
-        if (secure.TeamId == owningTeam)
+        if (secure == true)
         {
             _logger.LogInformation(
                 "Message {CommunicationId} belongs to a secure record; its readers are the record's sharees (secure-child " +

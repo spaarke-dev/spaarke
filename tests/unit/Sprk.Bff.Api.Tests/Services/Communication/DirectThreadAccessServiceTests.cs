@@ -933,6 +933,88 @@ public class DirectThreadAccessServiceTests
         VerifyNoGrantAtAll();
     }
 
+    [Theory]
+    [InlineData(null, "Secure Record Readers")]
+    [InlineData("Secure Records", null)]
+    public async Task ASecureMessage_WithSecureSettingsThatFindNothing_GrantsNothing(string? buSetting, string? teamSetting)
+    {
+        // The settings are present but name a unit or team Dataverse does not find: whether the owner is the Secure team
+        // cannot be told, so no participant is granted (fail closed), even though the owner IS the real Secure team.
+        var secureTeam = Guid.Parse("5e5e5e5e-0000-0000-0000-0000000002e5");
+        var secureBu = Guid.Parse("5b5b5b5b-0000-0000-0000-0000000002e5");
+        var settings = new Dictionary<string, string?>();
+        if (buSetting is not null)
+            settings[Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.BusinessUnitNameConfigKey] = buSetting;
+        if (teamSetting is not null)
+            settings[Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamNameConfigKey] = teamSetting;
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", secureTeam) },
+            }));
+        TeamsAndUnitsMatchedAsDataverse(
+            new[] { (secureTeam, secureBu, "Secure Record Owners", false, 0) },
+            new[] { (secureBu, "Secure Record") });
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var sut = new DirectThreadAccessService(
+            _entityService.Object,
+            _accessGrant.Object,
+            new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
+            Mock.Of<ILogger<DirectThreadAccessService>>(),
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
+            DirectMessageOwnerTeamDouble.Unconfigured());
+
+        await sut.GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNoGrantAtAll();
+    }
+
+    [Fact]
+    public async Task AnOrdinaryTeamMessage_WithCorrectSecureSettings_KeepsTheParticipantGrant()
+    {
+        // Must not fire: the settings find the Secure team, and the message's owner is another (ordinary Owner) team.
+        var secureTeam = Guid.Parse("5e5e5e5e-0000-0000-0000-0000000003e5");
+        var secureBu = Guid.Parse("5b5b5b5b-0000-0000-0000-0000000003e5");
+        var ordinaryTeam = Guid.Parse("9d9d9d9d-0000-0000-0000-0000000003e5");
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", ordinaryTeam) },
+            }));
+        TeamsAndUnitsMatchedAsDataverse(
+            new[] { (secureTeam, secureBu, "Secure Record Owners", false, 0), (ordinaryTeam, Guid.NewGuid(), "Matter Team", false, 0) },
+            new[] { (secureBu, "Secure Record") });
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var sut = new DirectThreadAccessService(
+            _entityService.Object,
+            _accessGrant.Object,
+            new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.BusinessUnitNameConfigKey] = "Secure Record",
+                [Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamNameConfigKey] = "Secure Record Owners",
+            }).Build(),
+            Mock.Of<ILogger<DirectThreadAccessService>>(),
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
+            DirectMessageOwnerTeamDouble.Unconfigured());
+
+        await sut.GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+    }
+
     /// <summary>
     /// The <c>team</c> and <c>businessunit</c> reads answered by EVALUATING their conditions over the given rows, with names
     /// compared as Dataverse's default collation compares them (case- and accent-insensitive), and only the selected columns

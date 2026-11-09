@@ -54,6 +54,12 @@ public sealed class SecureOwnerTeamNameMatchTests
 
     private readonly List<QueryExpression> _queries = new();
 
+    /// <summary>When set, every read throws it (a Dataverse fault).</summary>
+    private Exception? _fault;
+
+    /// <summary>When set, this environment holds no Secure Record unit and no team in it (an environment without secure records).</summary>
+    private bool _noSecureUnit;
+
     private IGenericEntityService Dataverse()
     {
         var mock = new Mock<IGenericEntityService>(MockBehavior.Strict);
@@ -61,9 +67,12 @@ public sealed class SecureOwnerTeamNameMatchTests
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
             {
                 _queries.Add(q);
+                if (_fault is not null)
+                    throw _fault;
                 return new EntityCollection(q.EntityName switch
                 {
-                    "team" => Teams.Where(t => Matches(q, "teamid", t.Id) && Matches(q, "businessunitid", t.BusinessUnit)
+                    "team" => Teams.Where(t => !(_noSecureUnit && t.BusinessUnit == SecureBu))
+                        .Where(t => Matches(q, "teamid", t.Id) && Matches(q, "businessunitid", t.BusinessUnit)
                                                && Matches(q, "isdefault", t.IsDefault) && Matches(q, "teamtype", t.TeamType)
                                                && Matches(q, "name", t.Name))
                         .Select(t => Project(q, new Entity("team", t.Id)
@@ -75,7 +84,8 @@ public sealed class SecureOwnerTeamNameMatchTests
                         }))
                         .Take(q.TopCount ?? int.MaxValue)
                         .ToList(),
-                    "businessunit" => BusinessUnits.Where(b => Matches(q, "businessunitid", b.Id) && Matches(q, "name", b.Name))
+                    "businessunit" => BusinessUnits.Where(b => !(_noSecureUnit && b.Id == SecureBu))
+                        .Where(b => Matches(q, "businessunitid", b.Id) && Matches(q, "name", b.Name))
                         .Select(b => new Entity("businessunit", b.Id))
                         .Take(q.TopCount ?? int.MaxValue)
                         .ToList(),
@@ -176,17 +186,109 @@ public sealed class SecureOwnerTeamNameMatchTests
             .Should().BeTrue("an accent-insensitive match still does not match another name");
     }
 
-    [Fact]
-    public async Task CannotBeSecureOwnerTeam_ASettingThatNamesNoTeam_RulesOutTheSecureTeamToo_AndTheResolverFindsNone()
+    // ── K1: Secure settings PRESENT that name no unit or team Dataverse finds never rule the real Secure team out ──────
+
+    [Theory]
+    [InlineData(null, "Secure Record Readers")]   // the team setting names no team
+    [InlineData("Secure Records", null)]          // the unit setting names no unit
+    [InlineData("Secure Records", "Secure Record Readers")]
+    public async Task CannotBeSecureOwnerTeam_WrongSecureSettings_DoNotRuleOutTheRealSecureTeam_AndIsSecureIsUnknown(
+        string? buSetting, string? teamSetting)
     {
-        // A setting Dataverse matches to no team: no team can be the Secure team, and the resolver agrees (no team).
-        var config = Config(teamName: "Secure Record Readers");
+        var config = Config(buName: buSetting, teamName: teamSetting);
         var dataverse = Dataverse();
 
         (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(dataverse, config, SecureTeam, CancellationToken.None))
+            .Should().BeFalse("a setting that finds nothing proves nothing about the team that owns the row");
+        var (secure, undetermined) = await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(
+            dataverse, config, SecureTeam, CancellationToken.None);
+        secure.Should().BeNull("the configured Secure team is not found, so whether this is it cannot be told");
+        undetermined.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task CannotBeSecureOwnerTeam_WrongSecureSettings_DoNotRuleOutAnOrdinaryTeamEither()
+    {
+        // Nothing is ruled out by name while the configured names find no Secure team; the caller fails closed.
+        var config = Config(teamName: "Secure Record Readers");
+
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(Dataverse(), config, OrdinaryTeam, CancellationToken.None))
+            .Should().BeFalse();
+        (await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), config, OrdinaryTeam, CancellationToken.None))
+            .Secure.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AWrongUnitSetting_WithTheRightTeamName_RulesOutAnOrdinaryTeamByName_ButTheSecureTeamIsUnknown()
+    {
+        // The team name finds the Secure team, so a team without that name is not it (no unit read needed, task 149 F7);
+        // the real Secure team's unit is not the configured one, so whether it is the Secure team cannot be told.
+        var config = Config(buName: "Secure Records", teamName: LiveTeamName);
+
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(Dataverse(), config, OrdinaryTeam, CancellationToken.None))
             .Should().BeTrue();
-        (await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(dataverse, config, CancellationToken.None))
-            .TeamId.Should().BeNull();
+        _queries.Should().NotContain(q => q.EntityName == "businessunit");
+        (await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), config, SecureTeam, CancellationToken.None))
+            .Secure.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CannotBeSecureOwnerTeam_AReadFault_DoesNotRuleTheTeamOut()
+    {
+        _fault = new InvalidOperationException("Test: Dataverse is unavailable.");
+
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(Dataverse(), Config(), OrdinaryTeam, CancellationToken.None))
+            .Should().BeFalse("a fault is doubt, never \"cannot be Secure\"");
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(
+                Dataverse(), Config(teamName: LiveTeamName), OrdinaryTeam, CancellationToken.None))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsSecureOwnerTeam_AReadFault_Propagates_SoTheCallerGrantsNothing()
+    {
+        _fault = new InvalidOperationException("Test: Dataverse is unavailable.");
+
+        var act = () => SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), Config(), OrdinaryTeam, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task CorrectSecureSettings_AnOrdinaryTeam_IsRuledOut_AndTheSecureTeamIsSecure()
+    {
+        var config = Config(buName: LiveBuName, teamName: LiveTeamName);
+
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(Dataverse(), config, OrdinaryTeam, CancellationToken.None))
+            .Should().BeTrue();
+        (await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), config, OrdinaryTeam, CancellationToken.None))
+            .Should().Be(((bool?)false, (string?)null));
+        (await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), config, SecureTeam, CancellationToken.None))
+            .Should().Be(((bool?)true, (string?)null));
+    }
+
+    // ── Secure settings ABSENT: the compiled defaults, unchanged ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AbsentSecureSettings_InAnEnvironmentWithoutASecureUnit_AnOrdinaryTeamIsRuledOut_AndIsNotSecure()
+    {
+        // No SecureRecord:* setting and no unit or team carrying the default names: no record is secure here, so a
+        // team-owned row is ordinary (the behaviour before the K1 rule).
+        _noSecureUnit = true;
+
+        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(Dataverse(), Config(), OrdinaryTeam, CancellationToken.None))
+            .Should().BeTrue("the team exists and Dataverse finds no row with the default team name");
+        (await SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(Dataverse(), Config(), OrdinaryTeam, CancellationToken.None))
+            .Should().Be(((bool?)false, (string?)null));
+    }
+
+    [Fact]
+    public void SecureSettingsConfigured_IsTrueWhenEitherKeyIsSet_AndFalseWhenBothAreUnsetOrBlank()
+    {
+        SecureChildShareSynchronizer.SecureSettingsConfigured(Config()).Should().BeFalse();
+        SecureChildShareSynchronizer.SecureSettingsConfigured(Config(buName: " ", teamName: "")).Should().BeFalse();
+        SecureChildShareSynchronizer.SecureSettingsConfigured(Config(buName: LiveBuName)).Should().BeTrue();
+        SecureChildShareSynchronizer.SecureSettingsConfigured(Config(teamName: LiveTeamName)).Should().BeTrue();
     }
 
     [Fact]
