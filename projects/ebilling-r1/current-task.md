@@ -9,7 +9,7 @@
 | **Mode** | Owner: "keep progressing on open tasks so we can complete the project". At most 4 agents. Merge each finished branch after its reviews; verify the combined tip (build, full ArchTests, FILTERED unit). One adversarial pass per change set; two for partner-readable / auth / tenant-isolation; a scoped Sonnet re-check when a fix changes the approach. Every agent launch states a model. Never `--no-verify`. |
 | **Agent worktrees** | `isolation: worktree` starts on MASTER. Every brief names the base sha and checks `git merge-base --is-ancestor`. Never cd into agent worktrees; use `git -C` and absolute paths. To remove one: `git worktree unlock`, then run `Remove-WorktreeSafe.ps1 -Path <one path>` from the **PowerShell tool**, one path per call (bash mangles the backslashes). |
 | **Public-repo rule** | Never put access-gap mechanisms, identity names or role maps in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Peers** | uac-r2 = `uac-r2`; ontology-r1 = `ontology-r1` (messages to it were HELD/expired — not delivered; resend only if owner asks); provisioning = `provisioning-r1`; word-add-in = `word-add-in-r1`; mcp = `mcp-r1`; R4 = `spa-r4`. |
+| **Peers** | uac-r2 = `uac-r2`; ontology-r1 = `ontology-r1` (messages to it were HELD/expired — not delivered; resend only if owner asks); provisioning = `provisioning-r1`; word-add-in = `word-add-in-r1`; mcp = `mcp-r1`; R4 = `spa-r4`; field-mapping = `field-mapping-r1` (from 2026-11-09; their 032b-2/032b-3 will run on the `work/ebilling-r1` tip, and we receive the 032b-2 diff after their two adversarial passes; not started). |
 | **Live-change rule** | Live Dataverse writes / role changes need the owner's OK typed in THIS session, plus uac-r2 notices before and after. |
 
 ## Exact next action
@@ -33,7 +33,11 @@ Wait for the agent notifications below and act on each:
      - F1-b: RequiredData names the missing field.
    - It also found K1–K4.
    - **Fix round 1 is DONE** at `adb765caa3` on `task/ebilling-130c` (filtered 177/0, full ArchTests 2183/0). Side effect to decide after pass 2: credit-test reads now show as empty-valued entries on ApprovedRate findings (one-line restriction to RequiredData if wanted).
-   - **Pass 2** (Opus adversarial, read-only, `ecf694a8d1..adb765caa3`) is running. Then any fix round, then the diff to uac-r2.
+   - **Pass 2 DONE:** no disclosure path; "has a `field`" boundary holds for every reject-capable reason; keep the empty-value rule (credit-test placeholders can't reach a rejecting finding). F1: the 200 cap truncates silently. K1 AI-assigned skip, K2 merge-fragile `approvedRate.scope` test, K4 line-number wording, K5 wrong note + reachability test, K6 surrogate cut / per-entry catch. K3 = owner question 4b.
+   - **Fix round 2 DONE** at `9a84a1f346` (build 0 err, ArchTests 2183/0, filtered 2403/0): additive `FirmOutcome.NotShownCount`, AI-assigned values dropped, per-entry fault isolation, surrogate-safe cut, reachability tests via `SubmissionRejectionRule.Decide`, notes corrected. Agent worktrees `agent-aff95c719a54a6e5b`, `agent-acfabc1702a61b70f` to remove at batch.
+   - Diff `ecf694a8d1..9a84a1f346` sent to uac-r2: **approved, no F** (subject to the re-check). uac-r2 relays owner Q4/Q4b. Scoped Sonnet re-check of `adb765caa3..9a84a1f346` running.
+   - Fix-2 re-check DONE: no F → uac-r2 approval stands.
+   - **Fix round 3 (Sonnet) is RUNNING** on `task/ebilling-130c-f3`, fast-forwarding `task/ebilling-130c` from `9a84a1f346`. Scope: the guard below; a case-insensitive AI-assigned skip; dropped rejecting entries (malformed / refused / undecodable) counted in `NotShownCount`; one vacuous assertion fixed. The guard is uac-r2's hardening item: The guard is a catalogue-driven test: every `BillingRuleCatalogue.RejectCapableReasons` handler runs through `BillingHandlerKit.Run` with reference data present, and no reference-sourced value may carry `field`; a reason with no fixture fails. Send uac-r2 the round 3 diff.
 4. **Then F3b** (one agent, Opus/Sonnet-xhigh), on a base that merges 130-0 fix tip + 130-0b `0f6b49b5ab`. Scope:
    - The four named descendants: analysisoutput, eventlog, fileversion, and document via parentdocument.
    - The child document is decided by EVERY invoice link up its parent chain, reusing the 188 hop bound (≤3, a cycle fails closed).
@@ -59,10 +63,10 @@ Wait for the agent notifications below and act on each:
 
 | Branch | Head | State |
 |---|---|---|
-| `task/ebilling-130-0-fix1` | `7a7f5d2808` | Round 2 approved by uac-r2, with one F going into round 3. Round 3 is running. |
+| `task/ebilling-130-0-fix1` | `17a283c00c` (3b pushed `ed11b30f95..17a283c00c`: ArchTests 2181/0, filtered 17504 + rerun 706/0; fail-before 55/104). **Round 3c running** (`LiveParentsOf` absent column → unreadable + select pins), then ONE scoped re-check over `ed11b30f95..<3c tip>`, then 3c diff to uac-r2 → 130-0 done. Agent worktrees `agent-ad9cdf00a103ae635` (+3c) to remove at batch. Earlier: | Round 3 pushed (`7a7f5d2808..ed11b30f95`; ArchTests 2181/0, filtered 7130/0). uac-r2 approved round 3 (subject to re-check no F). **Round 3b** (Sonnet) running on `task/ebilling-130-0-fix3b` → ff fix1 from `ed11b30f95`: DocumentRootLinks absent column → malformed/unreadable; `/data/record/{entity}/{id}` uniform refusal (missing / gone / out-of-set). Then scoped re-check, then the 3b diff to uac-r2 → 130-0 done. Round 3 re-check DONE: no F (uac-r2's condition met). Folded into 3b: uniform per-invoice fault notion (AnyFaulted/IsFaultedFor on lists, submission single read, redaction); confirm the `/data/record` gate applies the per-invoice decision; registry validator early-return gap. For the batch note to spa-r4: `ProjectPage.tsx:~465` 404 branch is now dead (stale grant → 403). Agent worktree `agent-a56d6943daafbbf5e` to remove at batch. |
 | `task/ebilling-130-0b` | `0f6b49b5ab` | FINAL, approved |
 | `task/ebilling-130b-fix1` | `2367fbab2c` | **FINAL, approved by uac-r2.** At the batch merge, derive `SubmissionCoreColumns` from the submission core column names `InvoiceSubmissionContracts` (:69) already maps from `InvoiceCoreRecordKind`, or add a one-line comment pointing at it. |
-| `task/ebilling-130c` | `adb765caa3` | Built on `ecf694a8d1`. Pass 1 + fix round 1 done; pass 2 running. It will need 130b's later fixes merged at batch time. |
+| `task/ebilling-130c` | `a357a5c7e1` | Built on `ecf694a8d1`. **Done:** both Opus passes and 3 fix rounds; uac-r2 approved with no F. Round 3 adds the catalogue-driven value-boundary guard, and its diff has been sent. Agent worktree `agent-a0af46b7a8db4e045` to remove at batch. It will need 130b's later fixes merged at batch time. |
 
 ## Rulings in force (uac-r2, 2026-11-09)
 
