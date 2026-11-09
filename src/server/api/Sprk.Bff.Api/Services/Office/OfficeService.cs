@@ -2760,6 +2760,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
                 => new(refusal.Code, Forbidden, refusal.Detail),
 
+            // ── Invalid: a value copied from a secure source files the row, which would not be secure (task 022 fix round 3).
+            // The same request is refused every time: passed through with the service's words, never the generic 500. ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.MappingSourceSecureFilingCode)
+                => new(refusal.Code, StatusCodes.Status400BadRequest, refusal.Detail),
+
             // ── OwnerUnresolved (stays 403) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
