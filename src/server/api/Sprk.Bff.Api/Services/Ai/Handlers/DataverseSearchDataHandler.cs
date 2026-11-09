@@ -202,10 +202,12 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         {
             // ISS-010 (task 078): externality is resolved lazily — only when the entity filter names a
             // communication-family table or a family hit comes back — so every other search is byte-identical.
-            bool? isExternal = null;
-            async Task<bool> IsExternalCallerAsync() =>
-                isExternal ??= await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false);
+            // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
+            CallerExternalityVerdict? verdict = null;
+            async Task<CallerExternalityVerdict> ClassifyCallerAsync() =>
+                verdict ??= await CallerExternality.ClassifyCallerAsync(
+                    _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false);
+            async Task<bool> IsExternalCallerAsync() => (await ClassifyCallerAsync().ConfigureAwait(false)).IsExternal;
 
             if (entityFilter.Exists(ExternalCallerCommunicationGuard.IsCommunicationFamily) &&
                 await IsExternalCallerAsync().ConfigureAwait(false))
@@ -359,10 +361,12 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)).ToList();
                 if (familyHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
+                    // Task 130-0b: one caller for the tool call, so the caller's firms are read once for every family table.
+                    var familyCaller = new InvoiceFamilyCaller((await ClassifyCallerAsync().ConfigureAwait(false)).SystemUserId);
                     foreach (var table in familyHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
                     {
                         hiddenFamily[table.Key] = await _hideInvoiceFamily(
-                            table.Key, table.Select(h => h.RecordId).Distinct().ToList(), cancellationToken).ConfigureAwait(false);
+                            familyCaller, table.Key, table.Select(h => h.RecordId).Distinct().ToList(), cancellationToken).ConfigureAwait(false);
                     }
                 }
 

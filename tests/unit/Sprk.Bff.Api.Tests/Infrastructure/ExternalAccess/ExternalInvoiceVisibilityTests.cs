@@ -666,15 +666,15 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var unreadable = _world.FamilyRow("sprk_invoicesubmission", invoice: null);
         var service = _world.NewService(_identity.Object);
 
-        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags))
+        (await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms))
             .Should().BeEmpty("the from-email invoice is visible to its firm");
 
         _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", unreadable, "_sprk_invoice_value", "not-a-guid");
-        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission, unreadable }, _world.RootFlags))
+        (await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission, unreadable }, _world.RootFlags, _world.SystemUserFirms))
             .Should().BeEquivalentTo(new[] { unreadable });
 
         _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
-        var act = () => service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+        var act = () => service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
         await act.Should().ThrowAsync<Exception>("a failed invoice read gives the caller no data");
         (await Decide("contact", invoice)).IsVisible(invoice).Should().BeFalse("the predicate's own submission read failed");
     }
@@ -1228,7 +1228,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var withFirm = _world.PendingSubmission(document, channel);
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { blank, withFirm }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { blank, withFirm }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Contains(blank).Should().BeTrue("a submission with no firm is hidden whatever its source");
         // Control: the row with a firm is decided by its source exactly as before (the empty Internal link stays withheld; the others are visible).
@@ -1440,7 +1440,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var missing = Guid.NewGuid();
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync(table, new[] { ofHidden, ofVisible, ofNone, missing }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), table, new[] { ofHidden, ofVisible, ofNone, missing }, _world.RootFlags, _world.SystemUserFirms);
 
         if (table == "sprk_invoicesubmission")
         {
@@ -1491,7 +1491,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var submission = _world.PendingSubmission(document, channel);
 
         var tool = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
         var route = await DecideSubmissions("contact", SubmissionView(submission, channel, document));
 
         tool.Contains(submission).Should().Be(hiddenExpected, route.HiddenSummary());
@@ -1505,7 +1505,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", submission, "_sprk_document_value", "not-a-guid");
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().Contain(submission);
     }
@@ -1520,7 +1520,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var withInvoice = _world.SpaUpload(invoice);
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { spa, isolated, withInvoice }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { spa, isolated, withInvoice }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { isolated });
         var byId = _world.Reads("sprk_invoicesubmissions").Where(u => u.Contains("sprk_invoicesubmissionid eq", StringComparison.Ordinal)).ToList();
@@ -1536,7 +1536,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
 
         var act = () => _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
         await act.Should().ThrowAsync<Exception>();
     }
@@ -1558,7 +1558,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var ofMissingLine = _world.FamilyRow(table, invoice: null, line: Guid.NewGuid());
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync(table, new[] { ofHiddenLine, ofVisibleLine, ofMissingLine }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), table, new[] { ofHiddenLine, ofVisibleLine, ofMissingLine }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { ofHiddenLine, ofMissingLine });
     }
@@ -1571,7 +1571,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var visibleInvoice = _world.OwnedInvoice();
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { hiddenInvoice, visibleInvoice }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoice", new[] { hiddenInvoice, visibleInvoice }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { hiddenInvoice });
     }
@@ -1583,7 +1583,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Faults["sprk_billingevents"] = HttpStatusCode.ServiceUnavailable;
 
         var act = () => _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_billingevent", new[] { row }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_billingevent", new[] { row }, _world.RootFlags, _world.SystemUserFirms);
 
         await act.Should().ThrowAsync<Exception>();
     }
@@ -1721,6 +1721,14 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     /// <summary>The REAL caller-aware seam (<see cref="ExternalDataService.HideInvoicesForAsync"/>) over this world, every caller external.</summary>
     public ExternalInvoiceHiding Seam => (caller, invoiceIds, ct) =>
         NewService(identity: null).HideInvoicesForAsync(caller, invoiceIds, RootFlags, CallerFirms, ct);
+
+    /// <summary>Task 130-0b: the caller of a new assistant tool call (its firms are read on its first call of the family seam).</summary>
+    public InvoiceFamilyCaller NewFamilyCaller() => new(Guid.NewGuid());
+
+    /// <summary>Task 130-0b: the family seam's firm reader over this world's answer (<see cref="CallerFirmsAnswer"/>), counted in
+    /// <see cref="CallerFirmReads"/>.</summary>
+    public Func<Guid, CancellationToken, Task<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms>> SystemUserFirms =>
+        (_, ct) => CallerFirms(null!, ct);
 
     private static Entity Projected(Entity stored, ColumnSet? columns)
     {

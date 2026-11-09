@@ -376,12 +376,15 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         var guardDocument = false;
         var guardDerived = false;
         var guardInvoice = false;
+        // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
+        InvoiceFamilyCaller? familyCaller = null;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName) ||
              ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName)) &&
-            await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                _httpContextAccessor, _callerResolver, _identityResolver, ct).ConfigureAwait(false))
+            await CallerExternality.ClassifyCallerAsync(
+                _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, ct).ConfigureAwait(false)
+                is { IsExternal: true } verdict)
         {
             if (ExternalCallerCommunicationGuard.IsDocumentTable(logicalName))
             {
@@ -396,6 +399,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             {
                 // ebilling-r1 task 098 ((a')): an invoice-family record follows its invoice.
                 guardInvoice = true;
+                familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
             }
             else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
             {
@@ -450,7 +454,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             {
                 // ebilling-r1 task 098 ((a')): hidden when its invoice (directly or through its invoice line) is hidden or
                 // undecidable; the hide-only seam reads the links and the predicate app-only by id. A read fault throws.
-                visible = !(await _hideInvoiceFamily(logicalName, new[] { recordId }, ct).ConfigureAwait(false)).Contains(recordId);
+                visible = !(await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), logicalName, new[] { recordId }, ct).ConfigureAwait(false)).Contains(recordId);
             }
             else if (guardCommunication)
             {

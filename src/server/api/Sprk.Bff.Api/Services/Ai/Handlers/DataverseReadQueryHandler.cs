@@ -189,12 +189,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var guardDocuments = false;
             var guardDerived = false;
             var guardInvoices = false;
+            // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
+            InvoiceFamilyCaller? familyCaller = null;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName) ||
                  ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName)) &&
-                await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
+                await CallerExternality.ClassifyCallerAsync(
+                    _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false)
+                    is { IsExternal: true } verdict)
             {
                 if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
                 {
@@ -209,6 +212,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 {
                     // ebilling-r1 task 098 ((a')): decided after the read by row id; nothing is injected into the query.
                     guardInvoices = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
                 }
                 else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
                 {
@@ -375,7 +379,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     .Where(id => id != Guid.Empty)
                     .Distinct()
                     .ToList();
-                hiddenInvoiceRows = await _hideInvoiceFamily(translation.EntityLogicalName!, rowIds, cancellationToken)
+                hiddenInvoiceRows = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
                     .ConfigureAwait(false);
             }
 

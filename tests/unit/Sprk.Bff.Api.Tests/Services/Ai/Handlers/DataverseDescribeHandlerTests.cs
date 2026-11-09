@@ -546,6 +546,88 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("SUB-1");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b: a partner sees only invoices of its own firms (the seam as AddExternalAccess registers it)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private Task<ToolResult> DescribeInvoiceAsync(Guid invoice)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_invoice')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"EntitySetName\": \"sprk_invoices\", \"PrimaryIdAttribute\": \"sprk_invoiceid\" }")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_invoices(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"sprk_invoiceid\": \"" + invoice.ToString("D") + "\", \"sprk_name\": \"INV-1\" }")));
+        return CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: "{\"path\":\"tables/sprk_invoice/records/" + invoice.ToString("D") + "\"}"),
+            BuildDescribeTool(), CancellationToken.None);
+    }
+
+    private static void ShouldAnswerLikeAMissingRecord(ToolResult result)
+    {
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound);
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage);
+    }
+
+    [Fact(DisplayName = "130-0b describe must fire: another firm's invoice answers like a missing one; one firm read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsInvoice_AnswersLikeAMissingOne()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldAnswerLikeAMissingRecord(await DescribeInvoiceAsync(other));
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b describe must not fire: the caller's own firm's invoice is returned")]
+    public async Task ExecuteChatAsync_Task130_0b_TheCallersOwnFirmsInvoice_IsReturned()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeInvoiceAsync(own);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("INV-1");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b describe must fire: for a caller with no usable firm (no linked contact, a contact-binding fault, an inactive contact) even its own firm's invoice answers like a missing one")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithNoFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_Task130_0b_ACallerWithNoUsableFirm_GetsNoInvoice(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldAnswerLikeAMissingRecord(await DescribeInvoiceAsync(own));
+        firms.World.Urls.Should().BeEmpty("no row is read for a caller with no usable firm");
+        firms.World.InvoiceReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0b describe: an internal systemuser gets another firm's invoice unchanged, and no identity or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnInternalCaller_IsUnchanged_AndReadsNoFirm()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeInvoiceAsync(other);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only read");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCaller_AnInvoiceNeverReachesThePredicate()
     {

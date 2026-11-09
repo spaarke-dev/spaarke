@@ -2019,23 +2019,71 @@ public class ExternalDataService
     /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
     /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
     /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. The caller's firms come from
+    /// <paramref name="caller"/>, read through <paramref name="systemUserFirms"/> at most ONCE per tool call. Known firms apply the
+    /// own-firms rule (the firm hold decides first, firm_missing; then firm_not_callers; a submission row is also hidden when its own
+    /// firm is not one of the caller's). A caller with no firm, and firms that cannot be read (a throw, a null answer,
+    /// <see cref="CallerFirmsState.Unknown"/>), hide every asked row, with no row read.
     /// </summary>
     internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
-        string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+        InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(rootFlags);
-        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(table, rowIds, InvoiceVisibilityReadersOver(rootFlags), ct);
+        ArgumentNullException.ThrowIfNull(systemUserFirms);
+        var asked = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (asked.Count == 0)
+            return new HashSet<Guid>();
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} {Table} row(s) hidden (plane={Plane}).",
+                firms.State, asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(
+            table, asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
         _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
-            AssistantPlane, table, rowIds.Count, hidden.Count);
+            AssistantPlane, table, asked.Count, hidden.Count);
         return hidden;
+    }
+
+    /// <summary>
+    /// Task 130-0b: the assistant caller's firms through <paramref name="read"/>; a throw or a null answer is
+    /// <see cref="CallerFirms.Unknown"/> (fail closed: every asked row hidden). Cancellation propagates.
+    /// </summary>
+    private async Task<CallerFirms> ReadSystemUserFirmsOrUnknownAsync(
+        Func<Guid, CancellationToken, Task<CallerFirms>> read, Guid systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            return await read(systemUserId, ct).ConfigureAwait(false) ?? CallerFirms.Unknown;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The firms of systemuser {SystemUserId} could not be read. Failing CLOSED: no invoice-family row is shown.",
+                systemUserId);
+            return CallerFirms.Unknown;
+        }
     }
 
     /// <summary>
     /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
     /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
     /// the live-parent walk and <paramref name="rootFlags"/>. Task 130-0: <paramref name="callerFirms"/> only from
-    /// <see cref="HideInvoicesForAsync"/> (the own-firms rule); <c>null</c> on the other seams.
+    /// <see cref="HideInvoicesForAsync"/> and (task 130-0b) <see cref="HideInvoiceFamilyRowsAsync"/> (the own-firms rule); <c>null</c> on
+    /// the submission routes' seam.
     /// </summary>
     private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(
         EffectiveRootFlagReader rootFlags, IReadOnlySet<Guid>? callerFirms = null) => new(

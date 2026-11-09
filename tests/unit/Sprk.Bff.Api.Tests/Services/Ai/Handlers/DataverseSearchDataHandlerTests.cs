@@ -480,6 +480,98 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         result.Data!.Value.GetRawText().Should().Contain(spa.ToString("D"));
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b: a partner sees only invoices of its own firms (the seam as AddExternalAccess registers it)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static string HitsJson(params (string Entity, Guid Id)[] hits) =>
+        "{ \"value\": [ "
+        + "{ \"@search.score\": 9.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+        + string.Join(", ", hits.Select((hit, i) =>
+            "{ \"@search.score\": " + (5 - i) + ".0, \"entityname\": \"" + hit.Entity + "\", \"objectid\": \"" + hit.Id.ToString("D") + "\" }"))
+        + " ] }";
+
+    private async Task<ToolResult> SearchAsync()
+    {
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        return await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "130-0b search_data must fire: another firm's invoice-family hits are hidden; the caller's own firm's are shown; one firm read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsInvoiceHitIsHidden_TheCallersOwnIsShown()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_invoice", own), ("sprk_invoice", other)))));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice");
+        result.Data!.Value.GetRawText().Should().Contain(own.ToString("D")).And.NotContain(other.ToString("D"));
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b search_data must fire: a caller with no usable firm (no linked contact, a contact-binding fault, an inactive contact) gets no invoice-family hit")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithNoFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_Task130_0b_ACallerWithNoUsableFirm_GetsNoInvoiceFamilyHit(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_invoice", own), ("sprk_invoice", other)))));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter");
+        firms.World.Urls.Should().BeEmpty("no row is read for a caller with no usable firm");
+        firms.World.InvoiceReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0b search_data: the caller's firms are read exactly once per tool call, across every invoice-family table on the page")]
+    public async Task ExecuteChatAsync_Task130_0b_TheCallersFirmsAreReadOncePerToolCall()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var submission = firms.SubmissionOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var signal = firms.World.FamilyRow("sprk_signal", invoice);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(
+            ("sprk_invoice", invoice), ("sprk_invoicesubmission", submission), ("sprk_signal", signal)))));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice", "sprk_invoicesubmission", "sprk_signal");
+        firms.FirmReads.Should().Be(1, "three seam calls in one tool call share one caller");
+        firms.MembershipReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b search_data: an internal systemuser's results are unchanged, and no identity or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnInternalCaller_IsUnchanged_AndReadsNoFirm()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_invoice", other)))));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice");
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only read");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCaller_InvoiceFamilyHitsNeverReachThePredicate()
     {

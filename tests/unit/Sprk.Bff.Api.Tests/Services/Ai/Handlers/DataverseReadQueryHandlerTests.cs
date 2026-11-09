@@ -975,6 +975,85 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         Names(result).Should().Equal("Spa");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b: a partner sees only invoices of its own firms (the seam as AddExternalAccess registers it)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130-0b read_query must fire: another firm's invoice row is hidden; the caller's own firm's row is shown; one firm read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsInvoiceRowIsHidden_TheCallersOwnIsShown()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b read_query must fire: a caller with no usable firm (no linked contact, a contact-binding fault, an inactive contact) gets no invoice row")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithNoFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_Task130_0b_ACallerWithNoUsableFirm_GetsNoInvoiceRow(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().BeEmpty();
+        firms.World.Urls.Should().BeEmpty("no row is read for a caller with no usable firm");
+        firms.World.InvoiceReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0b read_query must fire: another firm's submission is hidden even when its invoice is visible; the caller's own firm's submission is shown")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsSubmissionOfAVisibleInvoice_IsHidden_TheCallersOwnIsShown()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.SubmissionOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.SubmissionOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b read_query: an internal systemuser's rows are unchanged, and no identity or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnInternalCaller_IsUnchanged_AndReadsNoFirm()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Other");
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only read");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_NeverReachesThePredicate()
     {
