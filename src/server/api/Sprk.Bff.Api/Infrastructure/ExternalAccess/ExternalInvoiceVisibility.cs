@@ -24,8 +24,10 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// (<see cref="ReadFirmHeldInvoicesAsync"/>). The caller's firms come from <see cref="CallerFirmReader"/> as a <see cref="CallerFirms"/>,
 /// which keeps two states apart: a caller KNOWN to have no firm sees no invoice (owner decision 2026-11-08; reason
 /// <see cref="InvoiceHiddenReason.FirmNotCallers"/>, not a fault), and firms that are UNKNOWN hide every asked invoice as a failed read
-/// (<see cref="InvoiceVisibilityResult.ReadFailed"/>). The submission routes and the assistant tools' seam do not apply it here
-/// (<see cref="InvoiceVisibilityReaders.CallerFirms"/> is <c>null</c> there).</para>
+/// (<see cref="InvoiceVisibilityResult.ReadFailed"/>). Task 130-0b: the assistant tools' seam
+/// (<see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/>) applies it too, and there a submission row is also hidden when its own
+/// firm is not one of the caller's (<see cref="HiddenFamilyRowsAsync"/>). The submission routes do not apply it here
+/// (<see cref="InvoiceVisibilityReaders.CallerFirms"/> is <c>null</c> there; their filter scopes by the submission's firm).</para>
 /// <para><b>Own submission (task 165e).</b> The invoice is decided only from its own submission
 /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>, read with the other submissions linked to
 /// it in the same batch): an invoice whose own submission is not found among them is hidden
@@ -107,6 +109,69 @@ internal static class ExternalInvoiceVisibility
     /// <summary>True for <c>sprk_invoice</c> and every table of the taint closure (<see cref="FamilyTables"/>).</summary>
     internal static bool IsInvoiceFamilyTable(string? logicalName) =>
         logicalName is not null && FamilyTables.ContainsKey(logicalName);
+
+    /// <summary>
+    /// Task 130-0b step 2: a CHILD table with an invoice link (<see cref="InvoiceLinks.Tables"/>, derived from the registries): not a
+    /// root (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; a root is never hidden by its invoice link) and not in the invoice family
+    /// (<see cref="FamilyTables"/>, which keeps its own path). A row of such a table is hidden when any invoice it links to is.
+    /// </summary>
+    internal static bool IsInvoiceLinkedChildTable(string? logicalName) =>
+        InvoiceLinks.HasInvoiceLink(logicalName)
+        && !InvoiceLinks.IsRootWithInvoiceLink(logicalName)
+        && !IsInvoiceFamilyTable(logicalName);
+
+    /// <summary>
+    /// Task 130-0b step 3: the columns the regarding resolver derives from a record's regarding target (the target's id as text, its
+    /// name, its URL). Every regarding target shares them, so on a root they carry the invoice only when the target IS the linked invoice.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> RegardingTargetColumns =
+        new[] { "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl" };
+
+    /// <summary>
+    /// Task 130-0b step 3: blanks (sets to null) every form of the invoice link in <paramref name="fields"/>, a row of the ROOT
+    /// <paramref name="table"/> as a tool returns it, when the seam says that root's linked invoice is not visible to the caller (or
+    /// cannot be decided). The link columns come from <see cref="InvoiceLinks.LinkColumnsOf"/>, never from a hand list. Blanked: the
+    /// lookup in its plain and <c>_col_value</c> forms, its name columns (<c>colname</c>, <c>colyominame</c>), and every annotation on
+    /// any of them (<c>key@…</c>: formatted value, lookup logical name, navigation property). The <see cref="RegardingTargetColumns"/>
+    /// (and their annotations) are blanked too unless the row shows they hold ANOTHER target: a regarding id that reads as a GUID that
+    /// is not one of the row's linked invoices. When that cannot be told (no regarding id, no linked invoice in the row), they are
+    /// blanked (fail closed). The row itself is kept.
+    /// </summary>
+    internal static void BlankRootInvoiceLink(string? table, IDictionary<string, object?> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var linkColumns = InvoiceLinks.LinkColumnsOf(table);
+        if (linkColumns.Count == 0)
+            return;
+
+        var valueForms = linkColumns.SelectMany(c => new[] { c, $"_{c}_value" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var linkForms = valueForms.Concat(linkColumns.SelectMany(c => new[] { c + "name", c + "yominame" }))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var invoices = fields.Where(kv => valueForms.Contains(kv.Key)).Select(kv => GuidOf(kv.Value)).OfType<Guid>().ToHashSet();
+        var regardingTarget = fields
+            .Where(kv => string.Equals(kv.Key, RegardingTargetColumns[0], StringComparison.OrdinalIgnoreCase))
+            .Select(kv => GuidOf(kv.Value))
+            .FirstOrDefault();
+        var regardingIsAnotherRecord = invoices.Count > 0 && regardingTarget is { } target && !invoices.Contains(target);
+
+        foreach (var key in fields.Keys.ToList())
+        {
+            var column = key.Split('@', 2)[0];
+            if (linkForms.Contains(column)
+                || (!regardingIsAnotherRecord && RegardingTargetColumns.Contains(column, StringComparer.OrdinalIgnoreCase)))
+            {
+                fields[key] = null;
+            }
+        }
+    }
+
+    private static Guid? GuidOf(object? value) => value switch
+    {
+        Guid id => id,
+        string text when Guid.TryParse(text, out var id) => id,
+        JsonElement { ValueKind: JsonValueKind.String } element when Guid.TryParse(element.GetString(), out var id) => id,
+        _ => null,
+    };
 
     /// <summary>The columns a source document is read with: 188's narrowing columns, the marker, the root links and the
     /// live-parent lookups (whose live roots join the roots term).</summary>
@@ -892,6 +957,16 @@ internal static class ExternalInvoiceVisibility
         var decision = await DecideSubmissionsAsync(decidable, readers, ct).ConfigureAwait(false);
         foreach (var view in decidable.Where(v => !decision.IsVisible(v.SubmissionId)))
             hidden.Add(view.SubmissionId);
+
+        // Task 130-0b (design.md:414): on the assistant tools' seam (the only caller of this function that passes the caller's firms), a
+        // submission is ALSO hidden when its own firm (sprk_vendororg, read above) is not one of the caller's firms, even when its invoice
+        // is visible. The most restrictive reading: the submission routes scope by the submission's own firm only.
+        if (readers.CallerFirms is { } callerFirms)
+        {
+            foreach (var view in decidable.Where(v => v.FirmId is not { } firm || !callerFirms.Contains(firm)))
+                hidden.Add(view.SubmissionId);
+        }
+
         return hidden;
     }
 
@@ -1082,8 +1157,9 @@ public delegate Task<IReadOnlyDictionary<Guid, RootRecordFlags>> EffectiveRootFl
 /// returns each invoice's firm.</param>
 /// <param name="CallerFirms">Task 130-0: the caller's firms, at least one, on the caller-aware invoice seam
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>): an invoice whose firm is not one of them is hidden
-/// (<see cref="InvoiceHiddenReason.FirmNotCallers"/>). <c>null</c> on the seams that do not apply the rule here (the submission routes,
-/// scoped by firm in their filter, and the assistant tools' seam).</param>
+/// (<see cref="InvoiceHiddenReason.FirmNotCallers"/>). Task 130-0b: also on the assistant tools' seam
+/// (<see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/>), where a submission row whose own firm is not one of them is hidden
+/// too. <c>null</c> on the seam that does not apply the rule here (the submission routes, scoped by firm in their filter).</param>
 internal sealed record InvoiceVisibilityReaders(
     CommunicationOpenThreadGate.RowQuery Query,
     InvoiceSourceDecider DecideSources,
@@ -1197,9 +1273,52 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
 /// read app-only (a submission row is decided by <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, as on the
 /// routes); only the hidden id set comes back (a hide decision; no row data). The tool has already decided the caller is
 /// external. A failed read THROWS (the tool call fails with no data). Registered by <c>AddExternalAccess</c>.
+/// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. <paramref name="caller"/> is the tool call's caller
+/// (<see cref="InvoiceFamilyCaller"/>, one per tool call), whose firms are read at most once for every call of the seam in that
+/// tool call. No firm, or firms that cannot be read, hide every asked row.
+/// Task 130-0b step 2: <paramref name="table"/> may also be a CHILD table with an invoice link
+/// (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>: a to-do, event, document, communication, analysis, memo...).
+/// Such a row is hidden when ANY invoice it links to is not visible (the same invoice decision, with the caller's firms) or cannot be
+/// decided; a row with no invoice link is not hidden. On a child table a fault does not throw: a failed link read hides every asked
+/// row, and a failed decision (or firms that cannot be read) hides every asked row that links to an invoice.
+/// Task 130-0b step 3: <paramref name="table"/> may also be a ROOT with an invoice link (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>;
+/// today the work assignment). A root is decided by its grant and is NEVER hidden by its invoice link: for a root the returned ids are
+/// the rows whose invoice link the tool must blank (<see cref="ExternalInvoiceVisibility.BlankRootInvoiceLink"/>), under the child
+/// rule's decision and fault rule (not visible, undecidable, or a fault: blank).
 /// </summary>
 public delegate Task<IReadOnlySet<Guid>> AppOnlyInvoiceFamilyHiding(
-    string table, IReadOnlyCollection<Guid> rowIds, CancellationToken ct);
+    InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, CancellationToken ct);
+
+/// <summary>
+/// Task 130-0b: the caller of ONE assistant tool call, as <see cref="AppOnlyInvoiceFamilyHiding"/> takes it. The tool builds it once,
+/// from the external-caller classification it already made (<c>CallerExternality.ClassifyCallerAsync</c>), and passes the same
+/// object to every call of the seam in that tool call. It remembers the caller's firms, so they are read at most ONCE per tool call.
+/// A caller with no resolved systemuser has no firm (nothing is read).
+/// </summary>
+public sealed class InvoiceFamilyCaller
+{
+    private readonly object _gate = new();
+    private Task<CallerFirms>? _firms;
+
+    public InvoiceFamilyCaller(Guid? systemUserId)
+    {
+        SystemUserId = systemUserId is { } id && id != Guid.Empty ? id : null;
+    }
+
+    /// <summary>The caller's resolved <c>systemuserid</c>; <c>null</c> when none resolved.</summary>
+    public Guid? SystemUserId { get; }
+
+    /// <summary>
+    /// The caller's firms: the first call reads them through <paramref name="read"/> (only when a systemuser resolved); every later
+    /// call in the same tool call gets that answer, a fault included.
+    /// </summary>
+    internal Task<CallerFirms> FirmsAsync(Func<Guid, CancellationToken, Task<CallerFirms>> read, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        lock (_gate)
+            return _firms ??= SystemUserId is { } systemUserId ? read(systemUserId, ct) : Task.FromResult(CallerFirms.NoFirm);
+    }
+}
 
 /// <summary>Why an invoice is hidden (logged as counts per code only).</summary>
 internal enum InvoiceHiddenReason

@@ -142,9 +142,20 @@ public static class ExternalAccessModule
         services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
             (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
                 caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Task 130-0b (design.md:414): with the firms of the tool call's systemuser, through the same contact-keyed core
+        // (ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync), read at most once per tool call (InvoiceFamilyCaller).
+        // Step 2: the same seam also decides rows of a child table with an invoice link (InvoiceLinks), by the invoices they link to.
         services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
-            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
-                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+            (caller, table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                caller, table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (systemUserId, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync(
+                        systemUserId, sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(),
+                        sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
 
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for

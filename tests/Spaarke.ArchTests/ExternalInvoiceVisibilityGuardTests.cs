@@ -801,14 +801,15 @@ internal sealed class InvoiceGuardControlNamesStepZero
 /// <summary>MUST FIRE (family seam): takes the seam.</summary>
 internal sealed class FamilySeamControlTakesTheSeam(AppOnlyInvoiceFamilyHiding hide)
 {
-    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide("sprk_invoice", new[] { id }, ct);
+    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide(new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, ct);
 }
 
 /// <summary>MUST FIRE (family seam): calls the app-only reader's entry directly.</summary>
 internal sealed class FamilySeamControlCallsTheReaderDirectly(ExternalDataService data)
 {
     internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, EffectiveRootFlagReader flags, CancellationToken ct) =>
-        data.HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { id }, flags, ct);
+        data.HideInvoiceFamilyRowsAsync(
+            new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, flags, (_, _) => Task.FromResult(CallerFirms.NoFirm), ct);
 }
 
 /// <summary>MUST FIRE (family seam): resolves the seam by name.</summary>
@@ -882,7 +883,7 @@ internal sealed class ToolDecisionControlToolDecidesWithTheInvoiceSeam(ExternalI
 internal sealed class ToolDecisionControlToolUsesTheFamilySeam(AppOnlyInvoiceFamilyHiding hide)
 {
     internal async Task<bool> ExecuteChatAsync(Guid row, CancellationToken ct) =>
-        !(await hide("sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
+        !(await hide(new InvoiceFamilyCaller(null), "sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
 }
 
 /// <summary>Control (one function): the shared decision; it invokes the seam.</summary>

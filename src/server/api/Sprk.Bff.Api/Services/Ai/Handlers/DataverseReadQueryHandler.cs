@@ -189,13 +189,36 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var guardDocuments = false;
             var guardDerived = false;
             var guardInvoices = false;
+            var guardInvoiceLinks = false;
+            var guardRootInvoiceLink = false;
+            // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
+            InvoiceFamilyCaller? familyCaller = null;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName) ||
-                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName)) &&
-                await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
+                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName) ||
+                 ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(translation.EntityLogicalName) ||
+                 InvoiceLinks.IsRootWithInvoiceLink(translation.EntityLogicalName)) &&
+                await CallerExternality.ClassifyCallerAsync(
+                    _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false)
+                    is { IsExternal: true } verdict)
             {
+                // Task 130-0b step 2: a CHILD table with an invoice link (to-do, event, document, communication, analysis, memo...)
+                // is ALSO decided after the read by row id, through the same seam, on top of any guard below; nothing is injected.
+                if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(translation.EntityLogicalName))
+                {
+                    guardInvoiceLinks = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
+                }
+
+                // Task 130-0b step 3: a ROOT with an invoice link (today the work assignment) is decided by its grant and never
+                // hidden by that link; after the read, the link is blanked on each row whose invoice is not visible (same seam).
+                if (InvoiceLinks.IsRootWithInvoiceLink(translation.EntityLogicalName))
+                {
+                    guardRootInvoiceLink = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
+                }
+
                 if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
                 {
                     guardDocuments = true;
@@ -209,18 +232,19 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 {
                     // ebilling-r1 task 098 ((a')): decided after the read by row id; nothing is injected into the query.
                     guardInvoices = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
                 }
-                else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                else if (ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                {
+                    guardCommunications = true;
+                }
+                else if (ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName))
                 {
                     _logger.LogInformation(
                         "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                         translation.EntityLogicalName, "family_table_refused", context.DecisionId);
                     return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
                         DataverseUserClientErrorCodes.AccessDenied, startedAt);
-                }
-                else
-                {
-                    guardCommunications = true;
                 }
             }
 
@@ -375,7 +399,41 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     .Where(id => id != Guid.Empty)
                     .Distinct()
                     .ToList();
-                hiddenInvoiceRows = await _hideInvoiceFamily(translation.EntityLogicalName!, rowIds, cancellationToken)
+                hiddenInvoiceRows = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Task 130-0b step 2: a row of a CHILD table with an invoice link is hidden when any invoice it links to is hidden or
+            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); a fault
+            // there hides every invoice-linked row of the page rather than throwing. A row without a readable id is hidden.
+            IReadOnlySet<Guid>? hiddenInvoiceLinkedRows = null;
+            if (guardInvoiceLinks &&
+                response.Body is { } linkedBody && linkedBody.TryGetProperty("value", out var linkedValue) &&
+                linkedValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = linkedValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                hiddenInvoiceLinkedRows = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Task 130-0b step 3: on a ROOT with an invoice link, the rows whose linked invoice is not visible or cannot be decided
+            // (a fault there counts as not visible, never throws). One app-only call for the page; the rows are KEPT and only their
+            // invoice link is blanked below. A row without a readable id has its link blanked.
+            IReadOnlySet<Guid>? blankedRootLinks = null;
+            if (guardRootInvoiceLink &&
+                response.Body is { } rootBody && rootBody.TryGetProperty("value", out var rootValue) &&
+                rootValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = rootValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                blankedRootLinks = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -383,6 +441,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
             var hiddenInvoiceFamily = 0;
+            var hiddenInvoiceLinked = 0;
+            var blankedRootLinkRows = 0;
             var hiddenDocuments = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
             // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
@@ -414,6 +474,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         (familyId == Guid.Empty || hiddenInvoiceRows is null || hiddenInvoiceRows.Contains(familyId)))
                     {
                         hiddenInvoiceFamily++;
+                        continue;
+                    }
+
+                    if (guardInvoiceLinks &&
+                        RecordIdOf(record, primaryIdAttribute) is var linkedId &&
+                        (linkedId == Guid.Empty || hiddenInvoiceLinkedRows is null || hiddenInvoiceLinkedRows.Contains(linkedId)))
+                    {
+                        hiddenInvoiceLinked++;
                         continue;
                     }
 
@@ -460,6 +528,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
                     }
 
+                    // Task 130-0b step 3: a root row is kept; its invoice link is blanked when that invoice is not visible.
+                    if (guardRootInvoiceLink &&
+                        RecordIdOf(record, primaryIdAttribute) is var rootId &&
+                        (rootId == Guid.Empty || blankedRootLinks is null || blankedRootLinks.Contains(rootId)))
+                    {
+                        ExternalInvoiceVisibility.BlankRootInvoiceLink(translation.EntityLogicalName, row);
+                        blankedRootLinkRows++;
+                    }
+
                     if (recordId != Guid.Empty)
                     {
                         row["@citation.path"] = DataverseRecordCitations.RecordPath(translation.EntityLogicalName!, recordId);
@@ -491,6 +568,20 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 _logger.LogInformation(
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     translation.EntityLogicalName, $"invoice_hidden={hiddenInvoiceFamily}", context.DecisionId);
+            }
+            if (hiddenInvoiceLinked > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"invoice_linked_hidden={hiddenInvoiceLinked}", context.DecisionId);
+            }
+            if (blankedRootLinkRows > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"root_invoice_link_blanked={blankedRootLinkRows}", context.DecisionId);
             }
             if (hiddenDerivedSources.Count > 0)
             {

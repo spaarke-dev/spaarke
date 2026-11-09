@@ -2161,23 +2161,188 @@ public class ExternalDataService
     /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
     /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
     /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. The caller's firms come from
+    /// <paramref name="caller"/>, read through <paramref name="systemUserFirms"/> at most ONCE per tool call. Known firms apply the
+    /// own-firms rule (the firm hold decides first, firm_missing; then firm_not_callers; a submission row is also hidden when its own
+    /// firm is not one of the caller's). A caller with no firm, and firms that cannot be read (a throw, a null answer,
+    /// <see cref="CallerFirmsState.Unknown"/>), hide every asked row, with no row read.
+    /// Task 130-0b step 2: rows of a CHILD table with an invoice link go to <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by
+    /// the invoices they link to; a fault there hides rather than throws).
+    /// Task 130-0b step 3: rows of a ROOT with an invoice link go to <see cref="RootRowsWithInvoiceLinkBlankedAsync"/>; for such a table
+    /// the returned ids are the rows whose invoice link is blanked, never rows to hide.
     /// </summary>
     internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
-        string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+        InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(rootFlags);
-        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(table, rowIds, InvoiceVisibilityReadersOver(rootFlags), ct);
+        ArgumentNullException.ThrowIfNull(systemUserFirms);
+        var asked = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (asked.Count == 0)
+            return new HashSet<Guid>();
+
+        // Task 130-0b step 2: a child row with an invoice link (to-do, event, document, communication, analysis, memo...) is decided by
+        // its invoices; it does not take the family path below.
+        if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table))
+            return await HideInvoiceLinkedChildRowsAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
+
+        // Task 130-0b step 3: a ROOT with an invoice link (InvoiceLinks; today the work assignment) is never hidden by it. The rows
+        // returned are the ones whose invoice link the tool blanks; the row itself is shown (a root is decided by its grant).
+        if (InvoiceLinks.IsRootWithInvoiceLink(table))
+            return await RootRowsWithInvoiceLinkBlankedAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} {Table} row(s) hidden (plane={Plane}).",
+                firms.State, asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(
+            table, asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
         _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
-            AssistantPlane, table, rowIds.Count, hidden.Count);
+            AssistantPlane, table, asked.Count, hidden.Count);
         return hidden;
+    }
+
+    /// <summary>
+    /// Task 130-0b step 2 (design.md:414): of <paramref name="asked"/> (rows of a CHILD table with an invoice link,
+    /// <see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>), the rows hidden because an invoice they link to is. The links
+    /// are read app-only through <see cref="InvoiceLinks.ReadLinkedInvoicesAsync"/> (one read per chunk); then ONE invoice decision over
+    /// the union of the linked invoices, with the caller's firms from <paramref name="caller"/> (the same decision as
+    /// <see cref="HideInvoicesForAsync"/>: firm hold, firm_not_callers, (a′)). A row is hidden when ANY linked invoice is not visible or
+    /// cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>); a row with no invoice link is not hidden, and the firms
+    /// are not read when no asked row has one. Fail closed without throwing: a failed link read hides every asked row (which of them link
+    /// to an invoice is unknown); firms that are not known, and a failed or faulted decision, hide every asked row that links to one.
+    /// </summary>
+    private Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "hidden", ct);
+
+    /// <summary>
+    /// Task 130-0b step 3 (design.md:414): of <paramref name="asked"/> (rows of a ROOT with an invoice link,
+    /// <see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; today the work assignment), the rows whose invoice link the tool must BLANK. A
+    /// root is decided by its grant and is never hidden by its invoice link; its invoice link is shown only when that invoice is visible.
+    /// The decision is the child rule's, with the same reads (one app-only link read, then ONE invoice decision with the firms from
+    /// <paramref name="caller"/>): a row whose linked invoice is not visible or cannot be decided is returned; a row with no invoice
+    /// link is not, and the firms are not read when no asked row has one. Fail closed without throwing: a failed link read returns
+    /// every asked row; firms that are not known, and a failed or faulted decision, return every asked row that links to an invoice.
+    /// </summary>
+    private Task<IReadOnlySet<Guid>> RootRowsWithInvoiceLinkBlankedAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "shown with the invoice link blanked", ct);
+
+    /// <summary>
+    /// Task 130-0b steps 2 and 3: of <paramref name="asked"/> (rows of a table with an invoice link), the rows that link to an invoice
+    /// that is not visible or cannot be decided, or whose links cannot be read. <paramref name="consequence"/> only labels the log
+    /// lines (a child row is hidden; a root row is shown with its invoice link blanked).
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> RowsLinkedToAnInvoiceNotVisibleAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, string consequence, CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> linksOf;
+        try
+        {
+            linksOf = await InvoiceLinks.ReadLinkedInvoicesAsync(table, asked, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The invoice links of {Count} {Table} row(s) could not be read. Failing CLOSED: every one is {Consequence} (plane={Plane}).",
+                asked.Count, table, consequence, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        var linked = linksOf.Where(kv => kv.Value.Count > 0).ToList();
+        if (linked.Count == 0)
+            return new HashSet<Guid>();
+        var linkedRows = linked.Select(kv => kv.Key).ToHashSet();
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} invoice-linked {Table} row(s) {Consequence} (plane={Plane}).",
+                firms.State, linkedRows.Count, table, consequence, AssistantPlane);
+            return linkedRows;
+        }
+
+        var invoices = linked.SelectMany(kv => kv.Value).Where(id => id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
+        InvoiceVisibilityResult? decision = null;
+        if (invoices.Count > 0)
+        {
+            try
+            {
+                decision = await ExternalInvoiceVisibility.DecideAsync(invoices, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[EXT-INVOICE-VISIBILITY] The decision for {Count} invoice(s) linked from {Table} failed. Failing CLOSED: every invoice-linked row is {Consequence} (plane={Plane}).",
+                    invoices.Count, table, consequence, AssistantPlane);
+                return linkedRows;
+            }
+
+            LogInvoiceVisibilityCost(AssistantPlane, invoices.Count, decision);
+            if (decision.Faulted)
+                return linkedRows;
+        }
+
+        return linked
+            .Where(kv => kv.Value.Any(invoice => invoice == ExternalDocumentNarrowing.UnreadableLink
+                || decision is null || !decision.IsVisible(invoice)))
+            .Select(kv => kv.Key)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Task 130-0b: the assistant caller's firms through <paramref name="read"/>; a throw or a null answer is
+    /// <see cref="CallerFirms.Unknown"/> (fail closed: every asked row hidden). Cancellation propagates.
+    /// </summary>
+    private async Task<CallerFirms> ReadSystemUserFirmsOrUnknownAsync(
+        Func<Guid, CancellationToken, Task<CallerFirms>> read, Guid systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            return await read(systemUserId, ct).ConfigureAwait(false) ?? CallerFirms.Unknown;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The firms of systemuser {SystemUserId} could not be read. Failing CLOSED: no invoice-family row is shown.",
+                systemUserId);
+            return CallerFirms.Unknown;
+        }
     }
 
     /// <summary>
     /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
     /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
     /// the live-parent walk and <paramref name="rootFlags"/>. Task 130-0: <paramref name="callerFirms"/> only from
-    /// <see cref="HideInvoicesForAsync"/> (the own-firms rule); <c>null</c> on the other seams.
+    /// <see cref="HideInvoicesForAsync"/> and (task 130-0b) <see cref="HideInvoiceFamilyRowsAsync"/> (the own-firms rule); <c>null</c> on
+    /// the submission routes' seam.
     /// </summary>
     private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(
         EffectiveRootFlagReader rootFlags, IReadOnlySet<Guid>? callerFirms = null) => new(
