@@ -617,12 +617,13 @@ public class DirectThreadAccessServiceTests
             .Team(OtherTeamId, "Some Owner Team", DirectMessageOwnerTeamDouble.RootUnitId);
 
     /// <summary>A SUT over the real Direct-team lookup, configured, reading <paramref name="directory"/>.</summary>
-    private DirectThreadAccessService DirectTeamSut(DirectMessageOwnerTeamDouble? directory = null) => new(
+    private DirectThreadAccessService DirectTeamSut(
+        DirectMessageOwnerTeamDouble? directory = null, ILogger<DirectThreadAccessService>? logger = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-        Mock.Of<ILogger<DirectThreadAccessService>>(),
+        logger ?? Mock.Of<ILogger<DirectThreadAccessService>>(),
         new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
         (directory ?? DirectDirectory()).Lookup());
 
@@ -778,6 +779,23 @@ public class DirectThreadAccessServiceTests
 
         await act.Should().NotThrowAsync();
         VerifyNoGrantAtAll();
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_WhenTheOneRowCheckFaults_IsUnknown_ReachesTheOneFailClosedBranch()
+    {
+        // Ruling Q5: a fault is unknown, never "not Direct", and every unknown takes the same branch (nothing granted; the
+        // re-grant hook of Part C), not the method's generic catch.
+        DirectTeamMessageWorld();
+        var directory = DirectDirectory();
+        directory.Faults = true;
+        var log = new CapturingLogger<DirectThreadAccessService>();
+
+        await DirectTeamSut(directory, log).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNoGrantAtAll();
+        log.Entries.Should().Contain(e => e.Message.Contains("cannot be determined", StringComparison.Ordinal));
+        log.Entries.Should().NotContain(e => e.Message.Contains("lookup failed (non-fatal)", StringComparison.Ordinal));
     }
 
     [Fact]

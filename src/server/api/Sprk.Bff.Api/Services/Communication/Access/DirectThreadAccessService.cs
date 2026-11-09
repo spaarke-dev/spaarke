@@ -263,21 +263,32 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// <item>Resolved: <c>true</c> exactly when the resolved team is <paramref name="owningTeam"/>.</item>
     /// <item>Refused as <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>: <c>false</c>. No Direct team is configured,
     /// so fm's writer assigns no message to one.</item>
-    /// <item>Any other refusal, or a fault: <c>null</c> (unknown).</item>
+    /// <item>Any other refusal, or a fault (in the one-row check or in the resolution): <c>null</c> (unknown).</item>
     /// </list>
-    /// A fault in the one-row check propagates to the caller's catch, which grants nothing.
+    /// Task 198 ruling Q5: only <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/> settles "not Direct" (no Direct team can
+    /// exist then, and fm's writer assigns none). Every other answer that is not a resolution is unknown, so every unknown reaches
+    /// the caller's one fail-closed branch (nothing granted; the message is queued for re-grant, Part C). This is the ONE place
+    /// the decision is made, so a change to the lookup's answer shape changes only this method.
     /// </summary>
     private async Task<bool?> IsDirectMessageOwnerTeamAsync(Guid owningTeam, CancellationToken ct)
     {
-        if (await _directMessageOwnerTeam.CannotBeDirectOwnerTeamAsync(owningTeam, ct))
-            return false;
+        try
+        {
+            if (await _directMessageOwnerTeam.CannotBeDirectOwnerTeamAsync(owningTeam, ct))
+                return false;
 
-        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct);
-        if (direct.IsResolved)
-            return direct.TeamId == owningTeam;
-        if (direct.Refusal == DirectMessageOwnerTeamRefusal.NotConfigured && direct.Fault is null)
-            return false;
-        return null;
+            var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct);
+            if (direct.IsResolved)
+                return direct.TeamId == owningTeam;
+            if (direct.Refusal == DirectMessageOwnerTeamRefusal.NotConfigured && direct.Fault is null)
+                return false;
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Whether team {TeamId} is the Direct-message owner team could not be read; treated as unknown.", owningTeam);
+            return null;
+        }
     }
 
     /// <summary>
