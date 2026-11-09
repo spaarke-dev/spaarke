@@ -1616,6 +1616,7 @@ hold it, so "written by the server writer" stays true. Never assign the reader r
 H10 does not assign it yet; after H6 imports SpaarkeMaster run
 `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <bff-app-id>,<bff-uami-client-id> -Apply`,
 then the same with `-Verify` (exit 0 = both App Users hold it, the role holds only that read, and nobody else holds it).
+`-Apply` strips privileges Dataverse adds to the role outside its one declared privilege.
 
 Then reconciles the stamp identity's Microsoft Graph app roles to exactly the evidence-backed set in `GraphAppRoles.cs`
 (task 261 / G31 — every app-only call the stamp BFF makes, its Microsoft Learn least-privileged permission, and the

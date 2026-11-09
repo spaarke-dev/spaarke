@@ -1,7 +1,8 @@
 # Pester 5.7.1 (6.x does not load the containers here). Run: Invoke-Pester tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1
 # ebilling-r1 DEF-059: scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 over a mocked Dataverse. Pins: -Verify exits 0 only when
 # every BFF application user present holds the role copy of its own business unit, the role holds exactly prvReadsprk_DecisionRecord
-# at Global, and nobody else holds it; -Apply assigns only what is missing (idempotent) and refuses a drifted role.
+# at Global, and nobody else holds it; -Apply first strips privileges outside the declared one (removal only, root role), then assigns
+# only what is missing (idempotent), and refuses (exit 2, writes nothing) when the role or the declared privilege is wrong.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -22,6 +23,9 @@ BeforeAll {
         $output = & $script:Script @Arguments 6>&1 2>&1 | Out-String
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
     }
+    function Priv([string]$Name, [string]$Depth, [string]$Id) { [pscustomobject]@{ PrivilegeName = $Name; Depth = $Depth; PrivilegeId = $Id } }
+    $global:DrrTest_DeclaredId = '00000000-0000-4000-8000-0000000000e0'
+    $global:DrrTest_ExtraIds = @('00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000e2', '00000000-0000-4000-8000-0000000000e3')
     function Base([switch]$Apply, [switch]$Verify) {
         $a = @{ EnvironmentUrl = $script:Url; BffApplicationIds = @("$global:DrrTest_AppA,$global:DrrTest_AppB") }
         if ($Apply) { $a.Apply = $true }
@@ -38,16 +42,26 @@ Describe 'Set-BffDecisionRecordReaderRole.ps1 (mocked Dataverse)' {
     BeforeEach {
         $global:LASTEXITCODE = 0
         $global:DrrTest_RoleExists = $true
-        $global:DrrTest_Privileges = @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Global' })
+        $global:DrrTest_Privileges = @(Priv 'prvReadsprk_DecisionRecord' 'Global' $global:DrrTest_DeclaredId)
         $global:DrrTest_PresentApps = @($global:DrrTest_AppA, $global:DrrTest_AppB)
         $global:DrrTest_Assigned = @{ $global:DrrTest_UserA = $true; $global:DrrTest_UserB = $true }
         $global:DrrTest_OtherHolders = @()
         $global:DrrTest_Teams = @()
         $global:DrrTest_Posts = [System.Collections.Generic.List[string]]::new()
+        $global:DrrTest_Removes = [System.Collections.Generic.List[string]]::new()   # privilege ids named in RemovePrivilegeRole calls
+        $global:DrrTest_RemoveRoles = [System.Collections.Generic.List[string]]::new()   # role ids those calls targeted
+        $global:DrrTest_StripSticks = $true   # false: the platform re-injects the privilege, so a removal does not stick
         Mock az { 'test-token' }
         Mock Invoke-RestMethod {
             $u = [string]$Uri
             if ($Method -eq 'Post') {
+                if ($u -match '/roles\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.RemovePrivilegeRole$') {
+                    $id = ([Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json).Privilege.privilegeid
+                    $global:DrrTest_Removes.Add($id)
+                    $global:DrrTest_RemoveRoles.Add($Matches[1])
+                    if ($global:DrrTest_StripSticks) { $global:DrrTest_Privileges = @($global:DrrTest_Privileges | Where-Object { "$($_.PrivilegeId)" -ne $id }) }
+                    return $null
+                }
                 if ($u -match 'systemusers\(([^)]+)\)/systemuserroles_association/\$ref$') {
                     $global:DrrTest_Posts.Add("$($Matches[1]) <- " + ([Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json).'@odata.id')
                     $global:DrrTest_Assigned[$Matches[1]] = $true
@@ -168,26 +182,81 @@ Describe 'Set-BffDecisionRecordReaderRole.ps1 (mocked Dataverse)' {
         $global:DrrTest_Posts.Count | Should -Be 0
     }
 
-    It 'platform defaults are drift by default; -AllowPlatformDefaults lists them without failing, and never excuses another privilege' {
-        $global:DrrTest_Privileges = @(
-            [pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Global' }
-            [pscustomobject]@{ PrivilegeName = 'prvReadPluginAssembly'; Depth = 'Global' })
+    It 'there is no allow-list switch: -AllowPlatformDefaults is not a parameter, and an extra privilege fails -Verify' {
+        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
         (Invoke-Script (Base -Verify)).ExitCode | Should -Be 1
         $a = Base -Verify; $a.AllowPlatformDefaults = $true
-        $r = Invoke-Script $a
-        $r.ExitCode | Should -Be 0
-        $r.Output | Should -Match 'platform default prvReadPluginAssembly'
-
-        $global:DrrTest_Privileges += [pscustomobject]@{ PrivilegeName = 'prvCreatesprk_DecisionRecord'; Depth = 'Global' }
-        (Invoke-Script $a).ExitCode | Should -Be 1
+        { & $script:Script @a 6>&1 2>&1 | Out-Null } | Should -Throw
     }
 
-    It '-Apply refuses a drifted role and assigns nothing' {
+    It 'must-fire: -Apply strips each extra privilege (naming exactly the extras, never the declared one, on the root role), then assigns' {
+        $global:DrrTest_Assigned = @{ $global:DrrTest_UserA = $true }
+        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
+        $global:DrrTest_Privileges += Priv 'prvReadSharePointData' 'Basic' $global:DrrTest_ExtraIds[1]
+        $global:DrrTest_Privileges += Priv 'prvCreateSharePointData' 'Global' $global:DrrTest_ExtraIds[2]
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 0
+        @($global:DrrTest_Removes | Sort-Object) | Should -Be @($global:DrrTest_ExtraIds | Sort-Object)
+        $global:DrrTest_Removes | Should -Not -Contain $global:DrrTest_DeclaredId
+        @($global:DrrTest_RemoveRoles | Select-Object -Unique) | Should -Be @($global:DrrTest_RootRole)
+        $global:DrrTest_Posts.Count | Should -Be 1
+        $global:DrrTest_Posts[0] | Should -Be "$global:DrrTest_UserB <- $script:Url/api/data/v9.2/roles($global:DrrTest_CustomerCopy)"
+        @($global:DrrTest_Privileges).Count | Should -Be 1
+        (Invoke-Script (Base -Verify)).ExitCode | Should -Be 0
+    }
+
+    It 'must-fire: -Apply on a role the platform keeps re-adding to exits 2 after the strip and assigns nothing' {
         $global:DrrTest_Assigned = @{}
-        $global:DrrTest_Privileges = @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Global' }, [pscustomobject]@{ PrivilegeName = 'prvCreatesprk_DecisionRecord'; Depth = 'Global' })
+        $global:DrrTest_StripSticks = $false
+        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 2
+        $r.Output | Should -Match 'REFUSED: after the strip'
+        $global:DrrTest_Removes.Count | Should -Be 1
+        $global:DrrTest_Posts.Count | Should -Be 0
+    }
+
+    It 'must-fire: -Apply with the declared privilege missing exits 2, strips nothing and assigns nothing (never repaired by adding)' {
+        $global:DrrTest_Assigned = @{}
+        $global:DrrTest_Privileges = @(Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0])
         $r = Invoke-Script (Base -Apply)
         $r.ExitCode | Should -Be 2
         $r.Output | Should -Match 'REFUSED'
+        $global:DrrTest_Removes.Count | Should -Be 0
+        $global:DrrTest_Posts.Count | Should -Be 0
+    }
+
+    It 'must-fire: -Apply with the declared privilege at Deep exits 2, strips nothing (not even the extras) and assigns nothing' {
+        $global:DrrTest_Assigned = @{}
+        $global:DrrTest_Privileges = @((Priv 'prvReadsprk_DecisionRecord' 'Deep' $global:DrrTest_DeclaredId), (Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]))
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 2
+        $global:DrrTest_Removes.Count | Should -Be 0
+        $global:DrrTest_Posts.Count | Should -Be 0
+    }
+
+    It 'must-fire: -Apply with the role missing exits 2 and writes nothing' {
+        $global:DrrTest_RoleExists = $false
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 2
+        $global:DrrTest_Removes.Count | Should -Be 0
+        $global:DrrTest_Posts.Count | Should -Be 0
+    }
+
+    It 'must-not-fire: -Apply on an exact role makes no strip call' {
+        $global:DrrTest_Assigned = @{ $global:DrrTest_UserA = $true }
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 0
+        $global:DrrTest_Removes.Count | Should -Be 0
+        $global:DrrTest_Posts.Count | Should -Be 1
+    }
+
+    It 'the dry run reports the extras -Apply would strip and writes nothing' {
+        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
+        $r = Invoke-Script (Base)
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Match 'would strip prvReadPluginAssembly'
+        $global:DrrTest_Removes.Count | Should -Be 0
         $global:DrrTest_Posts.Count | Should -Be 0
     }
 
