@@ -174,6 +174,48 @@ public sealed class DataverseWebApiAppUserCreatorTests
     }
 
     [Fact]
+    public async Task ThreeUnitsAnswerTheSecureName_TheCustomersLast_IsStillFound()
+    {
+        // Must fire: a $top=2 read of the reserved name would miss the customer's unit in third place. (Scripted per query:
+        // the customer-name lookup answers one unit, the reserved-name lookup answers three with the customer's last.)
+        var http = new FakeHttp(req =>
+        {
+            var uri = Uri.UnescapeDataString(req.RequestUri!.AbsoluteUri);
+            if (uri.Contains("parentbusinessunitid eq null"))
+            {
+                return Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""");
+            }
+            if (uri.Contains($"name eq '{SecureName}'"))
+            {
+                var take = int.Parse(System.Text.RegularExpressions.Regex.Match(uri, @"\$top=(\d+)").Groups[1].Value);
+                var rows = new[] { "90000000-0000-0000-0000-000000000009", SecureBu, CustomerBu }
+                    .Take(take).Select(id => $$"""{"businessunitid":"{{id}}"}""");
+                return Json($$"""{"value":[{{string.Join(",", rows)}}]}""");
+            }
+            return Json($$"""{"value":[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":"{{RootBu}}"}]}""");
+        });
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Sécure Record", Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.IsReservedUnit(Guid.Parse(CustomerBu), SecureName));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task ReservedNameAnsweredByTheCapOrMore_IsAFailure_NeverAPass()
+    {
+        var units = Enumerable.Range(1, DataverseWebApiAppUserCreator.ReservedLookupCap)
+            .Select(i => ($"a0000000-0000-0000-0000-{i:D12}", SecureName))
+            .Append((CustomerBu, "Acme Corporation"));
+        var http = UnitsFake(units);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
+
+        outcome.Should().BeOfType<CustomerBusinessUnitOutcome.Failure>().Which.Diagnostic.Should().Contain("cannot tell");
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
     public async Task CustomerName_Distinct_WithTheSecureUnitPresent_ReusesTheCustomersUnit()
     {
         // Must not fire: distinct names proceed.

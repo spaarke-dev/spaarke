@@ -48,6 +48,9 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 {
     private const string Api = "/api/data/v9.2/";
 
+    /// <summary>Rows read per reserved-name lookup; reaching it is a Failure (cannot decide), never a pass.</summary>
+    internal const int ReservedLookupCap = 50;
+
     private readonly HttpClient _httpClient;
     private readonly H10DataverseAppUserGraphParityOptions _options;
     private readonly ILogger<DataverseWebApiAppUserCreator> _logger;
@@ -138,9 +141,17 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             {
                 foreach (var reservedName in reservedUnitNames)
                 {
+                    // Read EVERY unit answering the reserved name (several can, in exactly the collision case): a capped read
+                    // could leave the customer's unit unread. Hitting the cap is undecidable → throw → Failure (fail closed).
                     var reserved = Values(await GetAsync(envUri, token,
-                        $"businessunits?$filter=name eq '{Literal(reservedName)}'&$select=businessunitid&$top=2",
+                        $"businessunits?$filter=name eq '{Literal(reservedName)}'&$select=businessunitid&$top={ReservedLookupCap}",
                         cancellationToken).ConfigureAwait(false));
+                    if (reserved.Count >= ReservedLookupCap)
+                    {
+                        throw new InvalidOperationException(
+                            $"{reserved.Count} or more business units answer the reserved name '{reservedName}' — H10 cannot " +
+                            "tell whether the customer's unit is among them. Nothing more was written.");
+                    }
                     var hit = reserved.Select(row => Id(row, "businessunitid")).FirstOrDefault(unitIds.Contains);
                     if (hit != Guid.Empty)
                     {
