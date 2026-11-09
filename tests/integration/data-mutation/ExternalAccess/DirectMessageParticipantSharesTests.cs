@@ -458,7 +458,7 @@ public class DirectMessageParticipantSharesTests
         _world.FailingRowReadsOf("sprk_communication", message);
         var job = Job();
 
-        for (var run = 0; run < SecureChildShareReconciliationJob.MaxDirectAttempts; run++)
+        for (var run = 0; run < 3; run++)
         {
             await job.ExecuteAsync(RunContext(), CancellationToken.None);
             _time.Advance(TimeSpan.FromMinutes(2));

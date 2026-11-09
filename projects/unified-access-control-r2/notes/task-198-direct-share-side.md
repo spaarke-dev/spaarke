@@ -373,6 +373,33 @@ No follow-up job is needed.
 
 The brief's baseline of 2870 was measured at an earlier tip. 2884 was re-measured at `2ca6340051` in a detached worktree.
 
+### §7.2 Fix round 1, batch 1 (R1, R4, R5)
+
+Adversarial review pass 1; coordinator rulings 2026-11-09. R2 (the participant source) waits for fm's choice between a stamped recipient column (A) and the Direct team owning the thread (C). R3 runs after this batch, and R6 (the script) runs in another worktree.
+
+**The participant seam.** `DirectMessageParticipantShares.DeriveParticipantsAsync(dataverse, shares, communicationId, threadId, …)` is the ONE derivation. The live grant (`DirectThreadAccessService.GrantDirectTeamMessageAsync`), the re-file step and the share job all call it. Its source is unchanged in this batch: the thread's user owner and its systemuser sharees, read strictly.
+- R2 swaps only this method. `communicationId` is already a parameter, for the new source.
+- One consequence in the live grant: a thread-share read that faults now derives nobody (nothing granted; the job retries). It used to grant the owner only.
+- The pre-198 path for user-owned and ordinary messages still uses `ReadDirectParticipantsForGrantAsync` (R1: unchanged).
+
+| Finding | Change | Tests (must-fire unless marked) |
+|---|---|---|
+| **R1** An unknown Direct-team answer cancelled the record-anchored grant (AC6 regression). | (a) `IsDirectOwnerTeamAsync` now takes `IGenericEntityService` and reads the owner team's own row first (`teamid`, selecting `isdefault` and `teamtype`). A default team, or a team type other than Owner, is "not Direct" with no lookup read; a fault in that read lets the lookup decide. (b) `GrantMessageAccessAsync`: only `case null when audience == DirectParticipants` returns early. A record-anchored join whose owner is unknown runs the pre-198 anchor grant. Only a PROVEN Direct owner takes the Direct branch. | `DirectThreadAccessServiceTests`: a default-team message with the lookup faulting → anchor grantee granted; a non-default Owner team with the lookup faulting → granted; with the lookup refusing (configured team missing) → granted. The existing `DirectTeamMessage_WhenTheLookupFaults_GrantsNothing` (Direct join, unknown → no participant grant) still passes. |
+| **R5** Race: the message re-owned between the owner read and the writes. | `OwnerUnchangedAsync` re-reads `owningteam` right before the message row's grant and again before its revokes. In the job and the re-file step, a change or a fault means nothing more is written and the outcome is Retry (status Unknown). The live Direct grant re-reads before its message grant. | World: an owner that changes after the first read → nothing written, Unknown, not complete. Moq live: an owner that changes between the ownership read and the grant → no grant at all. |
+| **R4** Starvation and the capped listing. | Listings are ordered by `modifiedon` then id, and select `modifiedon`. A capped listing (500) moves the watermark to its last row's `modifiedon` (the earliest across capped tables). If that does not move past the window start, it steps one tick and the sweep covers rows sharing that instant; the step is logged. `DirectSweepReserve = 50` of every run's 200 is the sweep's (the priority budget is 150). Per carried id, failures in a row are counted; at `MaxDirectAttempts = 3` the id is backed off for `DirectBackoff = 30 min` with an Error log, kept in the carry and skipped by every source until then. `DirectMessageRun.Ok` is false while a listing is capped or any id is backed off; `ResultJson` adds `listingCapped` and `backedOff`. | 520 changed messages drain over several runs, and the first run reports `listingCapped` and not Ok. With 250 messages re-changed before every run, a never-changed message is still reached by the sweep. 200 messages that fail every run (smaller ids) do not starve 20 others. A message incomplete 3 runs is backed off (`backedOff:1`, `examined:0`) and tried again after the backoff. The capped-run test is updated for the reserve. |
+
+**Test world:** `SecureChildShareWorld.Answer` now honours a query's `Orders` (stable, with the id order as the tie-break; a missing value sorts first), as Dataverse does. Before, it always returned rows in id order.
+
+**Fail-first** (on commit `f4c83ad083`): R1(a) off, R1(b) reverted to `case null:`, `OwnerUnchangedAsync` always true, `DirectSweepReserve = 0`, `MaxDirectAttempts = int.MaxValue`, and a capped listing holding the watermark. All 9 must-fire tests failed: R1 ×3, R5 ×2, and R4 ×4 (the drain, the sweep, starvation and the backoff). The source was restored to the commit afterwards.
+- The backoff test first looped `MaxDirectAttempts` times, which hung under the perturbation and would let a raised constant pass. It now pins the three runs its name states.
+- The starvation test is composite: it passes with either the sweep reserve or the backoff. The backoff test pins the backoff alone.
+
+**Counts** (on the batch 1 tip):
+- Scoped filter including `DirectMessageParticipantShares`: 2916 passed, up from 2907 (+9 new).
+- Job and Direct-message tests (`SecureChildShareReconciliationJob|DirectMessageParticipantShares`): 26 passed.
+- Full `Spaarke.ArchTests`: 2119 passed.
+- BFF build: 0 warnings, 0 errors.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
