@@ -16,17 +16,18 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 public sealed class FirmFindingsProjection
 {
     public Task<FirmOutcome?> GetForInvoiceAsync(Guid invoiceId, CancellationToken ct);     // null: the invoice does not exist
-    public Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, CancellationToken ct); // null: the submission does not exist
+    public Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, bool invoiceDecided, CancellationToken ct); // null: the submission does not exist (invoiceDecided: fix round 2)
 }
 
 public sealed record FirmOutcome(FirmOutcomeKind Kind, string? TrackingNumber, string StatusLabel,
     decimal? BilledTotal, decimal? ApprovedTotal, IReadOnlyList<FirmOutcomeItem> Items, bool Degraded);
 public sealed record FirmOutcomeItem(FirmOutcomeDecision Decision, Guid? LineId, FirmOutcomeLine? Line,
-    FirmOutcomeAdjustment? Adjustment, string? Reason, IReadOnlyList<FirmOutcomeCitation> Citations);
+    FirmOutcomeAdjustment? Adjustment, string? Reason, IReadOnlyList<string> FirmReasons, // FirmReasons: 130b fix round 2
+    IReadOnlyList<FirmOutcomeCitation> Citations);
 public sealed record FirmOutcomeLine(DateOnly? Date, string? TimekeeperAsBilled, string? DescriptionExcerpt,
     decimal BilledAmount, decimal? ApprovedAmount);
 public sealed record FirmOutcomeAdjustment(string Method, decimal? Value, decimal Amount);
-public sealed record FirmOutcomeCitation(string? RuleName, string? FirmReason, string? Label, int? Version,
+public sealed record FirmOutcomeCitation(string? RuleName, string? Label, int? Version, // FirmReason moved to the item (fix round 2)
     string? SectionReference, string? Quote);
 ```
 
@@ -268,7 +269,7 @@ Branch `task/ebilling-130b-fix2` from `task/ebilling-130b-fix1` at `7a962ffd9d`,
   - Pins: `TheRoutes_DeclareTheReadsTheyReturn` (it also asserts the four rule tables are absent).
 - **Rule citations are published by the firm flag (owner ruling, the hard rule).** Design statement: rule citations on a firm's line are shown only as the policy's firm flag publishes them; the workforce ceiling covers the line, decision and signal tables.
   - A citation exists only when the clause reader returned text for the version on this invoice (`RuleSetService.GetFirmClauseAsync`: the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) AND the rule is not an InternalStandard Procedure's.
-  - Otherwise the citation is omitted entirely: no rule name, no firm reason, no label, no version, no clause. The line and the reviewer's reason stay. Before this round, the rule name and firm reason were shown with the flag off.
+  - Otherwise the citation is omitted entirely: no rule name, no label, no version, no clause (the four citation fields of the ruling). The line, the reviewer's reason and the firm reason stay. Before this round, the rule name was shown with the flag off.
   - A fault reading the flag (a clause reader that throws), the rule set or the Procedure omits the citation; it no longer degrades the whole outcome.
   - InternalStandard: the BFF already keeps an InternalStandard Procedure's flag off:
     - `ProcedureService.cs:1221-1222`: `InitialVisibleToFirms` is off for InternalStandard;
@@ -283,7 +284,15 @@ Branch `task/ebilling-130b-fix2` from `task/ebilling-130b-fix1` at `7a962ffd9d`,
     - fault: `AFaultDecidingACitation_OmitsIt` (clause reader, rule set, Procedure); undecidable type: `AnUndecidableProcedureType_CitesNothing` (4 cases);
     - no ids: `NoPolicyVersionRuleSetOrProcedureId_IsInTheSerializedBody` (the serialized body carries no policy, version, rule set or Procedure id, in D or N form). At the route: the two-firm clause test also asserts that the version id is absent.
   - Changed to the new rule: `Approved_ProjectsTheApprovedTotal_TheLinesAndTheAdjustmentWithItsReasonAndRule` (version B unpublished: no citation), and four tests that relied on the old flag-off citation now publish it (`ABlankFirmReason_IsOmitted`, `ARuleCitedByTwoSignalsOfOneDecision_IsOneCitation`, `ASignalNotResolvedByTheLinkedRecord_IsNotACitation`, the fault theory). `AFaultInTheClauseReader_ProjectsTheStatusOnly` is replaced by the fault theory above.
-  - Consequence for 131, 133 and 134: the firm reason (`sprk_signal.sprk_firmreason`) is carried only inside a published citation, so with the flag off it is not shown either.
+  - The firm reason is not a citation (lead correction, Q1). `sprk_signal.sprk_firmreason` is the explanation addressed to the firm, and the ceiling now declares `sprk_signal`, so it is shown whenever present, whatever the flag, a fault deciding a citation, or an InternalStandard rule. It comes from the same source as before this round: the first non-blank reason per Billing rule version the decision resolved.
+  - Contract change this required: the reason moved from `FirmOutcomeCitation.FirmReason` (string, one per citation) to `FirmOutcomeItem.FirmReasons` (a list of strings: one per rule version that has one, duplicates removed, in Signal creation order; empty for an adjustment and when none). `FirmOutcomeCitation` is now `(RuleName, Label, Version, SectionReference, Quote)`. No other field changed. In JSON: `items[].firmReasons` replaces `items[].citations[].firmReason`. 131, 133 and 134 have no client code reading the outcome yet; they see a firm reason whenever the old shape had one.
+  - Tests:
+    - must-not-fire (firm reason), flag off: `FlagOff_TheRuleIsNotCited_NoNameNoLabelNoClause_ButTheFirmReasonIsShown`;
+    - flag on, both shown: `FlagOn_ACitationCarriesTheLabelVersionSectionAndQuote_AndTheRuleNameIsThePolicysNotTheRuleSets`;
+    - citation fault, reason still shown: `AFaultDecidingACitation_OmitsIt` (3 cases);
+    - InternalStandard: `AnInternalStandardProceduresRule_IsNeverCited_WhateverItsFlag` also asserts the reason;
+    - independence: `TheFirmReasons_AreIndependentOfTheCitationGate` (one published rule, one not: one citation and both reasons; a repeated reason once).
+  - Fail-before check: the firm reason gated on the citation again (`citable.Contains`). 6 of 64 `FirmFindingsProjectionTests` failed (the 3 fault cases, flag off, independence, InternalStandard). Restored; SHA-256 matched (`770d7eb3...50505e18`).
 - **K3.** `WorkforceCeilingRouteFamilyTests.Routes` lists both outcome routes, one row per declared table (4 on the invoice route, 5 on the submission route), so the shared must-fire, unavailable, must-not-fire and systemuser theories run on them.
 - **K4, text.** "Retrying would never change it" was false for Superseded (undoing a correction returns the invoice to In Review). It is now "a closed state at the time of the request" in `FirmOutcomeEndpoints.cs` (`ToResult`), the `FirmOutcomeKind.Closed` comment and these notes. The ledger's `AddFirmOutcomeAuthorizationFilter` credited form names the submission's invoice step and the `InvoiceDecided` rule; every line citation in it and in the `FirmOutcomeEndpoints.cs` governed-file entry was re-checked against the edited files. The two reviewed reasons in `ExternalInvoiceVisibilityGuardTests` (the submission handler and `GetForSubmissionAsync`) now state the `InvoiceDecided` rule.
 

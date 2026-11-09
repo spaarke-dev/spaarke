@@ -86,12 +86,19 @@ public sealed record FirmOutcome(
 /// <param name="Line">The line as the firm billed it (or the reviewer added it); null for an adjustment.</param>
 /// <param name="Adjustment">The adjustment; null for a line item.</param>
 /// <param name="Reason">The reviewer's reason; null when none is on record for this item (never substituted).</param>
+/// <param name="FirmReasons">
+/// The explanations addressed to the firm (<c>sprk_signal.sprk_firmreason</c>) of the Billing rules the item's decision resolved: one per rule
+/// version that has one (the first non-blank in creation order), duplicates removed, in the order the Signals were created; empty when none
+/// (never substituted). NOT a citation and not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an
+/// invoice-level adjustment (it resolves no Signal).
+/// </param>
 public sealed record FirmOutcomeItem(
     FirmOutcomeDecision Decision,
     Guid? LineId,
     FirmOutcomeLine? Line,
     FirmOutcomeAdjustment? Adjustment,
     string? Reason,
+    IReadOnlyList<string> FirmReasons,
     IReadOnlyList<FirmOutcomeCitation> Citations);
 
 /// <param name="DescriptionExcerpt">The first part of the line's description as billed.</param>
@@ -107,12 +114,12 @@ public sealed record FirmOutcomeAdjustment(string Method, decimal? Value, decima
 /// The rule behind an item, shown ONLY as the policy's firm flag publishes it (130b fix round 2): the clause reader returned text for this
 /// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) and the rule is not an
 /// InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
-/// name, no label, no clause (D-66, D-79). No member is an id of a policy, version, rule set or Procedure.
+/// name, no label, no clause (D-66, D-79). No member is an id of a policy, version, rule set or Procedure. The firm reason is not a citation
+/// field: it is <see cref="FirmOutcomeItem.FirmReasons"/>, shown whatever the flag says.
 /// </summary>
 /// <param name="RuleName">The rule's (policy's) name. Never the rule set's name.</param>
-/// <param name="FirmReason">The rule's firm-visible reason (<c>sprk_signal.sprk_firmreason</c>); null when the Signal has none.</param>
 /// <param name="Label">The Procedure's firm-facing name, or "Billing instructions for this record"; null for a legacy rule set.</param>
-public sealed record FirmOutcomeCitation(string? RuleName, string? FirmReason, string? Label, int? Version, string? SectionReference, string? Quote);
+public sealed record FirmOutcomeCitation(string? RuleName, string? Label, int? Version, string? SectionReference, string? Quote);
 
 /// <summary>The clause text a firm may be shown for a rule version on an invoice: <see cref="RuleSetService.GetFirmClauseAsync"/>.</summary>
 public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid invoiceId, CancellationToken ct);
@@ -137,10 +144,10 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// The clause: <see cref="FirmClauseReader"/> once per distinct policy version per invoice. Reviewer identity, internal notes, confidence
 /// scores and Signal messages are never read into the output.</para>
 /// <para><b>Visibility rule (130b fix round 2).</b> Rule citations on a firm's line are shown only as the policy's firm flag publishes them:
-/// a citation (rule name, firm reason, label, version, section reference, quote) exists only when the clause reader returned text (the rule
+/// a citation (rule name, label, version, section reference, quote) exists only when the clause reader returned text (the rule
 /// set's flag on, the version applied by the invoice's snapshot) AND the rule is not an InternalStandard Procedure's, whatever its flag. In
-/// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line and the reviewer's
-/// reason stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
+/// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line, the reviewer's
+/// reason and the firm reasons (<see cref="FirmOutcomeItem.FirmReasons"/>, which are not citation fields) stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
 /// Procedure id.</para>
 /// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header, or a header with no status,
 /// gives an <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged
@@ -480,14 +487,25 @@ public sealed class FirmFindingsProjection
             var record = records.TryGetValue(row.Id, out var chosen) && string.Equals(
                 chosen.GetAttributeValue<string>("sprk_actioncode"), candidate.ActionCode, StringComparison.Ordinal) ? chosen : null;
             var citations = new List<FirmOutcomeCitation>();
+            var firmReasons = new List<string>();
             if (record is not null && signalsOf.TryGetValue(record.Id, out var resolved))
             {
+                // Every Billing rule the decision resolved gives its firm reason (not gated: it is addressed to the firm); only a citable one
+                // is cited (fix round 2).
                 foreach (var byVersion in resolved
-                    .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } v && citable.Contains(v))
+                    .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } v && rules.ContainsKey(v))
                     .GroupBy(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id))
                 {
                     var firmReason = byVersion.Select(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason"))).FirstOrDefault(t => t is not null);
-                    citations.Add(Cite(rules[byVersion.Key], clauses[byVersion.Key], firmReason));
+                    if (firmReason is not null && !firmReasons.Contains(firmReason, StringComparer.Ordinal))
+                    {
+                        firmReasons.Add(firmReason);
+                    }
+
+                    if (citable.Contains(byVersion.Key))
+                    {
+                        citations.Add(Cite(rules[byVersion.Key], clauses[byVersion.Key]));
+                    }
                 }
             }
 
@@ -502,6 +520,7 @@ public sealed class FirmFindingsProjection
                     Money(row, InvoiceTotalsService.LineApprovedAmount)),
                 null,
                 record is null ? null : NullIfBlank(record.GetAttributeValue<string>("sprk_reason")),
+                firmReasons,
                 citations.OrderBy(c => c.RuleName, StringComparer.Ordinal).ToList()));
         }
 
@@ -510,7 +529,7 @@ public sealed class FirmFindingsProjection
             var citations = new List<FirmOutcomeCitation>();
             if (row.GetAttributeValue<EntityReference>(InvoiceAdjustmentService.LineRule)?.Id is { } versionId && citable.Contains(versionId))
             {
-                citations.Add(Cite(rules[versionId], clauses[versionId], firmReason: null));
+                citations.Add(Cite(rules[versionId], clauses[versionId]));
             }
 
             var method = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineAdjustmentMethod)?.Value;
@@ -523,6 +542,7 @@ public sealed class FirmFindingsProjection
                     row.TryGetAttributeValue<object>(InvoiceTotalsService.LineAdjustmentValue, out var value) ? AsDecimal(value) : null,
                     Money(row, InvoiceTotalsService.LineAmount) ?? 0m),
                 NullIfBlank(row.GetAttributeValue<string>(InvoiceReviewReadService.LineReason)),
+                [],
                 citations));
         }
 
@@ -530,11 +550,11 @@ public sealed class FirmFindingsProjection
     }
 
     /// <summary>
-    /// A citable rule's citation (<see cref="CitableVersionsAsync"/> decided it may be shown): the rule name, the firm reason, and the label,
-    /// version, section and quote the clause reader published. Never called for a version that is not citable: such a rule has no citation.
+    /// A citable rule's citation (<see cref="CitableVersionsAsync"/> decided it may be shown): the rule name and the label, version, section
+    /// and quote the clause reader published. Never called for a version that is not citable: such a rule has no citation.
     /// </summary>
-    private static FirmOutcomeCitation Cite(RuleRead rule, FirmClauseText clause, string? firmReason) =>
-        new(rule.Name, firmReason, clause.FirmFacingName, rule.Number, clause.SectionReference, clause.Quote);
+    private static FirmOutcomeCitation Cite(RuleRead rule, FirmClauseText clause) =>
+        new(rule.Name, clause.FirmFacingName, rule.Number, clause.SectionReference, clause.Quote);
 
     /// <summary>A clause the reader published: a quote or a section reference (a label alone is not a clause).</summary>
     private static bool Published(FirmClauseText clause) => clause.Quote is not null || clause.SectionReference is not null;

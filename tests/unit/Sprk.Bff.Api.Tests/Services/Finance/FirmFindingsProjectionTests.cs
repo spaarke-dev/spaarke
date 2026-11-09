@@ -706,8 +706,8 @@ public sealed class FirmFindingsProjectionTests
 
     // ── Visibility rule (D-66, D-79) ──
 
-    [Fact(DisplayName = "130b fix 2 must-fire: with the policy's firm flag off (or no snapshot) the rule is not cited at all: no name, no label, no clause, no firm reason; the line and its reason stay")]
-    public async Task FlagOff_TheRuleIsNotCited_NoNameNoLabelNoClause()
+    [Fact(DisplayName = "130b fix 2 must-fire (citation) / must-not-fire (firm reason): with the policy's firm flag off (or no snapshot) the rule is not cited at all (no name, label or clause), and the firm reason is still shown")]
+    public async Task FlagOff_TheRuleIsNotCited_NoNameNoLabelNoClause_ButTheFirmReasonIsShown()
     {
         var world = new World();
         world.AddReducedWithCitation(1, "Rate exceeds the agreed rate.", VersionA, "Your agreed rate is lower.");
@@ -718,10 +718,30 @@ public sealed class FirmFindingsProjectionTests
         var item = outcome!.Items.Should().ContainSingle().Subject;
         item.Citations.Should().BeEmpty();
         item.Reason.Should().Be("Rate exceeds the agreed rate.");
+        item.FirmReasons.Should().Equal("Your agreed rate is lower.");
         outcome.Degraded.Should().BeFalse();
-        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain("Your agreed rate is lower.")
-            .And.NotContain(FirmLabel).And.NotContain(ClauseSection);
+        var json = JsonSerializer.Serialize(outcome);
+        json.Should().Contain("Your agreed rate is lower.");
+        json.Should().NotContain("Travel time").And.NotContain(FirmLabel).And.NotContain(ClauseSection).And.NotContain(ClauseQuote);
         world.Reads("sprk_ruleset").Should().Be(0, "nothing is published, so no Procedure type needs deciding");
+    }
+
+    [Fact(DisplayName = "130b fix 2: the firm reasons do not follow the citation gate: two rules, one published and one not, give one citation and both firm reasons; the same reason twice is shown once")]
+    public async Task TheFirmReasons_AreIndependentOfTheCitationGate()
+    {
+        var world = new World();
+        var pair = world.AddReducedWithCitation(1, "Reason.", VersionA, "Your agreed rate is lower.");
+        world.AddSignal(pair.Record.Id, VersionB, "Block billing is not allowed.", pair.Line.Id, InvoiceId);
+        var second = world.AddReducedWithCitation(2, "Reason 2.", VersionA, "Same reason.");
+        world.AddSignal(second.Record.Id, VersionB, "Same reason.", second.Line.Id, InvoiceId);
+        world.Clause = v => v == VersionA ? FlagOnText : FirmClauseText.None;
+
+        var items = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items;
+
+        items[0].Citations.Should().ContainSingle().Which.RuleName.Should().Be("Travel time");
+        items[0].FirmReasons.Should().BeEquivalentTo("Your agreed rate is lower.", "Block billing is not allowed."); // same createdon in the fixture
+        items[1].FirmReasons.Should().Equal("Same reason.");
+        JsonSerializer.Serialize(items).Should().NotContain("\"Block billing\"", "version B's rule is not published, so its name is not shown");
     }
 
     [Fact(DisplayName = "130b fix 2 must-fire: an InternalStandard Procedure's rule is never cited, even with its flag on and the clause published")]
@@ -736,6 +756,7 @@ public sealed class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
         outcome!.Items.Should().HaveCount(2).And.OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].FirmReasons.Should().Equal(new[] { "Your agreed rate is lower." }, "the firm reason is not a citation field");
         outcome.Degraded.Should().BeFalse();
         JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain(ClauseQuote).And.NotContain(FirmLabel);
         world.Queries.Where(q => q.EntityName is "sprk_ruleset" or "sprk_procedure").Should().NotBeEmpty()
@@ -774,7 +795,7 @@ public sealed class FirmFindingsProjectionTests
         outcome.Degraded.Should().BeFalse();
     }
 
-    [Theory(DisplayName = "130b fix 2 (fault): a fault reading the firm flag (the clause reader), the rule set or the Procedure omits the citation; the line and reason stay, not degraded")]
+    [Theory(DisplayName = "130b fix 2 (fault): a fault reading the firm flag (the clause reader), the rule set or the Procedure omits the citation; the line, its reason and the firm reason stay, not degraded")]
     [InlineData("clause")]
     [InlineData("sprk_ruleset")]
     [InlineData("sprk_procedure")]
@@ -799,7 +820,8 @@ public sealed class FirmFindingsProjectionTests
         var item = outcome.Items.Single();
         item.Reason.Should().Be("Reason.");
         item.Citations.Should().BeEmpty();
-        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain("Firm reason.");
+        item.FirmReasons.Should().Equal("Firm reason.");
+        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain(ClauseQuote);
     }
 
     [Fact(DisplayName = "130b fix 2: no id of a policy, version, rule set or Procedure appears anywhere in the serialized outcome")]
@@ -830,7 +852,8 @@ public sealed class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
         outcome!.Items.Single().Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(
-            new FirmOutcomeCitation("Travel time", "Your agreed rate is lower.", FirmLabel, 3, ClauseSection, ClauseQuote));
+            new FirmOutcomeCitation("Travel time", FirmLabel, 3, ClauseSection, ClauseQuote));
+        outcome.Items.Single().FirmReasons.Should().Equal(new[] { "Your agreed rate is lower." }, "flag on: the citation and the firm reason are both shown");
         world.Queries.Where(q => q.EntityName is "sprk_ruleset" or "sprk_procedure").Should().OnlyContain(
             q => !q.ColumnSet.Columns.Contains("sprk_name"), "the rule set's (and Procedure's) name is never read: only the Procedure link and its type");
         JsonSerializer.Serialize(outcome).Should().NotContain("Internal rule set name").And.NotContain("Internal procedure name");
@@ -860,10 +883,11 @@ public sealed class FirmFindingsProjectionTests
         world.Signals[0]["sprk_message"] = "Internal Signal sentence with confidence 0.42"; // never selected
         world.Clause = _ => FlagOnText;
 
-        var citation = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations.Single();
+        var item = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single();
 
-        citation.FirmReason.Should().BeNull();
-        JsonSerializer.Serialize(citation).Should().NotContain("Internal Signal").And.NotContain("0.42");
+        item.FirmReasons.Should().BeEmpty();
+        item.Citations.Should().ContainSingle();
+        JsonSerializer.Serialize(item).Should().NotContain("Internal Signal").And.NotContain("0.42");
         world.Queries.Where(q => q.EntityName == "sprk_signal").Should().OnlyContain(q => !q.ColumnSet.Columns.Contains("sprk_message"));
     }
 
@@ -874,7 +898,7 @@ public sealed class FirmFindingsProjectionTests
         world.AddReducedWithCitation(1, "Reason.", VersionA, firmReason: "   ");
         world.Clause = _ => FlagOnText;
 
-        (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations.Single().FirmReason.Should().BeNull();
+        (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().FirmReasons.Should().BeEmpty();
     }
 
     [Fact]
@@ -919,9 +943,10 @@ public sealed class FirmFindingsProjectionTests
         world.AddSignal(pair.Record.Id, VersionA, "Second reason.", pair.Line.Id, InvoiceId);
         world.Clause = _ => FlagOnText;
 
-        var citations = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations;
+        var item = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single();
 
-        citations.Should().ContainSingle().Which.FirmReason.Should().Be("Second reason.", "the first Signal with a firm reason supplies it");
+        item.Citations.Should().ContainSingle();
+        item.FirmReasons.Should().Equal(new[] { "Second reason." }, "the first Signal with a firm reason supplies it");
     }
 
     // ── Decision Record link check (EB-D-202) ──
@@ -1082,9 +1107,10 @@ public sealed class FirmFindingsProjectionTests
         world.AddSignal(pair.Record.Id, VersionB, "Another line's Signal.", Guid.NewGuid(), InvoiceId);
         world.Clause = _ => FlagOnText;
 
-        var citations = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations;
+        var item = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single();
 
-        citations.Should().ContainSingle().Which.FirmReason.Should().Be("Good reason.");
+        item.Citations.Should().ContainSingle();
+        item.FirmReasons.Should().Equal("Good reason.");
     }
 
     [Fact]
