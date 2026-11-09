@@ -346,7 +346,16 @@ Branch `task/ebilling-130b-fix5` from `task/ebilling-130b-fix1` at `ecf694a8d1`.
 
 Branch `task/ebilling-130b-fix6` from `task/ebilling-130b-fix1` at `e991dba7f8`.
 
-- **Ruling.** Every record this filter decides by a core gets that core's secure-roots check. Round 5 applied it to the invoice only; the submission route reached it only through the submission's derived invoice, and a submission can exist before its invoice does (the undecided path), so its own row was then decided by its single core's Read alone.
+- **Ruling.** Every record this filter decides by a core gets that core's secure-roots check. Round 6 applies it to the submission's own row.
 - **Change.** `DecideSecureRootsAsync` is generalised over the table, the row and the table's core columns (one copy of the logic, still the module's own functions). `DecideSubmissionAsync` now reads the submission's own row (`ExternalDataService.GetSubmissionLookupsAsync`: the core trio plus `LiveParentLookupsOf("sprk_invoicesubmission")`, through the same private row reader as `GetInvoiceLookupsAsync`) and calls it after the core Read check and before the (a') seam, so before any projection read. Same outcomes: a secure root the caller cannot read answers the uniform 403, a fault or incomplete status read answers 503. The invoice-path check is unchanged.
 - **Tests** (`FirmOutcomeScopeTests`): must-fire `ASubmissionWithNoInvoice_WhoseOwnRowNamesASecureUnreadableRoot_Is403_AndNothingIsProjected` (a second core; a parent filed under a secure root); must-not-fire `ASubmissionWithNoInvoice_WhoseOwnRootsAreReadableOrNotSecure_Is200`; `ASubmissionWithNoInvoice_WhoseOwnRootStatusCannotBeRead_Is503_AndNothingIsProjected` (flag fault, row fault, live-parent fault). The double gained a submission-row read and a live-parent read.
 - Guard text: `ExternalInvoiceVisibilityGuardTests.NotInvoiceSurfaces` reasons and the ledger's `AddFirmOutcomeAuthorizationFilter` citations updated to the edited lines.
+
+## 130b fix round 7 (each read of the submission stands on its own)
+
+Branch `task/ebilling-130b-fix7` from `task/ebilling-130b-fix1` at `42cfdbce1b`.
+
+- **Rule.** A decision rests on the row it applies to. The submission's core-record Read check uses the submission as first read; the secure-roots check uses the submission's own row as read for it. The own-row read now carries the same core-record Read check the invoice's row has: Read on at least one of the row's own core lookups (project, matter, work assignment), else the uniform 403 and nothing is projected.
+- **Change.** One helper (`HasReadableCore`, the core-record union over a table's core columns) serves the invoice's row and the submission's own row; `DecideSubmissionAsync` applies it right after the own-row read and before the secure-roots check. Every other outcome is unchanged.
+- **Tests** (`FirmOutcomeScopeTests`): must-fire `ASubmission_WhoseRowNamesOnlyAnUnreadableCore_OnTheSecondRead_Is403_AndNothingIsProjected` (the own row names only a core the caller cannot read, known not secure; the secure status is never asked); `ASubmission_NotFoundOnTheSecondRead_Is403_AndNothingIsProjected` (the own-row read finds no record).
+- Guard text: the ledger's `AddFirmOutcomeAuthorizationFilter` citations re-cited to the edited lines.

@@ -1337,14 +1337,14 @@ public partial class RouteAuthorizationGuardTests
             + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
         new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
             "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "
-            + "must be among the caller contact's ACTIVE firms (:227, :373; an unreadable or faulting firm read is a retryable 503, never "
+            + "must be among the caller contact's ACTIVE firms (:227, :379; an unreadable or faulting firm read is a retryable 503, never "
             + "'no firm' and never a pass, :150-153 and :183-189; a decided empty set is the 403, :155-158) AND the caller holds Read on its "
-            + "core record from the evaluator's post-veto rights (principal.RightsOn, :237, :379), AND every secure root the record (an invoice, "
+            + "core record from the evaluator's post-veto rights (principal.RightsOn, :235, :385; on the submission's own row as read a second time, :412, fix round 7), AND every secure root the record (an invoice, "
             + "or a submission's own row, whether or not its invoice exists yet) names is one the caller can read, by the invoices module's own "
-            + "rule (ExternalMultiRootRule, one function, DecideSecureRootsAsync :294-328, called at :246 and :404; a status read that "
+            + "rule (ExternalMultiRootRule, one function, DecideSecureRootsAsync :291-325, called at :243 and :418; a status read that "
             + "failed is a 503, never a pass), AND the item is not hidden by the (a') "
-            + "predicate (:254-279, :412-425); every refusal, a missing item included, is the same 403 (:218), and a missing principal "
-            + "denies (:127-130). A submission's derived invoice is then decided by the same invoice rule (:439; fix round 1). The "
+            + "predicate (:251-276, :426-439); every refusal, a missing item included, is the same 403 (:218), and a missing principal "
+            + "denies (:127-130). A submission's derived invoice is then decided by the same invoice rule (:453; fix round 1). The "
             + "InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes UNDECIDED (:218), the decision is "
             + "stored with the admitted id (:168), and the projection then reads nothing of that invoice "
             + "(in progress: no billed total; Accepted: 503)."),

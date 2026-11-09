@@ -1085,6 +1085,34 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _projectionReads.Should().BeEmpty("a refused request projects nothing");
     }
 
+    // ── Fix round 7: each read of the submission stands on its own ──
+
+    [Fact(DisplayName = "130b fix 7 (must-fire): a submission whose own row, as read the second time, names only a core the caller cannot read (known not secure) is 403 and nothing is projected, though the first read named a readable core")]
+    public async Task ASubmission_WhoseRowNamesOnlyAnUnreadableCore_OnTheSecondRead_Is403_AndNothingIsProjected()
+    {
+        var received = SeedSubmission(FirmA);
+        // The first read (the service's) keeps the readable matter; the row the rule reads next names only a project the caller cannot read,
+        // which is known not secure, so the secure-roots rule alone would pass it.
+        _data.SubmissionRows[received] = new Dictionary<string, object?> { ["sprk_regardingproject"] = SecureProject };
+        _data.NonSecureRoots.Add((ExternalGrantRootType.Project, SecureProject));
+
+        await AssertRefusedAndNothingProjectedAsync(await Submission(received));
+        _data.SubmissionReads.Should().Be(1, "the submission's own row was read");
+        _data.FlagReads.Should().Be(0, "the row names no core the caller can read, so the secure status is never asked");
+        _invoiceDecisions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130b fix 7 (must-fire): a submission whose row is not found on the second read is 403 and nothing is projected")]
+    public async Task ASubmission_NotFoundOnTheSecondRead_Is403_AndNothingIsProjected()
+    {
+        var received = SeedSubmission(FirmA);
+        _data.SubmissionRows.Remove(received);
+
+        await AssertRefusedAndNothingProjectedAsync(await Submission(received));
+        _data.SubmissionReads.Should().Be(1, "the second read was made and found nothing");
+        _invoiceDecisions.Should().BeEmpty();
+    }
+
     /// <summary>Makes the submission's own row (as the rule reads it) name a project the caller cannot read, as a second core or through a parent.</summary>
     private void AddSecureRootTo(Guid submission, string kind)
     {

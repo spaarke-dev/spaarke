@@ -232,10 +232,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
         // The core record: Read on the invoice's matter, project or work assignment (the union the invoices module and the invoice
         // documents already apply). A value that is not a GUID grants nothing.
-        var readable = CoreRoots.Any(root =>
-            invoice.TryGetValue(root.Column, out var value) && value is Guid id && id != Guid.Empty
-            && principal.RightsOn(root.Type, id).HasFlag(AccessRights.Read));
-        if (!readable)
+        if (!HasReadableCore(principal, invoice, InvoiceCoreColumns))
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the invoice's core record.");
             return (FirmOutcomeErrors.Forbidden(), false);
@@ -346,12 +343,21 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         [SubmissionCoreColumns.Project, SubmissionCoreColumns.Matter, SubmissionCoreColumns.WorkAssignment,
             .. ExternalMultiRootRule.LiveParentLookupsOf(SubmissionTable).Select(l => l.Column)];
 
-    /// <summary>The core record lookups of an invoice and the grant root each is checked against.</summary>
-    private static readonly (string Column, ExternalGrantRootType Type)[] CoreRoots =
+    /// <summary>
+    /// Read on at least one of the row's own core lookups (project, matter, work assignment), the union the invoices module and the invoice
+    /// documents apply. A value that is not a GUID grants nothing. Applied to the row each decision reads, so each read stands on its own.
+    /// </summary>
+    private static bool HasReadableCore(CallerPrincipal principal, IReadOnlyDictionary<string, object?> row, CoreColumns core) =>
+        CoreRoots(core).Any(root =>
+            row.TryGetValue(root.Column, out var value) && value is Guid id && id != Guid.Empty
+            && principal.RightsOn(root.Type, id).HasFlag(AccessRights.Read));
+
+    /// <summary>The core record lookups of a table and the grant root each is checked against.</summary>
+    private static (string Column, ExternalGrantRootType Type)[] CoreRoots(CoreColumns core) =>
     [
-        ("sprk_matter", ExternalGrantRootType.Matter),
-        ("sprk_project", ExternalGrantRootType.Project),
-        ("sprk_regardingworkassignment", ExternalGrantRootType.WorkAssignment),
+        (core.Matter, ExternalGrantRootType.Matter),
+        (core.Project, ExternalGrantRootType.Project),
+        (core.WorkAssignment, ExternalGrantRootType.WorkAssignment),
     ];
 
     // ── Submission ──
@@ -399,6 +405,14 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         {
             _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The submission's core record and parents could not be read; answering 503.");
             return (FirmOutcomeErrors.Unavailable(), false);
+        }
+
+        // The row stands on its own (fix round 7): Read on at least one of ITS core lookups, as the invoice's row is checked above, so the
+        // decision does not rest on the first read agreeing with this one.
+        if (!HasReadableCore(principal, row, SubmissionCoreColumns))
+        {
+            _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the submission row's core record.");
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         var secure = await DecideSecureRootsAsync(principal, SubmissionTable, row, SubmissionCoreColumns, ct);
