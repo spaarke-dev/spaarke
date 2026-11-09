@@ -675,6 +675,8 @@ public class ExternalDataService
         // Task 188: the columns the document narrowing reads (the two lookups are already lineage parents; the own Access
         // Permission is not), each once.
         select = string.Join(",", select.Split(',').Concat(ExternalDocumentNarrowing.SelectColumns).Distinct(StringComparer.Ordinal));
+        // Task 130-0 fix round 1: every invoice link (sprk_invoice, sprk_relatedinvoice), so a document follows its invoice.
+        select = WithInvoiceLinkColumns(select, DocumentTable);
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -941,6 +943,9 @@ public class ExternalDataService
             .Concat(DocumentRootLinks.SelectColumns)
             .Concat(ExternalMultiRootRule.LiveParentSelect(DocumentTable)) // task 187
             .Concat(ExternalDocumentNarrowing.SelectColumns) // task 188: what the document narrowing reads
+            .Concat(InvoiceLinks.Tables.TryGetValue(DocumentTable, out var invoiceLinked)
+                ? invoiceLinked.ValueColumns
+                : Array.Empty<string>()) // task 130-0 fix round 1: a document follows its invoice
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -1733,6 +1738,7 @@ public class ExternalDataService
                      "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl," +
                      CreatorStampSelect + // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
                      LiveParentSelectSuffix(TodoTable); // task 187: the parents whose live roots the rule takes in
+        select = WithInvoiceLinkColumns(select, TodoTable); // task 130-0 fix round 1: a to-do follows its invoice
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
@@ -1917,6 +1923,137 @@ public class ExternalDataService
             "[EXT-DATA] document {DocumentId} hidden by the document narrowing ({Reasons})",
             documentId, narrowing.HiddenSummary(new[] { row }));
         return false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // ebilling-r1 task 130-0, fix round 1 (design.md:414, uac-r2 rulings 2026-11-08): a partner sees only invoices of its own
+    // firms, and what belongs to them. A child row (a to-do, an event, a document ...) that links to an invoice the caller may
+    // not see is hidden on every external route, even when it is also filed under a shared record. Which columns are invoice
+    // links comes from InvoiceLinks (the edge registries), never a hand list.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Task 130-0 fix round 1: the invoices one Web API row of <paramref name="table"/> links to, through every invoice link
+    /// column of that table (<see cref="InvoiceLinks.LinkColumnsOf"/>, read as <c>_col_value</c>). Absent or JSON null is "no link";
+    /// a value that is not a GUID reads as <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible: fail closed).
+    /// </summary>
+    internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, JsonElement>? row)
+    {
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(table))
+        {
+            if (row is null || !row.TryGetValue($"_{column}_value", out var value)
+                || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            {
+                continue;
+            }
+
+            links.Add(value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id) && id != Guid.Empty
+                ? id
+                : ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        return links.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: <see cref="InvoiceLinksOf(string, IReadOnlyDictionary{string, JsonElement})"/> for a FetchXML (module)
+    /// row, keyed by logical name. A present value that is not a lookup id reads as <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.
+    /// </summary>
+    internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(table))
+        {
+            if (!row.TryGetValue(column, out var raw) || raw is null)
+                continue;
+            links.Add(ExternalModuleDescriptor.TryGetAttributeId(row, column, out var id) ? id : ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        return links.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: <paramref name="select"/> plus the invoice link columns of <paramref name="table"/> it does not already
+    /// name (<see cref="InvoiceLinks.LinkedTable.ValueColumns"/>), so a list read always carries what the invoice filter reads.
+    /// </summary>
+    internal static string WithInvoiceLinkColumns(string select, string table)
+    {
+        if (!InvoiceLinks.Tables.TryGetValue(table, out var linked))
+            return select;
+        var present = select.Split(',').ToHashSet(StringComparer.Ordinal);
+        return string.Concat(linked.ValueColumns.Where(c => !present.Contains(c)).Select(c => "," + c).Prepend(select));
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: the rows of ONE page that the invoice decision leaves visible to <paramref name="caller"/>. Every
+    /// invoice the page links to is put to <paramref name="hideInvoices"/> (the caller-aware seam, <see cref="ExternalInvoiceHiding"/>)
+    /// in ONE call; none linked means no call. A row with no invoice link is unaffected. A row is hidden when ANY invoice it links to is
+    /// not visible (or its link is unreadable). No seam, a seam that throws and a faulted decision hide EVERY invoice-linked row of the
+    /// page (fail closed), and the answer says <c>Truncated</c> when that dropped a row. Logs carry counts only.
+    /// </summary>
+    internal static async Task<(List<T> Visible, bool Truncated)> HideInvoiceLinkedRowsAsync<T>(
+        CallerPrincipal caller,
+        IReadOnlyList<T> rows,
+        Func<T, IReadOnlyList<Guid>> invoiceLinksOf,
+        ExternalInvoiceHiding? hideInvoices,
+        ILogger logger,
+        string surface,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(invoiceLinksOf);
+        var links = rows.Select(invoiceLinksOf).ToList();
+        var asked = links
+            .SelectMany(l => l)
+            .Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
+            .Distinct()
+            .ToList();
+        InvoiceVisibilityResult? decision = null;
+        var faulted = false;
+        if (asked.Count > 0)
+        {
+            if (hideInvoices is null)
+            {
+                logger.LogError(
+                    "[EXT-INVOICE-LINKED] {Surface}: no invoice predicate is configured; every row linked to one of {Count} invoice(s) is hidden (fail closed).",
+                    surface, asked.Count);
+                faulted = true;
+            }
+            else
+            {
+                try
+                {
+                    decision = await hideInvoices(caller, asked, ct).ConfigureAwait(false);
+                    faulted = decision.Faulted;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex,
+                        "[EXT-INVOICE-LINKED] {Surface}: the invoice decision for {Count} invoice(s) failed; every invoice-linked row is hidden (fail closed).",
+                        surface, asked.Count);
+                    faulted = true;
+                }
+            }
+        }
+
+        var visible = rows
+            .Where((_, i) => links[i].Count == 0 || (!faulted && decision is not null && links[i].All(decision.IsVisible)))
+            .ToList();
+        if (visible.Count != rows.Count)
+        {
+            logger.LogInformation(
+                "[EXT-INVOICE-LINKED] {Surface}: {Hidden} of {Total} row(s) hidden by the invoice they belong to (faulted={Faulted}; {Reasons}).",
+                surface, rows.Count - visible.Count, rows.Count, faulted, decision?.HiddenSummary() ?? "");
+        }
+
+        return (visible, faulted && visible.Count != rows.Count);
     }
 
     /// <summary>
@@ -2447,6 +2584,7 @@ public class ExternalDataService
                      + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
                      + CreatorStampSelect
                      + LiveParentSelectSuffix(EventTable); // task 187: the parents whose live roots the rule takes in
+        select = WithInvoiceLinkColumns(select, EventTable); // task 130-0 fix round 1: an event follows its invoice
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
         return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
@@ -3738,6 +3876,7 @@ public class ExternalDataService
         // R3 ISS-011 (#1886): the same truth the download and versions routes use (DocumentStorageResolver.GetSpePointersAsync:
         // a usable drive id AND item id; sprk_hasfile is a hint that can be stale). Only the boolean leaves the BFF.
         HasFile = Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(r.SprkGraphdriveid, r.SprkGraphitemid),
+        InvoiceLinks = InvoiceLinksOf(DocumentTable, r.Extra), // task 130-0 fix round 1; never serialized
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()
@@ -3759,6 +3898,7 @@ public class ExternalDataService
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        InvoiceLinks = InvoiceLinksOf(TodoTable, r.Extra), // task 130-0 fix round 1; never serialized
     };
 
     private static ExternalEventDto MapEvent(EventRow r) => new()
@@ -3773,6 +3913,7 @@ public class ExternalDataService
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra), // task 130-0 fix round 1; never serialized
     };
 
     private static ExternalContactDto MapContact(ContactRow r) => new()

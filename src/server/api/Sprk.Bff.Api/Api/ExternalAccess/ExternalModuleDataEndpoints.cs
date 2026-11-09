@@ -353,6 +353,7 @@ public static class ExternalModuleDataEndpoints
                 .Concat(module.NarrowingAttributes)
                 .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
+                .Concat(InvoiceLinkedChildAttributes(module)) // task 130-0 fix round 1: the invoices a child row belongs to
                 .Concat(ExternalInvoiceReviewDetail.RequiredAttributes(module.RecordEntity)) // 082c-2 fix round 3 (U1): the status the review detail is judged on
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -411,6 +412,18 @@ public static class ExternalModuleDataEndpoints
                     .ConfigureAwait(false);
             }
 
+            // ebilling-r1 task 130-0 fix round 1: a CHILD row (a document ...) that belongs to an invoice the caller may not see is hidden,
+            // even when it is also filed under a record the caller can read (one seam call for the page; a fault hides every
+            // invoice-linked row and the response says truncated). Which columns are invoice links comes from InvoiceLinks.
+            var invoiceLinkedTruncated = false;
+            if (InvoiceLinkedChildAttributes(module).Any() && scoped.Count > 0)
+            {
+                (scoped, invoiceLinkedTruncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+                        principal, scoped, row => ExternalDataService.InvoiceLinksOf(module.RecordEntity, row), hideInvoices, logger,
+                        $"module {module.Name}", ct)
+                    .ConfigureAwait(false);
+            }
+
             // 082c-2 fix round 3 (uac-r2 U1): the invoice's review detail is returned only while the row's statuscode is In Review (the status was
             // projected server-side above, and is removed below unless the caller asked for it). Before the strip, which drops the status.
             if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity))
@@ -440,6 +453,11 @@ public static class ExternalModuleDataEndpoints
                     .ToList();
             }
 
+            // ebilling-r1 task 130-0 fix round 1 (uac-r2 ruling on roots): a ROOT row is decided by its grant and never hidden by an
+            // invoice link; the link it returns is blanked when that invoice is not visible to the caller (or the decision faults).
+            projected = await RedactRootInvoiceLinksAsync(module.RecordEntity, projected, principal, hideInvoices, logger, ct)
+                .ConfigureAwait(false);
+
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope (server-side filtered).",
                 module.Name, module.RecordEntity, projected.Count, result.Entities.Count);
@@ -451,7 +469,7 @@ public static class ExternalModuleDataEndpoints
             // notes/grid-widget-empty-diagnosis.md.
             return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null)
             {
-                Truncated = scopeTruncated || narrowingTruncated || invoiceTruncated,
+                Truncated = scopeTruncated || narrowingTruncated || invoiceTruncated || invoiceLinkedTruncated,
             });
         }
         catch (FetchXmlParseException)
@@ -474,6 +492,123 @@ public static class ExternalModuleDataEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCH_INTERNAL_ERROR" });
         }
     }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoice link columns (<see cref="InvoiceLinks.LinkColumnsOf"/>) of a CHILD module's
+    /// table, projected server-side so a row that belongs to an invoice the caller may not see can be hidden. None for a root module
+    /// (a root is never hidden by an invoice link; its link is redacted instead) and none for the invoice family (decided by the
+    /// invoice predicate itself, <see cref="HideInvoiceRowsAsync"/>).
+    /// </summary>
+    private static IReadOnlyList<string> InvoiceLinkedChildAttributes(ExternalModuleDescriptor module) =>
+        InvoiceLinks.HasInvoiceLink(module.RecordEntity)
+        && !InvoiceLinks.IsRootWithInvoiceLink(module.RecordEntity)
+        && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(module.RecordEntity)
+            ? InvoiceLinks.LinkColumnsOf(module.RecordEntity)
+            : Array.Empty<string>();
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1 (uac-r2 ruling on roots): a root is decided by its grant; its invoice link is shown only when
+    /// that invoice is visible. For a root table with invoice links (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>), every invoice
+    /// the returned rows link to is put to <paramref name="hideInvoices"/> in ONE call; every form of a link whose invoice is not
+    /// visible is blanked (the lookup under its logical name and its <c>_col_value</c> form, their annotations, and the
+    /// <c>{col}name</c> display column). No seam, a throw, a faulted decision and a value that is not a lookup id blank the link
+    /// (fail closed). The row itself is always returned. Any other table, or rows that return no link, are unchanged and cause no call.
+    /// </summary>
+    internal static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RedactRootInvoiceLinksAsync(
+        string table,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+        CallerPrincipal principal,
+        ExternalInvoiceHiding? hideInvoices,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!InvoiceLinks.IsRootWithInvoiceLink(table) || rows.Count == 0)
+            return rows;
+
+        var columns = InvoiceLinks.LinkColumnsOf(table);
+        // Per row, per link column the row returns: the invoice it names (UnreadableLink when it is not a lookup id).
+        var links = rows
+            .Select(row => columns
+                .Select(column => (Column: column, Raw: LinkValueOf(row, column)))
+                .Where(link => link.Raw is not null)
+                .Select(link => (link.Column, Invoice: RootLinkIdOf(link.Raw) ?? ExternalDocumentNarrowing.UnreadableLink))
+                .ToList())
+            .ToList();
+        var asked = links.SelectMany(l => l).Select(l => l.Invoice)
+            .Where(id => id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
+        if (links.All(l => l.Count == 0))
+            return rows;
+
+        InvoiceVisibilityResult? decision = null;
+        if (asked.Count > 0 && hideInvoices is not null)
+        {
+            try
+            {
+                decision = await hideInvoices(principal, asked, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[EXT-MODULE] {Entity}: the invoice decision for {Count} linked invoice(s) failed; the links are blanked (fail closed).",
+                    table, asked.Count);
+            }
+        }
+        else if (asked.Count > 0)
+        {
+            logger.LogError("[EXT-MODULE] {Entity}: no invoice predicate is configured; {Count} invoice link(s) are blanked (fail closed).",
+                table, asked.Count);
+        }
+
+        bool Shown(Guid invoice) => decision is { Faulted: false } && decision.IsVisible(invoice);
+        var blanked = 0;
+        var result = rows
+            .Select((row, i) =>
+            {
+                var hidden = links[i].Where(l => !Shown(l.Invoice)).Select(l => l.Column).ToList();
+                if (hidden.Count == 0)
+                    return row;
+                blanked += hidden.Count;
+                var copy = row.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var key in row.Keys.Where(k => hidden.Any(column => IsFormOfLink(k, column))))
+                    copy[key] = null;
+                return (IReadOnlyDictionary<string, object?>)copy;
+            })
+            .ToList();
+        if (blanked > 0)
+        {
+            logger.LogInformation(
+                "[EXT-MODULE] {Entity}: {Blanked} invoice link(s) blanked on {Rows} root row(s): the invoice is not visible to the caller ({Reasons}).",
+                table, blanked, rows.Count, decision?.HiddenSummary() ?? "no decision");
+        }
+
+        return result;
+
+        static object? LinkValueOf(IReadOnlyDictionary<string, object?> row, string column) =>
+            row.TryGetValue(column, out var raw) && raw is not null ? raw
+            : row.TryGetValue($"_{column}_value", out var value) && value is not null ? value
+            : null;
+
+        static bool IsFormOfLink(string key, string column) =>
+            string.Equals(key, column, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, $"_{column}_value", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, column + "name", StringComparison.OrdinalIgnoreCase)
+            || key.StartsWith(column + "@", StringComparison.OrdinalIgnoreCase)
+            || key.StartsWith($"_{column}_value@", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>A root link value as the module reads project it: a GUID, an entity reference, a GUID string, or a
+    /// <c>{ id, logicalName, name }</c> map (<see cref="RecordService"/>); <c>null</c> for anything else.</summary>
+    private static Guid? RootLinkIdOf(object? raw) => raw switch
+    {
+        Guid g when g != Guid.Empty => g,
+        Microsoft.Xrm.Sdk.EntityReference er when er.Id != Guid.Empty => er.Id,
+        string text when Guid.TryParse(text, out var parsed) && parsed != Guid.Empty => parsed,
+        IReadOnlyDictionary<string, object?> map when map.TryGetValue("id", out var id) => RootLinkIdOf(id),
+        _ => null,
+    };
 
     /// <summary>Task 098: the primary id of an <c>sprk_invoice</c> module, projected server-side so the (a′) predicate can key
     /// every row (none for any other module).</summary>
@@ -528,6 +663,7 @@ public static class ExternalModuleDataEndpoints
         ExternalModuleRegistry registry,
         RecordService recordService,
         IDataversePrivilegeChecker privileges,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -541,7 +677,8 @@ public static class ExternalModuleDataEndpoints
         }
 
         return await GetScopedRecordCoreAsync(
-            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct).ConfigureAwait(false);
+            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct, hideInvoices)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -550,6 +687,8 @@ public static class ExternalModuleDataEndpoints
     /// test double for <paramref name="readRecord"/> (the shared <see cref="RecordService"/> needs a live
     /// ServiceClient). The handler passes <c>RecordService.GetRecordAsync</c> unchanged.
     /// </summary>
+    /// <param name="hideInvoices">ebilling-r1 task 130-0 fix round 1: the caller-aware invoice seam a root's invoice link is decided by
+    /// (<see cref="RedactRootInvoiceLinksAsync"/>). None given blanks every returned invoice link (fail closed).</param>
     internal static async Task<IResult> GetScopedRecordCoreAsync(
         string entityLogicalName,
         Guid id,
@@ -558,7 +697,8 @@ public static class ExternalModuleDataEndpoints
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName) || id == Guid.Empty)
         {
@@ -625,7 +765,12 @@ public static class ExternalModuleDataEndpoints
                 record = ExternalInvoiceReviewDetail.Project(record);
             }
 
-            return Results.Ok(StripToReadableColumns(record, returnable, keepLogicalName: false, out _));
+            var stripped = StripToReadableColumns(record, returnable, keepLogicalName: false, out _);
+            // ebilling-r1 task 130-0 fix round 1: a root's invoice link is shown only when that invoice is visible to the caller.
+            var redacted = await RedactRootInvoiceLinksAsync(
+                    module.RecordEntity, new[] { stripped }, principal, hideInvoices, logger, ct)
+                .ConfigureAwait(false);
+            return Results.Ok(redacted[0]);
         }
         catch (RecordNotFoundException ex)
         {

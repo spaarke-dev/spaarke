@@ -141,6 +141,13 @@ public sealed class ExternalDocumentDto
     /// </summary>
     [JsonPropertyName("hasFile")]
     public bool HasFile { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid> InvoiceLinks { get; init; } = Array.Empty<Guid>();
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +247,13 @@ public sealed class ExternalTodoDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid> InvoiceLinks { get; init; } = Array.Empty<Guid>();
 }
 
 /// <summary>
@@ -434,6 +448,13 @@ public sealed class ExternalEventDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid> InvoiceLinks { get; init; } = Array.Empty<Guid>();
 }
 
 public sealed class CreateExternalEventRequest

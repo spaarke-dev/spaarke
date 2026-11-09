@@ -623,7 +623,10 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
 
-        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct);
+        // Task 130-0 fix round 1: a document that belongs to an invoice the caller may not see (sprk_invoice or sprk_relatedinvoice)
+        // is hidden, even when it is also filed under this record (one seam call per page).
+        var documents = await HideInvoiceLinkedAsync(
+            await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct), callerContext, hideInvoices, logger, "documents", ct);
         return Results.Ok(new ExternalDocumentListResponse
         {
             Value = documents.Value,
@@ -684,7 +687,7 @@ public static class ExternalProjectDataEndpoints
         //     downloaded it through P's route.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
         var documentName = document.DocumentName;
-        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
+        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct, hideInvoices, logger))
         {
             logger.LogWarning(
                 "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
@@ -738,7 +741,8 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -754,7 +758,9 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        var todos = await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct);
+        // Task 130-0 fix round 1: a to-do that belongs to an invoice the caller may not see is hidden (one seam call per page).
+        var todos = await HideInvoiceLinkedAsync(
+            await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct), callerContext, hideInvoices, logger, "todos", ct);
         if (!callerContext.DataverseConfirmsWrites)
             return Results.Ok(todos);
 
@@ -1523,10 +1529,14 @@ public static class ExternalProjectDataEndpoints
     /// or ancestor Restricted, or an internal-only / non-Open communication on the bounded parent walk). The secure flags
     /// of its unreadable linked roots are read app-only, only once the document is known to be under the route parent; a
     /// document not under it is refused without that read, and one the root rule refuses without the narrowing read.
+    /// <para>ebilling-r1 task 130-0 fix round 1: AND every invoice the document links to (<c>sprk_invoice</c>,
+    /// <c>sprk_relatedinvoice</c>; <see cref="InvoiceLinks"/>) is visible to the caller (<paramref name="hideInvoices"/>, the
+    /// caller-aware seam). A document of an invoice the caller may not see, no seam and a faulted decision all give the same
+    /// refusal, decided last, so the answer cannot tell why.</para>
     /// </summary>
     private static async Task<bool> IsDocumentReadableUnderAsync(
         ExternalDataService.DocumentScopeRead document, Guid documentId, Guid routeParentId, CallerPrincipal caller,
-        ExternalDataService dataService, CancellationToken ct)
+        ExternalDataService dataService, CancellationToken ct, ExternalInvoiceHiding? hideInvoices, ILogger logger)
     {
         if (!document.IsUnder(routeParentId))
             return false;
@@ -1539,7 +1549,43 @@ public static class ExternalProjectDataEndpoints
         if (!document.IsReadableUnder(routeParentId, caller, flags, live))
             return false;
         // Task 188: the same refusal for a document the narrowing hides, so the answer cannot tell why.
-        return await dataService.IsDocumentVisibleAsync(caller, documentId, document, ct);
+        if (!await dataService.IsDocumentVisibleAsync(caller, documentId, document, ct))
+            return false;
+        // Task 130-0 fix round 1: the same refusal for a document whose invoice the caller may not see.
+        var (visible, _) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            caller, new[] { document },
+            d => ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, d.Roots.Row),
+            hideInvoices, logger, "document", ct);
+        return visible.Count == 1;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: <paramref name="page"/> minus the rows that belong to an invoice <paramref name="caller"/> may
+    /// not see (<see cref="ExternalDataService.HideInvoiceLinkedRowsAsync"/>: one seam call for the page; a fault hides every
+    /// invoice-linked row and the list says <c>Truncated</c>). Every other field of the response is kept.
+    /// </summary>
+    private static async Task<ExternalCollectionResponse<T>> HideInvoiceLinkedAsync<T>(
+        ExternalCollectionResponse<T> page, CallerPrincipal caller, ExternalInvoiceHiding? hideInvoices, ILogger logger,
+        string surface, CancellationToken ct)
+    {
+        var (visible, truncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            caller, page.Value, InvoiceLinksOfDto, hideInvoices, logger, surface, ct);
+        return visible.Count == page.Value.Count
+            ? page
+            : new ExternalCollectionResponse<T>
+            {
+                Value = visible,
+                Truncated = page.Truncated || truncated,
+                CanCreate = page.CanCreate,
+            };
+
+        static IReadOnlyList<Guid> InvoiceLinksOfDto(T row) => row switch
+        {
+            ExternalTodoDto todo => todo.InvoiceLinks,
+            ExternalEventDto calendarEvent => calendarEvent.InvoiceLinks,
+            ExternalDocumentDto document => document.InvoiceLinks,
+            _ => throw new InvalidOperationException($"{typeof(T).Name} carries no invoice links."),
+        };
     }
 
     /// <summary>
@@ -1556,27 +1602,31 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetServiceRequestDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetInvoiceDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
@@ -1587,30 +1637,30 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadMatterDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadWorkAssignmentDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadServiceRequestDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadInvoiceDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1663,30 +1713,34 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetServiceRequestDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetInvoiceDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1711,18 +1765,18 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> CreateTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
@@ -2137,7 +2191,7 @@ public static class ExternalProjectDataEndpoints
         // Fix round for task 039 (ExternalMultiRootRule, owner option B): as the download route, a document also filed to a
         // SECURE root the caller cannot read is the same uniform 403 as one not under this parent.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
+        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct, hideInvoices, logger))
         {
             logger.LogWarning(
                 "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
@@ -2212,7 +2266,8 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -2221,7 +2276,9 @@ public static class ExternalProjectDataEndpoints
         if (!RightsForRoot(callerContext, rootKind, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        var events = await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct);
+        // Task 130-0 fix round 1: an event that belongs to an invoice the caller may not see is hidden (one seam call per page).
+        var events = await HideInvoiceLinkedAsync(
+            await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct), callerContext, hideInvoices, logger, "events", ct);
 
         // Task 036 fix round 1 (F4): as the to-do list, but only a PROJECT has an event create route, so only a project's
         // list says, and only to a caller whose access Dataverse decided (AppendTo on the project + prvCreatesprk_Event).
@@ -2243,20 +2300,20 @@ public static class ExternalProjectDataEndpoints
     /// <summary>GET /api/v1/external/projects/{id}/events — calendar events for a project.</summary>
     private static Task<IResult> GetEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/matters/{id}/events — calendar events for a matter (task 039).</summary>
     private static Task<IResult> GetMatterEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/workassignments/{id}/events — calendar events for a work assignment (task 039).</summary>
     private static Task<IResult> GetWorkAssignmentEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>
     /// POST /api/v1/external/projects/{id}/events — create a calendar event on a project.
