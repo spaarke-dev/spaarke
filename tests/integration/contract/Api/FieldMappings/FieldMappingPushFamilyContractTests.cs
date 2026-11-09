@@ -413,6 +413,128 @@ public class FieldMappingPushFamilyContractTests
         FieldMappingPushFamily.FlagNames(new RootRecordFlags(false, false)).Should().BeEmpty();
     }
 
+    // ───────────────────────── task 022 fix round 4: the mapping-source rule, through the route ─────────────────────────
+
+    /// <summary>A secure source, children owned by a user (not its isolation owner): the route asks the rule on the apply.</summary>
+    [Fact]
+    public async Task Apply_FromASecureSource_DoesNotWriteAChildNotOwnedByItsIsolationOwner_AndGivesTheCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA, ChildB, ChildC]);
+        world.Host.ArrangeSourceGateRead("sprk_matter", secureFlag: true);
+        ArrangeChildOwner(world, new Microsoft.Xrm.Sdk.EntityReference("systemuser", Guid.NewGuid()));
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!;
+        json["updatedCount"]!.GetValue<int>().Should().Be(0);
+        json["failedCount"]!.GetValue<int>().Should().Be(1);
+        var error = json["errors"]!.AsArray().Should().ContainSingle().Which!;
+        error["recordId"]!.GetValue<string>().Should().Be(ChildA.ToString("D"));
+        error["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        error["error"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
+        world.Host.Writes.Should().BeEmpty("nothing is written to a child the rule refuses");
+    }
+
+    /// <summary>The same source and children on a preview: no value is listed for the child; it comes back with its code.</summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ListsNoValueForAChildNotOwnedByItsIsolationOwner_AndReturnsItWithTheCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+        world.Dataverse.Current[ChildA] = "OLD";
+        world.Host.ArrangeSourceGateRead("sprk_matter", secureFlag: true);
+        ArrangeChildOwner(world, new Microsoft.Xrm.Sdk.EntityReference("systemuser", Guid.NewGuid()));
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!;
+        json["preview"]!.GetValue<bool>().Should().BeTrue();
+        json["changes"]!.AsArray().Should().BeEmpty("the apply would write nothing to the child");
+        var skipped = json["errors"]!.AsArray().Should().ContainSingle().Which!;
+        skipped["recordId"]!.GetValue<string>().Should().Be(ChildA.ToString("D"));
+        skipped["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        world.Host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>An ordinary source through the route: unchanged, the child is written and no child owner is read.</summary>
+    [Fact]
+    public async Task Apply_FromAnOrdinarySource_IsUnchanged_AndReadsNoChildOwner()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        JsonNode.Parse(body)!["updatedCount"]!.GetValue<int>().Should().Be(1);
+        world.Host.Writes.Should().ContainSingle().Which.Id.Should().Be(ChildA);
+        world.Host.Entities.Verify(e => e.RetrieveAsync(
+            "sprk_event", It.IsAny<Guid>(), It.Is<string[]>(c => c.Length == 1 && c[0] == "ownerid"), It.IsAny<CancellationToken>()),
+            Times.Never, "a source that is not secure is allowed for every child");
+    }
+
+    /// <summary>
+    /// The preview over a secure source owned by the Secure Record owner team: the child that team owns is listed with its
+    /// value; the child an ordinary team owns is not, and comes back with the code and the fixed text.
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ListsTheChildItsIsolationOwnerOwns_AndReturnsTheOtherWithTheCode()
+    {
+        var secureTeam = Guid.NewGuid();
+        var ordinaryTeam = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.AddRange([ChildA, ChildB]);
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", id == ChildB ? secureTeam : ordinaryTeam),
+            });
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var rule = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = Column, SourceFieldType = "Text", TargetField = Column, TargetFieldType = "Text",
+            Priority = 1, MappingType = "Copy",
+        };
+        var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
+            "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
+
+        var response = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, [rule], new Dictionary<string, object?> { [Column] = "SECURE-VALUE" },
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA, ChildB]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        response.Changes!.Select(c => c.RecordId).Should().Equal([ChildB], "the child the isolation owner owns is listed");
+        var skipped = response.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        skipped.Error.Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
+    }
+
+    /// <summary>Each child's owner as the app-only read returns it (task 022 fix round 4).</summary>
+    private static void ArrangeChildOwner(World world, Microsoft.Xrm.Sdk.EntityReference owner) =>
+        world.Host.Entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                new Microsoft.Xrm.Sdk.Entity(table, id) { ["ownerid"] = owner });
+
     // ───────────────────────── fixtures ─────────────────────────
 
     /// <summary>The host, a scripted caller-scoped Dataverse and a probe that answers the rights the test sets.</summary>

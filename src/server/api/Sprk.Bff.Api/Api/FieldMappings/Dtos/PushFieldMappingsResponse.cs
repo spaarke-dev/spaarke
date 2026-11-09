@@ -46,6 +46,8 @@ public record PushFieldMappingsResponse
     /// List of errors encountered during the operation.
     /// Each entry includes the record ID and error message.
     /// </summary>
+    /// <remarks>Task 022 fix round 4: on a preview, the children the apply would not write under the mapping-source rule, each
+    /// with its <see cref="PushFieldMappingsError.ReasonCode"/>; their values are not listed in <see cref="Changes"/>.</remarks>
     public PushFieldMappingsError[] Errors { get; init; } = [];
 
     /// <summary>
@@ -134,6 +136,13 @@ public record PushFieldMappingsError
     /// Human-readable error message describing the failure.
     /// </summary>
     public string Error { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Task 022 fix round 4: the stable code of a child the push does not write because of the mapping-source rule
+    /// (<c>field_mapping.push.secure_source_not_isolated</c>, <c>field_mapping.push.secure_source_undetermined</c>); null for
+    /// every other entry. Carried on the apply and on the preview.
+    /// </summary>
+    public string? ReasonCode { get; init; }
 }
 
 /// <summary>

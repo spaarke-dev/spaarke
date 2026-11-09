@@ -475,7 +475,9 @@ public static class FieldMappingEndpoints
         // Assigned-To classifier reads. Required: a host without them fails the request (500) instead of pushing without them.
         [FromServices] Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader familyReader,
         [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
-        [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership)
+        [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership,
+        // Task 022 fix round 4: the Secure Record owner team's configuration, for the mapping-source rule.
+        [FromServices] IConfiguration configuration)
     {
         logger.LogInformation(
             "Pushing field mappings. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}, TargetEntity={TargetEntity}, "
@@ -715,12 +717,17 @@ public static class FieldMappingEndpoints
                 entityService,
                 ct);
 
+            // Task 022 fix round 4 (the mapping-source rule): every value a push writes is copied from the source, so each child
+            // is asked, on the preview and on the apply, whether the source may be copied into it.
+            var sourceGate = FieldMappingPushSourceGate.For(
+                entityService, configuration, request.SourceEntity, request.SourceRecordId, logger);
+
             if (request.Preview)
             {
                 return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        selection.SkippedCount, isAssignedToColumn, refusedChildIds),
+                        selection.SkippedCount, isAssignedToColumn, refusedChildIds, sourceGate),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
@@ -767,7 +774,8 @@ public static class FieldMappingEndpoints
                 rootFiling,
                 lookupBinds,
                 entityService,
-                impersonatedQuery);
+                impersonatedQuery,
+                sourceGate: sourceGate);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1291,7 +1299,9 @@ public static class FieldMappingEndpoints
     /// </summary>
     /// <remarks>Internal (not private) so the test assembly can drive it directly: task 156 (the re-file cascade), and
     /// task 142's writer test, which asserts the inline Assigned-To trigger after a push that wrote a root's "Assigned *"
-    /// column (InternalsVisibleTo).</remarks>
+    /// column (InternalsVisibleTo).
+    /// <para>Task 022 fix round 4: <paramref name="sourceGate"/> is the mapping-source rule for the push's source. The route
+    /// always passes it (pinned by a source-scan test); a direct caller that passes none asks no source question.</para></remarks>
     internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
         IFieldMappingDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
@@ -1306,7 +1316,8 @@ public static class FieldMappingEndpoints
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
         IGenericEntityService? appOnlyEntities = null,
-        IImpersonatedCommunicationQuery? callerQuery = null)
+        IImpersonatedCommunicationQuery? callerQuery = null,
+        FieldMappingPushSourceGate? sourceGate = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1429,6 +1440,22 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a
+                    // row owned by that source's isolation owner (MappingSourceCopyGate, the one predicate). A child that is not,
+                    // or whose answer cannot be told, is not written at all; its entry carries the stable code.
+                    if (sourceGate is not null
+                        && await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, ct) is { } sourceRefusal)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = FieldMappingPushSourceGate.MessageFor(sourceRefusal),
+                            ReasonCode = sourceRefusal,
+                        });
+                        continue;
+                    }
+
                     // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
                     // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
                     // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the

@@ -61,7 +61,8 @@ internal static class FieldMappingPushFamily
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> LookupBinds,
         int SkippedRuleCount,
         Func<string, string, bool> IsAssignedToColumn,
-        IReadOnlyList<Guid>? RefusedChildIds = null);
+        IReadOnlyList<Guid>? RefusedChildIds = null,
+        FieldMappingPushSourceGate? SourceGate = null);
 
     /// <summary>One value a rule would write: the same for every child, so computed once.</summary>
     private sealed record PlannedChange(FieldMappingRuleDto Rule, object? Wire, string To, Guid? LookupId, bool IsAssignedTo);
@@ -83,6 +84,7 @@ internal static class FieldMappingPushFamily
     {
         var planned = Plan(input, logger);
         var changes = new List<PushPreviewChange>();
+        var notWritten = new List<PushFieldMappingsError>();
         var skippedNoWrite = 0;
 
         if (input.Children.Count > 0)
@@ -112,6 +114,7 @@ internal static class FieldMappingPushFamily
                 foreach (var child in writable)
                 {
                     rows.TryGetValue(child.Id, out var row);
+                    var childChanges = new List<PushPreviewChange>();
                     foreach (var change in planned)
                     {
                         var column = change.Rule.TargetField;
@@ -122,7 +125,7 @@ internal static class FieldMappingPushFamily
                         if (same)
                             continue;
 
-                        changes.Add(new PushPreviewChange
+                        childChanges.Add(new PushPreviewChange
                         {
                             RecordId = child.Id,
                             Name = child.Name,
@@ -132,6 +135,23 @@ internal static class FieldMappingPushFamily
                             Flags = change.IsAssignedTo ? FlagNames(flags.GetValueOrDefault(child.Id, Unreadable)) : [],
                         });
                     }
+
+                    // Task 022 fix round 4 (the mapping-source rule): the same question the apply asks before it writes. A child
+                    // the apply would not write is not listed with values; it is returned with its code instead.
+                    if (childChanges.Count > 0
+                        && input.SourceGate is { } gate
+                        && await gate.RefusalForChildAsync(input.TargetEntity, child.Id, ct).ConfigureAwait(false) is { } refusal)
+                    {
+                        notWritten.Add(new PushFieldMappingsError
+                        {
+                            RecordId = child.Id,
+                            Error = FieldMappingPushSourceGate.MessageFor(refusal),
+                            ReasonCode = refusal,
+                        });
+                        continue;
+                    }
+
+                    changes.AddRange(childChanges);
                 }
             }
         }
@@ -146,6 +166,7 @@ internal static class FieldMappingPushFamily
             SkippedCount = 0,
             Preview = true,
             Changes = changes.ToArray(),
+            Errors = notWritten.ToArray(),
             SkippedNoWriteCount = skippedNoWrite,
             Truncated = input.Truncated,
             SkippedRuleCount = input.SkippedRuleCount,
