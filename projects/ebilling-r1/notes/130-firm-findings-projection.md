@@ -36,7 +36,7 @@ Enums serialize as strings. No caller check: the caller establishes that the inv
 
 | State | Projected |
 |---|---|
-| Submission Received / Processing | status, tracking number, billed total (from the submission's own derived invoice once it exists, else null); no reads of lines, records or Signals |
+| Submission Received / Processing | status, tracking number, billed total (from the submission's own derived invoice once it exists AND the route's filter decided it, else null; 130b fix round 2); no reads of lines, records or Signals |
 | Submission Accepted | the invoice's outcome |
 | Submission Rejected | status only (see open question 1) |
 | Submission Failed, unknown | `Closed`, status only, not degraded (130b fix round 1; was `Unavailable`) |
@@ -53,8 +53,8 @@ Where each part is read (all app-only, through `IGenericEntityService`):
 - Reviewer-added: `ExtractionProvenance.IsReviewerAdded`.
 - Reason: the `reduce-line` / `disallow-line` / `add-line` Decision Record whose `sprk_regardinginvoiceline` is one of this invoice's decided lines (and whose `sprk_regardinginvoice`, if set, is this invoice) with the action code the line's current status needs; the newest wins. A record with neither link of this invoice is never projected, whatever the query returns. `sprk_confirmedby`, `sprk_steps`, `sprk_factsnapshot` are not selected.
 - Citations (line items): the Signals the chosen record resolved (`sprk_signal.sprk_decisionrecord`), one citation per distinct policy version, with `sprk_firmreason` (first non-blank in creation order; null when none, never substituted; the Signal message is not selected). Citations (adjustments): `sprk_adjustmentrule`, no firm reason.
-- Rule name: `sprk_policy.sprk_name` of a Billing policy. A version whose Billing policy cannot be read is not cited. The rule set is never read.
-- Clause: `FirmClauseReader` (= `RuleSetService.GetFirmClauseAsync`) once per distinct policy version per invoice. Text returned: label, version number, section reference, quote. None (flag off, version not applied, any fault inside the reader): rule name and firm reason only.
+- Rule name: `sprk_policy.sprk_name` of a Billing policy. A version whose Billing policy cannot be read is not cited. The rule set's name is never read (since 130b fix round 2 its Procedure link is, for the InternalStandard check).
+- Clause: `FirmClauseReader` (= `RuleSetService.GetFirmClauseAsync`) once per distinct policy version per invoice. Text returned: label, version number, section reference, quote. None (flag off, version not applied, any fault inside the reader): ~~rule name and firm reason only~~ no citation at all since 130b fix round 2 (see there).
 
 ## Decisions taken inside the brief (for review)
 
@@ -121,8 +121,8 @@ Branch `task/ebilling-130b` (from `task/ebilling-130a` head `60a2b64dc0`).
 | Item does not exist | 403 | same body as another firm's |
 | Invoice/submission read faults, or the visibility decision cannot be made | 503 | `ebilling.firm-outcome.unavailable` |
 | eBilling flag off, caller authorized | 503 | `ebilling.disabled` |
-| Projection `Degraded` or `Kind == Unavailable` (a read FAULTED) | 503 | `ebilling.firm-outcome.unavailable` |
-| Projection `Kind == Closed` (a permanent state; fix round 1) | 200 | status label and tracking number only |
+| Projection `Degraded` or `Kind == Unavailable` (a read FAULTED, the invoice has no status, or an Accepted submission's invoice was not decided by the filter: fix round 2) | 503 | `ebilling.firm-outcome.unavailable` |
+| Projection `Kind == Closed` (a closed state at the time of the request; fix round 1) | 200 | status label and tracking number only |
 | Otherwise | 200, `Cache-Control: no-store`, the `FirmOutcome` JSON (the kind is a string) | |
 
 A multi-firm caller sees the items of each of its firms.
@@ -182,9 +182,9 @@ Branch `task/ebilling-130b-fix1` from `task/ebilling-130b` at `34f6188cb5`. The 
 - **F1, the submission route decides the submission's invoice too.** `FirmOutcomeAuthorizationFilter.DecideSubmissionAsync`, after the submission's own firm, core record and seam checks, runs `DecideInvoiceAsync` on `InvoiceSubmissionPersister.InvoiceIdFor(submissionId)`. That is the id the projection reads. The invoice gets the same firm, core-record and (a') checks as on the invoice route. No invoice yet (`RecordNotFoundException`) passes; a refusal is the same 403 and a fault the same 503. A submission is shown only when it is the caller's AND its invoice is visible to the caller (uac-r2's rule). Its firm and core record are the submission's own columns, which say nothing about the invoice.
   - Tests: `ASubmission_WhoseInvoiceIsAnotherFirms_IsTheSame403AsAForeignSubmission` (the probe: byte-identical body, nothing projected), `ASubmission_WhoseInvoiceIsNotVisible_Is403` (another firm, an unreadable record, hidden by (a')), `AReceivedSubmission_WhoseExistingInvoiceIsAnotherFirms_Is403`.
   - Must-not-fire: `AnOwnSubmission_WithAnOwnInvoice_Is200` and `AReceivedSubmission_WithNoInvoiceYet_Is200_StatusOnly`.
-- **F1, permanent states are not faults (a contract change).** A new `FirmOutcomeKind.Closed`. A Failed submission, a Cancelled invoice, a Superseded invoice (also reached through an Accepted submission whose invoice a correction replaced) and an unknown status code are `Closed`: status label and tracking number only, no items, no totals, `Degraded = false`, so the route answers **200**. An unknown code is logged as a warning. `Unavailable` / `Degraded` (503) now mean a FAULT only. Authorization has already passed, so the 200 tells the caller nothing new about the item.
+- **F1, closed states are not faults (a contract change).** (Fix round 2: "permanent" was wrong. A closed state is closed at the time of the request; undoing a correction returns a superseded invoice to In Review.) A new `FirmOutcomeKind.Closed`. A Failed submission, a Cancelled invoice, a Superseded invoice (also reached through an Accepted submission whose invoice a correction replaced) and an unknown status code are `Closed`: status label and tracking number only, no items, no totals, `Degraded = false`, so the route answers **200**. An unknown code is logged as a warning. `Unavailable` / `Degraded` (503) now mean a FAULT only. Authorization has already passed, so the 200 tells the caller nothing new about the item.
   - Labels: `Failed`, `Cancelled`, `Replaced by a correction`, and `Closed` for an unknown code.
-  - An Accepted submission whose invoice cannot be found is still 503 (not a permanent state the brief names: the data is inconsistent, not closed).
+  - An Accepted submission whose invoice cannot be found is still 503 (not a closed state the brief names: the data is inconsistent, not closed).
   - Tests changed to the new contract: `SubmissionStates_MapToTheirStatus` (Failed: 200 Closed) and `AnUnavailableProjection_Is503` (header fault only; Cancelled moved to `APermanentInvoiceState_Is200_StatusOnly`). Unit: `PermanentStates_AndUnknownCodes_AreClosed_StatusOnly_NotDegraded`, `RejectedSubmission_ProjectsStatusOnly_FailedIsClosed_AndMissingProjectsNothing`, `AnAcceptedSubmission_WhoseInvoiceWasSuperseded_IsClosed`.
   - SPA (134): one new `kind` value, `Closed`; no other field changed. No client code reads the outcome yet (no match in `src/client` or `src/solutions`).
 - **F2, a failed billed-total read is not swallowed.** A Received or Processing submission whose invoice total read faults is status-only `Degraded` (503 at the route), never a 200 with a null total. Tests: `ASubmissionWhoseBilledTotalReadFaults_IsDegraded_NeverANullTotal` (unit) and `AReceivedSubmission_WhoseBilledTotalReadFaults_Is503` (route).
@@ -228,8 +228,7 @@ No other external route returns `sprk_billingevent` content.
 
 - K1: Signals and the line status, amount and adjustment columns are trusted without a writer filter. This is the same native-write limit as 085. `WriterCreatedRecord` on Signals waits for a single Signal writer.
 - K2: since the 130-0 merge, the invoice route reads and compares the caller's firms twice (the filter, then the seam). A fault on the second read gives 503 where a fault on the first gives 403.
-- A Received or Processing submission with no invoice passes the invoice decision. If the processing job creates the invoice between the filter and the projection's total read, that one total is read without the invoice decision. The invoice is the submission's own derived one, and the window is one request.
-- `WorkforceCeilingRouteFamilyTests.Routes` (uac-r2's per-route table) does not list the two outcome routes. Their ceiling is pinned in `FirmOutcomeScopeTests` instead.
+- (Removed in fix round 2: the window in which an invoice created after the filter had its total read without the invoice decision is closed by the `InvoiceDecided` rule; the missing route-family rows were added.)
 
 ### Seeding proof (F1 submission fix)
 
@@ -249,3 +248,64 @@ See "Results (fix round 1)".
   19 of 104 failed: every permanent-state, F2, K3 and seam-throw test, and the four ceiling must-fire cases the old declaration did not cover. The submission-table case passed, as expected (it was always declared). All four files were restored; their SHA-256 matched.
 - ArchTests (full, once): 2181 total, 2181 passed, 0 failed.
 - Broader unit run (`ExternalAccess`, `UnifiedAccessControl` name filters, for the owner-table double): 5022 passed, 0 failed.
+
+## 130b fix round 2 (adversarial pass 2, and the F4b owner ruling)
+
+Branch `task/ebilling-130b-fix2` from `task/ebilling-130b-fix1` at `7a962ffd9d`, pushed to `task/ebilling-130b-fix1` (fast-forward).
+
+### Fixed
+
+- **F1, the `InvoiceDecided` rule.** `FirmOutcomeScope` now records whether the filter decided, by the invoice rule, the invoice the outcome would show (`FirmOutcomeAuthorizationFilter.cs`: `DecideInvoiceAsync` returns the refusal and the flag; a submission's invoice that does not exist yet passes UNDECIDED; the flag is stored with the admitted id). The submission handler passes it to `FirmFindingsProjection.GetForSubmissionAsync(submissionId, invoiceDecided, ct)`. With it false nothing is read from that invoice: Received or Processing is status only with a null total (not degraded, 200); Accepted is `Unavailable` (503), so the retry re-enters the filter, which then decides the invoice. The invoice route always decides its invoice (true).
+  - Must-fire (route, the reviewer's probe turned into tests): `AnUndecidedInvoice_InProgress_Is200_WithNoBilledTotal_AndIsNeverRead` (Received and Processing; the invoice exists only in the projection's store, as another firm's on an unreadable matter: no billed total in the body, no `sprk_invoice` read, no invoice decision asked) and `AnUndecidedInvoice_Accepted_Is503_AndIsNeverRead`.
+  - Must-fire (the window itself): `AnInvoiceCreatedBetweenTheFilterAndTheProjection_IsNotShown` (Processing and Accepted). The filter's invoice read misses, and the invoice (own firm, readable matter) is created right after it. No total and no content; Accepted is 503. The retry is decided and shows the content.
+  - Must-not-fire: `ADecidedInvoice_InProgress_ShowsItsBilledTotal` (route) and `ADecidedInvoice_ShowsTheBilledTotal` (unit); `AnOwnSubmission_WithAnOwnInvoice_Is200` unchanged.
+  - Unit: `AnUndecidedInvoice_IsNeverRead_InProgressIsStatusOnly`, `AnUndecidedInvoice_OfAnAcceptedSubmission_IsUnavailable`.
+  - Changed premise: `AReceivedSubmission_WhoseBilledTotalReadFaults_Is503` now seeds the invoice where the filter can see it (a total is read only for a decided invoice).
+- **K1, a null `statuscode` is not Closed.** `InvoiceReviewReadService.ReadHeaderFactsAsync` turned a null status into 0, which read as an unknown code and so as Closed (200). Its only caller is the projection (checked: no other reference to `ReadHeaderFactsAsync` or `InvoiceHeaderFacts`). So `InvoiceHeaderFacts.StatusCode` is now `int?` (no `?? 0`), and the projection maps a null status to `Unavailable` (503). Test: `AnInvoiceWithNoStatusCode_IsUnavailable_NotClosed` (directly and through an Accepted submission).
+- **K1 (an Accepted submission whose invoice is missing).** Still 503 (the data is inconsistent). It is logged at Error with the stable code `EBILLING-FIRM-OUTCOME-ACCEPTED-WITHOUT-INVOICE` (`FirmFindingsProjection.AcceptedWithoutInvoiceCode`). Test: `AnAcceptedSubmission_WithNoInvoice_IsUnavailable_AndLoggedWithAStableCode`. Known limit: this is a permanent 503 until the data is repaired.
+- **F4b, the ceiling (owner ruling).** `ReadInvoiceOutcome` and `ReadSubmissionOutcome` also declare Read on `sprk_decisionrecord` (the reviewer's reasons) and `sprk_signal` (a cited rule's firm reason). `sprk_policy`, `sprk_policyversion`, `sprk_procedure` and `sprk_ruleset` are NOT declared; see the citation rule below. `WorkforceCeilingDouble.OwnerPrerequisite` gains both, so the dev Workforce role needs Read on them for workforce contacts to keep these routes.
+  - Must-fire rows: `AWorkforceContact_WithoutReadOnAReturnedTable_IsRefusedByTheCeiling` gains one row per new table per route (4).
+  - Pins: `TheRoutes_DeclareTheReadsTheyReturn` (it also asserts the four rule tables are absent).
+- **Rule citations are published by the firm flag (owner ruling, the hard rule).** Design statement: rule citations on a firm's line are shown only as the policy's firm flag publishes them; the workforce ceiling covers the line, decision and signal tables.
+  - A citation exists only when the clause reader returned text for the version on this invoice (`RuleSetService.GetFirmClauseAsync`: the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) AND the rule is not an InternalStandard Procedure's.
+  - Otherwise the citation is omitted entirely: no rule name, no firm reason, no label, no version, no clause. The line and the reviewer's reason stay. Before this round, the rule name and firm reason were shown with the flag off.
+  - A fault reading the flag (a clause reader that throws), the rule set or the Procedure omits the citation; it no longer degrades the whole outcome.
+  - InternalStandard: the BFF already keeps an InternalStandard Procedure's flag off:
+    - `ProcedureService.cs:1221-1222`: `InitialVisibleToFirms` is off for InternalStandard;
+    - `ProcedureService.cs:439`: a type change resets the flag;
+    - `RuleSetService.cs:2090`: the rule set's visibility route refuses a Procedure-owned set.
+  - A native write to the flag is not blocked by those, so the projection also reads the policy's rule set (only `sprk_procedure`) and the Procedure (only `sprk_proceduretype`). An InternalStandard rule is never cited, whatever its flag.
+  - Fail closed on the citation: a policy with no rule set, a rule set or Procedure not returned, a Procedure with no type, or a fault reading either, cites nothing. A rule set with no Procedure (a legacy or record rule set) is decided by its flag alone. Names of rule sets and Procedures are never read.
+  - Tests (unit):
+    - must-fire, flag off: `FlagOff_TheRuleIsNotCited_NoNameNoLabelNoClause`;
+    - must-fire, InternalStandard with the flag on: `AnInternalStandardProceduresRule_IsNeverCited_WhateverItsFlag`;
+    - must-not-fire, flag on: `FlagOn_ACitationCarriesTheLabelVersionSectionAndQuote_AndTheRuleNameIsThePolicysNotTheRuleSets`, `FlagOn_ALegacyRuleSetHasNoLabel_ButStillShowsVersionSectionAndQuote`;
+    - fault: `AFaultDecidingACitation_OmitsIt` (clause reader, rule set, Procedure); undecidable type: `AnUndecidableProcedureType_CitesNothing` (4 cases);
+    - no ids: `NoPolicyVersionRuleSetOrProcedureId_IsInTheSerializedBody` (the serialized body carries no policy, version, rule set or Procedure id, in D or N form). At the route: the two-firm clause test also asserts that the version id is absent.
+  - Changed to the new rule: `Approved_ProjectsTheApprovedTotal_TheLinesAndTheAdjustmentWithItsReasonAndRule` (version B unpublished: no citation), and four tests that relied on the old flag-off citation now publish it (`ABlankFirmReason_IsOmitted`, `ARuleCitedByTwoSignalsOfOneDecision_IsOneCitation`, `ASignalNotResolvedByTheLinkedRecord_IsNotACitation`, the fault theory). `AFaultInTheClauseReader_ProjectsTheStatusOnly` is replaced by the fault theory above.
+  - Consequence for 131, 133 and 134: the firm reason (`sprk_signal.sprk_firmreason`) is carried only inside a published citation, so with the flag off it is not shown either.
+- **K3.** `WorkforceCeilingRouteFamilyTests.Routes` lists both outcome routes, one row per declared table (4 on the invoice route, 5 on the submission route), so the shared must-fire, unavailable, must-not-fire and systemuser theories run on them.
+- **K4, text.** "Retrying would never change it" was false for Superseded (undoing a correction returns the invoice to In Review). It is now "a closed state at the time of the request" in `FirmOutcomeEndpoints.cs` (`ToResult`), the `FirmOutcomeKind.Closed` comment and these notes. The ledger's `AddFirmOutcomeAuthorizationFilter` credited form names the submission's invoice step and the `InvoiceDecided` rule; every line citation in it and in the `FirmOutcomeEndpoints.cs` governed-file entry was re-checked against the edited files. The two reviewed reasons in `ExternalInvoiceVisibilityGuardTests` (the submission handler and `GetForSubmissionAsync`) now state the `InvoiceDecided` rule.
+
+### Workforce-ceiling census (F4b): external routes returning `sprk_decisionrecord` or `sprk_signal` content
+
+| Route | Declared | Status |
+|---|---|---|
+| `GET /ebilling/invoices/{id}/outcome` | `ReadInvoiceOutcome` | declared here |
+| `GET /ebilling/submissions/{id}/outcome` | `ReadSubmissionOutcome` | declared here |
+
+No other external route returns either table's content. The service-request delete (`ExternalDataService.ServiceRequestRelations`) probes both for existence and returns none of their content; the assistant tools (model 9.1 (d)) are not workforce-ceiling routes.
+
+### Known limits
+
+- An Accepted submission whose invoice is missing is a permanent 503 (inconsistent data), logged with `EBILLING-FIRM-OUTCOME-ACCEPTED-WITHOUT-INVOICE`.
+- K1 of fix round 1 stands: the Signal, line status and adjustment columns are trusted without a writer filter. The Procedure-type check reads `sprk_proceduretype` and `sprk_procedure` the same way.
+
+### Results (fix round 2)
+
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `WorkforceCeiling`, `ExternalInvoiceVisibility`, `InvoiceSubmission`): 2143 passed, 0 failed (final run, after the seeds were restored).
+- Seeding proof 1 (F1, the filter): `FirmOutcomeScope` built with `InvoiceDecided` forced to true. 5 of 65 `FirmOutcomeScopeTests` failed: both `AnUndecidedInvoice_InProgress_Is200_WithNoBilledTotal_AndIsNeverRead` cases, `AnUndecidedInvoice_Accepted_Is503_AndIsNeverRead`, and both `AnInvoiceCreatedBetweenTheFilterAndTheProjection_IsNotShown` cases. Restored from a copy; SHA-256 matched (`41ad93c7...a83facb6e`).
+- Seeding proof 2 (F1, the projection): both `!invoiceDecided` checks in `GetForSubmissionAsync` disabled. 8 of 128 (`FirmOutcomeScopeTests` + `FirmFindingsProjectionTests`) failed: the 5 above and the 3 unit must-fire tests. Restored from a copy; SHA-256 matched (`7f93f72b...d81e58b`).
+- Fail-before check (citations): the citation filter put back to "every readable Billing rule" (`rules.ContainsKey`). 10 of 63 `FirmFindingsProjectionTests` failed: flag off, InternalStandard, the 3 fault cases, the 4 undecidable-type cases and the Approved adjustment. Restored; SHA-256 matched.
+- ArchTests (full, once): 2181 total, 2180 passed, 1 failed: `Task 098` flagged the three new projection members (`ReadClauseAsync`, `CitableVersionsAsync`, `ReadByIdsAsync`). They are now listed with reasons; the four affected classes (`ExternalInvoiceVisibilityGuardTests`, `RouteAuthorizationGuard*`, `InvoiceMoneyColumns*`, `AuthenticationSchemeCensus*`) were re-run: 121 passed, 0 failed.
+- Publish size: not re-measured. No package changed; the source delta is one projection method group and a tuple in the filter.
