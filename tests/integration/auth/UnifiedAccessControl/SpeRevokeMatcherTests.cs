@@ -803,6 +803,12 @@ public class SpeRevokeMatcherTests
         public int? CapturedJunctionTop { get; private set; }
         public int JunctionQueryCount { get; private set; }
 
+        /// <summary>Fix round 3e: membership rows returned WITHOUT the contact column (not read), added to the members.</summary>
+        public int UnreadRows { get; init; }
+
+        /// <summary>Fix round 3e: membership rows returned with an explicit null contact (no member), added to the members.</summary>
+        public int ExplicitNullRows { get; init; }
+
         public OrgRevokeFixture(
             params Guid[] members)
             : this(junctionThrows: false, membersWithoutEmail: null, overflowRows: 0, members) { }
@@ -907,6 +913,13 @@ public class SpeRevokeMatcherTests
                     // Simulates an organization larger than one sweep may handle.
                     for (var i = 0; i < overflowRows; i++)
                         rows.Add(new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = Guid.NewGuid() });
+
+                    var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+                    for (var i = 0; i < UnreadRows; i++)
+                        rows.Add(System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>("{}", web)!);
+                    for (var i = 0; i < ExplicitNullRows; i++)
+                        rows.Add(System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+                            "{\"_sprk_contact_value\":null}", web)!);
 
                     return rows.Take(top.Value).ToList();
                 });
@@ -1201,6 +1214,41 @@ public class SpeRevokeMatcherTests
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(
             RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason,
             "a member read that faulted is transient — the retryable code, unlike organization_too_large");
+    }
+
+    /// <summary>
+    /// Fix round 3e, must fire: a membership row whose contact column was not returned names a member who cannot be resolved. It is
+    /// counted as Failed (never a clean result), the revoke answers the retryable 500, and the members that were read are still swept.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenAMembershipRowDidNotCarryTheContactColumn_CountsItFailed_AndStillSweepsTheRest()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo) { UnreadRows = 1 };
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(2, "the members that were read are still swept: stopping early leaves more access in place");
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        problem.ProblemDetails.Extensions["speOrgMemberCleanup"].Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 2, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 1));
+    }
+
+    /// <summary>Fix round 3e, must not fire: a row with an explicit null contact names no member and is not counted.</summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenAMembershipRowNamesNoContact_IsNotUnresolved()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo) { ExplicitNullRows = 1 };
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+        body.SpeOrgMemberCleanup.Should().Be(new SpeOrgMemberCleanupSummary(
+            MembersEnumerated: 2, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 0));
     }
 
     /// <summary>

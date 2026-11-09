@@ -57,6 +57,8 @@ public class ExternalLookupAbsentReadGuardTests
     {
         Bff + "Services/Communication/CommunicationThreadReadService.cs",
         Bff + "Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs",
+        Bff + "Services/Communication/CommunicationOpenThreadGate.cs",
+        Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs",
     };
 
     internal enum Category
@@ -73,14 +75,14 @@ public class ExternalLookupAbsentReadGuardTests
         /// <summary>Not an access decision for an external caller (the decision it does feed is named).</summary>
         NotAnAccessDecision,
 
-        /// <summary>Not changed in round 3d and recorded in the fix-round notes as a known limit (the ratchet baseline).</summary>
+        /// <summary>A hardening item recorded in the fix-round notes and not yet changed (the ratchet baseline). Zero since fix round 3e.</summary>
         KnownOpen,
     }
 
     internal sealed record Reviewed(int Count, Category Category, string Reason);
 
     /// <summary>The number of <see cref="Category.KnownOpen"/> entries below. A new one needs a reviewer; fewer is a ratchet to update.</summary>
-    internal const int KnownOpenSites = 4;
+    internal const int KnownOpenSites = 0;
 
     /// <summary>The reviewed sites, keyed <c>File.cs::Type.Member</c> (see <see cref="MemberAt"/>).</summary>
     internal static readonly IReadOnlyDictionary<string, Reviewed> ReviewedSites = new Dictionary<string, Reviewed>(StringComparer.Ordinal)
@@ -88,16 +90,19 @@ public class ExternalLookupAbsentReadGuardTests
         ["AssignedAccessStore.cs::AssignedAccessLedgerRow"] = new(8, Category.PositiveOnly, "assigned-access ledger rows (admin plane): positive grants, an absent lookup gives fewer grants"),
         ["AssignedAccessStore.cs::AssignedAccessStore.LinkCandidateRow"] = new(1, Category.PositiveOnly, "assigned-access ledger rows (admin plane): positive grants, an absent lookup gives fewer grants"),
         ["AssignedAccessStore.cs::AssignedAccessStore.ReadRootAsync"] = new(1, Category.PositiveOnly, "assigned-access ledger rows (admin plane): positive grants, an absent lookup gives fewer grants"),
+        ["CommunicationOpenThreadGate.cs::CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync"] = new(1, Category.FailsClosed, "a communication row whose thread lookup was not returned (or is null) is left out of the visible set, so it is withheld; the select lists MessageThreadLookupValue (CommunicationOpenThreadGate.cs:141-142)"),
+        ["CommunicationRecordAuthorizationFilter.cs::CommunicationRecordAuthorizationFilter.Gate.LoadProposalAsync"] = new(1, Category.FailsClosed, "SDK read of the proposal row; a missing or empty communication reference gives no proposal, and a request with no proposal is answered as not found (AuthorizeVisibleProposalAsync, AuthorizeProposalCreateTaskApplyAsync); the column list names ProposalCommunicationColumn"),
         ["CommunicationThreadReadService.cs::CommunicationThreadReadService.BuildParticipantClauseAsync"] = new(1, Category.PositiveOnly, "participant message ids build a positive filter; an absent id is skipped, so fewer messages match"),
         ["CommunicationThreadReadService.cs::CommunicationThreadReadService.LoadAttachmentsAsync"] = new(2, Category.PositiveOnly, "attachment rows of already-authorised messages; an absent message or document id drops the attachment"),
         ["CommunicationThreadReadService.cs::CommunicationThreadReadService.ParseMessageRow"] = new(3, Category.PositiveOnly, "thread id absent reads as empty (not in the open-thread set, so hidden); an absent author never matches own"),
         ["CommunicationThreadReadService.cs::CommunicationThreadReadService.ReadVisibleCommunicationAsync"] = new(1, Category.FailsClosed, "an absent thread id is empty, which is not in the open-thread set, so the message is hidden"),
-        ["CommunicationThreadReadService.cs::CommunicationThreadReadService.static"] = new(1, Category.KnownOpen, "thread regarding record of an impersonated (Dataverse-permission) thread read: absent reads as a record-less thread; both selects are built from ThreadRegardingFields; see fix round 3d notes"),
+        ["CommunicationThreadReadService.cs::CommunicationThreadReadService.static"] = new(1, Category.FailsClosed, "fix round 3e: a thread row that does not carry every typed regarding column has an unknown anchor (withheld on the list, null for the single read, which the send route refuses); both selects are built from ThreadRegardingFields and pinned"),
         ["ContactIdentityStore.cs::DataverseContactIdentityStore.FindSystemUsersLinkingAsync"] = new(1, Category.PositiveOnly, "identity binding (systemuser to contact link): an absent link reads as unlinked, which yields fewer bindings, never more access"),
         ["ContactIdentityStore.cs::DataverseContactIdentityStore.ParseSystemUserRow"] = new(1, Category.PositiveOnly, "identity binding (systemuser to contact link): an absent link reads as unlinked, which yields fewer bindings, never more access"),
         ["ExternalAccessReconciliationJob.cs::ExternalAccessReconciliationJob"] = new(1, Category.ProjectedAndPinned, "grant reconciliation scan (SDK rows): BuildGrantScanFetchXml selects every root lookup, the organization and the issuer attribute (ExternalAccessReconciliationJob.cs:1170-1181); pinned by TheGrantScan_ProjectsEveryLookupItReads"),
         ["ExternalAccessReconciliationJob.cs::ExternalAccessReconciliationJob.PlanGrantChange"] = new(2, Category.ProjectedAndPinned, "grant reconciliation scan (SDK rows): BuildGrantScanFetchXml selects every root lookup, the organization and the issuer attribute (ExternalAccessReconciliationJob.cs:1170-1181); pinned by TheGrantScan_ProjectsEveryLookupItReads"),
         ["ExternalAccessReconciliationJob.cs::ExternalAccessReconciliationJob.static"] = new(1, Category.ProjectedAndPinned, "grant reconciliation scan (SDK rows): BuildGrantScanFetchXml selects every root lookup, the organization and the issuer attribute (ExternalAccessReconciliationJob.cs:1170-1181); pinned by TheGrantScan_ProjectsEveryLookupItReads"),
+        ["ExternalCallerCommunicationGuard.cs::ExternalCallerCommunicationGuard"] = new(1, Category.FailsClosed, "ThreadIdOf: an absent thread lookup reads as an empty id, which every caller treats as hidden (DataverseDescribeHandler.cs:482, DataverseReadQueryHandler.cs:457) and which ReadOpenThreadIdsAsync drops (CommunicationOpenThreadGate.cs:91)"),
         ["ExternalDataService.cs::ExternalDataService.AccessLinkRow"] = new(1, Category.NotAnAccessDecision, "participant list of a record (who has access, shown to a manager); grants nothing"),
         ["ExternalDataService.cs::ExternalDataService.ContactRow"] = new(1, Category.NotAnAccessDecision, "display of a participant contact (its organization name); grants nothing"),
         ["ExternalDataService.cs::ExternalDataService.DocumentRow"] = new(6, Category.FailsClosed, "records which root link columns were read; RootLinkOf reads an unread link as unreadable (fix round 3b)"),
@@ -117,7 +122,7 @@ public class ExternalLookupAbsentReadGuardTests
         ["ExternalModuleDataEndpoints.cs::ExternalModuleDataEndpoints.RedactRootInvoiceLinksAsync"] = new(1, Category.NotAnAccessDecision, "response redaction of link values in returned module rows (FetchXML); an unreturned pair is not served, and the visibility decision is HideInvoiceLinkedRows"),
         ["ExternalModuleRegistry.cs::ExternalModuleDescriptor.TryGetAttributeId"] = new(1, Category.ProjectedAndPinned, "FetchXML / SDK row id read; modules project RootRuleAttributes (pinned by EveryFetchXmlModule_ProjectsEveryLiveParentAttribute and the record gate pin)"),
         ["ExternalMultiRootRule.cs::ExternalMultiRootRule"] = new(1, Category.FailsClosed, "LiveParentsOf Web API overload reads an absent column as unresolved (fix round 3c)"),
-        ["ExternalOrganizationMembership.cs::ExternalOrganizationMembership.ContactOrganizationRow"] = new(2, Category.KnownOpen, "revoke sweep (admin plane): a row without the contact lookup is skipped, so a grant may stay; the select is a constant of this class; see fix round 3d notes"),
+        ["ExternalOrganizationMembership.cs::ExternalOrganizationMembership.ContactOrganizationRow"] = new(2, Category.FailsClosed, "fix round 3e: a membership row that does not carry the lookup is unresolved (UnreadableRows), counted by the caller as an undecidable member; an explicit null names nobody; the selects are class constants, pinned"),
         ["ExternalParticipationService.cs::ExternalParticipationService.ColleagueMembershipRow"] = new(2, Category.PositiveOnly, "membership rows: an absent organization or contact yields fewer colleagues or organizations, never more access"),
         ["ExternalParticipationService.cs::ExternalParticipationService.ContactOrgRow"] = new(1, Category.PositiveOnly, "membership rows: an absent organization or contact yields fewer colleagues or organizations, never more access"),
         ["ExternalParticipationService.cs::ExternalParticipationService.ExternalAccessRow"] = new(4, Category.PositiveOnly, "grant derivation rows (ISS-026 guard): an absent root lookup gives fewer grants"),
@@ -127,8 +132,8 @@ public class ExternalLookupAbsentReadGuardTests
         ["ExternalProjectDtos.cs::ExternalEventDto"] = new(3, Category.NotAnAccessDecision, "response DTO property serialised to the SPA; never read back from a Dataverse row"),
         ["ExternalProjectDtos.cs::ExternalTodoDto"] = new(3, Category.NotAnAccessDecision, "response DTO property serialised to the SPA; never read back from a Dataverse row"),
         ["GrantExpiryReminderJob.cs::GrantExpiryReminderJob.DueGrant"] = new(1, Category.NotAnAccessDecision, "internal expiry reminder job (sends a reminder); grants nothing"),
-        ["NoAccessEnforcementStore.cs::NoAccessEnforcementStore.EntryFrom"] = new(6, Category.KnownOpen, "admin-side share removal over deny entries: an entry read without a subject or object column enforces less; the select is a constant of this class; see fix round 3d notes"),
-        ["NoAccessEnforcementStore.cs::NoAccessEnforcementStore.ReadOwnerAsync"] = new(2, Category.KnownOpen, "admin-side share removal over deny entries: an entry read without a subject or object column enforces less; the select is a constant of this class; see fix round 3d notes"),
+        ["NoAccessEnforcementStore.cs::NoAccessEnforcementStore.EntryFrom"] = new(6, Category.FailsClosed, "fix round 3e: a row that does not carry every EntryRequiredColumns column is undetermined and throws (the entry is recorded as unreadable, counted and retried); an explicit null is empty; the select is a class constant, pinned"),
+        ["NoAccessEnforcementStore.cs::NoAccessEnforcementStore.OwnerFrom"] = new(2, Category.FailsClosed, "fix round 3e: a row that does not carry both owner columns is undetermined and throws (the enforcer counts an owner it could not read as a failure and retries); the select is a class constant, pinned"),
         ["NoAccessListReader.cs::NoAccessEntryRow"] = new(5, Category.FailsClosed, "fix round 3d: ParseRows fails the chunk closed when a row lacks a selected column"),
         ["ProvisionProjectEndpoint.cs::ProvisionProjectEndpoint.RootRow"] = new(5, Category.NotAnAccessDecision, "secure-designation provisioning (management plane behind DelegationRuleFilter); not an external caller data read"),
         ["RecordAccessGateEndpoint.cs::RecordAccessGateEndpoint.OwnerRow"] = new(3, Category.NotAnAccessDecision, "owner facts in the can-manage-access answer (informational; DelegationRuleFilter is the gate)"),

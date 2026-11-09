@@ -159,6 +159,28 @@ public class RevokeGrantOverlapAndOwnContainerTests
         world.Deactivated.Should().Equal(target);
     }
 
+    /// <summary>
+    /// Fix round 3e, must fire: the overlap check reads the member list of an organization still granted the root. A membership row
+    /// that did not carry the contact column makes that list unknown, so the check fails closed exactly as a list past the bound
+    /// does: nothing is kept on the strength of another grant (the contact's permission is removed).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_AContactGrant_WhenTheOtherOrganizationsMembershipHasAnUnreadRow_KeepsNothing_FailClosed()
+    {
+        var world = new GrantWorld(ExternalGrantRootType.Project, ProjectId);
+        var target = world.ContactGrant(ContactA, NextMonth);
+        world.OrganizationGrant(OrganizationId, NextMonth);
+        world.Members[OrganizationId] = [ContactA];
+        world.OrganizationsWithAnUnreadMembershipRow.Add(OrganizationId);
+        var spe = new SpeCalls();
+
+        var result = await Revoke(world, spe, target, ContactA);
+
+        Body(result).SpeContainerOutcome.Should().NotBe(SpeContainerRevokeOutcome.NotAttempted,
+            "the member list is not known, so the permission is not kept on the strength of that organization's grant");
+        spe.Emails.Should().NotBeEmpty();
+    }
+
     [Fact]
     public async Task Revoke_AnOrganizationGrant_KeepsTheMemberWithTheirOwnLiveGrant_AndRemovesTheRest()
     {
@@ -295,6 +317,9 @@ public class RevokeGrantOverlapAndOwnContainerTests
         public ExternalGrantRootType RootType { get; } = rootType;
         public Guid RootId { get; } = rootId;
         public Dictionary<Guid, Guid[]> Members { get; } = new();
+
+        /// <summary>Fix round 3e: organizations whose membership read also returns one row WITHOUT the contact column (not read).</summary>
+        public HashSet<Guid> OrganizationsWithAnUnreadMembershipRow { get; } = new();
         public List<Guid> Deactivated { get; } = new();
         public bool RootQueryFails { get; init; }
 
@@ -348,9 +373,13 @@ public class RevokeGrantOverlapAndOwnContainerTests
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
                 {
                     var org = Guid.Parse(Regex.Match(filter!, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
-                    return (Members.TryGetValue(org, out var ids) ? ids : [])
+                    var rows = (Members.TryGetValue(org, out var ids) ? ids : [])
                         .Select(id => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = id })
                         .ToList();
+                    if (OrganizationsWithAnUnreadMembershipRow.Contains(org))
+                        rows.Add(System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+                            "{}", new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!);
+                    return rows;
                 });
 
             mock.Setup(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(

@@ -285,6 +285,18 @@ internal sealed class ExternalGrantRevocationService
 
         var truncated = false;
         var failed = 0;
+        if (organizations.UnreadableRows > 0)
+        {
+            // Fix round 3e: a membership row whose organization column was not returned names an organization that cannot be
+            // resolved. It is counted here, with every other part of the cleanup that could not be checked, so the cleanup
+            // reports not completed (Completed = false) and the removal step is retried.
+            _logger.LogError(
+                "[EXT-REMOVE-PERSON] {Count} organization membership row(s) of contact {ContactId} did not carry the organization " +
+                "column; the organizations they name cannot be resolved and are counted as not completed.",
+                organizations.UnreadableRows, contactId);
+            failed += organizations.UnreadableRows;
+        }
+
         var roots = new HashSet<(ExternalGrantRootType RootType, Guid RootId)>();
         foreach (var organizationId in organizations.ContactIds)
         {
@@ -628,6 +640,17 @@ internal sealed class ExternalGrantRevocationService
                 return null;
             }
 
+            if (members.UnreadableRows > 0)
+            {
+                // Fix round 3e: a membership row that did not carry the contact column cannot be attributed to anyone, so the
+                // member list is not known; the same answer as a list past the bound.
+                logger.LogWarning(
+                    "[EXT-REVOKE] Organization {OrganizationId} (still granted {RootType} {RootId}) has {Count} membership "
+                    + "row(s) that did not carry the contact column; the overlap check fails closed.",
+                    organizationId, rootType, rootId, members.UnreadableRows);
+                return null;
+            }
+
             entitled.UnionWith(members.ContactIds);
         }
 
@@ -818,6 +841,18 @@ internal sealed class ExternalGrantRevocationService
         var failed = 0;
         var retained = 0;
         var noKey = 0;
+        if (memberSet.UnreadableRows > 0)
+        {
+            // Fix round 3e: a membership row that did not carry the contact column names a member who cannot be resolved. It
+            // is counted as Failed, like any member whose permission could not be checked, so the outcome is Failed (never a
+            // clean result) and the revoke is retried. The members that were read are still swept.
+            failed += memberSet.UnreadableRows;
+            _logger.LogError(
+                "[EXT-REVOKE] {Count} membership row(s) of Organization {OrganizationId} did not carry the contact column; " +
+                "those members cannot be resolved and are counted as Failed. Continuing with the rest.",
+                memberSet.UnreadableRows, organizationId);
+        }
+
         // #2104 round 3: members whose Failed is an ambiguous or unverifiable match (counted in `failed` too) — the part
         // a retry cannot fix.
         var ambiguous = 0;

@@ -38,6 +38,13 @@ public class PersonOrganizationGrantSpeCleanupTests
     private readonly List<Guid> _updates = new();
     private bool _membershipReadFails;
 
+    /// <summary>Fix round 3e: membership rows as the Web API returns them, from JSON (so a column can be ABSENT or an explicit null).</summary>
+    private readonly List<string> _membershipRowJson = new();
+
+    private static ExternalOrganizationMembership.ContactOrganizationRow ReadRow(string json)
+        => System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+            json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
     // ── Must fire ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -156,6 +163,38 @@ public class PersonOrganizationGrantSpeCleanupTests
         cleanup.PermissionsRemoved.Should().Be(0);
     }
 
+    // ── Fix round 3e: an organization column the read did not return is UNRESOLVED, never "no organization" ─────────
+
+    [Fact]
+    public async Task AMembershipRowWithoutTheOrganizationColumn_IsCounted_AndTheCleanupIsNotCompleted()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        OrganizationGrant(Organization, ProjectId);
+        _membershipRowJson.Add("{\"_sprk_contact_value\":\"" + Contact + "\"}"); // the organization column was not returned
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeFalse("a membership whose organization could not be read cannot be checked, so the run is not complete");
+        cleanup.Failed.Should().Be(1, "the unresolved row is counted with the other parts of the cleanup that could not be checked");
+        cleanup.PermissionsRemoved.Should().Be(1, "the organization that was read is still cleaned: nothing is kept on a guess");
+    }
+
+    [Fact]
+    public async Task AMembershipRowWithAnExplicitNullOrganization_IsNotUnresolved_AndTheCleanupCompletes()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        OrganizationGrant(Organization, ProjectId);
+        _membershipRowJson.Add("{\"_sprk_contact_value\":\"" + Contact + "\",\"_sprk_organization_value\":null}");
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeTrue("an explicit null names no organization: there is nothing to resolve");
+        cleanup.Failed.Should().Be(0);
+        cleanup.PermissionsRemoved.Should().Be(1);
+    }
+
     // ── World ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static SpeContainerMembershipResult Removed() => new(true, "perm-c2c", null);
@@ -220,6 +259,7 @@ public class PersonOrganizationGrantSpeCleanupTests
                 return _memberships
                     .Where(m => m.Contact == Contact && m.State == 0)
                     .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = m.Contact, OrganizationId = m.Organization })
+                    .Concat(_membershipRowJson.Select(ReadRow))
                     .ToList();
             });
 
