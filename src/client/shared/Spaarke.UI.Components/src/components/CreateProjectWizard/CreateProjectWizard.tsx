@@ -424,6 +424,33 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
     }
   }, [open, seededFormState]);
 
+  // ── Secure parent (preview only) ────────────────────────────────────────
+  // A project under a secure matter is secure too: when the Matter chosen in "Associate To" is secure, the Secure
+  // toggle is turned on and locked. A non-secure matter, an account, no association or a failed read leaves it
+  // editable; the server still decides the create. Only the latest association's answer is applied.
+  const [parentSecure, setParentSecure] = React.useState(false);
+  const associationRequestRef = React.useRef(0);
+  const handleAssociationChange = React.useCallback(
+    (association: AssociationResult | null) => {
+      const request = ++associationRequestRef.current;
+      setParentSecure(false);
+      if (association?.entityType !== 'sprk_matter' || !association.recordId) return;
+      void (async () => {
+        try {
+          const matter = (await dataService.retrieveRecord(
+            'sprk_matter',
+            association.recordId,
+            '?$select=sprk_issecure'
+          )) as { sprk_issecure?: unknown } | null;
+          if (request === associationRequestRef.current) setParentSecure(matter?.sprk_issecure === true);
+        } catch {
+          // Unknown: leave the toggle editable (the server's rule still applies).
+        }
+      })();
+    },
+    [dataService]
+  );
+
   // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
@@ -478,6 +505,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               navigationService,
               initialAssociation,
               lockAssociation,
+              onAssociationChange: handleAssociationChange,
             },
           }
         : {}),
@@ -496,6 +524,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             authenticatedFetch={authFetch}
             bffBaseUrl={bffBaseUrl}
             navigationService={navigationService}
+            parentSecure={parentSecure}
           />
         ),
       },
@@ -965,6 +994,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       handoffFiles,
       initialAssociation,
       lockAssociation,
+      handleAssociationChange,
+      parentSecure,
     ]
   );
 
