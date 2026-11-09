@@ -249,7 +249,18 @@ public class DirectThreadAccessServiceTests
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         Mock.Of<ILogger<DirectThreadAccessService>>(),
         gateDecisionRecords,
-        DirectMessageOwnerTeamDouble.Unconfigured());
+        DirectMessageOwnerTeamDouble.Unconfigured(),
+        new UserFlagDirectoryDouble(),
+        HostColumnProbe());
+
+    /// <summary>
+    /// uac-r2 task 198 R3: the core-ancestor resolver the host always injects (its column probe is the Restricted bar's filing
+    /// walk). The messages here carry no filing lookup and no Restricted value, so the bar finds them not Restricted and the
+    /// record-anchored grant is exactly as before (no user is read).
+    /// </summary>
+    private Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver HostColumnProbe() =>
+        new(_entityService.Object, Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.ColumnProbe(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
 
     [Fact]
     public async Task GrantMessageAccessAsync_AUserOwnedMessage_MirrorsTheGrantToItsGateDecisionRecord_D169()
@@ -1254,7 +1265,7 @@ public class DirectThreadAccessServiceTests
             new Lazy<IThreadMembershipDerivationService>(() => derivation),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             Mock.Of<ILogger<DirectThreadAccessService>>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-            DirectMessageOwnerTeamDouble.Unconfigured());
+            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble(), HostColumnProbe());
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

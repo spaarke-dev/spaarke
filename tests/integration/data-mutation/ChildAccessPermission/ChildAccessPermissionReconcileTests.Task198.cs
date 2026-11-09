@@ -94,4 +94,76 @@ public partial class ChildAccessPermissionReconcileTests
         await job.RunAsync();
         Holds(job, "sprk_communication", message, ExternalUser).Should().BeFalse("the carried row is barred on the next run");
     }
+
+    // ── Fix round 1, R3: the bar runs on EVERY Restricted communication the job examines ──────────────────────────────────
+
+    [Fact(DisplayName = "198 R3 must-fire (finding 9): a message filed under nothing whose OWN value is Restricted loses its external participant's share in the sweep")]
+    public async Task Run_AParentlessMessageWhoseOwnValueIsRestricted_LosesTheExternalShare_InTheSweep()
+    {
+        var job = new Harness();
+        job.LinkColumns.Users[ExternalUser] = true;
+        job.LinkColumns.Users[InternalUser] = false;
+        var message = job.Child("sprk_communication", Restricted); // no filing: its own value is the user's (round 81)
+        foreach (var user in new[] { ExternalUser, InternalUser })
+            job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(user), 1);
+
+        var report = (await job.RunAsync()).GetProperty("accessPermission");
+
+        report.GetProperty("rowsChanged").GetInt32().Should().Be(0, "nothing marks it changed: only the sweep finds it");
+        report.GetProperty("sweep").GetProperty("rows").GetInt32().Should().BeGreaterThan(0);
+        report.GetProperty("parentless").GetInt32().Should().Be(1);
+        job.World.AccessPermissionWrites.Should().BeEmpty("a parentless row's own value is never written");
+        Holds(job, "sprk_communication", message, ExternalUser).Should().BeFalse("its own value is Restricted");
+        Holds(job, "sprk_communication", message, InternalUser).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 R3 must-not-fire: a message filed under nothing whose own value is Standard keeps its external participant")]
+    public async Task Run_AParentlessStandardMessage_KeepsTheExternalShare()
+    {
+        var job = new Harness();
+        job.LinkColumns.Users[ExternalUser] = true;
+        var message = job.Child("sprk_communication", Standard);
+        job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(ExternalUser), 1);
+
+        var report = (await job.RunAsync()).GetProperty("accessPermission");
+
+        report.GetProperty("restrictedBar").GetProperty("ran").GetInt32().Should().Be(0);
+        Holds(job, "sprk_communication", message, ExternalUser).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 R3 bounds: many Restricted messages — each run bars at most the write cap, logs the capped run, and carries the rest until all are barred")]
+    public async Task Run_WithMoreRestrictedMessagesThanTheBudget_IsCapped_Carried_AndConverges()
+    {
+        var job = new Harness(maxWritesPerRun: 2);
+        job.LinkColumns.Users[ExternalUser] = true;
+        var matter = job.Root("sprk_matter", Restricted);
+        var messages = Enumerable.Range(0, 5)
+            .Select(_ => job.Child("sprk_communication", Restricted, ("sprk_regardingmatter", "sprk_matter", matter)))
+            .ToArray();
+        foreach (var message in messages)
+            job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(ExternalUser), 1);
+
+        var first = (await job.RunAsync()).GetProperty("accessPermission");
+        var heldAfterFirst = messages.Count(m => Holds(job, "sprk_communication", m, ExternalUser));
+        var second = (await job.RunAsync()).GetProperty("accessPermission");
+        var third = (await job.RunAsync()).GetProperty("accessPermission");
+
+        var bar = first.GetProperty("restrictedBar");
+        bar.GetProperty("ran").GetInt32().Should().Be(2, "at most the write cap per run");
+        bar.GetProperty("capped").GetInt32().Should().Be(3);
+        bar.GetProperty("capReached").GetBoolean().Should().BeTrue();
+        bar.GetProperty("left").GetInt32().Should().Be(0, "sweep rows past the cap are carried, not dropped");
+        first.GetProperty("carriedRows").GetInt32().Should().Be(3);
+        first.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+            .Should().Contain(p => p!.Contains("reached its cap of 2", StringComparison.Ordinal), "a capped run says so");
+        heldAfterFirst.Should().Be(3);
+
+        second.GetProperty("restrictedBar").GetProperty("ran").GetInt32().Should().Be(2, "the carried rows, still within the cap");
+        second.GetProperty("restrictedBar").GetProperty("capped").GetInt32().Should().Be(1);
+        third.GetProperty("restrictedBar").GetProperty("ran").GetInt32().Should().Be(1);
+        third.GetProperty("restrictedBar").GetProperty("capReached").GetBoolean().Should().BeFalse();
+        third.GetProperty("carriedRows").GetInt32().Should().Be(0);
+        messages.Should().OnlyContain(m => !Holds(job, "sprk_communication", m, ExternalUser), "every one is barred in the end");
+        job.World.AccessPermissionWrites.Should().BeEmpty("every value was already right; the bar is bounded on its own");
+    }
 }
