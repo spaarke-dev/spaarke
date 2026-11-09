@@ -387,10 +387,17 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         ["clauseLocation"] = "INTERNAL location",
         ["subject"] = line is null ? "Invoice" : "Line",
         ["line"] = line,
-        ["reasonCode"] = "rate.over",
+        ["reasonCode"] = ruleType == "RequiredData" ? "required_data.missing_field" : "approved_rate.above_approved",
         ["detailWithheld"] = false,
         ["rejects"] = true,
-        ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject { ["name"] = v.Name, ["value"] = v.Value, ["confidence"] = 0.42m }).ToArray()),
+        // The writer records the extracted field's name with an extracted value; a reference value (the approved rate) has none.
+        ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject
+        {
+            ["name"] = v.Name,
+            ["value"] = v.Value,
+            ["field"] = v.Name.StartsWith("approvedRate", StringComparison.Ordinal) ? null : "Rate",
+            ["confidence"] = 0.42m,
+        }).ToArray()),
     };
 
     /// <summary>The stored findings (<c>sprk_findingsjson</c>) of an auto-rejected submission with a line finding (line index 2) and an invoice-level one.</summary>
@@ -398,9 +405,10 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     {
         ["schema"] = 1,
         ["kind"] = "AutoRejected",
-        ["reasonCode"] = "rate.over",
+        ["reasonCode"] = "approved_rate.above_approved",
         ["findings"] = new JsonArray(
-            StoredFinding("ApprovedRate", version, 2, ("line.rate", "450.00"), ("approvedRate", "400.00")), StoredFinding("RequiredData", version, null)),
+            StoredFinding("ApprovedRate", version, 2, ("line.rate", "450.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")),
+            StoredFinding("RequiredData", version, null)),
         ["signalPlan"] = new JsonArray(new JsonObject { ["sentence"] = "INTERNAL Signal plan sentence" }),
     }.ToJsonString();
 
@@ -969,7 +977,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         line.GetProperty("lineNumber").GetInt32().Should().Be(3);
         line.GetProperty("valuesRead")[0].GetProperty("name").GetString().Should().Be("line.rate");
         line.GetProperty("valuesRead")[0].GetProperty("value").GetString().Should().Be("450.00");
-        line.GetProperty("valuesRead")[1].GetProperty("value").GetString().Should().Be("400.00");
+        line.GetProperty("valuesRead").GetArrayLength().Should().Be(2, "the approved rate is a reference value, not one extracted from the invoice");
+        line.GetProperty("valuesRead")[1].GetProperty("value").GetString().Should().Be("2.5");
         line.GetProperty("firmReasons").EnumerateArray().Select(r => r.GetString()).Should().Equal("Your rate is above the agreed rate.");
         var citation = line.GetProperty("citations").EnumerateArray().Should().ContainSingle().Subject;
         citation.GetProperty("ruleName").GetString().Should().Be("Travel time");
@@ -979,7 +988,7 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
         items[1].TryGetProperty("lineNumber", out _).Should().BeFalse("an invoice-level finding names no line");
         text.Should().NotContain(ForgedReason).And.NotContain(InternalStoredClause).And.NotContain("INTERNAL").And.NotContain("0.42")
-            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain(version.ToString("D")).And.NotContain(invoice.ToString("D"));
+            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("400.00").And.NotContain(version.ToString("D")).And.NotContain(invoice.ToString("D"));
         _clauseInvoices.Should().NotBeEmpty().And.OnlyContain(id => id == invoice);
         _projectionReads.Should().NotContain("sprk_billingevent", "a rejected submission's live lines are never read");
     }

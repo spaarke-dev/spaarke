@@ -213,6 +213,9 @@ public sealed class FirmFindingsProjection
     private readonly Func<CancellationToken, Task<Guid>> _writerUserId;
     private readonly ILogger<FirmFindingsProjection> _logger;
 
+    /// <summary>The stored-findings parser (<see cref="FirmRejectionFindings.Parse"/>); replaceable by the test assembly to inject a parser fault.</summary>
+    internal Func<string?, ILogger, Guid, IReadOnlyList<FirmRejectionFindings.Finding>> ParseRejectionFindings { get; init; } = FirmRejectionFindings.Parse;
+
     /// <param name="writerUserId">The <c>systemuserid</c> of the identity that creates every Decision Record (<c>BillingDecisionRecorder.WriterUserIdAsync</c>).
     /// Asked at most once per projection, and only when the invoice has decided lines to give a reason to; a fault, or an empty id, degrades the
     /// outcome to the status only (EB-D-208, 130a open question 3).</param>
@@ -860,7 +863,19 @@ public sealed class FirmFindingsProjection
             return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], true);
         }
 
-        var findings = FirmRejectionFindings.Parse(json, _logger, submissionId);
+        IReadOnlyList<FirmRejectionFindings.Finding> findings;
+        try
+        {
+            findings = ParseRejectionFindings(json, _logger, submissionId);
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            // Whatever the cause, a stored copy that cannot be parsed is an unreadable one: the status only, with the stable code (no content).
+            _logger.LogDebug(ex, "Firm outcome rejection findings parse fault detail");
+            FirmRejectionFindings.LogUnreadable(_logger, submissionId);
+            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
+        }
+
         if (findings.Count == 0)
         {
             return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);

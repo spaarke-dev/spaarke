@@ -12,8 +12,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 /// <remarks>
 /// <para><b>An allow-list parse.</b> Only the members named here are read: <c>kind</c>, <c>findings[]</c> and, per finding, <c>ruleType</c>,
-/// <c>rejects</c>, <c>policyVersionId</c>, <c>subject</c>, <c>line</c>, <c>reasonCode</c>, <c>detailWithheld</c> and <c>valuesRead[]</c> (<c>name</c>
-/// and <c>value</c> only). Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
+/// <c>rejects</c>, <c>policyVersionId</c>, <c>subject</c>, <c>line</c>, <c>reasonCode</c>, <c>detailWithheld</c> and <c>valuesRead[]</c> (<c>name</c>,
+/// <c>value</c> and whether <c>field</c> is present). A value is shown only when it was extracted from the firm's own invoice (the entry names
+/// its field) and its text is not an identifier. Never read, and so never projected: the stored <c>clause</c> and <c>clauseLocation</c> (the clause reaches a firm only
 /// through <see cref="RuleSetService.GetFirmClauseAsync"/>), <c>policyId</c> and <c>policyCode</c> (internal identifiers), confidence and the
 /// reliability flag (NFR-10), <c>suggestedAdjustment</c>, the Signal plan (its sentences are the internal wording) and the Procedure snapshot.</para>
 /// <para><b>Which findings.</b> Only the findings that REJECTED the submission (<c>rejects</c> true) of an <c>AutoRejected</c> outcome. A
@@ -41,6 +42,7 @@ internal static class FirmRejectionFindings
     internal const int MaxFindings = 200;
     internal const int MaxValuesPerFinding = 20;
     internal const int MaxValueTextLength = 200;
+    internal const int MaxValueNameLength = 100;
 
     private const int MaxLineIndex = 1_000_000;
     private const int MaxDepth = 32;
@@ -131,7 +133,7 @@ internal static class FirmRejectionFindings
         }
     }
 
-    private static void LogUnreadable(ILogger logger, Guid submissionId) =>
+    internal static void LogUnreadable(ILogger logger, Guid submissionId) =>
         logger.LogWarning("[{Code}] Submission {Id}: the stored findings could not be read; none is shown.", UnreadableCode, submissionId);
 
     private static EntryResult ParseEntry(JsonElement entry, out Finding? finding)
@@ -175,7 +177,9 @@ internal static class FirmRejectionFindings
             return EntryResult.Malformed;
         }
 
-        if (!TryText(entry, "reasonCode", out var reasonCode) || string.IsNullOrWhiteSpace(reasonCode))
+        // A hold-only type never rejects, and a reason the type cannot reject on is not a rejection (the catalogue's allow-list).
+        if (!TryText(entry, "reasonCode", out var reasonCode) || string.IsNullOrWhiteSpace(reasonCode)
+            || BillingRuleCatalogue.IsHoldOnly(ruleType) || !BillingRuleCatalogue.IsRejectCapableReason(ruleType, reasonCode))
         {
             return EntryResult.Malformed;
         }
@@ -236,14 +240,33 @@ internal static class FirmRejectionFindings
                     return EntryResult.Malformed;
                 }
 
-                // No text means nothing was read (a withheld value is stored without its text). A Duplicate quotes an earlier invoice, and a
-                // withheld group shows no detail: neither projects a value.
-                if (!string.IsNullOrWhiteSpace(value) && !withheld && ruleType != RuleType.Duplicate && values.Count < MaxValuesPerFinding)
+                // Only a value extracted from the firm's own invoice is shown: the writer records the extracted field's name with it, and
+                // a value read from the system's own tables carries none. A Duplicate quotes an earlier invoice, and a withheld group shows
+                // no detail: neither projects a value.
+                var extracted = item.TryGetProperty("field", out var fieldJson) && fieldJson.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(fieldJson.GetString());
+                if (!extracted || withheld || ruleType == RuleType.Duplicate || values.Count >= MaxValuesPerFinding)
                 {
-                    var text = value.Trim();
-                    values.Add(new ValueRead(
-                        name.Trim(), text.Length <= MaxValueTextLength ? text : text[..MaxValueTextLength].TrimEnd() + "..."));
+                    continue;
                 }
+
+                // A name that is too long is not a name a firm can use: the value is dropped.
+                var trimmedName = name.Trim();
+                if (trimmedName.Length > MaxValueNameLength)
+                {
+                    continue;
+                }
+
+                // A value with no text is kept as an empty value: it names the field that was read and found empty (a missing field).
+                var text = string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+                // Backstop: a value that is an identifier is never shown, whatever its entry says.
+                if (Guid.TryParse(text, out _))
+                {
+                    continue;
+                }
+
+                values.Add(new ValueRead(trimmedName, text.Length <= MaxValueTextLength ? text : text[..MaxValueTextLength].TrimEnd() + "..."));
             }
         }
 

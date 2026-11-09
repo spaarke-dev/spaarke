@@ -344,7 +344,7 @@ Branch `task/ebilling-130c` from `task/ebilling-130b-fix1` at `ecf694a8d1`. Clos
 
 ### The JSON shape consumed (field names only)
 
-Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required, never shown), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, `field`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
+Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required, never shown), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
 
 ### Rules as built
 
@@ -357,11 +357,11 @@ Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId
 | Logging | One Warning per read: stable code plus counts. No content, no ids of the finding. |
 | Bounds | 200 findings, 20 values per finding, 200 characters per value (trimmed with "..."). |
 | Line | `LineNumber` = stored zero-based index + 1; null for an invoice-level finding. Never a line id; no live line is read. |
-| Values read | Name and value as stored, nothing else (no confidence). A value with no text is dropped. A Duplicate finding and a `detailWithheld` finding project none (a Duplicate quotes an EARLIER invoice the caller may not see: D-112, D-176). |
+| Values read | Name and value, trimmed and truncated (not "as stored"), nothing else (no confidence). Only values extracted from the invoice (see "130c fix round 1"). A Duplicate finding and a `detailWithheld` finding project none (a Duplicate quotes an EARLIER invoice the caller may not see: D-112, D-176). |
 | Citation (the rule and the clause) | Exactly as an invoice item's (130b fix round 2): only when `RuleSetService.GetFirmClauseAsync` publishes text for that version on the submission's derived invoice AND the rule set's Procedure is not InternalStandard; otherwise none (no rule name, label, version, section or quote). A fault deciding it omits it; it is never a guess. No ids. |
 | Firm reason | From a `sprk_signal` the BFF writer created (`WriterCreatedRecord`), for the derived invoice, the finding's policy version and its line (the derived line id; none for an invoice-level finding), first non-blank `sprk_firmreason` in creation order. Independent of the citation gate. A fault, or an unknown writer id, makes the outcome Degraded (503), as for a decided line. |
 | Invoice not decided | `invoiceDecided` false (the derived invoice did not exist when the route's filter ran): the findings keep their line and values (the submission's own), but there is no citation, no firm reason, and nothing of the invoice is read (no clause call, no Signal, no rule row, no writer id). |
-| Faults | Reading the stored findings, the rules, the Procedure type or the Signals: status only, `Degraded` (route 503). A stored document that cannot be read, or has no usable rejection finding: status only, not degraded (route 200), with the stable-coded Warning when it was unreadable. |
+| Faults | Reading the stored findings, the rules or the Signals: status only, `Degraded` (route 503). A fault reading the Procedure type (or the firm flag) omits the citation and is not a fault of the outcome (`CitableVersionsAsync` catches it). A stored document that cannot be read, or has no usable rejection finding: status only, not degraded (route 200), with the stable-coded Warning when it was unreadable. |
 
 ### Decisions taken inside the brief (for review)
 
@@ -388,6 +388,20 @@ Placement: BFF, `Services/Finance` beside the projection (B4 live request). No p
 - `sprk_signal.sprk_firmreason` still has no writer (130a decision 3): until one exists the firm reason of a rejection finding is empty in production, as an invoice item's is.
 - Which Signal belongs to a finding is decided by (invoice, policy version, derived line id). If the Signal writer subjects a line finding differently, the reason is absent (fail closed), never wrong.
 - A rejected submission whose derived invoice was never created shows its findings without citation or reason.
+
+### 130c fix round 1
+
+Changes after the first adversarial review pass (closed set of items):
+
+- **F1-a, which values are shown.** The projection shows a value only when the stored entry names the invoice field it was extracted from (the persister writes `field` from the finding's extracted-field reference; a value read from the system's own tables has none). Every other value is dropped. As a backstop, a value whose text parses as an identifier is dropped. `field` is now read, but only for whether it is present. No per-type reference-value list was added.
+- **F1-b, a missing field is named.** A value with no text is kept as an empty value (name kept) for a finding that is not withheld and not a Duplicate, so a RequiredData rejection tells the firm which field is missing. RequiredData stores that value through the extracted-field helpers, so its `field` is present and the F1-a rule keeps it. The same applies to any extracted value that was read as empty (for example the credit-test reads of an ApprovedRate finding), which now appear with an empty value.
+- **F3, tests use the writer's real shape.** The stored entries in the new tests come from `InvoiceSubmissionPersister.FindingEntryJson` over findings produced by the real `ApprovedRateHandler` and `RequiredDataHandler` (through the existing handler test kit). The hand-built fixtures use real reject-capable reason codes instead of a made-up one.
+- **K1, parse faults.** The call to the parser in `ProjectRejectionAsync` is inside fault handling: any exception other than the caller's own cancellation is treated as an unreadable document (status only, `Degraded` false, the stable UNREADABLE Warning, no content). The parser is replaceable through an internal init-only member so the test can inject a fault.
+- **K2, reject-capable reasons only.** An entry is malformed (dropped, counted in the DROPPED Warning) unless `BillingRuleCatalogue.IsRejectCapableReason(type, reasonCode)` holds and the type is not hold-only.
+- **K3, value name cap.** A value name over 100 characters drops the value.
+- **K4, notes corrected.** A fault reading the Procedure type omits the citation; it does not make the outcome Degraded. Values are trimmed and truncated, not "as stored".
+
+Results (fix round 1): filtered run (`FirmFindingsProjectionTests` + the `FirmOutcome*` classes) 177 passed, 0 failed (8 new tests). Fail-before: with the F1-a, F1-b, K1, K2 and K3 changes temporarily reverted, 13 of the 177 fail, including every new test (the real-shape ApprovedRate test, the extracted-field test, the two-RequiredData test, the parser-fault test, the reason test and the name-cap test); the files were restored and their SHA-256 verified. Full `Spaarke.ArchTests`: 2183 passed, 0 failed. The existing integration fixture in `FirmOutcomeScopeTests` now stores real reason codes and the writer's `field` member.
 
 ### Results (130c)
 
