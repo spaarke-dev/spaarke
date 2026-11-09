@@ -236,3 +236,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | F2, a doc that contradicts the code; doc only |
 | **Failure** | Row I-18 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` says `sprk_signal` is owned by the writer identity with `owningbusinessunit` set from the matter's unit. Since ontology task 143, `SignalWriter` writes the resolver's team and never sends `owningbusinessunit` (class remarks; census entry `SignalWriter.cs`). I-6 and §5.2 describe the current behaviour. Task 060's edit was confined to §5.2 and an I-6 pointer, so it did not fix I-18. Rewrite or retire the row (task 062 or the ontology project) |
 | **Status** | Open |
+
+## DI-024 — A default displaced by a mapped value is not re-applied when the mapping-source rule removes that value
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-09, task 022 fix round 6 (K4 from the security review), verified by a seam test |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2648 |
+| **Class** | K, known limit; accepted by UAC-r2 2026-11-09 |
+| **Failure** | Step 3½ fills an adapter default only where the column is still empty (`RecordCreationService.cs` ~:587). When the mapping-source strip later removes the mapped value, the rebuild keeps only the surviving mapped values (`RecordCreationService.Mapping.cs` ~:513-517), so the displaced default is lost. Concrete case: the Office To Do's Assigned To (the caller's own contact, `OfficeService.cs` ~:2969-2987) ends up empty. Fix: re-run the defaults fill over the stripped columns AND re-run the caller's write checks (AppendTo on a lookup) on what it fills. The seam test `..._IsNotReapplied_KnownLimitK4` pins today's behaviour; flip it when fixed |
+| **Status** | Open |
