@@ -2261,6 +2261,9 @@ record), whatever its Sync Mode. "Assigned-To" means exactly the columns the BFF
 work assignment, event, to-do and analysis. The push, this script and the provisioning seeder all classify from that one
 registry. An invoice's attorney and paralegal columns are display copies of the matter's people, not Assigned-To: they confer no
 access, and a push never writes them, whatever their Sync Mode and whether or not the request opts in; only the create sets them.
+They also select nothing in the Daily Briefing or notifications. An invoice's Assigned To (`sprk_assignedto1`, `sprk_assignedto2`)
+does target the person its contact represents, but confers no access: it is read from `MembershipOptionsDefaults.TargetingOnlyColumns`,
+which is not the registry and cannot be set by configuration.
 A filing rule is applied by a push only while its Sync Mode is Manual Refresh (it then re-files the child); the script
 keeps it at One-time. Default, Concat and Template rules are never written.
 
