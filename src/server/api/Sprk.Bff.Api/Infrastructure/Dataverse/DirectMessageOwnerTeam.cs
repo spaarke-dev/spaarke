@@ -147,7 +147,10 @@ public sealed class DirectMessageOwnerTeam
     /// <see cref="DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord"/>. A caller comparing a row's owner with
     /// <see cref="DirectMessageOwnerTeamIdentity.TeamId"/> therefore never reads a Secure-owned row as Direct-owned.</item>
     /// <item>The Secure Record lookup cannot be decided: no ids, <see cref="DirectMessageOwnerTeamRefusal.SecureRecordAmbiguous"/>
-    /// or <see cref="DirectMessageOwnerTeamRefusal.SecureRecordUnreadable"/> (with the fault).</item>
+    /// or <see cref="DirectMessageOwnerTeamRefusal.SecureRecordUnreadable"/> — the latter for a fault (carried), a Secure
+    /// Record team not found, or a Secure Record unit not found while a Secure Record setting is set (the setting may be
+    /// wrong, so the real Secure unit is unknown). Only with NO Secure Record setting and no unit by the compiled default
+    /// name is "no Secure Record unit here" accepted, as <see cref="SecureRecordOwnerTeam"/> reads that case.</item>
     /// <item>A <see cref="DirectMessageOwnerTeamIdentity.Fault"/> only when a read was unreadable (no ids).</item>
     /// <item>Otherwise no ids and a <see cref="DirectMessageOwnerTeamIdentity.Refusal"/> code: not found (no such unit or named
     /// team exists under the configuration), or ambiguous (unknown — fail closed).</item>
@@ -250,32 +253,50 @@ public sealed class DirectMessageOwnerTeam
     /// Whether the configured unit (and team, when found) is the Secure Record unit or its owner team — decided by comparing
     /// IDS with the Secure Record lookup (<see cref="SecureRecordOwnerTeam.IdentifyAsync"/>), never names: Dataverse's name
     /// match also ignores accents, so a setting that differs from the Secure names only by an accent finds the Secure unit.
-    /// <c>null</c> when it is neither. An unreadable or ambiguous Secure Record lookup cannot prove "not Secure", so it refuses
-    /// with its own code. No Secure Record unit, or no Secure Record team in it, is an answer (compare what was found).
+    /// <c>null</c> when it is proven neither. An unreadable or ambiguous Secure Record lookup, a Secure Record team not found,
+    /// or a Secure Record unit not found while a Secure Record setting is set cannot prove "not Secure", so each refuses with
+    /// its own code. Only with no Secure Record setting is a unit not found by the compiled default name "no Secure Record
+    /// unit here" (<see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>'s reading).
     /// </summary>
     private async Task<DirectMessageOwnerTeamResolution?> SecureRecordRefusalAsync(SecureOwnerTeamIdentity direct, CancellationToken ct)
     {
         var secure = await SecureRecordOwnerTeam.IdentifyAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
-        switch (secure.Refusal)
-        {
-            case null:
-            case SecureOwnerTeamStatus.BusinessUnitNotFound:
-            case SecureOwnerTeamStatus.OwnerTeamNotFound:
-                break;
-            case SecureOwnerTeamStatus.BusinessUnitAmbiguous:
-            case SecureOwnerTeamStatus.OwnerTeamAmbiguous:
-                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordAmbiguous);
-            default:
-                // Unreadable — or a status the identity step does not produce today: not provably "not Secure".
-                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable, secure.Fault);
-        }
 
+        // Whatever was found is compared first: a match is the precise answer.
         if (secure.BusinessUnitId is { } secureUnit && secureUnit != Guid.Empty && direct.BusinessUnitId == secureUnit)
             return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord);
         if (secure.OwnerTeamId is { } secureTeam && secureTeam != Guid.Empty && direct.OwnerTeamId == secureTeam)
             return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord);
-        return null;
+
+        switch (secure.Refusal)
+        {
+            case null:
+                return null;
+
+            case SecureOwnerTeamStatus.BusinessUnitNotFound when !SecureRecordSettingsPresent():
+                // No Secure Record setting and no unit by the compiled default name: this environment has no Secure Record
+                // unit, so no unit is it — SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync's own reading of that case.
+                return null;
+
+            case SecureOwnerTeamStatus.BusinessUnitAmbiguous:
+            case SecureOwnerTeamStatus.OwnerTeamAmbiguous:
+                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordAmbiguous);
+
+            default:
+                // Unreadable; a CONFIGURED Secure Record unit not found (the setting may be wrong, so the real unit is
+                // unknown); the Secure Record team not found; or a status the identity step does not produce today. None
+                // proves "not Secure".
+                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable, secure.Fault);
+        }
     }
+
+    /// <summary>
+    /// Whether either Secure Record setting is set (non-blank). Unset means <see cref="SecureRecordOwnerTeam"/> looks up its
+    /// compiled default names — the only case in which a unit that is not found is read as "no Secure Record unit here".
+    /// </summary>
+    private bool SecureRecordSettingsPresent() =>
+        !string.IsNullOrWhiteSpace(_configuration[SecureRecordOwnerTeam.BusinessUnitNameConfigKey])
+        || !string.IsNullOrWhiteSpace(_configuration[SecureRecordOwnerTeam.OwnerTeamNameConfigKey]);
 
     /// <summary>
     /// The unit has no NAMED, non-default Owner team with the configured name. When its DEFAULT team carries that name, the
@@ -408,7 +429,10 @@ public static class DirectMessageOwnerTeamRefusal
     /// <summary>The Secure Record lookup is ambiguous, so "not the Secure Record unit" cannot be proven.</summary>
     public const string SecureRecordAmbiguous = Prefix + "secure_record_ambiguous";
 
-    /// <summary>The Secure Record lookup faulted, so "not the Secure Record unit" cannot be proven.</summary>
+    /// <summary>
+    /// "Not the Secure Record unit" cannot be proven: the Secure Record lookup faulted, its team was not found, or its unit
+    /// was not found while a Secure Record setting is set.
+    /// </summary>
     public const string SecureRecordUnreadable = Prefix + "secure_record_unreadable";
 
     /// <summary>No business unit has the configured name.</summary>

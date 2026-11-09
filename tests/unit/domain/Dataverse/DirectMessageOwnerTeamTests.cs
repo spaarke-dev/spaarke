@@ -51,7 +51,8 @@ public class DirectMessageOwnerTeamTests
         _directory.Team(SecureTeam, SecureRecordOwnerTeam.DefaultOwnerTeamName, SecureBu, isDefault: false, teamType: 0);
     }
 
-    private static IConfiguration Config(string? buName = DirectBuName, string? teamName = DirectTeamName, string? secureBuName = null)
+    private static IConfiguration Config(
+        string? buName = DirectBuName, string? teamName = DirectTeamName, string? secureBuName = null, string? secureTeamName = null)
     {
         var values = new Dictionary<string, string?>
         {
@@ -60,6 +61,8 @@ public class DirectMessageOwnerTeamTests
         };
         if (secureBuName is not null)
             values[SecureRecordOwnerTeam.BusinessUnitNameConfigKey] = secureBuName;
+        if (secureTeamName is not null)
+            values[SecureRecordOwnerTeam.OwnerTeamNameConfigKey] = secureTeamName;
         return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
@@ -416,11 +419,75 @@ public class DirectMessageOwnerTeamTests
     }
 
     [Fact]
-    public async Task Resolve_NoSecureRecordUnitInTheEnvironment_StillResolves()
+    public async Task NoSecureRecordSettingAndNoSecureRecordUnit_IsNoSecureUnitHere_ResolvesAndIdentifies()
     {
-        var result = await Lookup(Config(secureBuName: "No Such Secure Unit")).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None);
+        // Settings absent → SecureRecordOwnerTeam looks up its compiled default names; no unit by that name is "this
+        // environment has no Secure Record unit" (ResolveSecureBusinessUnitAsync's reading), so nothing is the Secure unit.
+        _directory.RemoveBusinessUnit(SecureBu);
+        var lookup = Lookup();
 
-        result.TeamId.Should().Be(DirectTeam);
+        (await lookup.ResolveDirectMessageOwnerTeamAsync(CancellationToken.None)).TeamId.Should().Be(DirectTeam);
+        var identity = await lookup.IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+        identity.TeamId.Should().Be(DirectTeam);
+        identity.BusinessUnitId.Should().Be(DirectBu);
+    }
+
+    [Fact]
+    public async Task SecureRecordSettingWrong_DirectSettingsNameTheRealSecureUnit_RefusedWithNoIds()
+    {
+        // The Secure Record setting names no unit, so the real Secure unit is unknown — it cannot be proven "not Secure".
+        var lookup = Lookup(Config(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName, SecureRecordOwnerTeam.DefaultOwnerTeamName, secureBuName: "Wrong Secure Name"));
+
+        var identity = await lookup.IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+        var resolution = await lookup.ResolveDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        identity.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable);
+        identity.IsIdentified.Should().BeFalse();
+        identity.BusinessUnitId.Should().BeNull();
+        identity.TeamId.Should().BeNull();
+        AssertRefused(resolution, DirectMessageOwnerTeamRefusal.SecureRecordUnreadable);
+        (await lookup.CannotBeDirectOwnerTeamAsync(SecureTeam, CancellationToken.None)).Should().BeFalse("fail closed");
+    }
+
+    [Fact]
+    public async Task SecureRecordSettingWrong_EvenForAnotherDirectUnit_RefusedWithNoIds()
+    {
+        var identity = await Lookup(Config(secureBuName: "Wrong Secure Name")).IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        identity.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable);
+        identity.TeamId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SecureRecordTeamNotFound_RefusedWithNoIds(bool settingPresent)
+    {
+        var configuration = settingPresent ? Config(secureTeamName: "Missing Owners") : Config();
+        if (!settingPresent)
+            _directory.RemoveTeam(SecureTeam);
+        var lookup = Lookup(configuration);
+
+        var identity = await lookup.IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        identity.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable);
+        identity.IsIdentified.Should().BeFalse();
+        identity.BusinessUnitId.Should().BeNull();
+        identity.TeamId.Should().BeNull();
+        AssertRefused(await lookup.ResolveDirectMessageOwnerTeamAsync(CancellationToken.None), DirectMessageOwnerTeamRefusal.SecureRecordUnreadable);
+    }
+
+    [Fact]
+    public async Task SecureRecordSettingsPresentAndCorrect_ReturnsTheIds()
+    {
+        var identity = await Lookup(Config(
+                secureBuName: SecureRecordOwnerTeam.DefaultBusinessUnitName, secureTeamName: SecureRecordOwnerTeam.DefaultOwnerTeamName))
+            .IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        identity.IsIdentified.Should().BeTrue();
+        identity.BusinessUnitId.Should().Be(DirectBu);
+        identity.TeamId.Should().Be(DirectTeam);
     }
 
     [Fact]
@@ -686,6 +753,15 @@ public class DirectMessageOwnerTeamTests
         public void Team(Guid id, string name, Guid unit, bool isDefault, int teamType) => _teams.Add((id, name, unit, isDefault, teamType));
 
         public void Member(Guid team, Guid user) => _members.Add((team, user));
+
+        /// <summary>Removes a unit and every team in it (an environment without that unit).</summary>
+        public void RemoveBusinessUnit(Guid id)
+        {
+            _units.RemoveAll(u => u.Id == id);
+            _teams.RemoveAll(t => t.Unit == id);
+        }
+
+        public void RemoveTeam(Guid id) => _teams.RemoveAll(t => t.Id == id);
 
         public void User(Guid user, Guid unit) => _users.Add((user, unit));
 

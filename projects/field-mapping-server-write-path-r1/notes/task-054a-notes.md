@@ -122,5 +122,20 @@ Tests (`DirectMessageOwnerTeamTests`, 42 → 60):
   `78d2c4076c`: 8 failed / 59 passed (must-fire: the Secure unit-and-team settings incl. accent variants, another team in
   the Secure unit, Secure ambiguous and unreadable; plus the two read-sequence pins that now include the Secure reads);
   after: 67/67.
+- **A Secure Record unit or team that is not found no longer reads as "not Secure"** (K1, follow-up commit on
+  `7b5e914784`). Ids found are compared first (a match is `bu_is_secure_record`); then a Secure Record team not found, or a
+  Secure Record unit not found while either Secure Record setting is set, refuses `secure_record_unreadable` with no ids —
+  in Identify, and so in Resolve (same check) and CannotBe (through Identify; answers `false`). Absent settings: matched to
+  `SecureRecordOwnerTeam`, which has no "not configured" state — unset settings fall back to the compiled default names,
+  and `ResolveSecureBusinessUnitAsync` reads "no unit by that name" as "this environment has no Secure Record unit". So
+  with NO Secure Record setting and no unit by the default name, nothing is the Secure unit and ids are returned; a set
+  setting that finds nothing may be wrong, so the real Secure unit is unknown and it refuses. Fail-first against
+  `7b5e914784`: 4 failed / 68 passed (setting wrong with the Direct settings naming the real Secure unit; setting wrong
+  for another Direct unit; Secure team not found with the setting set and unset); after: 72/72. Tests also pin the
+  absent-settings case (ids) and present-and-correct settings (ids). `Resolve_NoSecureRecordUnitInTheEnvironment_StillResolves`
+  encoded K1 (it set a wrong Secure name) and became the absent-settings test.
+- **Consumer contract.** Callers of Identify check `IsIdentified` first and compare only non-null ids — never
+  `owner == identity.TeamId` on a nullable. The rule is owned and tested by UAC-r2 task 198. Accepted known limits: K2 — a
+  missing business-unit row is cached for 2 minutes as a fail-closed refusal; K4 — CannotBe costs 4 reads.
 
 rework: none task 054a
