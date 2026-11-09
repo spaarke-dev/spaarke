@@ -363,9 +363,8 @@ The invoices module scopes through matter, project and work assignment (D-28): a
 
 ### Known limits
 
-- `PATCH /todos/{id}` for a missing id answers 404 where the other refusals are 403. That predates this task.
 - The deleted or deactivated work assignment case is enforced where the caller's work assignments are built; at the route it is a work assignment outside the caller's set, which is what the route tests cover.
-- A per-invoice read failure on a single invoice-linked document is the refusal, not the 503 (the ruling covers the caller's firm read).
+- (Fix round 3 closed two limits listed here in round 2: the `PATCH /todos/{id}` missing id is now the uniform 403, and a per-invoice read failure on a single invoice-linked read is now the 503.)
 
 ### Tests
 
@@ -403,3 +402,73 @@ New surface:
 1. **Existing.** `HideInvoiceLinkedRowsAsync` is the one invoice decision for rows; the delete-own `DeleteTarget` read is the one record read before a delete; `SecureRootsFilter` is the message filter; the module descriptor already scopes through matter and project.
 2. **Extension.** Each piece extends these: the write decision calls the row filter on one row; the delete target read selects the link columns it already lacked; the fault flag is a BCL `StrongBox<bool>` parameter, not a new type; the module gains one dimension of the existing kind.
 3. **Cost of doing nothing.** A partner could edit or delete a to-do, event or document of another firm's invoice by id; a faulted firm read on a thread or feed would look complete; an invoice under a work assignment would be unreachable to a caller who reads it only through that work assignment.
+
+## Fix round 3
+
+### Q2: a single invoice-linked read whose decision faulted is the 503
+
+A single-record read of an invoice-linked row answers the `InvoiceUnreadableReasonCode` 503 when the invoice decision could not be made, for the caller's firm read and for the per-invoice decision (`InvoiceVisibilityResult.IsFaultedFor(invoice)`: the whole result faulted, or that invoice's own `ReadFailed`). A decided hidden invoice keeps the route's uniform refusal. Collections keep hiding the row (and say `Truncated` when the whole read faulted).
+
+`ExternalDataService.DecideInvoiceLinkedRowAsync` is the one row decision (Visible, Hidden, Faulted) and shares the single seam ask (`AskInvoiceDecisionAsync`) with the list filter. A row is Hidden when any link is unreadable or decided hidden, and Faulted only when every non-visible link is a failed decision.
+
+Single-record invoice-linked read routes (all changed or confirmed):
+- `GET /{projects|matters|workassignments|servicerequests}/{id}/documents/{documentId}/content` and `/versions`: `IsDocumentReadableUnderAsync` now uses the row decision.
+- `GET /invoices/{id}/documents` (list), `.../{documentId}/content`, `.../versions`, and `POST /invoices/{id}/documents`: `InvoiceVisibleToAsync` reports the per-invoice fault, so the invoice-unreadable 503 follows the record and rights checks.
+- `GET`/`POST /invoices/{id}/messages`: the invoice gate treats the per-invoice fault as the 503.
+- `GET /invoice-submissions/{id}`: unchanged; it shares the list read and already answers its 503 on a faulted result. The production seam only ever reports a failed decision as a faulted result, so the per-invoice-only shape is reachable by a test stub, not by the live seam.
+- Writes (to-do PATCH, delete-own) are outside this ruling and unchanged.
+
+### Uniform refusal for single to-do routes
+
+`PATCH /todos/{id}` with an id that does not exist answered 404 while every other refusal is the uniform 403. A missing id now answers `DenyTodoWrite`, byte-identical to the answer for a to-do outside the caller's set. `GET /projects/{id}` answered a distinct 404 for a stale grant; it now answers the same 403 as no Read.
+
+Route census (single-record routes in `ExternalProjectDataEndpoints.cs`):
+
+| Route | Missing id vs an id outside the caller's set | Changed |
+|---|---|---|
+| `PATCH /todos/{id}` | was 404 vs 403 | Yes, both 403 |
+| `GET /projects/{id}` | was 404 (stale grant) vs 403 | Yes, both 403 |
+| `DELETE /todos/{id}`, `/events/{id}`, `/documents/{id}` | uniform delete-own 403 | No (`ExternalDeleteOwnTests.AbsentRow_AnswersExactlyAsSomeoneElsesRow`) |
+| `DELETE /servicerequests/{id}` | uniform delete-own 403 | No (`ExternalDeleteServiceRequestTests`) |
+| `GET .../documents/{documentId}/content`, `/versions` (every root and invoices) | uniform 403 | No |
+| `POST` creates, record lists | out-of-scope parent is 403 | No |
+
+The `.ProducesProblem(404)` metadata that remains on other routes in the file documents no response the code returns. `/data/record/{entity}/{id}` answers 404 only for an id inside the caller's own accessible set that no longer exists; it was not changed.
+
+### An absent link column is not "no link"
+
+`ExternalDataService.InvoiceLinksOf(table, Web API row)`: a link column that is ABSENT from the row reads as `UnreadableLink` (never visible); an explicit JSON null is "no link". The read's `$select` is no longer the boundary. The FetchXML overload keeps "absent = no link" (FetchXML omits a null attribute) and is pinned: `ExternalInvoiceLinkedChildListTests.EveryFetchXmlChildModule_ProjectsEveryRegistryLinkColumn` runs every registered child module with invoice links through the real fetch and asserts the executed FetchXML names every `InvoiceLinks.LinkColumnsOf(table)`.
+
+The thread read selects every invoice link column of a communication: `CommunicationThreadReadService.ExternalSelect` appends `InvoiceLinks.Tables["sprk_communication"].ValueColumns`. Test doubles now answer a selected lookup that is not set as an explicit null (`FakeDataverse`, `AppOnlySelectProjection`), and can mask a column (`MaskedColumns`, an omit set) to prove a column that was not returned hides the row.
+
+### Root typing
+
+`ExternalModuleRegistry.RootTypeOfScopeAttribute` is the one mapping from a root lookup to its root type; `RootLinks` uses it, and now types `sprk_regardingworkassignment`. `Register` refuses (`ValidateRootDimensionsAreTyped`) a module with the secure-roots rule that scopes by, or declares as an extra root lookup, a lineage root lookup that `RootLinks` does not type. The invoices module's duplicate `sprk_regardingworkassignment` root lookup is removed: it is a scope dimension and is listed once in `RootRuleAttributes`; projection, validation and the secure work assignment test are unchanged (tests below).
+
+### Known limit
+
+- A deactivated work assignment is excluded where the caller's set is built (`AccessibleRecordSetService.cs:629-641`); at the route it is a work assignment outside the caller's set, which the out-of-set route tests cover.
+
+### Hygiene
+
+- `RedactRootInvoiceLinksAsync` carries the invariant comment that the regarding forms are stripped only when the pair names a hidden invoice.
+- `ExternalMessageEndpointsTests` thread fault test: the ordered assertion is restored (the route documents oldest first, so the order is a contract).
+- `ExternalInvoiceLinkedChildListTests`: the filter test that drove a whole-result fault under a per-invoice name is renamed `TheFilter_AFaultedDecision_HidesThatRow_AndSaysTruncated`.
+- The `ExternalDataService` document-parent doc comment names matter, project and work assignment.
+
+### Tests (fix round 3)
+
+New:
+- `ExternalInvoiceLinkedDocumentRouteTests`: `APerInvoiceFault_OnAnInvoiceLinkedDocument_IsThe503` (must fire), `ADecidedHiddenInvoice_OnADocument_KeepsTheUniformRefusal` (must not fire), `ADocumentReadWithoutALinkColumn_IsRefused` (must fire, a masked link column).
+- `ExternalRecordDocumentRoutesTests.Task130_0_Q2_*` (invoice document routes) and `ExternalMessageEndpointsTests.Task130_0_Q2_*` (invoice thread, 503 and the uniform refusal).
+- `ExternalInvoiceLinkedTodoUpdateTests.AMissingTodoId_IsTheSameRefusal_AsATodoOutsideTheCallersSet`; `ExternalTodoScopeTests.PatchExternalTodo_WhenTodoDoesNotExist_*` now expects the 403.
+- Absent link column: `ExternalInvoiceLinkedChildListTests.TheFilter_AnAbsentLinkColumn_*`, `ExternalInvoiceLinkedDeleteTests.ARowReadWithoutALinkColumn_*`, `ExternalMessageEndpointsTests.Task130_0_Fix3_*` (the thread read), plus the FetchXML pin `EveryFetchXmlChildModule_ProjectsEveryRegistryLinkColumn`.
+- `ExternalModuleRootTypingTests` (registration guard: must fire for an untyped root dimension and for a wrongly typed extra lookup; must not fire for the work assignment dimension, a declared extra lookup, a module without the rule, and the production registry).
+
+Test doubles: `InvoiceHidingStub.PerInvoiceFault`; `FakeDataverse` and `AppOnlySelectProjection` answer a selected unset lookup as an explicit null and can mask a column; the in-memory document service and the message-send read-back set explicit nulls.
+
+Results: the filtered external-access suites (7130 tests) pass; `tests/Spaarke.ArchTests` passes in full (2181 of 2181).
+
+Seeding proofs (each file restored byte-identical, same SHA-256):
+- The five production files (`ExternalDataService`, `ExternalInvoiceVisibility`, `ExternalProjectDataEndpoints`, `ExternalMessageEndpoints`, `CommunicationThreadReadService`) set back to the round 2 version: 15 of 15 new must-fire tests fail (single-record 503s, the missing to-do 403, the absent link cases, the thread select).
+- `ExternalModuleRegistry` set back to the round 2 version: 5 of 8 guard and typing tests fail.
