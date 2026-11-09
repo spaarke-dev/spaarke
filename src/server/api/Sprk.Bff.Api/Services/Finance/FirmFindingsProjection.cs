@@ -39,8 +39,15 @@ public enum FirmOutcomeKind
 
     Paid,
 
-    /// <summary>Nothing may be told: a closed state this contract does not cover, or a read that did not complete (fail closed).</summary>
+    /// <summary>A read FAULTED, so nothing may be told right now (fail closed). Always <see cref="FirmOutcome.Degraded"/>; the route answers 503.</summary>
     Unavailable,
+
+    /// <summary>
+    /// A permanent state with nothing more to tell: a failed submission, a cancelled invoice, an invoice replaced by a correction, or a status
+    /// this contract does not know (logged). The status label and tracking number only, no items and no totals, never
+    /// <see cref="FirmOutcome.Degraded"/>: retrying would never change it, so the route answers 200 (130b fix round 1).
+    /// </summary>
+    Closed,
 }
 
 /// <summary>The kind of one projected item.</summary>
@@ -129,7 +136,9 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// (the rule set's flag on, the version applied by the invoice's snapshot). In every other case, including a lookup fault, it carries the rule
 /// name and the firm reason only. There is no member for a Procedure Library document, container, drive item or link.</para>
 /// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header gives an
-/// <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged <see cref="FirmOutcome.Degraded"/>.</para>
+/// <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged <see cref="FirmOutcome.Degraded"/>. A
+/// permanent state (failed, cancelled, superseded, an unknown status) is NOT a fault: it is a <see cref="FirmOutcomeKind.Closed"/> outcome,
+/// status only and not degraded.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceReviewReadService"/> is the INTERNAL review read model
 /// (it carries Signal sentences, confidence and reviewer identity); <see cref="RuleSetService.GetFirmClauseAsync"/> is the clause decision.
 /// Extension: the review model cannot be narrowed to the firm view without a second set of rules inside it; this reuses its line query and
@@ -205,12 +214,14 @@ public sealed class FirmFindingsProjection
             return null;
         }
 
+        var tracking = invoice.TrackingNumber;
         if (!InvoiceStatusCodes.TryFromStatusCode(invoice.StatusCode, out var lifecycle))
         {
-            return Unavailable();
+            _logger.LogWarning("Invoice {Id} has a status code ({StatusCode}) the firm outcome does not know; projecting it as closed, status only.",
+                invoiceId, invoice.StatusCode);
+            return Closed(tracking, ClosedLabel);
         }
 
-        var tracking = invoice.TrackingNumber;
         var billed = invoice.Billed;
         switch (lifecycle)
         {
@@ -223,9 +234,15 @@ public sealed class FirmFindingsProjection
             case InvoiceLifecycleStatus.SentToAp:
             case InvoiceLifecycleStatus.Paid:
                 break;
+            case InvoiceLifecycleStatus.Cancelled:
+                return Closed(tracking, "Cancelled");
+            case InvoiceLifecycleStatus.Superseded:
+                return Closed(tracking, "Replaced by a correction");
             default:
-                // Cancelled, Superseded: this contract tells a firm nothing about them.
-                return Unavailable();
+                // A lifecycle value added later: permanent until this contract learns it, so closed, not a fault.
+                _logger.LogWarning("Invoice {Id} is in a state ({Lifecycle}) the firm outcome does not cover; projecting it as closed, status only.",
+                    invoiceId, lifecycle);
+                return Closed(tracking, ClosedLabel);
         }
 
         var decided = lifecycle != InvoiceLifecycleStatus.InReview;
@@ -262,8 +279,8 @@ public sealed class FirmFindingsProjection
 
     /// <summary>
     /// The firm outcome of <paramref name="submissionId"/>, or null when it does not exist. Received or Processing: status (and the billed total
-    /// once its invoice exists) only. Accepted: the invoice's outcome. Rejected: status only (the rejection findings are not projected yet).
-    /// Failed or unknown: nothing.
+    /// once its invoice exists) only; a fault reading that total is Degraded, never a null total. Accepted: the invoice's outcome. Rejected:
+    /// status only (the rejection findings are not projected yet). Failed or an unknown status: <see cref="FirmOutcomeKind.Closed"/>.
     /// </summary>
     /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
     public async Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, CancellationToken ct)
@@ -295,7 +312,8 @@ public sealed class FirmFindingsProjection
         {
             case (int)InvoiceSubmissionStatus.Received:
             case (int)InvoiceSubmissionStatus.Processing:
-                decimal? billed = null;
+                var label = status == (int)InvoiceSubmissionStatus.Received ? "Received" : "Processing";
+                decimal? billed;
                 try
                 {
                     // The submission's own invoice (a derived id, never a link read from a column), once it exists.
@@ -305,19 +323,23 @@ public sealed class FirmFindingsProjection
                 }
                 catch (Exception ex) when (IsFault(ex, ct))
                 {
+                    // A total that could not be read is not "no total": the status only, Degraded (the route answers 503).
                     LogFault(ex, "the submission's invoice total", submissionId);
+                    return new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, null, label, null, null, [], true);
                 }
 
-                return new FirmOutcome(
-                    FirmOutcomeKind.SubmissionInProgress, tracking, status == (int)InvoiceSubmissionStatus.Received ? "Received" : "Processing",
-                    billed, null, [], false);
+                return new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, tracking, label, billed, null, [], false);
             case (int)InvoiceSubmissionStatus.Accepted:
                 return await GetForInvoiceAsync(InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct).ConfigureAwait(false)
                     ?? Unavailable();
             case (int)InvoiceSubmissionStatus.Rejected:
                 return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
+            case (int)InvoiceSubmissionStatus.Failed:
+                return Closed(tracking, "Failed");
             default:
-                return Unavailable();
+                _logger.LogWarning("Submission {Id} has a status ({Status}) the firm outcome does not know; projecting it as closed, status only.",
+                    submissionId, status);
+                return Closed(tracking, ClosedLabel);
         }
     }
 
@@ -622,6 +644,12 @@ public sealed class FirmFindingsProjection
     // ── Helpers ──
 
     private static FirmOutcome Unavailable() => new(FirmOutcomeKind.Unavailable, null, "Unavailable", null, null, [], true);
+
+    /// <summary>The label of a status this contract does not know.</summary>
+    internal const string ClosedLabel = "Closed";
+
+    /// <summary>A permanent state: the status label and tracking number only, no items, no totals, not degraded.</summary>
+    private static FirmOutcome Closed(string? tracking, string label) => new(FirmOutcomeKind.Closed, tracking, label, null, null, [], false);
 
     private static bool IsFault(Exception ex, CancellationToken ct) => ex is not OperationCanceledException || !ct.IsCancellationRequested;
 

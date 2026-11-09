@@ -7,8 +7,8 @@
 // group-level CallerPrincipalAuthorizationFilter. Each route then carries FirmOutcomeAuthorizationFilter (the firm, the core record and the (a')
 // visibility decision, ADR-008: the projection has no caller check) and, after it, RequireEbillingEnabled (ADR-018: the flag never replaces
 // authorization). The handler runs only behind the filter and projects the id the filter decided.
-// Workforce ceiling (uac-r2 task 186): both routes reuse the submissions' declaration (Read on sprk_invoicesubmission); a workforce SYSTEMUSER
-// is refused by the filter whatever its role, so the ceiling only ever decides a workforce-plane contact.
+// Workforce ceiling (uac-r2 task 186, run first by the group's filter, independent of the id): each route declares Read on every table it returns
+// (WorkforceRoleCeilingGate.ReadInvoiceOutcome / ReadSubmissionOutcome); a workforce SYSTEMUSER is refused by the route's filter whatever its role.
 
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Services.Finance;
@@ -24,7 +24,7 @@ public static class FirmOutcomeEndpoints
         // Two literal chains (not a loop): the RouteAuthorizationGuard scanner reads each route's path and attachments from its own chain.
         externalGroup.MapGet("/ebilling/invoices/{invoiceId:guid}/outcome", GetInvoiceOutcomeAsync)
             .AddFirmOutcomeAuthorizationFilter(FirmOutcomeSubject.Invoice)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceOutcome)
             .RequireEbillingEnabled()
             .WithName("GetExternalInvoiceOutcome")
             .WithSummary("The firm-visible outcome of one of the caller's firm's invoices")
@@ -35,7 +35,7 @@ public static class FirmOutcomeEndpoints
 
         externalGroup.MapGet("/ebilling/submissions/{submissionId:guid}/outcome", GetSubmissionOutcomeAsync)
             .AddFirmOutcomeAuthorizationFilter(FirmOutcomeSubject.Submission)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadSubmissionOutcome)
             .RequireEbillingEnabled()
             .WithName("GetExternalSubmissionOutcome")
             .WithSummary("The firm-visible outcome of one of the caller's firm's invoice submissions")
@@ -72,9 +72,11 @@ public static class FirmOutcomeEndpoints
     }
 
     /// <summary>
-    /// A projection that read nothing (the id vanished since the filter decided it) is the same 403 as any other refusal; one that did not
-    /// complete (<see cref="FirmOutcome.Degraded"/>, or <see cref="FirmOutcomeKind.Unavailable"/>) is a retryable 503, never a 200 with an empty
-    /// list (130a); anything else is the outcome. Not cacheable: it names what a reviewer decided.
+    /// A projection that read nothing (the id vanished since the filter decided it) is the same 403 as any other refusal. One that did not
+    /// complete because a read FAULTED (<see cref="FirmOutcome.Degraded"/>, or <see cref="FirmOutcomeKind.Unavailable"/>) is a retryable 503,
+    /// never a 200 with an empty list (130a). A permanent state (<see cref="FirmOutcomeKind.Closed"/>: a failed submission, a cancelled or
+    /// superseded invoice, an unknown status) is a 200 with the status only: retrying would never change it. Anything else is the outcome. Not
+    /// cacheable: it names what a reviewer decided.
     /// </summary>
     private static IResult ToResult(HttpContext http, FirmOutcome? outcome)
     {

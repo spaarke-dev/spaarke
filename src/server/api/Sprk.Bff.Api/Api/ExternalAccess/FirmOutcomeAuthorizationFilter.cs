@@ -61,16 +61,16 @@ internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid Subject
 /// definition 044 and <c>/me</c> use); the invoice's (submission's) firm (<c>sprk_vendororg</c>) is one of them; the caller holds Read on the
 /// core record (the principal's post-veto rights, <see cref="CallerPrincipal.RightsOn"/>); and the invoice (submission) is not hidden from it
 /// by the (a') predicate (<see cref="ExternalInvoiceHiding"/> / <see cref="ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync"/>,
-/// the same decisions every other external invoice read applies). A caller of several firms sees each of its firms' items; another firm's item
-/// is refused even on a shared matter.</para>
+/// the same decisions every other external invoice read applies). A submission's invoice, once it exists, must ALSO pass the invoice rule. A
+/// caller of several firms sees each of its firms' items; another firm's item is refused even on a shared matter.</para>
 /// <para><b>One 403 for every refusal.</b> No firm, a firm read that faults or comes back unreadable (logged as a system failure; owner ruling
 /// 2026-11-08), another firm's item, no core access, a hidden item, a systemuser and an id that does not exist all answer the SAME 403
 /// <see cref="FirmOutcomeErrors.Forbidden"/> with the same body, so the status says nothing about which. <b>Not-found is 403 too, not 404:</b> an
 /// id that does not exist has no firm, so the firm check can never pass for it, and a 404 for it beside a 403 for another firm's item would let a
 /// caller learn which ids exist. A read that cannot decide (the invoice or submission, or the visibility decision, faulted) is a retryable 503
 /// <see cref="FirmOutcomeErrors.Unavailable"/> (EB-D-169), never a 200 and never a denial that blames the caller.</para>
-/// <para><b>Order.</b> Principal, systemuser, firms, then the record read, firm membership, core record, visibility. The eBilling kill switch
-/// runs after this filter. Reads are app-only (ADR-028 A1/A3): no OBO, no plane branching. Fails closed: a missing principal denies.</para>
+/// <para><b>Order.</b> The group's workforce ceiling (id-independent), then principal, systemuser, firms, record read, firm, core record, visibility
+/// (a submission: then its invoice's); the kill switch after this filter. App-only reads (ADR-028 A1/A3), no OBO; no principal denies.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: 044's <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/> (its
 /// <c>ReadOne</c> answers a uniform 404 and keys on a submission only). Extension: it cannot serve this route without changing what 044's
 /// callers observe (404 versus the 403 the task requires) and it has no invoice arm; this filter reuses its firm read, its systemuser test, the
@@ -182,7 +182,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
     // ── Invoice ──
 
-    private async Task<IResult?> DecideInvoiceAsync(CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct)
+    private async Task<IResult?> DecideInvoiceAsync(CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct, bool missingPasses = false)
     {
         IReadOnlyDictionary<string, object?> invoice;
         try
@@ -191,8 +191,8 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         }
         catch (RecordNotFoundException)
         {
-            // No such invoice: the SAME 403 as another firm's (see the type remarks: a 404 would be an existence oracle).
-            return FirmOutcomeErrors.Forbidden();
+            // No such invoice: the SAME 403 as another firm's (a 404 would be an existence oracle); a submission's not-yet-created invoice passes.
+            return missingPasses ? null : FirmOutcomeErrors.Forbidden();
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -298,6 +298,11 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         {
             return FirmOutcomeErrors.Unavailable();
         }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The submission visibility decision faulted; answering 503.");
+            return FirmOutcomeErrors.Unavailable();
+        }
 
         if (visible.Count == 0)
         {
@@ -305,6 +310,11 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return FirmOutcomeErrors.Forbidden();
         }
 
-        return null;
+        // The invoice the projection would show for this submission (the derived id GetForSubmissionAsync reads: its billed total while
+        // Received or Processing, its whole outcome once Accepted) is decided exactly as the invoice route decides it: its OWN firm among the
+        // caller's, Read on its OWN core record, and the (a') predicate. The submission's firm and core record are the submission's own
+        // columns and say nothing about the invoice's. A submission is shown only when it AND its invoice are the caller's to see. No invoice
+        // yet passes (there is nothing of it to show); a refusal is the same 403, a fault the same 503.
+        return await DecideInvoiceAsync(principal, firms, InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct, missingPasses: true);
     }
 }

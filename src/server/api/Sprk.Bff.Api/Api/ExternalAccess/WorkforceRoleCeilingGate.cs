@@ -59,6 +59,7 @@ internal static class WorkforceRoleCeilingGate
     internal const string CommunicationTable = "sprk_communication";
     internal const string GrantTable = "sprk_externalrecordaccess";
     internal const string InvoiceSubmissionTable = "sprk_invoicesubmission";
+    internal const string BillingEventTable = "sprk_billingevent";
 
     // ── The route map (design note §0, owner round 101; review round 1 F1: every workforce-reachable route) ──────────
     // Each set is derived from what the route reads or writes: a read needs Read on every table whose rows it returns (the
@@ -204,6 +205,21 @@ internal static class WorkforceRoleCeilingGate
     /// </summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissions = Set(
         (InvoiceSubmissionTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/invoices/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoice</c> (status, tracking number,
+    /// totals) and on <c>sprk_billingevent</c> (the decided and reviewer-added lines and the invoice-level adjustments it returns).
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceOutcome = Set(
+        (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/submissions/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoicesubmission</c> (status and
+    /// tracking number), and, because an accepted submission's outcome is its invoice's, Read on <c>sprk_invoice</c> and
+    /// <c>sprk_billingevent</c> as <see cref="ReadInvoiceOutcome"/>.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadSubmissionOutcome = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read));
 
     /// <summary>
     /// <c>GET /invoice-submissions/firm-records</c>: Read on the three core tables whose ids it returns, and Create on

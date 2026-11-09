@@ -80,7 +80,7 @@ public sealed class FirmFindingsProjectionTests
                     var rows = query.EntityName switch
                     {
                         "sprk_invoice" => Invoices,
-                        "sprk_billingevent" => Lines,
+                        "sprk_billingevent" => Lines.Where(r => SatisfiesNestedFilters(r, query.Criteria)).ToList(),
                         "sprk_decisionrecord" => Records.Where(r => SatisfiesWriterConditions(r, query.Criteria)).ToList(),
                         "sprk_signal" => Signals,
                         "sprk_policyversion" => Versions,
@@ -144,6 +144,46 @@ public sealed class FirmFindingsProjectionTests
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// The store applies the query's NESTED filters (the line query's <c>ExcludeInactiveAdjustments</c>: not an Adjustment line, or no cost
+        /// type, or <c>statecode</c> Active) to the stored row, as Dataverse does, so a projection whose line query lost that filter shows a
+        /// removed adjustment. The top-level conditions are left alone (the invoice link is checked by the projection itself, and a stray line
+        /// of another invoice must still reach it). An operator this double cannot evaluate throws, so a new criterion is never silently ignored.
+        /// </summary>
+        private static bool SatisfiesNestedFilters(Entity row, FilterExpression criteria) =>
+            criteria.Filters.All(filter => Evaluate(row, filter));
+
+        private static bool Evaluate(Entity row, FilterExpression filter)
+        {
+            var results = filter.Conditions.Select(c => Evaluate(row, c)).Concat(filter.Filters.Select(f => Evaluate(row, f))).ToList();
+            return filter.FilterOperator == LogicalOperator.Or ? results.Any(r => r) : results.All(r => r);
+        }
+
+        private static bool Evaluate(Entity row, ConditionExpression condition)
+        {
+            var value = row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+            // A row with no statecode is active (Dataverse always has one; the fixtures set it only on a removed line).
+            if (value is null && condition.AttributeName == "statecode")
+            {
+                value = new OptionSetValue(0);
+            }
+
+            object? raw = value switch
+            {
+                OptionSetValue option => option.Value,
+                EntityReference reference => reference.Id,
+                _ => value,
+            };
+            return condition.Operator switch
+            {
+                ConditionOperator.Null => raw is null,
+                ConditionOperator.NotNull => raw is not null,
+                ConditionOperator.Equal => raw is not null && Equals(raw, condition.Values[0]),
+                ConditionOperator.NotEqual => raw is not null && !Equals(raw, condition.Values[0]),
+                _ => throw new InvalidOperationException($"The test double cannot evaluate {condition.Operator} on {condition.AttributeName}."),
+            };
         }
 
         private static Entity Requested(Entity row, ColumnSet columns)
@@ -435,15 +475,21 @@ public sealed class FirmFindingsProjectionTests
     }
 
     [Fact]
-    public async Task RejectedSubmission_ProjectsStatusOnly_AndFailedOrMissingProjectsNothing()
+    public async Task RejectedSubmission_ProjectsStatusOnly_FailedIsClosed_AndMissingProjectsNothing()
     {
         var world = new World();
         world.AddSubmission((int)InvoiceSubmissionStatus.Rejected);
         (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
             .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
 
+        // 130b fix round 1: a failed submission is a permanent state, not a fault: Closed, status only, not degraded (the route answers 200).
         world.Submissions[0]["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed);
-        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
+            .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Failed", null, null, [], false));
+
+        world.Submissions[0]["sprk_processingstatus"] = new OptionSetValue(424242);
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
+            .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Closed", null, null, [], false));
 
         world.Submissions.Clear();
         (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None)).Should().BeNull();
@@ -508,16 +554,61 @@ public sealed class FirmFindingsProjectionTests
     }
 
     [Theory]
-    [InlineData(InvoiceStatusCodes.Cancelled)]
-    [InlineData(InvoiceStatusCodes.Superseded)]
-    [InlineData(12345)]
-    public async Task ClosedStatesThisContractDoesNotCover_AndUnknownCodes_ProjectNothing(int status)
+    [InlineData(InvoiceStatusCodes.Cancelled, "Cancelled")]
+    [InlineData(InvoiceStatusCodes.Superseded, "Replaced by a correction")]
+    [InlineData(12345, "Closed")]
+    public async Task PermanentStates_AndUnknownCodes_AreClosed_StatusOnly_NotDegraded(int status, string label)
     {
+        // 130b fix round 1: a permanent state is not a fault. Status only (no items, no totals), not degraded, nothing below the header read.
         var world = new World(status);
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
 
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
-        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Unavailable, null, "Unavailable", null, null, [], true));
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", label, null, null, [], false));
+        world.Reads("sprk_billingevent").Should().Be(0);
+        world.Reads("sprk_decisionrecord").Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AnAcceptedSubmission_WhoseInvoiceWasSuperseded_IsClosed()
+    {
+        var world = new World(InvoiceStatusCodes.Superseded);
+        world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Replaced by a correction", null, null, [], false));
+    }
+
+    [Theory]
+    [InlineData((int)InvoiceSubmissionStatus.Received, "Received")]
+    [InlineData((int)InvoiceSubmissionStatus.Processing, "Processing")]
+    public async Task ASubmissionWhoseBilledTotalReadFaults_IsDegraded_NeverANullTotal(int status, string label)
+    {
+        // 130b fix round 1 (F2): a total that could not be read is not "no total yet".
+        var world = new World();
+        world.AddSubmission(status);
+        world.FaultingEntities.Add("sprk_invoice");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, null, label, null, null, [], true));
+    }
+
+    [Fact]
+    public async Task ARemovedAdjustment_AndItsReason_NeverReachTheFirm()
+    {
+        // 130b fix round 1 (K3): a removed invoice-level adjustment is deactivated, never deleted (task 102); the line query excludes it.
+        var world = new World(InvoiceStatusCodes.Approved);
+        world.AddAdjustment(5, "Volume discount.", VersionB, amount: -50m, value: 5m);
+        world.AddAdjustment(6, "Removed write-down.", VersionA, amount: -70m, value: 7m)["statecode"] = new OptionSetValue(1);
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.Reason.Should().Be("Volume discount.");
+        JsonSerializer.Serialize(outcome).Should().NotContain("Removed write-down.").And.NotContain("-70");
+        world.ClauseCalls.Should().NotContain(VersionA, "the removed adjustment's rule is not cited");
     }
 
     // ── Visibility rule (D-66, D-79) ──
