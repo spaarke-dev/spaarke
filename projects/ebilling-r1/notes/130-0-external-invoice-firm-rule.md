@@ -175,7 +175,7 @@ Per tool and table class (theories over `InvoiceLinkedCase`, each class a separa
 - Its name columns (`sprk_regardinginvoicename`, `sprk_regardinginvoiceyominame`), if a tool returns them.
 - Every annotation on any of these (`key@…`: `@OData.Community.Display.V1.FormattedValue`, `@Microsoft.Dynamics.CRM.lookuplogicalname`, `@Microsoft.Dynamics.CRM.associatednavigationproperty`, and any other). describe already drops the `@OData.Community` annotations itself.
 - The regarding columns derived from the target: `sprk_regardingrecordid`, `sprk_regardingrecordname` and `sprk_regardingrecordurl` (on the work assignment in `docs/data-model/sprk_workassignment.md`). They are shared by every regarding target, so they are kept only when the row shows they hold ANOTHER target: a regarding id that reads as a GUID that is not one of the row's linked invoices. When that cannot be told (no regarding id in the row, or no invoice link in the row), they are blanked (fail closed).
-- Not blanked: `sprk_regardingrecordtype`, a lookup to the record-type table that names the kind of target, not the invoice.
+- Fix round 1 (below) widened this: the regarding number and the record type are blanked under the same condition, and every column comes from `RootInvoiceLinkRedaction`.
 
 **Search snippet decision.** A search hit carries `path`, `entity`, `recordId`, `score` and `content` (up to three highlight snippets from any matching field); no lookup column is projected. For a root hit whose invoice link is not visible, faulted or unreadable, `content` is null and the hit is kept. Index finding: in the repo's solution, the work assignment's Quick Find view (`SavedQueries/{37b5d1c9-…}.xml`, the find columns Dataverse search indexes) has `sprk_name` as its only find column. `sprk_regardinginvoice`, `sprk_regardingrecordname`, `sprk_regardingrecordurl` and `sprk_regardingrecordid` are `IsSearchable=0` in `Entity.xml`. So today the invoice lookup name is not a searchable field of the work assignment. The blanking stays: it costs nothing and holds if the index changes.
 
@@ -212,4 +212,54 @@ Also: one firm read per tool call (`search_data S3_TheCallersFirmsAreReadOncePer
 
 **Existing tests changed.** Step 2's three "a root is unchanged in this step (the seam is not called)" tests (one per tool) are replaced by the step 3 tests above; the rule they pinned was temporary.
 
-**Open question.** A root's own text columns (for example `sprk_name`) are root content decided by the grant and are returned by read_query and describe even when the linked invoice is not visible. search_data blanks the whole snippet, because a snippet's source field is unknown.
+**Open question (answered in fix round 1, R2).** A root's own text columns (for example `sprk_name`) are root content decided by the grant and are returned by read_query and describe even when the linked invoice is not visible. search_data blanks the whole snippet, because a snippet's source field is unknown.
+
+## 130-0b fix round 1
+
+Adversarial pass 1 findings and the owning project's rulings (R1, R2), on the assistant tools (`dataverse.search_data`, `dataverse.read_query`, `dataverse.describe`).
+
+### Findings and fixes
+
+| Finding | Rule | Fix | Files | Tests |
+|---|---|---|---|---|
+| F1-1 | One redaction set for a root's invoice link, shared by both planes | `RootInvoiceLinkRedaction` (new): for each root with an invoice link, every form (`col`, `_col_value`, `colname`, `colyominame`) of its invoice link columns (`InvoiceLinks.LinkColumnsOf`) and of the regarding pair and resolver columns (`CreateTimeFieldMapping.RegardingPairAndResolverColumns`: id, record type, name, URL, number). Committed alone (77d6becd24) so the external routes' round can merge it. | `Infrastructure/ExternalAccess/RootInvoiceLinkRedaction.cs` | `RootInvoiceLinkRedactionTests`: the guard reads each root's `Entity.xml` and fails on a `sprk_regardingrecord*` column outside the set (must fire: a seeded column, and the old three-column list misses the number and the record type; must not fire: other columns and tables) |
+| F1 | Every form of a hidden invoice link is blanked on a root | `BlankRootInvoiceLink` takes its columns from the set; the hand list `RegardingTargetColumns` is gone. `sprk_regardingrecordnumber` (the invoice number when the target is the invoice) is now covered. | `ExternalInvoiceVisibility.cs`; `docs/data-model/sprk_workassignment.md` (the number column was missing) | read_query and describe step 3 fixtures carry the number and the record type: blank in must-fire, fault and unreadable-link cases, kept in must-not-fire |
+| K2 | The record type shows that an invoice is the target | `sprk_regardingrecordtype` (all forms, with annotations) is blanked under the same condition as the other regarding columns: the regarding id is one of the row's linked invoices, or that cannot be told. It is kept for another target. | `ExternalInvoiceVisibility.cs` | read_query `S3_TheRegardingColumns_AreBlankedOnlyForTheInvoice` (kept for another target, blank when it cannot be told); describe `K2_ARootRegardingAnotherRecord_KeepsTheRegardingColumns` |
+| F1-2 (F2) | A root row is never hidden, so a filter or sort on its link must not answer what the blanking withholds | For an external caller on a root with an invoice link, read_query refuses BEFORE any read any WHERE or ORDER BY that names a column of the set, with one fixed validation answer (`RootInvoiceLinkPredicateRefusal`), the same whether or not a row would be blanked. Decided from the query's identifiers outside quoted literals, never from data. Internal callers unchanged. | `DataverseReadQueryHandler.cs` | `F1_2_APredicateOnTheRootLink_IsRefusedBeforeAnyRead` (each column × `=` on a GUID, `LIKE` prefix, `<`, `>`, ORDER BY: refused, no Dataverse call, no link or firm read); must not fire: `sprk_name` WHERE / ORDER BY, a literal spelling a set column, an internal caller |
+| R1 | Row cap with a hiding seam (ruling; supersedes task 188 round 4a F1-5) | When a seam that can leave rows out is active for the call (decided from the caller and the table before the read: communication, document, derived, invoice family, invoice-linked child), the cap warning fires if and only if the VISIBLE rows reach TOP, and the result always carries one fixed note (`RowsLeftOutNote`), byte-identical whether or not a row was left out. No active seam: the raw rule, no note. No page refill. Logs unchanged (counts only). | `DataverseReadQueryHandler.cs` | `R1_HidingSeamActive_RowCapWarning_CountsTheVisibleRows`, `R1_Top1_OnlyAHiddenMatch_NoCapWarning_TheNote`, `R1_TheNote_IsIdenticalWithAndWithoutHiding`, `R1_NoActiveSeam_KeepsTheRawRule_AndNoNote` (replace the round 4a raw-page test) |
+| K5 | One definition of a caller's firms | The weak "delegate and core agree" test is replaced by a table-driven test that runs the contact plane (`ReadCallerFirmsAsync`) and the systemuser plane through the core over the same principal states (active firms, inactive contact, unreadable contact, unreadable memberships, a membership read fault, no memberships, no contact) and asserts identical firms, identical unreadable flags and the expected state | — | `ContactFirmsCoreTests.TheContactPlane_AndTheCore_GiveIdenticalFirms` |
+
+**Other inputs checked for F1-2.** describe takes a record path only (no predicate or sort). search_data takes keywords and a table scope only; the number and record type are `IsSearchable=0` on the work assignment, so a keyword cannot match them. No change there.
+
+### Rulings recorded (no code)
+
+- **R2: root content is decided by its grant.** A work assignment's own text columns (`sprk_name`, `sprk_description`) are root content; they are returned when the grant allows, whatever the linked invoice. No BFF code writes an invoice's name or number into them; only a field-mapping profile in data could.
+  Dev field-mapping census (read-only, 2026-11-09): 8 profiles; none has an invoice or invoice-family source with a matter, project or work-assignment target (the only invoice profile maps Matter → Invoice). So no data path writes invoice details into a root's own text columns today.
+- **K1 (row-cap warning with zero rows):** superseded by R1 above.
+- **K3:** see R2.
+- **K4:** `InvoiceLinks` covers edges to `sprk_invoice` only, not to invoice lines. No table outside the invoice family links to a line only today (#2348).
+
+### Moved out of this round: F3 and F3b (descendants of invoice-linked children)
+
+uac-r2 ruled: one separate agent (F3b), after this branch tip, does the four named descendants and the derived set with one guard. Inputs for it:
+
+- **Named descendants:** `sprk_analysisoutput` (of an analysis), `sprk_eventlog` (of an event), `sprk_fileversion` (of a document), `sprk_document` through `sprk_parentdocument`.
+- **Derived set** (`RecordFamilyEdges` Filing edges one level below the invoice-linked child tables — to-do, event, document, communication, communication thread, analysis, memo — roots excluded):
+  - plain tables: `sprk_agreement` (`sprk_regardingdocument`), `sprk_analysisoutput`, `sprk_attachmentartifact` (`sprk_document`), `sprk_emailartifact` (`sprk_document`), `sprk_eventlog`, `sprk_fileversion`;
+  - communication-family tables (refused or dropped for an external caller today, but still edges): `sprk_communicationattachment` (`sprk_communication`, `sprk_document`), `sprk_communicationparticipant` (`sprk_communication`), `sprk_emailreviewlog` (`sprk_communication`);
+  - child tables that are also descendants: to-do, memo, event (regarding analysis, communication, document, event), analysis (`sprk_documentid`, `sprk_regardingdocument`, `sprk_regardingcommunication`), communication (`sprk_communicationthread`, `sprk_regardinganalysis`, `sprk_regardingevent`), communication thread (`sprk_regardinganalysis`, `sprk_regardingevent`), document (`sprk_parentdocument` and the `DocumentLinkFields` links to a child table);
+  - invoice-family tables: `sprk_decisionrecord` and `sprk_signal` (regarding communication, document, event, to-do), `sprk_invoicesubmission` (`sprk_document`);
+  - excluded: `sprk_workassignment.sprk_regardingevent` (a root is never hidden).
+- **Family-path fault change (uac-r2 ruling).** A fault on a decided row hides the row, on the family path too; a whole-read failure still fails the call. Today `ExternalInvoiceVisibility.HiddenFamilyRowsAsync` throws on a failed app-only read and the tool call fails, while the child and root branches hide or blank. F3b aligns the family branch and the task 098 fault tests.
+- **Gap against the ruling (left as is in this round).** The ruling counts a failed read of the caller's firms as a whole-read failure that fails the call. The seam today maps it to `CallerFirms.Unknown` and hides every asked row (`ReadSystemUserFirmsOrUnknownAsync`). F3b aligns it.
+
+### Component justification (root CLAUDE.md section 11)
+
+`RootInvoiceLinkRedaction` (the answers also live in its class comment):
+1. **Existing.** `ExternalInvoiceVisibility` held a hand-written list of three regarding columns; `CreateTimeFieldMapping.RegardingPairAndResolverColumns` lists the regarding columns for the write path only; `InvoiceLinks` lists the link columns.
+2. **Extension.** It composes those two registries instead of copying them. It is its own file because `InvoiceLinks` is shared with a parallel branch, and the external routes need the set without the tools' predicate.
+3. **Cost of doing nothing.** The regarding number and record type of a root show that it is linked to an invoice the caller may not see, and a filter on them answers the same.
+
+The read_query refusal and the R1 note are new surface inside an existing handler: (1) existing — the handler's validation-error answer and its warnings list, reused; (2) extension — both are added to those, no new endpoint, service or registration; (3) cost of doing nothing — a filter on a blanked column answers what the blanking withholds, and a short page reads as "no further matches".
+
+**Publish-size delta:** not measured: source-only, no package.
