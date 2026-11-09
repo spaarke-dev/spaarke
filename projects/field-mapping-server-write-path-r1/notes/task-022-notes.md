@@ -170,3 +170,49 @@ Held for a follow-up. In rule wording only:
   - per source table, whether the source is Restricted (the column and the tables that carry it);
   - per target, whether the row being created ends Restricted in this create.
 - `sprk_document` gets its access permission after the create (#2169), so the second predicate cannot be read off the row before the create for a document target.
+
+## Fix round 3 (the strip's branches; the refusals' words, 2026-11-09)
+
+**The strip (`EnforceMappingSourceOwnerAsync`, `RecordCreationService.Mapping.cs`).**
+
+- A copied default is removed with the strip when its source column was mapped at step 3. The service records step 3's mapped columns before step 5 (`stepThreeMappedColumns`) and matches each copy's source against them, so a copy is removed even when step 5 dropped its source and kept the copy.
+- A removed value that files the row refuses the create with its own code, `record_creation.mapping_source_secure_filing` (400, `RecordCreationRefusalKind.Invalid`): "This {noun} can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record." The same request is refused every time, so the words never suggest retrying. The child-record route renders it through the shared map with that `reasonCode`; `webApiCreateError.ts` maps it to the same sentence.
+- **Fail closed, intended.** If the strip's rebuild (`DataverseWriteItemMapper.MapAsync` over the caller's values and the kept defaults) cannot produce a row, or faults, or the pre-write rules' re-run faults, the whole create is refused and nothing is written. A rebuild that produces no row keeps `record_creation.check_failed` (503): it is a check that could not be completed.
+- The step 3 and strip warnings (`record_creation.mapping_source_secure`) now say that some fields weren't copied from the related record because it is secure.
+
+**Secure matter, no Share.** A project under a secure matter is secure (the wizard locks Secure on), so creating one needs the rights a secure create needs: Write and the table's Share privilege. A caller without them is refused (intended) by the route with the delegation rule's own codes, `sdap.access.deny.delegation_share_required` / `delegation_write_required` (403, ProblemDetails with `reasonCode`). With the matter secure, the wizard passes it to `ProjectService.createProject` (`parentSecure`), and `describeWebApiCreateError` (`secureParent: 'matter'`) says: "Creating a project under a secure matter needs permission to share (or edit and share) secure records. Ask an administrator." It never offers "create it without Secure", which the locked toggle does not allow. The check-failed sentence under a secure matter drops that offer too. With no secure matter the sentences are unchanged.
+
+**Wizard known limits (preview only; the server rule is unchanged by them).**
+
+- K: the preview reads `sprk_issecure` as the user. The column is field-secured, so a user without field Read on it gets `null`: no lock, Secure stays editable. The server still applies the mapping-source rule (step 3 maps nothing, or the strip removes what was mapped).
+- K: a locked toggle forces `secure=true`, which needs Write and Share (above). A user without them cannot create a project under a secure matter from the wizard; the refusal names the rule and whom to ask.
+
+**Tests (seam, `RecordCreationServiceMappingSeamTests.MappingSourceRule.cs`, a work assignment filed under the secure matter, owner forced to an ordinary team with `ForcedOwnerResolver`, the profile a Copy rule for Assigned To Internal and a Default rule for the description):**
+
+- the default copied from a mapped value (`sprk_assignedto` from `sprk_assignedtointernal`) is removed, with the Default rule's value;
+- a plain adapter default survives the strip through the rebuild (`kept.Count > 0`);
+- the copy is removed when step 5 dropped its mapped source (`sprk_assignedtointernal` field-secured for the caller);
+- a removed value that files the row (`sprk_regardingproject`, mapped) refuses with `record_creation.mapping_source_secure_filing`, 400, words with no retry, nothing written;
+- the pre-write rules are asked again on the stripped row, and the re-run's refusal stands.
+
+Client: `webApiCreateError.test.ts` (the filing code's sentence; the secure-matter Share/Write sentences; the check-failed sentence), `secureFromCreation.test.ts` (`createProject` with and without the secure matter).
+
+**Evidence.**
+
+- Fail-then-pass, strip branches. Each branch broken in turn in `RecordCreationService.Mapping.cs`, the five strip tests run:
+  - copy removal off: 3 failed (copy, rebuild, step-5 copy);
+  - rebuild off (`kept.Count > 0` skipped): 1 failed (rebuild);
+  - copy matched on the post-step-5 columns (the round 2 rule): 1 failed (step-5 copy);
+  - filing refusal off: 1 failed (filing);
+  - pre-write re-run off: 1 failed (pre-write);
+  - the round 2 refusal (503 `check_failed`): 1 failed (filing).
+  With the change: 5 / 5.
+- Fail-then-pass, client. Over HEAD's `webApiCreateError.ts`, `projectService.ts` and `CreateProjectWizard.tsx`: 5 failed / 54 passed (2 suites). With the change: jest on `src/utils/__tests__/webApiCreateError.test.ts` and `src/components/CreateProjectWizard`: 275 / 275 in 14 suites. `tsc --noEmit`: exit 0.
+- Office quick-create's refusal map (`OfficeService.MapQuickCreateRefusal`) passes `record_creation.mapping_source_secure_filing` through at 400 with the service's words, never the generic 500. `OfficeQuickCreateRefusalMapTests` has its row (the ledger test failed on the new code until it was mapped).
+
+**Not in this round.** The field-mapping push gate (the coordinator's item 6: `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` and its preview asking `MappingSourceCopyGate.DecideAsync` per child, after merging `task/fm-045b-2`) and the sweep for other server paths that copy field values between records are a separate deliverable. The rule they enforce is this task's: values from a secure source are written only into a row owned by that source's isolation owner.
+- Filtered BFF run (RecordCreation, ChildRecord, OfficeQuickCreate, MappingWriteGates, OfficeTodoCreate, AnalysisEndpoints, RecordCreatorPerson, InvoiceReviewWritePath, SecureRootCreateRoute, EventEndpoints, FieldMappingPush, MappingSourceRule, OfficeTodoRegarding): **1762 passed, 0 failed**, 3 skipped (1765). Before the Office row was added: 1 failed (`OfficeQuickCreateRefusalMapTests.EveryCodeTheServiceDeclares_HasARow`).
+- BFF build: 0 warnings, 0 errors. BFF test-project build: 0 warnings, 0 errors.
+- `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): no vulnerable packages.
+
+rework: fix-round-3 task 022 (F3 strip-branch tests; K4 copies matched on step 3; K1 filing refusal code and words; fail-closed rebuild noted; wizard Ks noted; secure-source and secure-matter refusal words)
