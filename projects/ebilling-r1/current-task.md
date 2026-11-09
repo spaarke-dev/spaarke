@@ -68,6 +68,13 @@ v2` (task `bgz2bshd9` output) and remove with `Remove-WorktreeSafe.ps1` if liste
 - **K3:** WA in the invoices module's ReadableColumns is accepted, on three conditions: sibling-exact forms; a test that a secure, unreadable WA row never returns; and its own diff item.
 - **Shared redaction set:** `77d6becd24`; 130-0 merges that exact sha.
 
+**130-0 fix round 2 is pushed:** `4102b719b9..7a7f5d2808` on `task/ebilling-130-0-fix1`. A scoped Sonnet re-check is running; the diff goes to uac-r2 after it. uac-r2 rulings so far:
+- **Q1 → F3b.** A child document is decided by EVERY invoice link up its parent chain. It reuses the 188 hop bound (≤3; a cycle fails closed). Test on both planes.
+- **Q2 → fix round 3.** A single invoice-linked record whose decision faults, whether the firm read or the per-invoice check, returns 503 `InvoiceUnreadableReasonCode`. A decided hidden record keeps the uniform refusal.
+- **Q3 → K.** One line in the notes for the deactivated WA.
+- **Fix round 3 also covers** the `/todos/{id}` single-record routes and their siblings in the same file: a missing id must give the uniform 403 with the same body as another firm's id, for each verb. Neutral commit text. uac-r2 authorized it.
+- **Fix round 3 starts after the re-check** and bundles its findings.
+
 **130b review by uac-r2 (fc68d0b44a):** approved once FIX-1, FIX-2 and the Q1 answer land.
 - **FIX-1:** a firm-read fault returns 503; "no firm" stays 403.
 - **FIX-2:** an ArchTest pins that only the endpoints and DI may call FirmFindingsProjection.

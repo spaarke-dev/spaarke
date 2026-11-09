@@ -10,6 +10,28 @@
 
 ## Open (in priority order)
 
+### DEF-065 — Billing fact loader: an unknown secure-root answer must fail closed
+
+| Field | Value |
+|---|---|
+| **Status** | Open (after the 130 batch) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 (filed by unified-access-control-r2; ebilling-r1 owns the file, task 072) |
+| **Source** | unified-access-control-r2 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2644 |
+
+**Description**: `BillingFactLoader.SecureRootsAsync` (~:723) treats one inconclusive answer from the secure-owner lookup as a definite one. Only a misconfigured environment can produce that answer. The fix makes an inconclusive answer fail closed, so prior-invoice detail is never used when it cannot be decided.
+
+**Fix direction**: use the tri-state check that the 198 branch adds (`SecureChildShareSynchronizer.IsSecureOwnerTeamAsync`: true / false / unknown) once it is on our base. Treat unknown as secure. Add a must-fire test for the unknown answer and a must-not-fire test for a decided non-secure answer.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs` (~:723); issue #2644.
+
+**Estimated effort**: 2-4 hours, after the 198 branch is merged into ours.
+**Blockers**: the 198 branch's tri-state helper reaching master. Do not add a local copy (reuse, do not fork); if 198 slips badly, unified-access-control-r2 splits that method out to master first. Scope: only the `BillingFactLoader` half of #2644; the `SignalSuppressionService` half stays open for spaarke-ontology-platform-r1.
+**Related**: task 072, D-112.
+
+---
+
 ### DEF-064 — Guard that every BFF writer of an invoice's core-record lookups calls InvoiceFamilyCoreRecordGuard
 
 | Field | Value |
