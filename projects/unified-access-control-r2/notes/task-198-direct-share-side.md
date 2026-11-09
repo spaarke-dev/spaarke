@@ -1,7 +1,7 @@
 # Task 198 — share side of Direct 1:1 messages (notes)
 
 > Task: `tasks/198-direct-message-share-side.poml` (FULL). Branch `task/uac-198-direct-share-side`.
-> This run: Steps 0, 1, 2 (Part A), 3 (Part B), 5 (Part D). Part C waits for fm 054a's lookup sha; Part E waits for ontology-r1's OK.
+> Done: Steps 0, 1, 2 (Part A, Q4, role guard), 3 (Part B, Q5), 5 (Part D). Part C and Part E are pending upstream.
 > Wording rule (public repo): rules only.
 
 ## §0 Conflict check (Step 0, 2026-11-09)
@@ -99,8 +99,8 @@ None in Dataverse. `Services/Communication/Membership/MembershipReconciler.cs:12
 3. *Cost of doing nothing:* fm 054a assigns unfiled Direct messages to the Direct team, and Dataverse refuses that assignment while no team in the Direct unit holds Read on `sprk_communication` ('Read Privilege Check For Owner failed').
 
 **Not done (follow-ups):**
-- No arch guard pins `direct-message-owner-role.json` (team and role names, Read/Basic, exact tables) the way `RestrictedContentOwnerRoleGuardTests` pins the customer files. The table list is TODO-fm; add the guard when fm names it.
-- The customer mode does not know the Direct unit's name, so it would accept the Direct unit as a customer unit (it is a direct child of the root). Refusing it there needs the Direct unit's name in the customer mode (for example, a `-DirectMessageBusinessUnitName` exclusion), which changes the customer mode. That is the owner's call: **Q4**.
+- Done since: the role file guard (§2d).
+- The customer mode does not know the Direct unit's name, so it would accept the Direct unit as a customer unit (it is a direct child of the root). Refusing it there needs the Direct unit's name in the customer mode (for example, a `-DirectMessageBusinessUnitName` exclusion), which changes the customer mode. Resolved: **Q4** (§2c).
 
 ## §2b Part A role file (fm confirmed the tables 2026-11-09)
 
@@ -140,25 +140,103 @@ New surface:
 - Test double `DirectMessageOwnerTeamDouble`. It reuses fm's fake pattern, shared because three test classes construct the service.
 - Constructor parameter `DirectMessageOwnerTeam`, already a DI singleton (`CommunicationModule.cs:725`).
 
-## §5 Part D — keep on filing (NOT DONE in this run)
+## §3b Q5 applied (owner ruling 2026-11-09)
 
-- Ordinary target: the census (§1a) and fm's census agree that no path revokes the message or content-row shares, so the rule holds today. The pin test is not written.
-- Secure target: the synchronizer decides. The pin test is not written.
-- Restricted target: needs new code. `RestrictedExternalShareRemover.RemoveForRecordAsync` (`Infrastructure/ExternalAccess/RestrictedExternalShareRemover.cs:185`) works per ROOT. It takes a per-record lease and does a strict read-back, a cache clear and a `SyncRootAsync` child fan-out (secure only). Extending it to a communication filed under a Restricted root needs these decisions:
-  - the hook: `SecureChildReconciler.AfterRefileCoreAsync` 1297-1339, or the remover's 5-minute job;
-  - the lease key;
-  - the content rows;
-  - Direct only, or every communication.
-  
-  Not guessed. Handed back.
+`NotConfigured` with no fault = not Direct. Every other refusal, and any fault (the one-row check's included), = unknown: nothing is granted (fail closed) and the message is left for Part C's re-grant queue (`TODO(task 198 Part C)` at the caller). The decision lives in ONE private method, `DirectThreadAccessService.IsDirectMessageOwnerTeamAsync`, so fm's identity-only API change edits one place.
 
-## Open questions
+Test: `DirectTeamMessage_WhenTheOneRowCheckFaults_IsUnknown_ReachesTheOneFailClosedBranch` (a one-row-check fault reaches the unknown branch, grants nothing, and is not logged as a non-fatal lookup failure). `DirectThreadAccessServiceTests`: 36/36.
+
+## §2c Q4 applied — customer mode refuses the Direct unit
+
+- `-DirectMessageBusinessUnitName` (default `'Spaarke Direct Messages'`) is now in all three parameter sets; it stays mandatory in `Direct`, which is the default set.
+- Customer mode reads the units with that name ONCE and decides by id: the customer unit whose id is among them is refused (exit 1, before any write), and those ids are dropped from `$customerTops`. There is no in-code name compare.
+- The change is additive (one block after `$customerTops`, one parameter attribute set, one help paragraph), so the ebilling 130-0/130-0b rewrite merges as separate hunks.
+- Pester: 27/27. Fail-first: against the previous script, 22 pass and 5 fail (the 5 new ones). Must-fire: refused by name, by id with `-Apply`, and under a non-default name. Must-not-fire: an ordinary customer unit plans (exit 0, Direct unit absent from the plan), and a name no unit has changes nothing.
+
+## §2d Role file guard
+
+`tests/Spaarke.ArchTests/DirectMessageOwnerRoleGuardTests.cs` pins `config/direct-message-owner-role.json`:
+- schemaVersion 1, `businessUnit: "direct"`, the team and role names;
+- Read at Basic on exactly the six tables, with the Read privilege name `UserPrivilegeChecker.ReadPrivilegeEntity` derives;
+- no extra entry fields; reason and evidence present;
+- the Direct team and role differ from the customer and Secure Record ones.
+
+Must-fire: an 11-case theory (each mutation of the live file yields its named finding). The `todo` field is gone.
+
+## §5 Part D — keep on filing, and the Restricted bar
+
+**Rules:**
+- Ordinary target: every participant keeps the shares on the message and its content rows.
+- Secure target: the synchronizer decides (the message mirrors the root's set).
+- Restricted target, its own value (100000002) or inherited through its filing (`InheritedAccessPermission`): every system user holding a direct share on the message or a content row (attachment, participant, email review log, document) for whom `InternalShareEndpoints.IsBarredOnRestricted(isExternal, rootIsRestricted: true)` is true loses those shares. It applies to every communication, not only Direct ones.
+
+**Where:** `Services/Access/RestrictedFilingShareBar.cs`, called from two places:
+- `SecureChildReconciler.AfterRefileCoreAsync`, the step every re-file writer runs, after the mirror and the gate re-own;
+- the job that revisits filed communications (below).
+
+**Fail closed:** nothing is ever granted.
+- A target that cannot be decided (no probe, a fault, an undeterminable lineage) removes nothing.
+- A user is barred only on a stored `sprk_isexternal = true`; a blank flag is internal (owner round 67).
+- A user-flag read fault removes nothing.
+- A user the read does not return is logged and left as is.
+- A share read fault leaves that row as it is.
+- Each revoke is confirmed by a strict read-back.
+
+**§11:**
+1. *Existing:* `RestrictedExternalShareRemover` applies the same rule to Restricted ROOTS (and secure children via `SyncRootAsync`); `NoAccessShareEnforcer` works per No Access entry. Neither covers a communication under an ordinary Restricted root.
+2. *Extension:* the bar reuses the remover's predicate (`IsBarredOnRestricted`) and its user-flag read (`RestrictedExternalShareRemover.ReadUsersAsync`, now `internal static` over the client, with the instance method delegating), plus the one inherited Access Permission rule. It is not a remover method, because the remover's unit is a root under a per-record lease with a last-reader report and root-set cache eviction, none of which applies to a message. No DI registration: both callers construct it from what they already hold.
+3. *Cost of doing nothing:* the rule "a user flagged external holds no share on a Restricted record's content" has no writer for communications filed under an ordinary record.
+
+**Decisions recorded:**
+- No lease: the lease serializes last-reader decisions on roots, and no last-reader rule applies to a message.
+- Gate Decision Records are excluded: `ReownAfterFilingAsync` revokes their shares on every communication re-file.
+- An external OWNER of a content row is not a share, so its revoke fails; that is logged and the outcome is incomplete.
+- Content rows are capped at 250 per table; a capped read is logged and the outcome is incomplete.
+
+**The existing-job question: yes.** `ChildAccessPermissionReconciler`, inside `SecureChildReconciliationJob` (2-minute schedule), already keeps a communication's `sprk_accesspermission` equal to what it inherits, so it sees a root becoming Restricted. It was extended rather than a new job built:
+- When it writes Restricted on a communication, or finds a carried communication already Restricted, it calls the bar's `RemoveBarredSharesAsync`.
+- An incomplete result carries the row to the next run and adds a problem line.
+- It never runs in a report-only run.
+
+No follow-up job is needed.
+
+**Tests:**
+- `RestrictedFilingShareBarTests` (7) through the real reconciler:
+  - pin, ordinary target: all kept, and users never read;
+  - pin, Secure target: the mirror;
+  - must-fire: an external user on a Restricted target loses the message and all four content rows;
+  - must-fire, inherited: event under a Restricted matter;
+  - must-not-fire: internal and blank-flag users keep everything;
+  - fail closed: a user-read fault removes nothing;
+  - fail closed: an unread user is left while the external one is removed.
+- `ChildAccessPermissionReconcileTests.Task198` (3) through the job:
+  - must-fire: a matter turning Restricted removes the external user's shares, content row included;
+  - must-not-fire: Limited keeps all;
+  - fail closed: an unread user is left and the row is carried, then barred on the next run once readable.
+- Fail-first, with the two call sites disabled: the 5 must-fire / fail-closed-removal tests fail and the 5 must-not-fire tests pass.
+- Affected slices, all green:
+  - access (SecureChild, ChildAccessPermission, RestrictedFiling, RecordOwnership, DocumentContainer, RestrictedExternal): 3892;
+  - Services.Communication, DirectMessageOwnerTeam, DecisionRecord and Signals: 5737 (2 skipped);
+  - ExternalAccess: 4923;
+  - Services.Office and ReconciledEmailFiling: 162.
+- BFF build: 0 warnings.
+- ArchTests: 2118/2119. The one failure is "045a guard 1" on `CommunicationService.cs` `CopyRegardingFromSourceAsync`. It predates this task (commits 045c on that file, not touched here).
+- Test doubles extended:
+  - `FakeRecordShareTable` maps `sprk_communicationparticipants` and `sprk_emailreviewlogs`;
+  - the job harness registers the share seam, as the host does;
+  - `LinkColumnSecurity` answers the user-flag read.
+
+**Not covered here:** a communication created directly under an already-Restricted record, with shares granted at create, is not re-filed and is not written by the job (its value is already correct). Today no create path grants a participant share on a filed communication: Part B grants only on Direct-team-owned (unfiled) messages. Part C's re-grant must not grant a barred user on a Restricted filing (use the same predicate).
 
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
-- **Q2:** Restricted target (Part D): extend `RestrictedExternalShareRemover` to communications filed under a Restricted root, or add a step in `SecureChildReconciler.AfterRefileCoreAsync`? Direct messages only, or every communication?
-- **Q5:** `NotConfigured` is read as "not Direct". The coordinator's rule (2026-11-09) is that "a Refusal never settles not-Direct". Applied literally, every team-owned message (every record thread) gets no grant in any environment without `DirectMessage:*` settings, because `CannotBeDirectOwnerTeamAsync` answers false when unset. This needs a ruling before fm's fix sha changes the API.
-- **Q6:** the Secure twin's accent bug (`SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync` :1346 compares names in code). It is not started in this run; see the report.
-- **Q4:** Should the customer-unit mode refuse the Direct-message unit (it is a direct child of the root, so today it passes as a customer top unit)?
 - **Q3:** The Read depth the internal roles hold on `sprk_communicationattachment` / `sprk_communicationparticipant` / `sprk_document` was not checked live (no live reads in this run). Part B grants the shares regardless.
+- **Q6:** the Secure twin's accent fix (`SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync`) runs on a separate branch; not touched here.
+
+**Resolved:**
+- **Q2:** a step in `AfterRefileCoreAsync` plus the existing job, for every communication (§5).
+- **Q4:** yes, by id (§2c).
+- **Q5:** `NotConfigured` = not Direct; everything else unknown (§3b).
+
+**Pending upstream:** Part C (re-grant queue: unfile, secure exit, content rows created after the grant, the unknown branch) and Part E (Gate Decision Records, ontology-owned).
