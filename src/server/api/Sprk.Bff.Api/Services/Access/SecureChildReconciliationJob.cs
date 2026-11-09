@@ -879,6 +879,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         // Owner round 122 fix round 2 (K2): save-time Restricted documents not released because the
                         // document link columns are not field-secured. Not carried, so they never hold the window.
                         releaseRefusedLinkColumnsNotSecured = apRun.ReleaseRefusedLinkColumnsNotSecured,
+                        // uac-r2 task 198 R3: the Restricted filing bar on every Restricted communication examined (capped at
+                        // the write cap; capped rows carried, or left for their next listing or the sweep).
+                        restrictedBar = new
+                        {
+                            ran = apRun.RestrictedBarRan,
+                            incomplete = apRun.RestrictedBarIncomplete,
+                            capped = apRun.RestrictedBarCapped,
+                            left = apRun.RestrictedBarLeft,
+                            capReached = apRun.RestrictedBarCapReached,
+                        },
                         failure = apRun.Failure,
                         sweep = new
                         {
@@ -1416,8 +1426,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 : _accessPermissionSweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
         }
 
-        // uac-r2 task 198 Part D: a communication whose filing became Restricted loses its external-flagged shares through the
-        // ONE bar (the same one every re-file runs). Its share seam and user reader are registered unconditionally.
+        // uac-r2 task 198 Part D (R3: every Restricted communication the pass examines, not only a value change): its external-
+        // flagged shares are removed through the ONE bar (the same one every re-file runs). Its share seam and user reader are
+        // registered unconditionally.
         var restrictedBar = new RestrictedFilingShareBar(
             dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token),
             services.GetService<IDataverseRecordShareService>(), services.GetService<DataverseWebApiClient>(), _logger);
@@ -1474,11 +1485,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
             "sweepRows={SweepRows} sweepComplete={SweepComplete} recordsWritten={RecordsWritten} ownKept={OwnKept} " +
             "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} " +
-            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} failure={Failure}",
+            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} restrictedBarRan={RestrictedBarRan} " +
+            "restrictedBarIncomplete={RestrictedBarIncomplete} restrictedBarCapped={RestrictedBarCapped} " +
+            "restrictedBarLeft={RestrictedBarLeft} failure={Failure}",
             runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
             run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete,
             run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.ReleaseRefusedLinkColumnsNotSecured,
-            run.Failure);
+            run.RestrictedBarRan, run.RestrictedBarIncomplete, run.RestrictedBarCapped, run.RestrictedBarLeft, run.Failure);
 
         return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }

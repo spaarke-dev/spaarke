@@ -1353,7 +1353,15 @@ public sealed class SecureChildReconciler
             // shares are the synchronizer's first. Never thrown; nothing granted.
             try
             {
-                await RestrictedFilingBar().AfterFilingAsync(childId, ct).ConfigureAwait(false);
+                // R3 (finding 3): an incomplete outcome is not retried here. The access-permission job bars every Restricted
+                // communication it examines (this one is listed as changed; after a restart its sweep finds it).
+                var bar = await RestrictedFilingBar().AfterFilingAsync(childId, ct).ConfigureAwait(false);
+                if (!bar.Complete)
+                {
+                    _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the Restricted filing bar did not " +
+                        "finish (Restricted {Restricted}); the access-permission job bars it again.",
+                        CommunicationTable, childId, bar.TargetRestricted);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {

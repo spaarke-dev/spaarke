@@ -248,7 +248,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             IReadOnlyList<Guid> principals = assignment.Audience switch
             {
                 ThreadGrantAudience.DirectParticipants => await ReadDirectParticipantsForGrantAsync(threadId, ct),
-                ThreadGrantAudience.AnchorRecordMembers => await GetAnchorGranteesAsync(communicationId, assignment, messageOwningTeam, ct),
+                ThreadGrantAudience.AnchorRecordMembers => await ClearAnchorGranteesAsync(
+                    communicationId, threadId, await GetAnchorGranteesAsync(communicationId, assignment, messageOwningTeam, ct), ct),
                 _ => Array.Empty<Guid>(),
             };
 
@@ -541,6 +542,44 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 communicationId, assignment.ThreadId);
             return Array.Empty<Guid>();
         }
+    }
+
+    /// <summary>
+    /// uac-r2 task 198 fix round 1 (R3, finding 4; coordinator ruling 2): the record-anchored grant applies the Restricted bar
+    /// AT GRANT TIME. A message created under a record that is already Restricted is stamped Restricted at create, and nothing
+    /// re-files it or changes its value, so a share granted here would otherwise stay. Owner rounds 67/76: Restricted wins over
+    /// AC6 for users flagged external.
+    /// <list type="bullet">
+    /// <item>The message's own value and the value it inherits through its filing are NOT Restricted: every grantee, exactly as
+    /// before (no user is read).</item>
+    /// <item>Restricted, or that cannot be decided: the grantees are cleared through
+    /// <see cref="RestrictedFilingShareBar.EligibleForGrantAsync"/> — the ONE predicate
+    /// (<c>InternalShareEndpoints.IsBarredOnRestricted</c>), so a user flagged external is not granted, and an internal or
+    /// blank-flag user is. Fail closed as that method is: a user the flag read does not return, or a read that faults, is not
+    /// granted (logged).</item>
+    /// </list>
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ClearAnchorGranteesAsync(
+        Guid communicationId, Guid threadId, IReadOnlyList<Guid> grantees, CancellationToken ct)
+    {
+        if (grantees.Count == 0)
+            return grantees;
+
+        var bar = new RestrictedFilingShareBar(
+            _entityService, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _accessGrant, _webApi, _logger);
+        if (await bar.RestrictedForGrantAsync(communicationId, ct) == false)
+            return grantees;
+
+        var (eligible, complete) = await bar.EligibleForGrantAsync(communicationId, grantees, ct);
+        if (eligible.Count < grantees.Count || !complete)
+        {
+            _logger.LogWarning(
+                "Message {CommunicationId} is Restricted (or that cannot be decided): {NotGranted} of its {Grantees} anchor-record " +
+                "grantee(s) are not granted (flagged external, or not cleared; complete {Complete}) (ThreadId={ThreadId}).",
+                communicationId, grantees.Count - eligible.Count, grantees.Count, complete, threadId);
+        }
+
+        return eligible;
     }
 
     // ── find-or-create helper ───────────────────────────────────────────────────────────────────────

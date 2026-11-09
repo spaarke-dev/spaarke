@@ -198,6 +198,27 @@ internal sealed class RestrictedFilingShareBar
     }
 
     /// <summary>
+    /// uac-r2 task 198 fix round 1 (R3, coordinator ruling 2): whether a GRANT on this communication must pass the bar — its own
+    /// <c>sprk_accesspermission</c> is Restricted, or it inherits Restricted through its filing (the same rule
+    /// <see cref="EligibleForGrantAsync"/> applies). <c>false</c>: no user is barred, so the caller grants exactly as before and no
+    /// user is read. <c>true</c> or <c>null</c> (cannot be decided, logged): the caller clears its candidates through
+    /// <see cref="EligibleForGrantAsync"/>. Never throws (cancellation aside).
+    /// </summary>
+    internal async Task<bool?> RestrictedForGrantAsync(Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            return await TargetIsRestrictedAsync(communicationId, includeOwnValue: true, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[RESTRICTED-FILING] {Table} {Id}: whether it is Restricted could not be read; no user flagged " +
+                "external is granted.", CommunicationTable, communicationId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// <c>true</c> when the message is filed under a Restricted record (inherited through its filing) — or, with
     /// <paramref name="includeOwnValue"/>, when its own <c>sprk_accesspermission</c> is Restricted; <c>false</c> when it is
     /// filed under none or the value is not Restricted; <c>null</c> when that cannot be decided (logged).
@@ -327,7 +348,8 @@ internal sealed class RestrictedFilingShareBar
         {
             complete = false;
             _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id}: user {UserId} holds a share but could not be read; it is left for " +
-                "the next pass.", CommunicationTable, communicationId, unread);
+                "the access-permission job, which visits every Restricted communication it lists, carries it, and finds it again " +
+                "in its sweep after a restart.", CommunicationTable, communicationId, unread);
         }
 
         bool Barred(Guid id) =>

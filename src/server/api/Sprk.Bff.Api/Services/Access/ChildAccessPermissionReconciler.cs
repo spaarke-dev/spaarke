@@ -97,6 +97,31 @@ internal sealed record ChildAccessPermissionRun
     public int RaisedOnly { get; init; }
 
     /// <summary>
+    /// uac-r2 task 198 fix round 1 (R3): communications whose own (parentless) or inherited (filed) value is Restricted, on which
+    /// the Restricted filing bar ran this run. Report-only: 0.
+    /// </summary>
+    public int RestrictedBarRan { get; init; }
+
+    /// <summary>R3: of <see cref="RestrictedBarRan"/>, those the bar did not finish (or faulted on): carried, tried next run.</summary>
+    public int RestrictedBarIncomplete { get; init; }
+
+    /// <summary>
+    /// R3: Restricted communications past this run's bar budget (the write cap): not barred this run. A row written to
+    /// Restricted this run, one carried, one listed as changed and one from the sweep are carried (within
+    /// <see cref="SecureChildReconciliationJob.MaxCarriedRows"/>); the rest are <see cref="RestrictedBarLeft"/>.
+    /// </summary>
+    public int RestrictedBarCapped { get; init; }
+
+    /// <summary>
+    /// R3: capped rows NOT carried — listed only because something they are filed under changed (or the carry was full). They
+    /// are barred when next listed: their own change, a parent's change, or the sweep (which a restart starts again).
+    /// </summary>
+    public int RestrictedBarLeft { get; init; }
+
+    /// <summary>R3: the bar stopped at its budget this run (logged as a warning).</summary>
+    public bool RestrictedBarCapReached => RestrictedBarCapped > 0;
+
+    /// <summary>
     /// Owner round 122 fix round 2 (K2): documents whose save-time Restricted would have been released but was refused
     /// because <c>sprk_document</c>'s link columns are not field-secured (a definite "not secured" answer,
     /// <c>link_columns_not_secured</c>). They keep Restricted (fail closed), are NOT carried, and are reconsidered when they
@@ -137,6 +162,10 @@ internal sealed record ChildAccessPermissionRun
 /// documents lack the record column) its value is only RAISED to what its parents give, never lowered, and its record is
 /// left as it is (fix round C, K1+K2; <see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>). To Do, Event and
 /// Communication are reconciled exactly as before.</para>
+/// <para><b>The Restricted bar (uac-r2 task 198 Part D, fix round 1 R3).</b> On every communication a writing run examines
+/// whose value is Restricted (inherited through its filing, or its own when filed under nothing), the shares of users flagged
+/// external are removed through <see cref="RestrictedFilingShareBar"/>. A row it does not finish is carried; the sweep finds
+/// it again after a restart. At most the write cap per run, in a fixed order (see <see cref="RunAsync"/>).</para>
 /// </remarks>
 internal sealed class ChildAccessPermissionReconciler
 {
@@ -146,6 +175,13 @@ internal sealed class ChildAccessPermissionReconciler
     private const string ModifiedOnColumn = "modifiedon";
     private const int MaxListed = 200;
     private const int MaxProblems = 50;
+
+    // R3: the order the Restricted bar takes a run's rows in (lower first). See the bar phase in RunAsync.
+    private const int BarOrderWritten = 0;
+    private const int BarOrderCarried = 1;
+    private const int BarOrderChanged = 2;
+    private const int BarOrderSwept = 3;
+    private const int BarOrderUnderAChange = 4;
 
     /// <summary>
     /// The tables a filing above one of the four can pass through: the four, every table one of them can be filed under,
@@ -188,10 +224,12 @@ internal sealed class ChildAccessPermissionReconciler
     /// and <c>sprk_document.sprk_parentdocument</c> are both field-secured (attribute metadata). A provisional own narrowing
     /// is released only when they are: otherwise a user who can write a document could set a link and release it, and a
     /// user who can write an <c>.eml</c> but not its children could release the children. A fault throws.</param>
-    /// <param name="restrictedCommunicationBar">uac-r2 task 198 Part D: for a communication this run finds filed under a Restricted
-    /// record — its value written to Restricted now, or already Restricted and carried — removes the shares of users flagged
-    /// external (<see cref="RestrictedFilingShareBar.RemoveBarredSharesAsync"/>); <c>true</c> when complete. A row it leaves
-    /// incomplete is carried, so the next run tries again. Never asked in a report-only run. <c>null</c>: not run.</param>
+    /// <param name="restrictedCommunicationBar">uac-r2 task 198 Part D, fix round 1 (R3): for EVERY communication this run
+    /// examines whose value is Restricted — inherited through its filing (written now or already stored), or its own value when
+    /// it is filed under nothing — removes the shares of users flagged external
+    /// (<see cref="RestrictedFilingShareBar.RemoveBarredSharesAsync"/>); <c>true</c> when complete. A row it leaves incomplete is
+    /// carried, so the next run tries again, and the sweep (which a restart starts again) finds it after a restart. Bounded per
+    /// run by the write cap (see <see cref="RunAsync"/>). Never asked in a report-only run. <c>null</c>: not run.</param>
     internal ChildAccessPermissionReconciler(
         IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger,
         Func<CancellationToken, Task<bool>> linkColumnsSecured,
@@ -236,6 +274,9 @@ internal sealed class ChildAccessPermissionReconciler
         var sweepRows = 0;
         (string Table, Guid Id)? sweepResume = null;
         var sweepEnd = false;
+        // R3: where each candidate came from, for the order the Restricted bar takes them in (see the bar phase below).
+        var seedKeys = new HashSet<(string Table, Guid Id)>();
+        var sweepKeys = new HashSet<(string Table, Guid Id)>();
         _recordTables.Clear();
         _raiseOnlyTables.Clear();
         _linkColumnsRefusal = null;
@@ -283,7 +324,10 @@ internal sealed class ChildAccessPermissionReconciler
 
             rowsChanged = seeds.Count;
             foreach (var row in seeds)
+            {
                 Take(row, candidates);
+                seedKeys.Add(Key(row.LogicalName, row.Id));
+            }
 
             // (2) Everything filed under them, at any depth.
             await DescendAsync(seeds, candidates, ct).ConfigureAwait(false);
@@ -313,7 +357,10 @@ internal sealed class ChildAccessPermissionReconciler
                 var window = await SweepWindowAsync(after, sweepCap, ct).ConfigureAwait(false);
                 sweepRows = window.Rows.Count;
                 foreach (var row in window.Rows)
+                {
                     Take(row, candidates);
+                    sweepKeys.Add(Key(row.LogicalName, row.Id));
+                }
                 sweepEnd = window.ReachedEnd;
                 sweepResume = window.ReachedEnd || window.Rows.Count == 0
                     ? null
@@ -340,6 +387,8 @@ internal sealed class ChildAccessPermissionReconciler
         var changes = new List<(string, Guid, int?, int)>();
         var carry = new List<(string, Guid)>();
         var carriedSet = carried.Select(c => (c.Table.ToLowerInvariant(), c.Id)).ToHashSet();
+        // R3: the communications whose value is Restricted (own or inherited), with the order the bar takes them in.
+        var barDue = new List<((string Table, Guid Id) Key, int Order)>();
         foreach (var ((table, id), row) in candidates.OrderBy(c => c.Key.Table, StringComparer.Ordinal).ThenBy(c => c.Key.Id))
         {
             ct.ThrowIfCancellationRequested();
@@ -357,6 +406,9 @@ internal sealed class ChildAccessPermissionReconciler
             if (parents.Count == 0)
             {
                 parentless++; // round 81: its own value is the user's — never written, even after an un-file
+                // R3 (finding 9): a communication filed under nothing whose OWN value is Restricted is barred like a filed one.
+                if (row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value == InheritedAccessPermission.Restricted)
+                    DueForBar(table, id, written: false);
                 continue;
             }
 
@@ -374,18 +426,23 @@ internal sealed class ChildAccessPermissionReconciler
             }
 
             var stored = row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
+            var inheritsRestricted = inherited == InheritedAccessPermission.Restricted;
             if (stored == inherited)
             {
                 correct++;
-                // Task 198 Part D: a carried communication already Restricted is one the bar left incomplete: try again.
-                if (carriedSet.Contains((table, id)))
-                    await BarIfRestrictedCommunicationAsync(table, id, inherited).ConfigureAwait(false);
+                // R3 (findings 3 and 4): EVERY communication already Restricted is barred, not only a carried one — a re-file
+                // whose own bar did not finish, one created under an already-Restricted record, and (after a restart, which
+                // empties the carry) the sweep's rows.
+                if (inheritsRestricted)
+                    DueForBar(table, id, written: false);
                 continue;
             }
 
             if (writes && attempted >= maxWrites)
             {
                 deferred++; // F3: the window is kept, so the next run lists this row again and writes it
+                if (inheritsRestricted)
+                    DueForBar(table, id, written: false); // R3: its value is Restricted by inheritance, written or not
                 continue;
             }
 
@@ -411,8 +468,10 @@ internal sealed class ChildAccessPermissionReconciler
                 _logger.LogInformation(
                     "[CHILD-ACCESS-PERMISSION] set: {Table} {Id} {From} -> {To} (inherited from {Tops}).",
                     table, id, stored?.ToString() ?? "null", inherited, InheritedAccessPermission.Describe(answer.Tops));
-                // Task 198 Part D: a communication whose filing BECAME Restricted loses its external-flagged shares now.
-                await BarIfRestrictedCommunicationAsync(table, id, inherited).ConfigureAwait(false);
+                // Task 198 Part D: a communication whose filing BECAME Restricted loses its external-flagged shares (R3: first
+                // in this run's bar phase, below).
+                if (inheritsRestricted)
+                    DueForBar(table, id, written: true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -422,35 +481,92 @@ internal sealed class ChildAccessPermissionReconciler
                     problems.Add($"{table} {id:D}: the write failed ({ex.GetType().Name})");
                 _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: writing its inherited Access Permission {To} failed; " +
                     "it is tried again next run.", table, id, inherited);
+                if (inheritsRestricted)
+                    DueForBar(table, id, written: false); // R3: Restricted by inheritance, whether or not the copy was written
             }
         }
 
-        // uac-r2 task 198 Part D: a communication filed under a Restricted record (its inherited value) loses the shares of users
-        // flagged external, through the ONE bar. Only in a run that writes. Incomplete (or a fault): carried, tried next run.
-        async Task BarIfRestrictedCommunicationAsync(string table, Guid id, int inherited)
+        // ── uac-r2 task 198 Part D, fix round 1 (R3): the Restricted bar, on every communication whose value is Restricted ──
+        // Coordinator ruling 1: the bar (RestrictedFilingShareBar.RemoveBarredSharesAsync) runs on every communication this run
+        // examined whose value is Restricted — inherited through its filing (InheritedAccessPermission, the rule the bar itself
+        // uses), or its own value when it is filed under nothing — not only on a value change or a carried id. A row the bar does
+        // not finish is carried, and the sweep (which every new job instance starts again) finds it after a restart, so the
+        // sweep is the durable backstop. Only in a run that writes.
+        //
+        // Bounds: at most maxWrites bars per run (the job's per-run budget, counted apart from the writes). The order is: rows
+        // written to Restricted this run (never more than maxWrites, so never capped), then carried rows, then rows listed as
+        // changed, then sweep rows, then rows listed only because something above them changed. Past the budget the run logs a
+        // warning, and the capped rows of the first four kinds are carried (within the job's carry cap); the last kind, and any
+        // past the carry cap, are left for their next listing (counted, never silently).
+        int barRan = 0, barIncomplete = 0, barCapped = 0, barLeft = 0;
+        if (writes && _restrictedCommunicationBar is not null && barDue.Count > 0)
         {
-            if (!writes || _restrictedCommunicationBar is null || inherited != InheritedAccessPermission.Restricted
-                || !string.Equals(table, RestrictedFilingShareBar.CommunicationTable, StringComparison.OrdinalIgnoreCase))
-                return;
+            var inCarry = carry.Select(c => Key(c.Item1, c.Item2)).ToHashSet();
+            foreach (var ((table, id), order) in barDue.OrderBy(d => d.Order)) // a stable sort: the decide order within a kind
+            {
+                ct.ThrowIfCancellationRequested();
+                if (barRan >= maxWrites)
+                {
+                    barCapped++;
+                    var mustCarry = order <= BarOrderCarried;
+                    if (!inCarry.Contains((table, id))
+                        && (mustCarry || (order <= BarOrderSwept && carry.Count < SecureChildReconciliationJob.MaxCarriedRows)))
+                    {
+                        carry.Add((table, id));
+                        inCarry.Add((table, id));
+                    }
+                    else if (!inCarry.Contains((table, id)))
+                    {
+                        barLeft++;
+                    }
 
-            bool complete;
-            try
-            {
-                complete = await _restrictedCommunicationBar(id, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: the Restricted filing bar faulted; tried again next run.",
-                    table, id);
-                complete = false;
-            }
+                    continue;
+                }
 
-            if (!complete && !carry.Contains((table, id)))
-            {
-                carry.Add((table, id));
+                barRan++;
+                bool complete;
+                try
+                {
+                    complete = await _restrictedCommunicationBar(id, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: the Restricted filing bar faulted; tried again next run.",
+                        table, id);
+                    complete = false;
+                }
+
+                if (complete)
+                    continue;
+                barIncomplete++;
+                if (inCarry.Add((table, id)))
+                    carry.Add((table, id));
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: the shares of users flagged external were not all removed yet");
             }
+
+            if (barCapped > 0)
+            {
+                if (problems.Count < MaxProblems)
+                    problems.Add($"the Restricted filing bar reached its cap of {maxWrites}: {barCapped} communication(s) not barred this run");
+                _logger.LogWarning(
+                    "[CHILD-ACCESS-PERMISSION] The Restricted filing bar reached its cap of {Cap} this run: {Capped} Restricted " +
+                    "communication(s) were not barred ({Carried} carried to the next run, {Left} left for their next listing or the " +
+                    "sweep).", maxWrites, barCapped, barCapped - barLeft, barLeft);
+            }
+        }
+
+        void DueForBar(string table, Guid id, bool written)
+        {
+            if (!string.Equals(table, RestrictedFilingShareBar.CommunicationTable, StringComparison.OrdinalIgnoreCase))
+                return;
+            var key = Key(table, id);
+            var order = written ? BarOrderWritten
+                : carriedSet.Contains(key) ? BarOrderCarried
+                : seedKeys.Contains(key) ? BarOrderChanged
+                : sweepKeys.Contains(key) ? BarOrderSwept
+                : BarOrderUnderAChange;
+            barDue.Add((key, order));
         }
 
         // Task 189 (D7 T7a, #2126): one document. Its value is max(own, inherited), never lowered below its own narrowing.
@@ -641,6 +757,10 @@ internal sealed class ChildAccessPermissionReconciler
             ChangedConcurrently = changedConcurrently,
             RaisedOnly = raisedOnly,
             ReleaseRefusedLinkColumnsNotSecured = refusedNotSecured,
+            RestrictedBarRan = barRan,
+            RestrictedBarIncomplete = barIncomplete,
+            RestrictedBarCapped = barCapped,
+            RestrictedBarLeft = barLeft,
         };
     }
 
