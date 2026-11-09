@@ -18,7 +18,7 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 | Credentials | 1 password, 0 certificates (verified 2026-11-09 by reading metadata only): `Teams Dev Portal OAuth – dev`, keyId `fafba383-8b89-409f-8e5a-94b459e474ff`, start 2026-11-09 14:35 local, end **2028-11-08 14:35** local. `isFallbackPublicClient` is false. |
 | Requested permission | BFF `1e40baad-…` delegated `user_impersonation` (`18afc847-a660-40b2-8925-747aed613f36`) |
 | Admin consent | granted: `oauth2PermissionGrant` consentType `AllPrincipals`, scope `user_impersonation` |
-| Redirect URIs | none yet; `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` goes on the **Web** platform after step (b), with the owner's go (it is a confidential client) |
+| Redirect URIs | **Web:** `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`, added by the owner with `az ad app update --web-redirect-uris` on 2026-11-09. The read-back confirmed it, with no SPA or public-client redirects, implicit grant off for both tokens, and the audience, the secret count and `requiredResourceAccess` unchanged. |
 
 **BFF app change** (`SDAP-BFF-SPE-API`, object `c2aab303-50f8-4279-9934-503ab3a4b357`):
 - `api.preAuthorizedApplications` went from 10 to 11 entries. Added `04f37fe4-…` with `user_impersonation`.
@@ -36,6 +36,8 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 - Secret: **required** (the portal will not save without one, 2026-11-08). The owner created it in Entra and pasted it straight into the portal; the value is never in the repo or the agent. **Expiry: 2028-11-08** (24 months, ADR-028 A10 Path A, dev only). Named owner: the project owner. Rotate before expiry (runbook owed with task 052).
 
 ## (c) Copilot connector "Spaarke" — pending (owner)
+
+- Gate checked 2026-11-09: an anonymous `POST /mcp/legal-operations` (initialize, with the MCP Accept header) on the dev BFF returns `401`, `WWW-Authenticate: Bearer`. The spike is live and auth is enforced.
 
 - Connector ID / date: _tbd_
 
