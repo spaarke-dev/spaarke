@@ -76,4 +76,44 @@ singleton. No new package, no interface (ADR-010), no options type, no backgroun
 - `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
 - Publish-size delta: not measured (no package or asset added; not in this piece's gate list).
 
+## Fix round 1 (Opus review of the lookup commit)
+
+New code commit on top of `6c1ad9cb16` (descendant; nothing amended). Rule wording only.
+
+1. **No name is compared in code.** Dataverse's `name eq` ignores case and accents; a code-side comparison does not, so it
+   could disagree with what Dataverse selected.
+   - Fix: once the configured unit is found (and nothing faulted), the Secure Record lookup (`SecureRecordOwnerTeam
+     .IdentifyAsync`) runs and the Direct unit id and team id are compared with its ids → `bu_is_secure_record`. The
+     settings-only name check is gone. An ambiguous Secure Record lookup refuses `secure_record_ambiguous`; an unreadable
+     one `secure_record_unreadable` (fault carried, not cached). No Secure Record unit, or no Secure Record team in it, is
+     an answer (compare what was found). The cache key now includes the Secure Record names.
+   - Test fake: every name-bearing filter is matched case- AND accent-insensitively, as Dataverse matches.
+2. **Identity apart from validity.** `IdentifyDirectMessageOwnerTeamAsync(ct)` → `DirectMessageOwnerTeamIdentity
+   (BusinessUnitId?, TeamId?, Refusal?, Fault?)` with `IsIdentified` and `IsNotConfigured`: both ids whenever the unit and
+   its named team exist, whatever their member, user or placement state; `IsNotConfigured` (no ids, no fault, no read)
+   when a setting is unset; a fault only when a read was unreadable; otherwise a not-found or ambiguous code. Not cached.
+   `DirectMessageOwnerTeamResolution.IsNotConfigured` added. Caller rule documented on both methods and the result: only
+   not-configured means "no Direct team can exist"; any other refusal or fault means "could be the Direct team" — settle
+   identity with Identify.
+3. **`CannotBeDirectOwnerTeamAsync` never answers a wrong "cannot be".** It now decides by id against Identify: `true` only
+   when the configured team is identified and the id differs; any doubt (empty id, unset, not found, ambiguous) is
+   `false`; a fault propagates. The unused `TeamRow` DTO is removed.
+4. **A default-team read fault** returns `team_unreadable` (was `team_not_found`), with the fault.
+
+Tests (`DirectMessageOwnerTeamTests`, 42 → 60):
+- Must-fire, fail-first against `6c1ad9cb16`'s implementation (new-API tests removed so the file compiles): 8 failed,
+  40 passed. Failing for the defects: the accent variants of the Secure Record unit/team names (3 cases, the old code
+  resolved the Secure team or answered `team_not_found`), `CannotBe` for an accent variant of the real team (old: `true`),
+  the default-team fault code (old: `team_not_found`). Failing by design: the success read sequence (now includes the
+  Secure Record reads), `CannotBe_ReadsOnlyTheConfiguredUnitAndTeam_ByName` (was `CannotBe_IsOneTeamRead`),
+  `CannotBe_InDoubt_AnswersNo` (a configured-but-missing team now answers `false`).
+- The Identify tests (unset → not configured, no ids, no fault; team with members → ids while Resolve refuses
+  `team_has_members`; misplaced or occupied unit → ids; read fault → fault, no ids; not found / ambiguous → no ids, no
+  fault) fail first by not compiling against the old code (CS1061 on the new members).
+- Existing tests changed because they encoded the old design: `Resolve_WellFormedSetup_ReturnsTheNamedTeam` (read
+  sequence), `Resolve_BusinessUnitIsTheSecureRecordUnit_Refuses` (no longer "no reads"; the configured-Secure-name case
+  now creates its unit), `CannotBe_InDoubt_AnswersNo` (an unknown team id is "cannot be" once the configured team is
+  identified), `CannotBe_IsOneTeamRead` → `CannotBe_ReadsOnlyTheConfiguredUnitAndTeam_ByName`.
+- Not changed: `SecureRecordOwnerTeam`, `SecureChildShareSynchronizer` (its own name compare belongs to another project).
+
 rework: none task 054a
