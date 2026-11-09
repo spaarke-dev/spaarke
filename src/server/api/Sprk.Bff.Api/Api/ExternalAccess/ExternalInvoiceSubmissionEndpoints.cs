@@ -141,7 +141,8 @@ public static class ExternalInvoiceSubmissionEndpoints
 
     private static async Task<IResult> GetAsync(
         HttpContext http, InvoiceSubmissionService service,
-        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger<Program> logger, CancellationToken ct)
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         if (Scope(http) is not { Submission: { } view } scope)
         {
@@ -149,7 +150,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         // Task 097f (EB-D-180): the replaced-by-correction note, named only when the caller may see the correcting submission as they see this one.
-        var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(scope, hideSubmissions, logger), ct);
+        var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(scope, hideSubmissions, logger, hideInvoices), ct);
         return Results.Ok(ExternalView(shown[0]));
     }
 
@@ -160,7 +161,8 @@ public static class ExternalInvoiceSubmissionEndpoints
     /// as "not named"; <see cref="InvoiceSubmissionService.WithReplacementNoteAsync"/> logs it).
     /// </summary>
     private static ReplacementReadGate ReplacementGate(
-        ExternalInvoiceSubmissionScope scope, ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger logger) =>
+        ExternalInvoiceSubmissionScope scope, ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger logger,
+        ExternalInvoiceHiding? hideInvoices) =>
         async (replacements, ct) =>
         {
             var inScope = replacements
@@ -168,7 +170,7 @@ public static class ExternalInvoiceSubmissionEndpoints
                     && scope.FirmIds.Contains(firmId)
                     && scope.Principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
                 .ToList();
-            var visible = await VisibleSubmissionsAsync(scope.Principal, inScope, hideSubmissions, logger, ct);
+            var visible = await VisibleSubmissionsAsync(scope.Principal, inScope, hideSubmissions, logger, ct, hideInvoices);
             return visible.Select(v => v.SubmissionId).ToHashSet();
         };
 
@@ -276,7 +278,8 @@ public static class ExternalInvoiceSubmissionEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http, InvoiceSubmissionService service,
-        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger<Program> logger,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger,
         CancellationToken ct)
     {
         if (Scope(http) is not { } scope)
@@ -293,9 +296,9 @@ public static class ExternalInvoiceSubmissionEndpoints
                 principal.GetAccessibleProjectIds().ToList(),
                 principal.AccessibleWorkAssignmentIds,
                 ct);
-            var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct);
+            var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct, hideInvoices);
             // Task 097f (EB-D-180): the replaced-by-correction note on each visible Accepted submission whose invoice is Superseded.
-            var shown = await service.WithReplacementNoteAsync(visible, ReplacementGate(scope, hideSubmissions, logger), ct);
+            var shown = await service.WithReplacementNoteAsync(visible, ReplacementGate(scope, hideSubmissions, logger, hideInvoices), ct);
             return Results.Ok(shown.Select(ExternalView).ToList());
         }
         catch (SdapProblemException ex)
@@ -312,10 +315,16 @@ public static class ExternalInvoiceSubmissionEndpoints
     /// marked. No seam withholds every asked submission (fail closed; logged at Error, a registration defect). A failed read
     /// THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/> (EB-D-169: the routes answer a retryable 503, never 200
     /// <c>[]</c> and never the not-found 404); it never shows a row.
+    /// <para>ebilling-r1 task 130-0 fix round 1 (uac-r2 parity condition): a submission also follows its invoice, as on the assistant
+    /// plane. The invoices of the kept submissions are put to the caller-aware invoice seam (<paramref name="hideInvoices"/>,
+    /// <see cref="ExternalInvoiceHiding"/>: a partner sees only invoices of its own firms) in ONE call, and a submission whose invoice
+    /// is not visible is withheld. A submission with no invoice is unaffected. No seam withholds every submission with an invoice
+    /// (fail closed); a faulted decision THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/>, as above (the single read
+    /// reaches it only after its record check).</para>
     /// </summary>
     internal static async Task<IReadOnlyList<InvoiceSubmissionView>> VisibleSubmissionsAsync(
         CallerPrincipal principal, IReadOnlyList<InvoiceSubmissionView> views, ExternalInvoiceSubmissionHiding? hideSubmissions,
-        ILogger logger, CancellationToken ct)
+        ILogger logger, CancellationToken ct, ExternalInvoiceHiding? hideInvoices = null)
     {
         if (views.Count == 0)
             return views;
@@ -343,7 +352,35 @@ public static class ExternalInvoiceSubmissionEndpoints
                 views.Count - kept.Count, views.Count, decision.HiddenSummary());
         }
 
-        return kept;
+        // Task 130-0 fix round 1: a submission also follows its invoice. Inline here, so this stays the ONE decision function of
+        // both reads (ExternalInvoiceVisibilityGuardTests.TheSubmissionListAndRead_CallOneDecisionFunction).
+        var invoices = kept.Select(v => v.InvoiceId).OfType<Guid>().Where(id => id != Guid.Empty).Distinct().ToList();
+        if (invoices.Count == 0)
+            return kept;
+        if (hideInvoices is null)
+        {
+            logger.LogError(
+                "[EBILLING-SUBMIT] The invoice decision (ExternalInvoiceHiding) is not registered: every submission with an invoice is withheld "
+                + "(fail closed).");
+            return kept.Where(v => v.InvoiceId is not { } id || id == Guid.Empty).ToList();
+        }
+
+        var invoiceDecision = await hideInvoices(principal, invoices, ct).ConfigureAwait(false);
+        if (invoiceDecision.Faulted)
+        {
+            // As the submission decision above: a retryable 503 for the whole page; no row is shown.
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+
+        var followed = kept.Where(v => v.InvoiceId is not { } id || id == Guid.Empty || invoiceDecision.IsVisible(id)).ToList();
+        if (followed.Count < kept.Count)
+        {
+            logger.LogInformation(
+                "[EBILLING-SUBMIT] {Withheld} of {Count} submission(s) withheld: their invoice is not visible to the caller ({Reasons}).",
+                kept.Count - followed.Count, kept.Count, invoiceDecision.HiddenSummary());
+        }
+
+        return followed;
     }
 }
 

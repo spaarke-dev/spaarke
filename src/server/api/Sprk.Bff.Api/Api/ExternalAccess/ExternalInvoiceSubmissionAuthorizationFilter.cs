@@ -51,7 +51,8 @@ public static class ExternalInvoiceSubmissionAuthorizationFilterExtensions
                 services.GetRequiredService<ExternalParticipationService>(),
                 services.GetRequiredService<InvoiceSubmissionService>(),
                 services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>(),
-                services.GetService<ExternalInvoiceSubmissionHiding>());
+                services.GetService<ExternalInvoiceSubmissionHiding>(),
+                services.GetService<ExternalInvoiceHiding>());
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -118,16 +119,20 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     private readonly InvoiceSubmissionService _submissions;
     private readonly ILogger<ExternalInvoiceSubmissionAuthorizationFilter> _logger;
     private readonly ExternalInvoiceSubmissionHiding? _hideSubmissions;
+    private readonly ExternalInvoiceHiding? _hideInvoices;
 
     /// <param name="hideSubmissions">ebilling-r1 task 098 (review round 4b): the submission decision the list applies too. Null
     /// withholds every submission on the read-one route (fail closed).</param>
+    /// <param name="hideInvoices">ebilling-r1 task 130-0 fix round 1: the caller-aware invoice seam the list applies too (a submission
+    /// follows its invoice). Null withholds a submission with an invoice on the read-one route (fail closed).</param>
     public ExternalInvoiceSubmissionAuthorizationFilter(
         ExternalInvoiceSubmissionAccess access,
         InvoiceCoreRecordKind? coreKind,
         ExternalParticipationService participations,
         InvoiceSubmissionService submissions,
         ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger,
-        ExternalInvoiceSubmissionHiding? hideSubmissions = null)
+        ExternalInvoiceSubmissionHiding? hideSubmissions = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         _access = access;
         _coreKind = coreKind;
@@ -135,6 +140,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         _submissions = submissions;
         _logger = logger;
         _hideSubmissions = hideSubmissions;
+        _hideInvoices = hideInvoices;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -312,7 +318,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         try
         {
             visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
-                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted);
+                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted, _hideInvoices);
         }
         catch (SdapProblemException ex)
         {
