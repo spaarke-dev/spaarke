@@ -1341,25 +1341,31 @@ public sealed class SecureChildShareSynchronizer
     /// select. <c>false</c> means "it could be" (the full resolution decides), including a team row that is not found. A
     /// Dataverse fault propagates.
     /// </summary>
-    /// <remarks>Names compare trimmed and case-insensitively, as Dataverse's own <c>name</c> equality does. Any doubt
-    /// answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</remarks>
+    /// <remarks>The name is matched by Dataverse, never in code: the team is read with <c>name eq</c> the configured name,
+    /// the same condition <see cref="ResolveSecureOwnerTeamAsync"/> uses, so whatever Dataverse's collation treats as equal
+    /// (case, accents, trailing spaces) can never answer "another name". Only when that read finds no row is the team read
+    /// by id, to tell "another name" (the row exists) from "not found" (<c>false</c>). Any doubt answers <c>false</c>, which
+    /// costs only the full resolution — never a wrong "not secure".</remarks>
     internal static async Task<bool> CannotBeSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
-        var query = new QueryExpression("team")
+        var named = new QueryExpression("team")
         {
-            ColumnSet = new ColumnSet("name", "isdefault", "teamtype"),
+            ColumnSet = new ColumnSet("isdefault", "teamtype"),
             TopCount = 1,
             NoLock = true,
         };
-        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-        var team = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+        named.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+        var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (team is null)
-            return false;
+        {
+            // No row carries the configured name: another name when the team exists, unknown (false) when it does not.
+            var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+            byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0;
+        }
 
-        if (team.GetAttributeValue<string>("name") is { } name
-            && !string.Equals(name.Trim(), SecureRecordOwnerTeam.OwnerTeamName(configuration).Trim(), StringComparison.OrdinalIgnoreCase))
-            return true;
         if (team.GetAttributeValue<bool?>("isdefault") == true)
             return true;
         return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
