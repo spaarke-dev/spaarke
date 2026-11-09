@@ -36,24 +36,23 @@
 
 > **Updated 2026-11-08 (live finding):** the portal **requires a client secret**, so the public-client steps below are superseded. The owner confirmed the secret. They create it in Entra (Certificates & secrets; dev expiry up to 24 months under ADR-028 A10 Path A) and paste it straight into the portal; the agent never sees it. The connector app is now a confidential client (public client flows off), and the portal's redirect URI goes on the **Web** platform, not Mobile and desktop. See `notes/decisions.md` 2026-11-08 and `notes/phase0-registration-facts.md`.
 
-1. Open https://dev.teams.microsoft.com › Tools › **OAuth client registration** › Register client.
-2. Fill in:
+1. Entra › the connector app › Certificates & secrets › **New client secret** (owner only, after confirming in-session).
+   - Description `Teams Dev Portal OAuth – dev`; Custom expiry (dev: up to 24 months, ADR-028 A10 Path A; customer stamps: 180 days).
+   - Copy the **Value** (not the Secret ID); it is shown once. Never paste it into a chat, file or Key Vault.
+2. Open https://dev.teams.microsoft.com › Tools › **OAuth client registration** › Register client.
+3. Fill in:
    - Name: `Spaarke Copilot Connector – dev`
    - Base URL: `https://spaarke-bff-dev.azurewebsites.net`
-   - Restrict usage by org: home tenant
+   - Restrict usage by org: My organization only (home tenant)
+   - Restrict usage by app: Any Teams app
    - Client ID: from (a) step 2
+   - Client secret: the Value from step 1
    - Authorization endpoint and token endpoint: from the table above
    - Refresh endpoint: the token endpoint
    - Scope: `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation`
-   - PKCE: **on**
-   - Client secret: **leave empty.** If the portal refuses to save without one, STOP. That is the escalation point: the agent asks the owner to confirm before any secret is created.
-3. Save. Record:
-   - the **OAuth client registration ID** (the connector needs it in step (c));
-   - the **redirect URI** the portal shows.
-4. Back in Entra:
-   - Open the connector app › Authentication › Add a platform › **Mobile and desktop applications** › add the portal's redirect URI.
-   - Use this platform because a Web redirect would force a client secret at token redemption, and an SPA redirect only accepts browser (cross-origin) redemption.
-   - If T5 shows token redemption failing, the next thing to try is the **Web** platform plus the confidential-client branch (needs owner confirmation).
+   - PKCE: on, if offered
+4. Save. Record the **OAuth client registration ID** (base64 of `{tenantId}##{guid}`; the connector needs it in step (c)) and the secret's expiry date. The portal does **not** show a redirect URI.
+5. Back in Entra, add `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` to the connector app on the **Web** platform (confidential client). If T5's sign-in fails with `AADSTS50011`, the error names the redirect actually used; add that one instead.
 
 ## (c) Copilot connector "Spaarke" — run by the owner, AFTER the spike is live on dev
 

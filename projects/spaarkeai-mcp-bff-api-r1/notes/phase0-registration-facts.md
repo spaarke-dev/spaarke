@@ -1,6 +1,6 @@
 # Phase 0 registration facts — dev (task 002)
 
-> Non-secret identifiers only. No client secret exists for the connector app; creating one requires the owner's in-session confirmation (runbook step (b)).
+> Non-secret identifiers only. The connector app has one client secret, created by the owner on 2026-11-08 and held only in the Teams Developer Portal registration; its value is never recorded here.
 
 ## (a) Entra app — done 2026-11-08
 
@@ -15,10 +15,10 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 | Tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
 | Sign-in audience | `AzureADMyOrg` (single tenant) |
 | Allow public client flows | Set to Yes at creation; switched to **No** on 2026-11-08 because the Dev Portal requires a secret, which makes this a confidential client |
-| Credentials | none (0 passwords, 0 certificates) |
+| Credentials | 1 password, 0 certificates (verified 2026-11-09 by reading metadata only): `Teams Dev Portal OAuth – dev`, keyId `fafba383-8b89-409f-8e5a-94b459e474ff`, start 2026-11-09 14:35 local, end **2028-11-08 14:35** local. `isFallbackPublicClient` is false. |
 | Requested permission | BFF `1e40baad-…` delegated `user_impersonation` (`18afc847-a660-40b2-8925-747aed613f36`) |
 | Admin consent | granted: `oauth2PermissionGrant` consentType `AllPrincipals`, scope `user_impersonation` |
-| Redirect URIs | none yet; the Dev Portal redirect goes on the **Mobile and desktop** platform after step (b) |
+| Redirect URIs | none yet; `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` goes on the **Web** platform after step (b), with the owner's go (it is a confidential client) |
 
 **BFF app change** (`SDAP-BFF-SPE-API`, object `c2aab303-50f8-4279-9934-503ab3a4b357`):
 - `api.preAuthorizedApplications` went from 10 to 11 entries. Added `04f37fe4-…` with `user_impersonation`.
@@ -29,11 +29,11 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
   - `knownClientApplications` are unchanged.
 - **Rollback:** PATCH `api.preAuthorizedApplications` back to the 10 entries without `04f37fe4-…`. The pre-change `api` object was captured in the session scratchpad, not committed.
 
-## (b) Teams Developer Portal OAuth registration — pending (owner)
+## (b) Teams Developer Portal OAuth registration — done 2026-11-09 (owner)
 
-- Registration ID: _tbd_
-- Redirect URI shown by the portal: _tbd_
-- Secret required? **Yes** (the portal will not save without one, 2026-11-08). The owner confirmed it and creates it in Entra, pasting it straight into the portal; the value is never in the repo or the agent. Expiry: _tbd_ (dev Path A: up to 24 months). Named owner: the project owner.
+- Registration ID: `YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMyMmNjNzMzYS0yMTU1LTQ0M2YtOThlNy1mOGM0ZDU4YzgyYmU=`. It is base64 for `a221a95e-6abc-4434-aecc-e48338a1b2f2##22cc733a-2155-443f-98e7-f8c4d58c82be`, the tenant ID plus the registration GUID. The connector in step (c) needs this ID.
+- Redirect URI: the portal does **not** display one for an OAuth client registration. Microsoft's guidance for Teams/Copilot OAuth registrations is the fixed `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`, on the connector app's **Web** platform. If T5's sign-in fails with `AADSTS50011`, the error names the redirect actually used; correct the redirect to that value.
+- Secret: **required** (the portal will not save without one, 2026-11-08). The owner created it in Entra and pasted it straight into the portal; the value is never in the repo or the agent. **Expiry: 2028-11-08** (24 months, ADR-028 A10 Path A, dev only). Named owner: the project owner. Rotate before expiry (runbook owed with task 052).
 
 ## (c) Copilot connector "Spaarke" — pending (owner)
 
