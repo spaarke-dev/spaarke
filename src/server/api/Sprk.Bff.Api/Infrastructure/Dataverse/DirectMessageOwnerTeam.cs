@@ -21,6 +21,15 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// fallback: an unset value refuses at use (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>) and never fails startup.
 /// Never the root business unit, never a default team, never the Secure Record unit: each is a refusal, not a fallback.</para>
 ///
+/// <para><b>Names are matched by Dataverse only.</b> Dataverse's <c>name eq</c> ignores case AND accents, so no name is ever
+/// compared in code: the Secure Record exclusion compares the resolved business-unit and team IDS with the Secure Record
+/// lookup's ids, and <see cref="CannotBeDirectOwnerTeamAsync"/> compares a team id with <see cref="IdentifyDirectMessageOwnerTeamAsync"/>'s.</para>
+///
+/// <para><b>Two answers.</b> <see cref="ResolveDirectMessageOwnerTeamAsync"/> answers "may this team be assigned to" (every
+/// check). <see cref="IdentifyDirectMessageOwnerTeamAsync"/> answers only "which team does the configuration name" (the unit and
+/// its named team, whatever their members, users or placement). A refusal from Resolve means "could be the Direct team"; a
+/// caller that must know whether a given team IS the configured one settles it with Identify.</para>
+///
 /// <para><b>Checked once, cached briefly (ADR-009).</b> The checks are several Dataverse reads; they run once and their verdict
 /// (the team, or a refusal) is shared for <see cref="CacheLifetime"/> by every caller, so no message pays for them. This is
 /// ADR-009's "Allowed L1 Exceptions: Metadata, ≤ 15 min, document in code" — this is that documentation: a process-local
@@ -72,6 +81,12 @@ public sealed class DirectMessageOwnerTeam
     /// a resolved answer (<see cref="DirectMessageOwnerTeamResolution.IsResolved"/>) may be used to assign. Never throws for a
     /// Dataverse fault (the fault is carried on the refusal and is not cached); cancellation of <paramref name="ct"/> propagates.
     /// </summary>
+    /// <remarks>
+    /// <b>Caller rule.</b> Only <see cref="DirectMessageOwnerTeamResolution.IsNotConfigured"/> means "no Direct team can exist".
+    /// Every other refusal, and every fault, means "could be the Direct team" (unknown): fail closed. A caller that must know
+    /// whether a given team IS the configured Direct team settles it with <see cref="IdentifyDirectMessageOwnerTeamAsync"/>,
+    /// never by reading a refusal as "not that team" (a refusal carries no team id).
+    /// </remarks>
     public async Task<DirectMessageOwnerTeamResolution> ResolveDirectMessageOwnerTeamAsync(CancellationToken ct)
     {
         // Configuration only — no read, nothing cached: these are the cache key.
@@ -80,23 +95,21 @@ public sealed class DirectMessageOwnerTeam
         if (buName is null || teamName is null)
             return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.NotConfigured);
 
-        if (string.Equals(buName, SecureRecordOwnerTeam.BusinessUnitName(_configuration), StringComparison.OrdinalIgnoreCase))
-            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord);
-
-        var lookup = new NamedOwnerTeamLookup(buName, teamName);
-        if (Fresh(lookup) is { } cached)
+        // The Secure Record names are part of the key: the Secure Record exclusion is decided against them (by id).
+        var key = new VerdictKey(new NamedOwnerTeamLookup(buName, teamName), SecureRecordOwnerTeam.SecureRecordLookup(_configuration));
+        if (Fresh(key) is { } cached)
             return cached;
 
         await _evaluation.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             // Another caller may have evaluated while this one waited.
-            if (Fresh(lookup) is { } evaluated)
+            if (Fresh(key) is { } evaluated)
                 return evaluated;
 
-            var verdict = await EvaluateAsync(lookup, ct).ConfigureAwait(false);
+            var verdict = await EvaluateAsync(key.Direct, ct).ConfigureAwait(false);
             if (verdict.Fault is null)
-                Volatile.Write(ref _cached, new CachedVerdict(lookup, verdict, _time.GetUtcNow()));
+                Volatile.Write(ref _cached, new CachedVerdict(key, verdict, _time.GetUtcNow()));
 
             if (!verdict.IsResolved)
             {
@@ -117,56 +130,93 @@ public sealed class DirectMessageOwnerTeam
     }
 
     /// <summary>
-    /// <c>true</c> when the team's OWN row proves it is not the Direct message owner team: another name, its business unit's
-    /// default team, or not an Owner team — none of which <see cref="ResolveDirectMessageOwnerTeamAsync"/> can ever select.
-    /// <c>false</c> means "it could be" (the full resolution decides), including an unset configuration, an empty id and a team
-    /// row that is not found. One read, not cached. A Dataverse fault propagates.
+    /// WHICH team the configuration names as the Direct message owner team — the business unit by its configured name, then its
+    /// NAMED, non-default Owner team — WITHOUT the validity checks <see cref="ResolveDirectMessageOwnerTeamAsync"/> adds (no
+    /// member, no user, placement in the tree, not the Secure Record unit). Not an assignment target: only a resolved answer from
+    /// <see cref="ResolveDirectMessageOwnerTeamAsync"/> may be assigned to.
     /// </summary>
-    /// <remarks>Mirrors <c>SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync</c>. Names compare trimmed and
-    /// case-insensitively, as Dataverse's own <c>name</c> equality does. Any doubt answers <c>false</c>, which costs only the full
-    /// resolution — never a wrong "not the Direct team".</remarks>
+    /// <remarks>
+    /// <para><b>Contract.</b></para>
+    /// <list type="bullet">
+    /// <item>Both ids, whenever the unit and its named team both exist, whatever their member, user or placement state
+    /// (<see cref="DirectMessageOwnerTeamIdentity.IsIdentified"/>). The same lookup <see cref="ResolveDirectMessageOwnerTeamAsync"/>
+    /// runs first, so Resolve can never select any other team.</item>
+    /// <item><see cref="DirectMessageOwnerTeamIdentity.IsNotConfigured"/> when either setting is unset or blank: no ids, no fault,
+    /// no read. Only this answer means "no Direct team can exist".</item>
+    /// <item>A <see cref="DirectMessageOwnerTeamIdentity.Fault"/> only when a read was unreadable (no ids).</item>
+    /// <item>Otherwise no ids and a <see cref="DirectMessageOwnerTeamIdentity.Refusal"/> code: not found (no such unit or named
+    /// team exists under the configuration), or ambiguous (unknown — fail closed).</item>
+    /// </list>
+    /// <para>Never throws for a Dataverse fault; cancellation of <paramref name="ct"/> propagates. Not cached (two reads).</para>
+    /// <para><b>Caller rule.</b> A refusal from <see cref="ResolveDirectMessageOwnerTeamAsync"/> means "could be the Direct team";
+    /// settle identity here.</para>
+    /// </remarks>
+    public async Task<DirectMessageOwnerTeamIdentity> IdentifyDirectMessageOwnerTeamAsync(CancellationToken ct)
+    {
+        var buName = Configured(BusinessUnitNameConfigKey);
+        var teamName = Configured(OwnerTeamNameConfigKey);
+        if (buName is null || teamName is null)
+            return DirectMessageOwnerTeamIdentity.NotConfigured;
+
+        var identity = await SecureRecordOwnerTeam.IdentifyNamedAsync(
+            _dataverse, new NamedOwnerTeamLookup(buName, teamName), ct).ConfigureAwait(false);
+        return identity.IsIdentified
+            ? new DirectMessageOwnerTeamIdentity(identity.BusinessUnitId, identity.OwnerTeamId, null, null)
+            : new DirectMessageOwnerTeamIdentity(null, null, Refusal(identity.Refusal, identity.Fault).Refusal, identity.Fault);
+    }
+
+    /// <summary>
+    /// <c>true</c> only when <paramref name="teamId"/> is proven not to be the team <see cref="ResolveDirectMessageOwnerTeamAsync"/>
+    /// could ever select: the configuration names a team (<see cref="IdentifyDirectMessageOwnerTeamAsync"/> identified it) and
+    /// this is another id. <c>false</c> means "it could be" (the full resolution decides): an empty id, an unset configuration,
+    /// a configured unit or team not found, or an ambiguous one. Not cached. A Dataverse fault propagates.
+    /// </summary>
+    /// <remarks>Mirrors <c>SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync</c>'s role, but decides by id against the
+    /// one identity lookup — never by comparing names in code, since Dataverse's name match also ignores accents. Its contract:
+    /// never a wrong "cannot be"; any doubt answers <c>false</c>, which costs only the full resolution.</remarks>
     public async Task<bool> CannotBeDirectOwnerTeamAsync(Guid teamId, CancellationToken ct)
     {
-        if (teamId == Guid.Empty || Configured(OwnerTeamNameConfigKey) is not { } teamName)
+        if (teamId == Guid.Empty)
             return false;
 
-        var rows = await _dataverse.QueryAsync<TeamRow>(
-            TeamEntitySet, filter: $"teamid eq {teamId}", select: "name,isdefault,teamtype",
-            top: 1, cancellationToken: ct).ConfigureAwait(false);
-        if (rows.Count == 0)
-            return false;
+        var identity = await IdentifyDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+        if (identity.Fault is { } fault)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
 
-        var team = rows[0];
-        if (team.name is { } name && !string.Equals(name.Trim(), teamName, StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (team.isdefault == true)
-            return true;
-        return team.teamtype is { } type && type != SecureRecordOwnerTeam.OwnerTeamType;
+        return identity.IsIdentified && identity.TeamId != teamId;
     }
 
     /// <summary>The trimmed setting, or <c>null</c> when it is unset or blank (no default).</summary>
     private string? Configured(string key) =>
         _configuration[key] is { } value && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
 
-    /// <summary>The cached verdict for <paramref name="lookup"/> while it is younger than <see cref="CacheLifetime"/>.</summary>
-    private DirectMessageOwnerTeamResolution? Fresh(NamedOwnerTeamLookup lookup)
+    /// <summary>The cached verdict for <paramref name="key"/> while it is younger than <see cref="CacheLifetime"/>.</summary>
+    private DirectMessageOwnerTeamResolution? Fresh(VerdictKey key)
     {
         var cached = Volatile.Read(ref _cached);
         return cached is not null
-               && cached.Lookup == lookup
+               && cached.Key == key
                && _time.GetUtcNow() - cached.At < CacheLifetime
             ? cached.Verdict
             : null;
     }
 
     /// <summary>
-    /// The checks, in order: the business unit and its named team (the shared lookup's steps 1–2; a not-found name is told
-    /// apart from the unit's default team), the unit's place in the tree (not the root, a direct child of the root), then the
-    /// shared lookup's invariants (no member, no user). Never throws for a Dataverse fault.
+    /// The checks, in order: the business unit and its named team (the shared lookup's steps 1–2); once the unit is found, that
+    /// neither it nor the team is the Secure Record unit or team (by id); a not-found name told apart from the unit's default
+    /// team; the unit's place in the tree (not the root, a direct child of the root); then the shared lookup's invariants (no
+    /// member, no user). Never throws for a Dataverse fault.
     /// </summary>
     private async Task<DirectMessageOwnerTeamResolution> EvaluateAsync(NamedOwnerTeamLookup lookup, CancellationToken ct)
     {
         var identity = await SecureRecordOwnerTeam.IdentifyNamedAsync(_dataverse, lookup, ct).ConfigureAwait(false);
+
+        // The Secure Record exclusion runs as soon as the unit is known (and nothing faulted), so a setting naming the
+        // Secure Record unit refuses as such even when it names no team there.
+        if (identity.BusinessUnitId is not null && identity.Fault is null
+            && await SecureRecordRefusalAsync(identity, ct).ConfigureAwait(false) is { } secure)
+            return secure;
+
         if (!identity.IsIdentified)
         {
             if (identity.Refusal == SecureOwnerTeamStatus.OwnerTeamNotFound && identity.BusinessUnitId is { } unit)
@@ -184,8 +234,40 @@ public sealed class DirectMessageOwnerTeam
     }
 
     /// <summary>
+    /// Whether the configured unit (and team, when found) is the Secure Record unit or its owner team — decided by comparing
+    /// IDS with the Secure Record lookup (<see cref="SecureRecordOwnerTeam.IdentifyAsync"/>), never names: Dataverse's name
+    /// match also ignores accents, so a setting that differs from the Secure names only by an accent finds the Secure unit.
+    /// <c>null</c> when it is neither. An unreadable or ambiguous Secure Record lookup cannot prove "not Secure", so it refuses
+    /// with its own code. No Secure Record unit, or no Secure Record team in it, is an answer (compare what was found).
+    /// </summary>
+    private async Task<DirectMessageOwnerTeamResolution?> SecureRecordRefusalAsync(SecureOwnerTeamIdentity direct, CancellationToken ct)
+    {
+        var secure = await SecureRecordOwnerTeam.IdentifyAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        switch (secure.Refusal)
+        {
+            case null:
+            case SecureOwnerTeamStatus.BusinessUnitNotFound:
+            case SecureOwnerTeamStatus.OwnerTeamNotFound:
+                break;
+            case SecureOwnerTeamStatus.BusinessUnitAmbiguous:
+            case SecureOwnerTeamStatus.OwnerTeamAmbiguous:
+                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordAmbiguous);
+            default:
+                // Unreadable — or a status the identity step does not produce today: not provably "not Secure".
+                return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.SecureRecordUnreadable, secure.Fault);
+        }
+
+        if (secure.BusinessUnitId is { } secureUnit && secureUnit != Guid.Empty && direct.BusinessUnitId == secureUnit)
+            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord);
+        if (secure.OwnerTeamId is { } secureTeam && secureTeam != Guid.Empty && direct.OwnerTeamId == secureTeam)
+            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.BusinessUnitIsSecureRecord);
+        return null;
+    }
+
+    /// <summary>
     /// The unit has no NAMED, non-default Owner team with the configured name. When its DEFAULT team carries that name, the
-    /// setting names the default team — its own refusal. A fault reading that is still a refusal (not found), not cached.
+    /// setting names the default team — its own refusal. A fault reading that is <see cref="DirectMessageOwnerTeamRefusal.OwnerTeamUnreadable"/>
+    /// with the fault, not cached.
     /// </summary>
     private async Task<DirectMessageOwnerTeamResolution> NotFoundOrDefaultTeamAsync(Guid businessUnitId, string teamName, CancellationToken ct)
     {
@@ -198,7 +280,7 @@ public sealed class DirectMessageOwnerTeam
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.OwnerTeamNotFound, ex);
+            return DirectMessageOwnerTeamResolution.Refused(DirectMessageOwnerTeamRefusal.OwnerTeamUnreadable, ex);
         }
 
         return DirectMessageOwnerTeamResolution.Refused(defaults.Count > 0
@@ -280,7 +362,10 @@ public sealed class DirectMessageOwnerTeam
         $"_{SecureRecordOwnerTeam.BusinessUnitColumn}_value eq {businessUnitId} and {SecureRecordOwnerTeam.NameColumn} eq "
         + $"'{SecureRecordOwnerTeam.EscapeODataStringLiteral(teamName)}' and {SecureRecordOwnerTeam.IsDefaultColumn} eq true";
 
-    private sealed record CachedVerdict(NamedOwnerTeamLookup Lookup, DirectMessageOwnerTeamResolution Verdict, DateTimeOffset At);
+    /// <summary>What a verdict depends on: the Direct names and the Secure Record names it was checked against.</summary>
+    private readonly record struct VerdictKey(NamedOwnerTeamLookup Direct, NamedOwnerTeamLookup SecureRecord);
+
+    private sealed record CachedVerdict(VerdictKey Key, DirectMessageOwnerTeamResolution Verdict, DateTimeOffset At);
 
     /// <summary>A business unit's id and parent. Internal so a test can answer the read through <c>QueryAsync</c>.</summary>
     internal sealed class BusinessUnitRow
@@ -290,19 +375,6 @@ public sealed class DirectMessageOwnerTeam
 
         [JsonPropertyName("_parentbusinessunitid_value")]
         public Guid? parentbusinessunitid { get; set; }
-    }
-
-    /// <summary>The team columns <see cref="CannotBeDirectOwnerTeamAsync"/> reads. Internal for the same reason.</summary>
-    internal sealed class TeamRow
-    {
-        [JsonPropertyName("name")]
-        public string? name { get; set; }
-
-        [JsonPropertyName("isdefault")]
-        public bool? isdefault { get; set; }
-
-        [JsonPropertyName("teamtype")]
-        public int? teamtype { get; set; }
     }
 }
 
@@ -317,8 +389,14 @@ public static class DirectMessageOwnerTeamRefusal
     /// <summary><c>DirectMessage:BusinessUnitName</c> or <c>DirectMessage:OwnerTeamName</c> is unset or blank.</summary>
     public const string NotConfigured = Prefix + "not_configured";
 
-    /// <summary>The configured business unit is the Secure Record business unit.</summary>
+    /// <summary>The configured business unit is the Secure Record business unit, or the team is its owner team (decided by id).</summary>
     public const string BusinessUnitIsSecureRecord = Prefix + "bu_is_secure_record";
+
+    /// <summary>The Secure Record lookup is ambiguous, so "not the Secure Record unit" cannot be proven.</summary>
+    public const string SecureRecordAmbiguous = Prefix + "secure_record_ambiguous";
+
+    /// <summary>The Secure Record lookup faulted, so "not the Secure Record unit" cannot be proven.</summary>
+    public const string SecureRecordUnreadable = Prefix + "secure_record_unreadable";
 
     /// <summary>No business unit has the configured name.</summary>
     public const string BusinessUnitNotFound = Prefix + "bu_not_found";
@@ -361,7 +439,9 @@ public static class DirectMessageOwnerTeamRefusal
 }
 
 /// <summary>
-/// The answer of <see cref="DirectMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync"/>: the team, or a refusal.
+/// The answer of <see cref="DirectMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync"/>: the team, or a refusal. A refusal
+/// carries no team id: only <see cref="IsNotConfigured"/> means "no Direct team can exist"; any other refusal or fault means
+/// "could be the Direct team" — settle identity with <see cref="DirectMessageOwnerTeam.IdentifyDirectMessageOwnerTeamAsync"/>.
 /// </summary>
 /// <param name="TeamId">The Direct message owner team, when resolved.</param>
 /// <param name="Refusal">A <see cref="DirectMessageOwnerTeamRefusal"/> code, when not.</param>
@@ -371,7 +451,35 @@ public sealed record DirectMessageOwnerTeamResolution(Guid? TeamId, string? Refu
     /// <summary>True only for a resolved team. Only then may the team be used to assign.</summary>
     public bool IsResolved => Refusal is null && TeamId is { } id && id != Guid.Empty;
 
+    /// <summary>
+    /// True only when a Direct setting is unset or blank (<see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/>): no Direct
+    /// team can exist. The one refusal a caller may read as "not the Direct team".
+    /// </summary>
+    public bool IsNotConfigured => Refusal == DirectMessageOwnerTeamRefusal.NotConfigured;
+
     internal static DirectMessageOwnerTeamResolution Resolved(Guid teamId) => new(teamId, null, null);
 
     internal static DirectMessageOwnerTeamResolution Refused(string refusal, Exception? fault = null) => new(null, refusal, fault);
+}
+
+/// <summary>
+/// The answer of <see cref="DirectMessageOwnerTeam.IdentifyDirectMessageOwnerTeamAsync"/>: WHICH business unit and team the
+/// configuration names, independent of the validity checks. Not an assignment target.
+/// </summary>
+/// <param name="BusinessUnitId">The configured business unit, when both it and its named team were found; otherwise <c>null</c>.</param>
+/// <param name="TeamId">The configured named team, when identified; otherwise <c>null</c>.</param>
+/// <param name="Refusal">Why nothing was identified (a <see cref="DirectMessageOwnerTeamRefusal"/> code: not configured, not
+/// found, ambiguous or unreadable); <c>null</c> when identified.</param>
+/// <param name="Fault">The Dataverse fault, only when a read was unreadable.</param>
+public sealed record DirectMessageOwnerTeamIdentity(Guid? BusinessUnitId, Guid? TeamId, string? Refusal, Exception? Fault)
+{
+    /// <summary>True when both ids are known: this is the team the configuration names.</summary>
+    public bool IsIdentified =>
+        Refusal is null && BusinessUnitId is { } bu && bu != Guid.Empty && TeamId is { } team && team != Guid.Empty;
+
+    /// <summary>True only when a Direct setting is unset or blank: no Direct team can exist. No ids, no fault.</summary>
+    public bool IsNotConfigured => Refusal == DirectMessageOwnerTeamRefusal.NotConfigured;
+
+    internal static DirectMessageOwnerTeamIdentity NotConfigured { get; } =
+        new(null, null, DirectMessageOwnerTeamRefusal.NotConfigured, null);
 }
