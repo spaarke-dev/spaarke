@@ -494,7 +494,8 @@ public sealed class InvoiceReviewReadService
     }
 
     /// <summary>The invoice header facts the firm projection (ebilling-r1 task 130a) reads: status code, tracking number, billed and approved totals.</summary>
-    internal sealed record InvoiceHeaderFacts(int StatusCode, string? TrackingNumber, decimal? Billed, decimal? Approved);
+    /// <param name="StatusCode">The <c>statuscode</c> as read; null when the row carries none (130b fix round 2: never turned into a code).</param>
+    internal sealed record InvoiceHeaderFacts(int? StatusCode, string? TrackingNumber, decimal? Billed, decimal? Approved);
 
     /// <summary>
     /// ebilling-r1 task 130a: the header facts of <paramref name="invoiceId"/> (app-only, one read), or null when the invoice does not exist. Kept
@@ -514,7 +515,7 @@ public sealed class InvoiceReviewReadService
         var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return page.Entities.FirstOrDefault(r => r.Id == invoiceId) is { } row
             ? new InvoiceHeaderFacts(
-                row.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0,
+                row.GetAttributeValue<OptionSetValue>("statuscode")?.Value,
                 row.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber),
                 Money(row, InvoiceTotalsService.InvoiceBilledTotal),
                 Money(row, InvoiceTotalsService.InvoiceApprovedTotal))

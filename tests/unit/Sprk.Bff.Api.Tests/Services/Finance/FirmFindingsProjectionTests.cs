@@ -1,11 +1,12 @@
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
@@ -27,6 +28,8 @@ public sealed class FirmFindingsProjectionTests
     private static readonly Guid PolicyB = Guid.Parse("20000000-0000-4000-8000-0000000000d3");
     private static readonly Guid VersionA = Guid.Parse("20000000-0000-4000-8000-0000000000d2");
     private static readonly Guid VersionB = Guid.Parse("20000000-0000-4000-8000-0000000000d4");
+    private static readonly Guid RuleSetA = Guid.Parse("20000000-0000-4000-8000-0000000000e1");
+    private static readonly Guid ProcedureA = Guid.Parse("20000000-0000-4000-8000-0000000000e2");
 
     private const string ClauseQuote = "Travel time is billed at half rate.";
     private const string ClauseSection = "Section 4.2";
@@ -43,7 +46,10 @@ public sealed class FirmFindingsProjectionTests
         public readonly List<Entity> Versions = [];
         public readonly List<Entity> Policies = [];
         public readonly List<Entity> Submissions = [];
+        public readonly List<Entity> RuleSets = [];
+        public readonly List<Entity> Procedures = [];
         public readonly List<QueryExpression> Queries = [];
+        public readonly ListLogger Logger = new();
         public readonly List<Guid> ClauseCalls = [];
         public readonly HashSet<string> FaultingEntities = [];
         public Func<Guid, FirmClauseText> Clause = _ => FirmClauseText.None;
@@ -63,6 +69,17 @@ public sealed class FirmFindingsProjectionTests
             Versions.Add(Version(VersionB, PolicyB, 1));
             Policies.Add(Policy(PolicyA, "Travel time"));
             Policies.Add(Policy(PolicyB, "Block billing"));
+            // Both policies belong to one rule set of a Guideline Procedure (a document firms receive); a test changes the type or the link.
+            RuleSets.Add(new Entity("sprk_ruleset", RuleSetA)
+            {
+                ["sprk_name"] = "Internal rule set name",
+                ["sprk_procedure"] = new EntityReference("sprk_procedure", ProcedureA),
+            });
+            Procedures.Add(new Entity("sprk_procedure", ProcedureA)
+            {
+                ["sprk_name"] = "Internal procedure name",
+                ["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.Guideline),
+            });
 
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression query, CancellationToken _) =>
@@ -86,6 +103,8 @@ public sealed class FirmFindingsProjectionTests
                         "sprk_policyversion" => Versions,
                         "sprk_policy" => Policies,
                         "sprk_invoicesubmission" => Submissions,
+                        "sprk_ruleset" => RuleSets,
+                        "sprk_procedure" => Procedures,
                         _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                     };
                     return new EntityCollection(rows.Select(r => Requested(r, query.ColumnSet)).ToList());
@@ -119,7 +138,7 @@ public sealed class FirmFindingsProjectionTests
                 WriterCalls++;
                 return WriterFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(WriterIdAnswered ?? WriterId);
             },
-            NullLogger<FirmFindingsProjection>.Instance);
+            Logger);
 
         /// <summary>
         /// The store applies the query's writer rule (<see cref="WriterCreatedRecord"/>: <c>createdby</c> equal to the writer, <c>createdonbehalfby</c>
@@ -353,7 +372,26 @@ public sealed class FirmFindingsProjectionTests
         {
             ["sprk_name"] = name,
             ["sprk_domain"] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            ["sprk_ruleset"] = new EntityReference("sprk_ruleset", RuleSetA),
         };
+    }
+
+    /// <summary>Records every log line (level and rendered message) the projection writes.</summary>
+    private sealed class ListLogger : ILogger<FirmFindingsProjection>
+    {
+        public readonly List<(LogLevel Level, string Message)> Lines = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (Lines)
+            {
+                Lines.Add((logLevel, formatter(state, exception)));
+            }
+        }
     }
 
     private static readonly FirmClauseText FlagOnText = new(ClauseQuote, ClauseSection, FirmLabel);
@@ -435,7 +473,7 @@ public sealed class FirmFindingsProjectionTests
         world.AddSubmission(status);
         world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
 
-        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome!.Kind.Should().Be(FirmOutcomeKind.SubmissionInProgress);
         outcome.StatusLabel.Should().Be(label);
@@ -455,10 +493,65 @@ public sealed class FirmFindingsProjectionTests
         world.Invoices.Clear();
         world.AddSubmission((int)InvoiceSubmissionStatus.Processing);
 
-        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome!.Kind.Should().Be(FirmOutcomeKind.SubmissionInProgress);
         outcome.BilledTotal.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "130b fix 2 (F1) must-fire: a Received or Processing submission whose invoice the caller did NOT decide shows no billed total and reads nothing of the invoice, even though it exists")]
+    [InlineData((int)InvoiceSubmissionStatus.Received, "Received")]
+    [InlineData((int)InvoiceSubmissionStatus.Processing, "Processing")]
+    public async Task AnUndecidedInvoice_IsNeverRead_InProgressIsStatusOnly(int status, string label)
+    {
+        var world = new World(); // the invoice exists in the store (created after the caller's check)
+        world.AddSubmission(status);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, "TRK-1", label, null, null, [], false));
+        world.Reads("sprk_invoice").Should().Be(0, "no invoice decision covers it, so it is not read");
+        JsonSerializer.Serialize(outcome).Should().NotContain("1000");
+    }
+
+    [Fact(DisplayName = "130b fix 2 (F1) must-fire: an Accepted submission whose invoice the caller did NOT decide is Unavailable (503: the retry decides it), and the invoice is not read")]
+    public async Task AnUndecidedInvoice_OfAnAcceptedSubmission_IsUnavailable()
+    {
+        var world = new World();
+        world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
+        outcome.Degraded.Should().BeTrue();
+        world.Reads("sprk_invoice").Should().Be(0);
+        world.Reads("sprk_billingevent").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130b fix 2 (F1) must-not-fire: with the invoice decided, a Processing submission shows its invoice's billed total")]
+    public async Task ADecidedInvoice_ShowsTheBilledTotal()
+    {
+        var world = new World();
+        world.AddSubmission((int)InvoiceSubmissionStatus.Processing);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.BilledTotal.Should().Be(1000m);
+    }
+
+    [Fact(DisplayName = "130b fix 2 (K1): an Accepted submission whose invoice does not exist is Unavailable, logged at Error with a stable code")]
+    public async Task AnAcceptedSubmission_WithNoInvoice_IsUnavailable_AndLoggedWithAStableCode()
+    {
+        var world = new World();
+        world.Invoices.Clear();
+        world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Error)
+            .Which.Message.Should().Contain(FirmFindingsProjection.AcceptedWithoutInvoiceCode);
     }
 
     [Fact]
@@ -468,7 +561,7 @@ public sealed class FirmFindingsProjectionTests
         world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
         world.AddReducedWithCitation(1, "Reason.", VersionA, null);
 
-        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome!.Kind.Should().Be(FirmOutcomeKind.InvoiceInReview);
         outcome.Items.Should().ContainSingle();
@@ -479,20 +572,20 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = new World();
         world.AddSubmission((int)InvoiceSubmissionStatus.Rejected);
-        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!
             .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
 
         // 130b fix round 1: a failed submission is a permanent state, not a fault: Closed, status only, not degraded (the route answers 200).
         world.Submissions[0]["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed);
-        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!
             .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Failed", null, null, [], false));
 
         world.Submissions[0]["sprk_processingstatus"] = new OptionSetValue(424242);
-        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!
             .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Closed", null, null, [], false));
 
         world.Submissions.Clear();
-        (await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None)).Should().BeNull();
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None)).Should().BeNull();
         (await world.Projection().GetForInvoiceAsync(Guid.NewGuid(), CancellationToken.None)).Should().BeNull();
     }
 
@@ -517,8 +610,8 @@ public sealed class FirmFindingsProjectionTests
         adjustment.Line.Should().BeNull();
         adjustment.Adjustment.Should().BeEquivalentTo(new FirmOutcomeAdjustment("Percent", 5m, -50m));
         adjustment.Reason.Should().Be("Volume discount.");
-        adjustment.Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(
-            new FirmOutcomeCitation("Block billing", null, null, null, null, null), "version B's clause is not visible to firms");
+        adjustment.Citations.Should().BeEmpty("version B's clause is not published to firms, so the rule is not cited at all (fix round 2)");
+        outcome.Items[0].Citations.Should().ContainSingle().Which.RuleName.Should().Be("Travel time", "version A's clause is published");
     }
 
     [Theory]
@@ -576,7 +669,7 @@ public sealed class FirmFindingsProjectionTests
         var world = new World(InvoiceStatusCodes.Superseded);
         world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
 
-        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Closed, "TRK-1", "Replaced by a correction", null, null, [], false));
     }
@@ -591,7 +684,7 @@ public sealed class FirmFindingsProjectionTests
         world.AddSubmission(status);
         world.FaultingEntities.Add("sprk_invoice");
 
-        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None);
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, null, label, null, null, [], true));
     }
@@ -613,17 +706,118 @@ public sealed class FirmFindingsProjectionTests
 
     // ── Visibility rule (D-66, D-79) ──
 
-    [Fact]
-    public async Task FlagOff_ACitationCarriesTheRuleNameAndTheFirmReasonOnly()
+    [Fact(DisplayName = "130b fix 2 must-fire: with the policy's firm flag off (or no snapshot) the rule is not cited at all: no name, no label, no clause, no firm reason; the line and its reason stay")]
+    public async Task FlagOff_TheRuleIsNotCited_NoNameNoLabelNoClause()
     {
         var world = new World();
         world.AddReducedWithCitation(1, "Rate exceeds the agreed rate.", VersionA, "Your agreed rate is lower.");
-        world.Clause = _ => FirmClauseText.None; // the rule set's flag is off (or the version was not applied)
+        world.Clause = _ => FirmClauseText.None; // the rule set's flag is off, or the invoice's snapshot did not apply the version
 
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
-        outcome!.Items.Should().ContainSingle().Which.Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(
-            new FirmOutcomeCitation("Travel time", "Your agreed rate is lower.", null, null, null, null));
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.Citations.Should().BeEmpty();
+        item.Reason.Should().Be("Rate exceeds the agreed rate.");
+        outcome.Degraded.Should().BeFalse();
+        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain("Your agreed rate is lower.")
+            .And.NotContain(FirmLabel).And.NotContain(ClauseSection);
+        world.Reads("sprk_ruleset").Should().Be(0, "nothing is published, so no Procedure type needs deciding");
+    }
+
+    [Fact(DisplayName = "130b fix 2 must-fire: an InternalStandard Procedure's rule is never cited, even with its flag on and the clause published")]
+    public async Task AnInternalStandardProceduresRule_IsNeverCited_WhateverItsFlag()
+    {
+        var world = new World(InvoiceStatusCodes.Approved);
+        world.AddReducedWithCitation(1, "Rate exceeds the agreed rate.", VersionA, "Your agreed rate is lower.");
+        world.AddAdjustment(5, "Volume discount.", VersionA);
+        world.Procedures[0]["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.InternalStandard);
+        world.Clause = _ => FlagOnText; // the flag says on (a native write could set it); the type still decides
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2).And.OnlyContain(i => i.Citations.Count == 0);
+        outcome.Degraded.Should().BeFalse();
+        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain(ClauseQuote).And.NotContain(FirmLabel);
+        world.Queries.Where(q => q.EntityName is "sprk_ruleset" or "sprk_procedure").Should().NotBeEmpty()
+            .And.OnlyContain(q => !q.ColumnSet.Columns.Contains("sprk_name"), "a rule set's or Procedure's name is never read");
+    }
+
+    [Theory(DisplayName = "130b fix 2: a rule set or Procedure that cannot be read, or a Procedure with no type, cites nothing (fail closed)")]
+    [InlineData("no-rule-set-link")]
+    [InlineData("rule-set-missing")]
+    [InlineData("procedure-missing")]
+    [InlineData("procedure-without-type")]
+    public async Task AnUndecidableProcedureType_CitesNothing(string kind)
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+        world.Clause = _ => FlagOnText;
+        switch (kind)
+        {
+            case "no-rule-set-link":
+                world.Policies.Single(p => p.Id == PolicyA).Attributes.Remove("sprk_ruleset");
+                break;
+            case "rule-set-missing":
+                world.RuleSets.Clear();
+                break;
+            case "procedure-missing":
+                world.Procedures.Clear();
+                break;
+            default:
+                world.Procedures[0].Attributes.Remove("sprk_proceduretype");
+                break;
+        }
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.Single().Citations.Should().BeEmpty();
+        outcome.Degraded.Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "130b fix 2 (fault): a fault reading the firm flag (the clause reader), the rule set or the Procedure omits the citation; the line and reason stay, not degraded")]
+    [InlineData("clause")]
+    [InlineData("sprk_ruleset")]
+    [InlineData("sprk_procedure")]
+    public async Task AFaultDecidingACitation_OmitsIt(string faulting)
+    {
+        var world = new World(InvoiceStatusCodes.Approved);
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+        world.Clause = _ => FlagOnText;
+        if (faulting == "clause")
+        {
+            world.ClauseFault = true;
+        }
+        else
+        {
+            world.FaultingEntities.Add(faulting);
+        }
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Kind.Should().Be(FirmOutcomeKind.ApprovedWithAdjustments);
+        outcome.Degraded.Should().BeFalse();
+        var item = outcome.Items.Single();
+        item.Reason.Should().Be("Reason.");
+        item.Citations.Should().BeEmpty();
+        JsonSerializer.Serialize(outcome).Should().NotContain("Travel time").And.NotContain("Firm reason.");
+    }
+
+    [Fact(DisplayName = "130b fix 2: no id of a policy, version, rule set or Procedure appears anywhere in the serialized outcome")]
+    public async Task NoPolicyVersionRuleSetOrProcedureId_IsInTheSerializedBody()
+    {
+        var world = new World(InvoiceStatusCodes.Approved);
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+        world.AddAdjustment(5, "Volume discount.", VersionB);
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
+
+        outcome!.Items.SelectMany(i => i.Citations).Should().HaveCount(2, "both rules are published, so the body carries their citations");
+        var json = JsonSerializer.Serialize(outcome);
+        foreach (var id in new[] { PolicyA, PolicyB, VersionA, VersionB, RuleSetA, ProcedureA })
+        {
+            json.Should().NotContainEquivalentOf(id.ToString("D")).And.NotContainEquivalentOf(id.ToString("N"));
+        }
     }
 
     [Fact]
@@ -637,7 +831,9 @@ public sealed class FirmFindingsProjectionTests
 
         outcome!.Items.Single().Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(
             new FirmOutcomeCitation("Travel time", "Your agreed rate is lower.", FirmLabel, 3, ClauseSection, ClauseQuote));
-        world.Reads("sprk_ruleset").Should().Be(0, "the rule set (and so its name) is never read");
+        world.Queries.Where(q => q.EntityName is "sprk_ruleset" or "sprk_procedure").Should().OnlyContain(
+            q => !q.ColumnSet.Columns.Contains("sprk_name"), "the rule set's (and Procedure's) name is never read: only the Procedure link and its type");
+        JsonSerializer.Serialize(outcome).Should().NotContain("Internal rule set name").And.NotContain("Internal procedure name");
     }
 
     [Fact]
@@ -646,6 +842,7 @@ public sealed class FirmFindingsProjectionTests
         var world = new World();
         world.AddReducedWithCitation(1, "Reason.", VersionA, null);
         world.Clause = _ => new FirmClauseText(ClauseQuote, null, null);
+        world.RuleSets[0].Attributes.Remove("sprk_procedure"); // a legacy rule set: no Procedure, so its flag alone decides
 
         var citation = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations.Single();
 
@@ -675,6 +872,7 @@ public sealed class FirmFindingsProjectionTests
     {
         var world = new World();
         world.AddReducedWithCitation(1, "Reason.", VersionA, firmReason: "   ");
+        world.Clause = _ => FlagOnText;
 
         (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations.Single().FirmReason.Should().BeNull();
     }
@@ -719,6 +917,7 @@ public sealed class FirmFindingsProjectionTests
         var world = new World();
         var pair = world.AddReducedWithCitation(1, "R.", VersionA, null);
         world.AddSignal(pair.Record.Id, VersionA, "Second reason.", pair.Line.Id, InvoiceId);
+        world.Clause = _ => FlagOnText;
 
         var citations = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations;
 
@@ -881,6 +1080,7 @@ public sealed class FirmFindingsProjectionTests
         world.AddSignal(Guid.NewGuid(), VersionB, "Another record's Signal.", pair.Line.Id, InvoiceId);
         world.AddSignal(pair.Record.Id, VersionB, "Another invoice's Signal.", pair.Line.Id, OtherInvoiceId);
         world.AddSignal(pair.Record.Id, VersionB, "Another line's Signal.", Guid.NewGuid(), InvoiceId);
+        world.Clause = _ => FlagOnText;
 
         var citations = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single().Citations;
 
@@ -964,6 +1164,7 @@ public sealed class FirmFindingsProjectionTests
         var world = new World();
         world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
         world.AddReducedWithCitation(2, "Reason 2.", VersionA, "Firm reason 2.");
+        world.Clause = _ => FlagOnText;
         world.FaultingEntities.Add(faulting);
 
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
@@ -971,16 +1172,21 @@ public sealed class FirmFindingsProjectionTests
         outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.InvoiceInReview, null, "In review", null, null, [], true));
     }
 
-    [Fact]
-    public async Task AFaultInTheClauseReader_ProjectsTheStatusOnly()
+    [Fact(DisplayName = "130b fix 2 (K1): an invoice read with no status code is Unavailable (503), never an unknown code read as Closed")]
+    public async Task AnInvoiceWithNoStatusCode_IsUnavailable_NotClosed()
     {
-        var world = new World(InvoiceStatusCodes.Approved);
+        var world = new World();
+        world.Invoices[0].Attributes.Remove("statuscode");
         world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
-        world.ClauseFault = true;
 
         var outcome = await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None);
 
-        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Approved, null, "Approved", null, null, [], true));
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.Unavailable, null, "Unavailable", null, null, [], true));
+        world.Reads("sprk_billingevent").Should().Be(0);
+
+        // The same through an Accepted submission.
+        world.AddSubmission((int)InvoiceSubmissionStatus.Accepted);
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
     }
 
     [Fact]
@@ -994,7 +1200,7 @@ public sealed class FirmFindingsProjectionTests
         var other = new World();
         other.AddSubmission((int)InvoiceSubmissionStatus.Rejected);
         other.FaultingEntities.Add("sprk_invoicesubmission");
-        (await other.Projection().GetForSubmissionAsync(SubmissionId, CancellationToken.None))!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
+        (await other.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!.Kind.Should().Be(FirmOutcomeKind.Unavailable);
     }
 
     [Fact]

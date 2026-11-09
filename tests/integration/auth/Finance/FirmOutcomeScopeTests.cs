@@ -74,6 +74,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     private readonly List<Entity> _signalRows = [];
     private readonly List<Entity> _versionRows = [];
     private readonly List<Entity> _policyRows = [];
+    private readonly List<Entity> _ruleSetRows = [];
+    private readonly List<Entity> _procedureRows = [];
     private readonly List<Guid> _clauseInvoices = [];
     private readonly WorkforceCeilingDouble _ceiling = new();
     private readonly List<string> _projectionReads = [];
@@ -116,6 +118,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
                     "sprk_signal" => _signalRows,
                     "sprk_policyversion" => _versionRows,
                     "sprk_policy" => _policyRows,
+                    "sprk_ruleset" => _ruleSetRows,
+                    "sprk_procedure" => _procedureRows,
                     _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                 };
                 return new EntityCollection(rows.Where(r => Matches(r, query.Criteria)).Select(r => Requested(r, query.ColumnSet)).ToList());
@@ -286,11 +290,20 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     {
         if (_versionRows.All(v => v.Id != version))
         {
+            // A Guideline Procedure's rule set (a document firms receive): its citation is shown when the clause reader publishes it.
+            var procedure = Guid.NewGuid();
+            _procedureRows.Add(new Entity("sprk_procedure", procedure)
+            {
+                ["sprk_proceduretype"] = new OptionSetValue((int)Sprk.Bff.Api.Services.Finance.Procedures.ProcedureType.Guideline),
+            });
+            var ruleSet = Guid.NewGuid();
+            _ruleSetRows.Add(new Entity("sprk_ruleset", ruleSet) { ["sprk_procedure"] = new EntityReference("sprk_procedure", procedure) });
             var policy = Guid.NewGuid();
             _policyRows.Add(new Entity("sprk_policy", policy)
             {
                 ["sprk_name"] = "Travel time",
                 [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+                ["sprk_ruleset"] = new EntityReference("sprk_ruleset", ruleSet),
             });
             _versionRows.Add(new Entity("sprk_policyversion", version)
             {
@@ -325,6 +338,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_invoicesubmission"] = AccessRights.Read,
             ["sprk_invoice"] = AccessRights.Read,
             ["sprk_billingevent"] = AccessRights.Read,
+            ["sprk_decisionrecord"] = AccessRights.Read,
+            ["sprk_signal"] = AccessRights.Read,
         };
         if (withoutReadOn is not null)
         {
@@ -865,7 +880,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     [Fact(DisplayName = "130b fix 1 (F2): a Received submission whose billed total cannot be read is a retryable 503, never a 200 with no total")]
     public async Task AReceivedSubmission_WhoseBilledTotalReadFaults_Is503()
     {
+        // Fix round 2: the total is read only for an invoice the filter decided, so the invoice exists (the caller's firm) when the filter looks.
         var received = SeedSubmission(FirmA);
+        SeedInvoice(FirmA, id: InvoiceSubmissionPersister.InvoiceIdFor(received));
         _faultingProjectionEntities.Add("sprk_invoice");
 
         await AssertRefusedAsync(await Submission(received), HttpStatusCode.ServiceUnavailable, Unavailable);
@@ -952,6 +969,104 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _invoiceDecisions.Should().BeEmpty("there is no invoice to decide");
     }
 
+    /// <summary>
+    /// An invoice the PROJECTION's store holds and the filter's read does not: the filter sees no invoice (it passes undecided), the projection
+    /// would find one. Seeded as another firm's on a matter the caller cannot read, so showing anything of it is a leak.
+    /// </summary>
+    private Guid SeedInvoiceOnlyInTheProjectionsStore(Guid submissionId)
+    {
+        var invoiceId = SeedInvoice(FirmB, matter: OtherMatter, id: InvoiceSubmissionPersister.InvoiceIdFor(submissionId));
+        _data.Invoices.Remove(invoiceId);
+        return invoiceId;
+    }
+
+    [Theory(DisplayName = "130b fix 2 (F1) SEEDING PROOF must-fire: a Received or Processing submission whose invoice the filter did not decide shows no billed total, and the projection never reads the invoice")]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    public async Task AnUndecidedInvoice_InProgress_Is200_WithNoBilledTotal_AndIsNeverRead(InvoiceSubmissionStatus status)
+    {
+        var submission = SeedSubmission(FirmA, status: status);
+        SeedInvoiceOnlyInTheProjectionsStore(submission);
+
+        var response = await Submission(submission);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("1000").And.NotContain("TRK-");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.GetProperty("kind").GetString().Should().Be("SubmissionInProgress");
+        body.RootElement.GetProperty("billedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        _projectionReads.Should().NotContain("sprk_invoice", "no invoice decision covers it");
+        _invoiceDecisions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130b fix 2 (F1) SEEDING PROOF must-fire: an Accepted submission whose invoice the filter did not decide is a retryable 503, and nothing of the invoice is read")]
+    public async Task AnUndecidedInvoice_Accepted_Is503_AndIsNeverRead()
+    {
+        var submission = SeedSubmission(FirmA, status: InvoiceSubmissionStatus.Accepted);
+        var invoice = SeedInvoiceOnlyInTheProjectionsStore(submission);
+        SeedReducedLine(invoice, Reason);
+
+        await AssertRefusedAsync(await Submission(submission), HttpStatusCode.ServiceUnavailable, Unavailable);
+        _projectionReads.Should().NotContain("sprk_invoice").And.NotContain("sprk_billingevent").And.NotContain("sprk_decisionrecord");
+    }
+
+    [Theory(DisplayName = "130b fix 2 (F1) must-fire: the invoice is created between the filter and the projection: no total, no content; an Accepted one is 503 and the retry is decided afresh")]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    public async Task AnInvoiceCreatedBetweenTheFilterAndTheProjection_IsNotShown(InvoiceSubmissionStatus status)
+    {
+        var submission = SeedSubmission(FirmA, status: status);
+        var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submission);
+        // The filter looks for the invoice and misses; the processing job creates it (the caller's own firm, a readable matter) right after.
+        _data.OnMiss = missed =>
+        {
+            if (missed == invoiceId)
+            {
+                _data.OnMiss = null;
+                SeedInvoice(FirmA, id: invoiceId);
+                SeedReducedLine(invoiceId, Reason);
+            }
+        };
+
+        var response = await Submission(submission);
+
+        if (status == InvoiceSubmissionStatus.Accepted)
+        {
+            await AssertRefusedAsync(response, HttpStatusCode.ServiceUnavailable, Unavailable);
+        }
+        else
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            var text = await response.Content.ReadAsStringAsync();
+            text.Should().NotContain("1000").And.NotContain(Reason);
+            using var body = JsonDocument.Parse(text);
+            body.RootElement.GetProperty("billedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+
+        _projectionReads.Should().NotContain("sprk_invoice", "the invoice existed by then, but the filter did not decide it");
+
+        // The retry re-enters the filter, which now decides the invoice: its content is shown.
+        var retry = await Submission(submission);
+        retry.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await retry.Content.ReadAsStringAsync()).Should().Contain(status == InvoiceSubmissionStatus.Accepted ? Reason : "1000");
+        _invoiceDecisions.Should().ContainSingle().Which.Should().Equal(new[] { invoiceId });
+    }
+
+    [Fact(DisplayName = "130b fix 2 (F1) must-not-fire: a Processing submission whose own-firm invoice the filter decided shows its billed total")]
+    public async Task ADecidedInvoice_InProgress_ShowsItsBilledTotal()
+    {
+        var submission = SeedSubmission(FirmA, status: InvoiceSubmissionStatus.Processing);
+        var invoice = SeedInvoice(FirmA, id: InvoiceSubmissionPersister.InvoiceIdFor(submission));
+
+        var response = await Submission(submission);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("billedTotal").GetDecimal().Should().Be(1000m);
+        _invoiceDecisions.Should().ContainSingle().Which.Should().Equal(new[] { invoice });
+    }
+
     [Theory(DisplayName = "130b fix 1 (F3): a submission decision that faults is a retryable 503, decided after the firm and core-record checks")]
     [InlineData(SeamFault.ReadFailed)]
     [InlineData(SeamFault.Throws)]
@@ -996,6 +1111,7 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         var text = await response.Content.ReadAsStringAsync();
         text.Should().Contain("Clause of firm A.").And.Contain("Firm A guidelines");
         text.Should().NotContain("Clause of firm B.").And.NotContain("Firm B guidelines").And.NotContain("B-1");
+        text.Should().NotContainEquivalentOf(version.ToString(), "no policy version id is in the body (fix round 2)");
         _clauseInvoices.Should().NotBeEmpty().And.OnlyContain(id => id == ofA, "the clause is asked only for the invoice being viewed");
     }
 
@@ -1006,9 +1122,13 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     [Theory(DisplayName = "130b fix 1 (F4) must-fire: a workforce contact whose role lacks Read on a table the route returns gets the ceiling's 403 before anything is read")]
     [InlineData("invoice", "sprk_invoice")]
     [InlineData("invoice", "sprk_billingevent")]
+    [InlineData("invoice", "sprk_decisionrecord")]
+    [InlineData("invoice", "sprk_signal")]
     [InlineData("submission", "sprk_invoicesubmission")]
     [InlineData("submission", "sprk_invoice")]
     [InlineData("submission", "sprk_billingevent")]
+    [InlineData("submission", "sprk_decisionrecord")]
+    [InlineData("submission", "sprk_signal")]
     public async Task AWorkforceContact_WithoutReadOnAReturnedTable_IsRefusedByTheCeiling(string route, string table)
     {
         _resolver.Principal = WorkforceContact();
@@ -1046,20 +1166,29 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         _ceiling.Reads.Should().Be(2);
     }
 
-    [Fact(DisplayName = "130b fix 1 (F4): the routes declare exactly the reads they return")]
+    [Fact(DisplayName = "130b fix 2 (F4b): the routes declare exactly the reads they return: invoice, line, Decision Record and Signal; never the policy, version, rule set or Procedure tables")]
     public void TheRoutes_DeclareTheReadsTheyReturn()
     {
         WorkforceRoleCeilingGate.ReadInvoiceOutcome.Should().BeEquivalentTo(new[]
         {
             new WorkforceCeilingRequirement("sprk_invoice", AccessRights.Read),
             new WorkforceCeilingRequirement("sprk_billingevent", AccessRights.Read),
+            new WorkforceCeilingRequirement("sprk_decisionrecord", AccessRights.Read),
+            new WorkforceCeilingRequirement("sprk_signal", AccessRights.Read),
         });
         WorkforceRoleCeilingGate.ReadSubmissionOutcome.Should().BeEquivalentTo(new[]
         {
             new WorkforceCeilingRequirement("sprk_invoicesubmission", AccessRights.Read),
             new WorkforceCeilingRequirement("sprk_invoice", AccessRights.Read),
             new WorkforceCeilingRequirement("sprk_billingevent", AccessRights.Read),
+            new WorkforceCeilingRequirement("sprk_decisionrecord", AccessRights.Read),
+            new WorkforceCeilingRequirement("sprk_signal", AccessRights.Read),
         });
+        foreach (var undeclared in new[] { "sprk_policy", "sprk_policyversion", "sprk_ruleset", "sprk_procedure" })
+        {
+            WorkforceRoleCeilingGate.ReadInvoiceOutcome.Concat(WorkforceRoleCeilingGate.ReadSubmissionOutcome)
+                .Should().NotContain(r => r.Table == undeclared, "a citation is shown only as the policy's firm flag publishes it");
+        }
     }
 
     /// <summary>How the submission (a') seam fails in a test: not at all, a failed read (its contract), or an exception.</summary>
@@ -1179,6 +1308,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
 
         public Exception? Fault { get; set; }
 
+        /// <summary>Called with the id of an invoice the filter looked for and did not find (before the miss is answered).</summary>
+        public Action<Guid>? OnMiss { get; set; }
+
         private int _reads;
 
         public int Reads => Volatile.Read(ref _reads);
@@ -1192,10 +1324,14 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
                 return Task.FromException<IReadOnlyDictionary<string, object?>>(fault);
             }
 
-            return Invoices.TryGetValue(invoiceId, out var row)
-                ? Task.FromResult<IReadOnlyDictionary<string, object?>>(row)
-                : Task.FromException<IReadOnlyDictionary<string, object?>>(
-                    new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoice", invoiceId));
+            if (Invoices.TryGetValue(invoiceId, out var row))
+            {
+                return Task.FromResult<IReadOnlyDictionary<string, object?>>(row);
+            }
+
+            OnMiss?.Invoke(invoiceId);
+            return Task.FromException<IReadOnlyDictionary<string, object?>>(
+                new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoice", invoiceId));
         }
     }
 }

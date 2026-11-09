@@ -114,6 +114,8 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
         ["sprk_invoice"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_invoicesubmission"] = AccessRights.Create | AccessRights.Read,
         ["sprk_billingevent"] = AccessRights.Read, // ebilling-r1 130b fix round 1: the firm outcome routes return invoice lines
+        ["sprk_decisionrecord"] = AccessRights.Read, // ebilling-r1 130b fix round 2: the firm outcome routes return the reviewer's reasons
+        ["sprk_signal"] = AccessRights.Read, // ebilling-r1 130b fix round 2: the firm outcome routes return a cited rule's firm reason
         ["sprk_todo"] = AccessRights.Create | AccessRights.Read | AccessRights.Write | AccessRights.Delete,
         ["sprk_event"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
         ["contact"] = AccessRights.Read,

@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 
@@ -43,9 +44,10 @@ public enum FirmOutcomeKind
     Unavailable,
 
     /// <summary>
-    /// A permanent state with nothing more to tell: a failed submission, a cancelled invoice, an invoice replaced by a correction, or a status
-    /// this contract does not know (logged). The status label and tracking number only, no items and no totals, never
-    /// <see cref="FirmOutcome.Degraded"/>: retrying would never change it, so the route answers 200 (130b fix round 1).
+    /// A closed state at the time of the request, with nothing more to tell: a failed submission, a cancelled invoice, an invoice replaced by a
+    /// correction, or a status this contract does not know (logged). The status label and tracking number only, no items and no totals, never
+    /// <see cref="FirmOutcome.Degraded"/>: it is not a fault, so the route answers 200 (130b fix round 1). It can change later (undoing a
+    /// correction returns a superseded invoice to In Review).
     /// </summary>
     Closed,
 }
@@ -102,8 +104,10 @@ public sealed record FirmOutcomeLine(
 public sealed record FirmOutcomeAdjustment(string Method, decimal? Value, decimal Amount);
 
 /// <summary>
-/// The rule behind an item. With the rule set's visible-to-firms flag off (or no clause text for any other reason) only <see cref="RuleName"/>
-/// and <see cref="FirmReason"/> are set; with it on the label, version, section reference and quote are set too (D-66, D-79).
+/// The rule behind an item, shown ONLY as the policy's firm flag publishes it (130b fix round 2): the clause reader returned text for this
+/// version on this invoice (the rule set's visible-to-firms flag on AND the invoice's snapshot applied the version) and the rule is not an
+/// InternalStandard Procedure's. Otherwise (flag off, flag unreadable, no snapshot, an InternalStandard rule) there is no citation at all: no
+/// name, no label, no clause (D-66, D-79). No member is an id of a policy, version, rule set or Procedure.
 /// </summary>
 /// <param name="RuleName">The rule's (policy's) name. Never the rule set's name.</param>
 /// <param name="FirmReason">The rule's firm-visible reason (<c>sprk_signal.sprk_firmreason</c>); null when the Signal has none.</param>
@@ -132,13 +136,17 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// adjustment writes no Decision Record: its reason is <c>sprk_adjustmentreason</c> on the line and its rule is <c>sprk_adjustmentrule</c>.
 /// The clause: <see cref="FirmClauseReader"/> once per distinct policy version per invoice. Reviewer identity, internal notes, confidence
 /// scores and Signal messages are never read into the output.</para>
-/// <para><b>Visibility rule.</b> A citation carries the label, version, section reference and quote only when the clause reader returned text
-/// (the rule set's flag on, the version applied by the invoice's snapshot). In every other case, including a lookup fault, it carries the rule
-/// name and the firm reason only. There is no member for a Procedure Library document, container, drive item or link.</para>
-/// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header gives an
-/// <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged <see cref="FirmOutcome.Degraded"/>. A
-/// permanent state (failed, cancelled, superseded, an unknown status) is NOT a fault: it is a <see cref="FirmOutcomeKind.Closed"/> outcome,
-/// status only and not degraded.</para>
+/// <para><b>Visibility rule (130b fix round 2).</b> Rule citations on a firm's line are shown only as the policy's firm flag publishes them:
+/// a citation (rule name, firm reason, label, version, section reference, quote) exists only when the clause reader returned text (the rule
+/// set's flag on, the version applied by the invoice's snapshot) AND the rule is not an InternalStandard Procedure's, whatever its flag. In
+/// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line and the reviewer's
+/// reason stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
+/// Procedure id.</para>
+/// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header, or a header with no status,
+/// gives an <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged
+/// <see cref="FirmOutcome.Degraded"/> (a fault deciding a citation omits that citation instead). A closed state at the time of the request
+/// (failed, cancelled, superseded, an unknown status) is NOT a fault: it is a <see cref="FirmOutcomeKind.Closed"/> outcome, status only and
+/// not degraded.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceReviewReadService"/> is the INTERNAL review read model
 /// (it carries Signal sentences, confidence and reviewer identity); <see cref="RuleSetService.GetFirmClauseAsync"/> is the clause decision.
 /// Extension: the review model cannot be narrowed to the firm view without a second set of rules inside it; this reuses its line query and
@@ -215,10 +223,17 @@ public sealed class FirmFindingsProjection
         }
 
         var tracking = invoice.TrackingNumber;
-        if (!InvoiceStatusCodes.TryFromStatusCode(invoice.StatusCode, out var lifecycle))
+        if (invoice.StatusCode is not { } statusCode)
+        {
+            // No status is not an unknown status: nothing is known about the invoice's state, so nothing may be told (130b fix round 2, K1).
+            _logger.LogWarning("Invoice {Id} was read with no status code; the firm outcome is unavailable.", invoiceId);
+            return Unavailable();
+        }
+
+        if (!InvoiceStatusCodes.TryFromStatusCode(statusCode, out var lifecycle))
         {
             _logger.LogWarning("Invoice {Id} has a status code ({StatusCode}) the firm outcome does not know; projecting it as closed, status only.",
-                invoiceId, invoice.StatusCode);
+                invoiceId, statusCode);
             return Closed(tracking, ClosedLabel);
         }
 
@@ -279,11 +294,18 @@ public sealed class FirmFindingsProjection
 
     /// <summary>
     /// The firm outcome of <paramref name="submissionId"/>, or null when it does not exist. Received or Processing: status (and the billed total
-    /// once its invoice exists) only; a fault reading that total is Degraded, never a null total. Accepted: the invoice's outcome. Rejected:
-    /// status only (the rejection findings are not projected yet). Failed or an unknown status: <see cref="FirmOutcomeKind.Closed"/>.
+    /// once its invoice exists and was decided) only; a fault reading that total is Degraded, never a null total. Accepted: the invoice's
+    /// outcome. Rejected: status only (the rejection findings are not projected yet). Failed or an unknown status:
+    /// <see cref="FirmOutcomeKind.Closed"/>.
     /// </summary>
+    /// <param name="invoiceDecided">
+    /// Whether the caller decided the submission's derived invoice by the invoice rule (the route's <c>FirmOutcomeScope.InvoiceDecided</c>; an
+    /// internal caller that shows the invoice passes true). False (130b fix round 2, F1): nothing is read from that invoice. Received or
+    /// Processing is the status with no billed total; Accepted is <see cref="FirmOutcomeKind.Unavailable"/> (a 503: the retry is decided
+    /// afresh, now that the invoice exists).
+    /// </param>
     /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
-    public async Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, CancellationToken ct)
+    public async Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, bool invoiceDecided, CancellationToken ct)
     {
         if (submissionId == Guid.Empty)
         {
@@ -313,6 +335,12 @@ public sealed class FirmFindingsProjection
             case (int)InvoiceSubmissionStatus.Received:
             case (int)InvoiceSubmissionStatus.Processing:
                 var label = status == (int)InvoiceSubmissionStatus.Received ? "Received" : "Processing";
+                if (!invoiceDecided)
+                {
+                    // The invoice was not decided (it did not exist when the caller checked): its total is not read, whether or not it exists now.
+                    return new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, tracking, label, null, null, [], false);
+                }
+
                 decimal? billed;
                 try
                 {
@@ -330,8 +358,25 @@ public sealed class FirmFindingsProjection
 
                 return new FirmOutcome(FirmOutcomeKind.SubmissionInProgress, tracking, label, billed, null, [], false);
             case (int)InvoiceSubmissionStatus.Accepted:
-                return await GetForInvoiceAsync(InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct).ConfigureAwait(false)
-                    ?? Unavailable();
+                if (!invoiceDecided)
+                {
+                    // Accepted since the caller checked (the invoice was created after it): no invoice content without its decision. A 503; the
+                    // retry decides the invoice.
+                    _logger.LogInformation("Submission {Id} is Accepted but its invoice was not decided by the caller; the firm outcome is unavailable.",
+                        submissionId);
+                    return Unavailable();
+                }
+
+                var accepted = await GetForInvoiceAsync(InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct).ConfigureAwait(false);
+                if (accepted is null)
+                {
+                    // Inconsistent data, not a fault that a retry clears: an Accepted submission always has its invoice. Logged with a stable code.
+                    _logger.LogError("[{Code}] Submission {Id} is Accepted but its invoice does not exist; the firm outcome is unavailable.",
+                        AcceptedWithoutInvoiceCode, submissionId);
+                    return Unavailable();
+                }
+
+                return accepted;
             case (int)InvoiceSubmissionStatus.Rejected:
                 return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
             case (int)InvoiceSubmissionStatus.Failed:
@@ -422,8 +467,11 @@ public sealed class FirmFindingsProjection
         var clauses = new Dictionary<Guid, FirmClauseText>();
         foreach (var versionId in rules.Keys)
         {
-            clauses[versionId] = await _clauses(versionId, invoiceId, ct).ConfigureAwait(false) ?? FirmClauseText.None;
+            clauses[versionId] = await ReadClauseAsync(versionId, invoiceId, ct).ConfigureAwait(false);
         }
+
+        // Fix round 2: only the versions the policy's firm flag publishes (clause text) and that are not an InternalStandard Procedure's.
+        var citable = await CitableVersionsAsync(rules, clauses, invoiceId, ct).ConfigureAwait(false);
 
         var items = new List<FirmOutcomeItem>(lineCandidates.Count + adjustmentRows.Count);
         foreach (var candidate in lineCandidates)
@@ -435,7 +483,7 @@ public sealed class FirmFindingsProjection
             if (record is not null && signalsOf.TryGetValue(record.Id, out var resolved))
             {
                 foreach (var byVersion in resolved
-                    .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } v && rules.ContainsKey(v))
+                    .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } v && citable.Contains(v))
                     .GroupBy(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id))
                 {
                     var firmReason = byVersion.Select(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason"))).FirstOrDefault(t => t is not null);
@@ -460,7 +508,7 @@ public sealed class FirmFindingsProjection
         foreach (var row in adjustmentRows)
         {
             var citations = new List<FirmOutcomeCitation>();
-            if (row.GetAttributeValue<EntityReference>(InvoiceAdjustmentService.LineRule)?.Id is { } versionId && rules.ContainsKey(versionId))
+            if (row.GetAttributeValue<EntityReference>(InvoiceAdjustmentService.LineRule)?.Id is { } versionId && citable.Contains(versionId))
             {
                 citations.Add(Cite(rules[versionId], clauses[versionId], firmReason: null));
             }
@@ -482,13 +530,99 @@ public sealed class FirmFindingsProjection
     }
 
     /// <summary>
-    /// A rule's citation under the visibility rule: the label, version, section and quote only when the clause reader returned text for this
-    /// version on this invoice (flag on and applied); otherwise the rule name and the firm reason only.
+    /// A citable rule's citation (<see cref="CitableVersionsAsync"/> decided it may be shown): the rule name, the firm reason, and the label,
+    /// version, section and quote the clause reader published. Never called for a version that is not citable: such a rule has no citation.
     /// </summary>
     private static FirmOutcomeCitation Cite(RuleRead rule, FirmClauseText clause, string? firmReason) =>
-        clause.Quote is not null || clause.SectionReference is not null
-            ? new FirmOutcomeCitation(rule.Name, firmReason, clause.FirmFacingName, rule.Number, clause.SectionReference, clause.Quote)
-            : new FirmOutcomeCitation(rule.Name, firmReason, null, null, null, null);
+        new(rule.Name, firmReason, clause.FirmFacingName, rule.Number, clause.SectionReference, clause.Quote);
+
+    /// <summary>A clause the reader published: a quote or a section reference (a label alone is not a clause).</summary>
+    private static bool Published(FirmClauseText clause) => clause.Quote is not null || clause.SectionReference is not null;
+
+    /// <summary>
+    /// The clause the firm may be shown for <paramref name="versionId"/> on this invoice (<see cref="FirmClauseReader"/>: the flag and the
+    /// snapshot). A fault reading it is no clause, so the citation is omitted (fail closed; 130b fix round 2), never a guess.
+    /// </summary>
+    private async Task<FirmClauseText> ReadClauseAsync(Guid versionId, Guid invoiceId, CancellationToken ct)
+    {
+        try
+        {
+            return await _clauses(versionId, invoiceId, ct).ConfigureAwait(false) ?? FirmClauseText.None;
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            _logger.LogWarning("A firm clause read faulted ({ExceptionType}) for invoice {Id}; that rule is not cited.", ex.GetType().Name, invoiceId);
+            _logger.LogDebug(ex, "Firm clause read fault detail");
+            return FirmClauseText.None;
+        }
+    }
+
+    /// <summary>
+    /// The versions a firm may see cited (130b fix round 2): the clause reader published text for them (the policy's firm flag on and the
+    /// invoice's snapshot applied them) AND their rule set is not an InternalStandard Procedure's, whatever that set's flag says. A rule set with
+    /// no Procedure (a legacy or a record rule set) is decided by its flag alone. Fails closed: a rule set or Procedure that cannot be read, a
+    /// Procedure with no type, or a fault reading either, cites nothing. Reads only the rule set's Procedure link and the Procedure's type,
+    /// never a name.
+    /// </summary>
+    private async Task<HashSet<Guid>> CitableVersionsAsync(
+        IReadOnlyDictionary<Guid, RuleRead> rules, IReadOnlyDictionary<Guid, FirmClauseText> clauses, Guid invoiceId, CancellationToken ct)
+    {
+        var published = rules.Keys.Where(v => Published(clauses[v]) && rules[v].RuleSetId is not null).ToList();
+        if (published.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            var setIds = published.Select(v => rules[v].RuleSetId!.Value).Distinct().OrderBy(id => id).ToList();
+            var procedureOf = new Dictionary<Guid, Guid?>();
+            foreach (var set in await ReadByIdsAsync(RuleSetService.RuleSetEntity, setIds, RuleSetService.ProcedureColumn, ct).ConfigureAwait(false))
+            {
+                procedureOf[set.Id] = set.GetAttributeValue<EntityReference>(RuleSetService.ProcedureColumn)?.Id;
+            }
+
+            var procedureIds = procedureOf.Values.OfType<Guid>().Distinct().OrderBy(id => id).ToList();
+            var typeOf = new Dictionary<Guid, int?>();
+            foreach (var procedure in await ReadByIdsAsync(ProcedureEntity.Entity, procedureIds, ProcedureEntity.TypeColumn, ct).ConfigureAwait(false))
+            {
+                typeOf[procedure.Id] = procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value;
+            }
+
+            return published.Where(v => procedureOf.TryGetValue(rules[v].RuleSetId!.Value, out var procedureId)
+                    && (procedureId is null
+                        || (typeOf.TryGetValue(procedureId.Value, out var type) && type is { } t && t != (int)ProcedureType.InternalStandard)))
+                .ToHashSet();
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            _logger.LogWarning("A firm outcome read faulted ({ExceptionType}) deciding the citations of invoice {Id}; no rule is cited.",
+                ex.GetType().Name, invoiceId);
+            _logger.LogDebug(ex, "Firm citation decision fault detail");
+            return [];
+        }
+    }
+
+    /// <summary>The rows of <paramref name="entity"/> with these ids, one column (app-only, chunked). Rows not asked for are dropped.</summary>
+    private async Task<List<Entity>> ReadByIdsAsync(string entity, IReadOnlyList<Guid> ids, string column, CancellationToken ct)
+    {
+        var rows = new List<Entity>();
+        foreach (var chunk in ids.Chunk(ChunkSize))
+        {
+            var query = new QueryExpression(entity)
+            {
+                ColumnSet = new ColumnSet(column),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
+                NoLock = true,
+            };
+            query.Criteria.AddCondition($"{entity}id", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            query.AddOrder($"{entity}id", OrderType.Ascending);
+            rows.AddRange(await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false));
+        }
+
+        return rows.Where(r => ids.Contains(r.Id)).ToList();
+    }
 
     // ── Reads (app-only, each bounded by this invoice) ──
 
@@ -582,9 +716,10 @@ public sealed class FirmFindingsProjection
             .ToList();
     }
 
-    private sealed record RuleRead(string? Name, int? Number);
+    /// <param name="RuleSetId">The policy's rule set (for the Procedure-type decision only; never shown).</param>
+    private sealed record RuleRead(string? Name, int? Number, Guid? RuleSetId);
 
-    /// <summary>The rule name (the policy's, never the rule set's) and version number of each version; a version whose Billing policy cannot be read is left out.</summary>
+    /// <summary>The rule name (the policy's, never the rule set's), version number and rule set of each version; a version whose Billing policy cannot be read is left out.</summary>
     private async Task<Dictionary<Guid, RuleRead>> ReadRulesAsync(IReadOnlyList<Guid> versionIds, CancellationToken ct)
     {
         var rules = new Dictionary<Guid, RuleRead>();
@@ -616,7 +751,7 @@ public sealed class FirmFindingsProjection
         {
             var query = new QueryExpression(RuleSetService.PolicyEntity)
             {
-                ColumnSet = new ColumnSet("sprk_name", RuleDomains.PolicyDomainColumn),
+                ColumnSet = new ColumnSet("sprk_name", RuleDomains.PolicyDomainColumn, "sprk_ruleset"),
                 Criteria = new FilterExpression(LogicalOperator.And),
                 PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
                 NoLock = true,
@@ -634,7 +769,9 @@ public sealed class FirmFindingsProjection
             if (version.GetAttributeValue<EntityReference>("sprk_policy")?.Id is { } policyId
                 && policies.TryGetValue(policyId, out var policy) && RuleDomains.IsBillingRow(policy))
             {
-                rules[version.Id] = new RuleRead(NullIfBlank(policy.GetAttributeValue<string>("sprk_name")), version.GetAttributeValue<int?>("sprk_versionnumber"));
+                rules[version.Id] = new RuleRead(
+                    NullIfBlank(policy.GetAttributeValue<string>("sprk_name")), version.GetAttributeValue<int?>("sprk_versionnumber"),
+                    policy.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id);
             }
         }
 
@@ -647,6 +784,9 @@ public sealed class FirmFindingsProjection
 
     /// <summary>The label of a status this contract does not know.</summary>
     internal const string ClosedLabel = "Closed";
+
+    /// <summary>The stable log code of an Accepted submission whose invoice does not exist (inconsistent data; 130b fix round 2).</summary>
+    internal const string AcceptedWithoutInvoiceCode = "EBILLING-FIRM-OUTCOME-ACCEPTED-WITHOUT-INVOICE";
 
     /// <summary>A permanent state: the status label and tracking number only, no items, no totals, not degraded.</summary>
     private static FirmOutcome Closed(string? tracking, string label) => new(FirmOutcomeKind.Closed, tracking, label, null, null, [], false);

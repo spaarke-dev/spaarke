@@ -8,7 +8,9 @@
 // visibility decision, ADR-008: the projection has no caller check) and, after it, RequireEbillingEnabled (ADR-018: the flag never replaces
 // authorization). The handler runs only behind the filter and projects the id the filter decided.
 // Workforce ceiling (uac-r2 task 186, run first by the group's filter, independent of the id): each route declares Read on every table it returns
-// (WorkforceRoleCeilingGate.ReadInvoiceOutcome / ReadSubmissionOutcome); a workforce SYSTEMUSER is refused by the route's filter whatever its role.
+// (WorkforceRoleCeilingGate.ReadInvoiceOutcome / ReadSubmissionOutcome: the invoice, line, Decision Record and Signal tables); a workforce
+// SYSTEMUSER is refused by the route's filter whatever its role. Rule citations are not a table the route returns as such: a citation is shown
+// only as the policy's firm flag publishes it (FirmFindingsProjection).
 
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Services.Finance;
@@ -63,20 +65,22 @@ public static class FirmOutcomeEndpoints
 
     private static async Task<IResult> GetSubmissionOutcomeAsync(HttpContext http, FirmFindingsProjection projection, CancellationToken ct)
     {
-        if (Scope(http) is not { Subject: FirmOutcomeSubject.Submission, SubjectId: var submissionId })
+        if (Scope(http) is not { Subject: FirmOutcomeSubject.Submission, SubjectId: var submissionId, InvoiceDecided: var invoiceDecided })
         {
             return FirmOutcomeErrors.Forbidden();
         }
 
-        return ToResult(http, await projection.GetForSubmissionAsync(submissionId, ct));
+        // Fix round 2 (F1): whether the filter decided the submission's invoice. When it did not (the invoice did not exist yet), the projection
+        // reads nothing of that invoice: an in-progress submission is status only, and an accepted one is a 503 so the retry is decided afresh.
+        return ToResult(http, await projection.GetForSubmissionAsync(submissionId, invoiceDecided, ct));
     }
 
     /// <summary>
     /// A projection that read nothing (the id vanished since the filter decided it) is the same 403 as any other refusal. One that did not
-    /// complete because a read FAULTED (<see cref="FirmOutcome.Degraded"/>, or <see cref="FirmOutcomeKind.Unavailable"/>) is a retryable 503,
-    /// never a 200 with an empty list (130a). A permanent state (<see cref="FirmOutcomeKind.Closed"/>: a failed submission, a cancelled or
-    /// superseded invoice, an unknown status) is a 200 with the status only: retrying would never change it. Anything else is the outcome. Not
-    /// cacheable: it names what a reviewer decided.
+    /// complete because a read FAULTED, or because the filter did not decide the invoice it would show (<see cref="FirmOutcome.Degraded"/>, or
+    /// <see cref="FirmOutcomeKind.Unavailable"/>), is a retryable 503, never a 200 with an empty list (130a). A closed state at the time of the
+    /// request (<see cref="FirmOutcomeKind.Closed"/>: a failed submission, a cancelled or superseded invoice, an unknown status) is a 200 with the
+    /// status only. Anything else is the outcome. Not cacheable: it names what a reviewer decided.
     /// </summary>
     private static IResult ToResult(HttpContext http, FirmOutcome? outcome)
     {

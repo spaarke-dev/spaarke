@@ -44,7 +44,12 @@ public static class FirmOutcomeAuthorizationFilterExtensions
 /// <summary>What the filter decided, for the handler that runs after it: the one id the caller may be told about.</summary>
 /// <param name="Subject">Whether <paramref name="SubjectId"/> is an invoice or a submission.</param>
 /// <param name="SubjectId">The invoice or submission, as READ server-side (never a request field beyond the route's own id, which was checked).</param>
-internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid SubjectId)
+/// <param name="InvoiceDecided">
+/// True when this filter decided, by the invoice rule, the invoice the outcome would show (the invoice route's own invoice, or a submission's
+/// derived invoice that existed when the filter looked). False only for a submission whose invoice did not exist yet: the handler then shows
+/// nothing read from that invoice (130b fix round 2, F1), even if it has been created since, because no invoice decision covers it.
+/// </param>
+internal sealed record FirmOutcomeScope(FirmOutcomeSubject Subject, Guid SubjectId, bool InvoiceDecided)
 {
     /// <summary>HttpContext.Items key under which the decided scope is stored.</summary>
     internal static readonly object HttpContextItemsKey = new();
@@ -140,7 +145,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return FirmOutcomeErrors.Forbidden();
         }
 
-        var denial = _subject == FirmOutcomeSubject.Invoice
+        var (denial, invoiceDecided) = _subject == FirmOutcomeSubject.Invoice
             ? await DecideInvoiceAsync(principal, firms, subjectId, ct)
             : await DecideSubmissionAsync(principal, firms, subjectId, ct);
         if (denial is not null)
@@ -148,7 +153,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
             return denial;
         }
 
-        http.Items[FirmOutcomeScope.HttpContextItemsKey] = new FirmOutcomeScope(_subject, subjectId);
+        http.Items[FirmOutcomeScope.HttpContextItemsKey] = new FirmOutcomeScope(_subject, subjectId, invoiceDecided);
         return await next(context);
     }
 
@@ -182,7 +187,12 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
     // ── Invoice ──
 
-    private async Task<IResult?> DecideInvoiceAsync(CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct, bool missingPasses = false)
+    /// <summary>
+    /// The invoice rule. Returns a refusal, or no refusal with <c>InvoiceDecided</c> true when the invoice passed it. A submission's invoice that
+    /// does not exist yet (<paramref name="missingPasses"/>) passes UNDECIDED (<c>InvoiceDecided</c> false), so nothing of it is shown.
+    /// </summary>
+    private async Task<(IResult? Denial, bool InvoiceDecided)> DecideInvoiceAsync(
+        CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid invoiceId, CancellationToken ct, bool missingPasses = false)
     {
         IReadOnlyDictionary<string, object?> invoice;
         try
@@ -191,20 +201,21 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         }
         catch (RecordNotFoundException)
         {
-            // No such invoice: the SAME 403 as another firm's (a 404 would be an existence oracle); a submission's not-yet-created invoice passes.
-            return missingPasses ? null : FirmOutcomeErrors.Forbidden();
+            // No such invoice: the SAME 403 as another firm's (a 404 would be an existence oracle). A submission's not-yet-created invoice
+            // passes, but undecided: the handler shows nothing read from it, even if it is created before the projection runs.
+            return missingPasses ? (null, false) : (FirmOutcomeErrors.Forbidden(), false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The invoice's firm and core record could not be read; answering 503.");
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
 
         // The firm: a missing or malformed value names no firm, so it matches none of the caller's.
         if (!invoice.TryGetValue("sprk_vendororg", out var firm) || firm is not Guid firmId || firmId == Guid.Empty || !firms.Contains(firmId))
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice's firm is not one of the caller's firms.");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         // The core record: Read on the invoice's matter, project or work assignment (the union the invoices module and the invoice
@@ -215,7 +226,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         if (!readable)
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the invoice's core record.");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         // THE (a') decision every external invoice read applies: a hidden invoice is another firm's, refused and never projected. No
@@ -223,7 +234,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         if (_hideInvoices is null)
         {
             _logger.LogError("[EBILLING-FIRM-OUTCOME] The invoice decision (ExternalInvoiceHiding) is not registered; denying (fail closed).");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         InvoiceVisibilityResult decision;
@@ -234,21 +245,21 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The invoice visibility decision faulted; answering 503.");
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
 
         if (decision.Faulted)
         {
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
 
         if (!decision.IsVisible(invoiceId))
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the invoice is hidden from the caller ({Reasons}).", decision.HiddenSummary());
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
-        return null;
+        return (null, true);
     }
 
     /// <summary>The core record lookups of an invoice and the grant root each is checked against.</summary>
@@ -261,7 +272,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
     // ── Submission ──
 
-    private async Task<IResult?> DecideSubmissionAsync(CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid submissionId, CancellationToken ct)
+    private async Task<(IResult? Denial, bool InvoiceDecided)> DecideSubmissionAsync(CallerPrincipal principal, IReadOnlyList<Guid> firms, Guid submissionId, CancellationToken ct)
     {
         InvoiceSubmissionView? view;
         try
@@ -271,20 +282,20 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         catch (SdapProblemException ex)
         {
             _logger.LogWarning("[EBILLING-FIRM-OUTCOME] The submission could not be read ({Code}); answering 503.", ex.Code);
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
 
         // Another firm's, a missing one and one with no firm or core record are all the same 403.
         if (view is not { FirmId: { } firmId, CoreRecord: { } core } || !firms.Contains(firmId))
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the submission is missing or its firm is not one of the caller's firms.");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         if (!principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the caller cannot read the submission's core record.");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         // THE (a') decision the submission list and the single read apply (one seam): with an invoice, the invoice predicate; without one,
@@ -296,25 +307,26 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
         }
         catch (SdapProblemException)
         {
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[EBILLING-FIRM-OUTCOME] The submission visibility decision faulted; answering 503.");
-            return FirmOutcomeErrors.Unavailable();
+            return (FirmOutcomeErrors.Unavailable(), false);
         }
 
         if (visible.Count == 0)
         {
             _logger.LogInformation("[EBILLING-FIRM-OUTCOME] Denied: the submission is hidden from the caller.");
-            return FirmOutcomeErrors.Forbidden();
+            return (FirmOutcomeErrors.Forbidden(), false);
         }
 
         // The invoice the projection would show for this submission (the derived id GetForSubmissionAsync reads: its billed total while
         // Received or Processing, its whole outcome once Accepted) is decided exactly as the invoice route decides it: its OWN firm among the
         // caller's, Read on its OWN core record, and the (a') predicate. The submission's firm and core record are the submission's own
         // columns and say nothing about the invoice's. A submission is shown only when it AND its invoice are the caller's to see. No invoice
-        // yet passes (there is nothing of it to show); a refusal is the same 403, a fault the same 503.
+        // yet passes UNDECIDED (InvoiceDecided false): the projection then reads nothing of the invoice, so one created after this check is
+        // never shown without it (fix round 2, F1). A refusal is the same 403, a fault the same 503.
         return await DecideInvoiceAsync(principal, firms, InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct, missingPasses: true);
     }
 }
