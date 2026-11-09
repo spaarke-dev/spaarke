@@ -472,3 +472,99 @@ Results: the filtered external-access suites (7130 tests) pass; `tests/Spaarke.A
 Seeding proofs (each file restored byte-identical, same SHA-256):
 - The five production files (`ExternalDataService`, `ExternalInvoiceVisibility`, `ExternalProjectDataEndpoints`, `ExternalMessageEndpoints`, `CommunicationThreadReadService`) set back to the round 2 version: 15 of 15 new must-fire tests fail (single-record 503s, the missing to-do 403, the absent link cases, the thread select).
 - `ExternalModuleRegistry` set back to the round 2 version: 5 of 8 guard and typing tests fail.
+
+## Fix round 3b
+
+### A document root link column that was not read is unreadable
+
+`ExternalDataService.DocumentRootLinks` is the one input to the secure-roots rule for a document's six root link columns. Before this round a root link column that was ABSENT from a Web API row read as "not filed to that root", so a read whose select left a column out skipped that root's check. Now an absent column reads as `DocumentRootLinks.Unreadable` (a value that is not a GUID, which the secure-roots rule already withholds); an explicit JSON null is still "not filed".
+
+- `DocumentRootLinks.From` (single-row Web API reads): an absent column is `Unreadable`.
+- The list path deserialises into the typed `DocumentRow`, where absent and null were indistinguishable. Each root link setter on `DocumentRow` now records that its column was present (an explicit null included), and `DocumentLinksOf` reads an unrecorded column as `Unreadable`. No new type or service.
+- FetchXML: no FetchXML path feeds `DocumentRootLinks` (`From` and `DocumentLinksOf` are the only producers, and every caller reads Web API JSON; the documents module reads take their root links from `ExternalModuleDescriptor.RootLinks`, which `EnsureProjected` already projects server-side). So no FetchXML pin is needed for this type; the select pins below are on the Web API reads.
+
+Every caller and its select (all select all six columns, so visible documents do not start failing; none needed a fix):
+
+| Caller | Read | Select source | Pinned by |
+|---|---|---|---|
+| `GetDocumentsAsync` (document list, every parent kind) | Web API list | `BuildDocumentListUrl` names the six columns | `TheListSelect_NamesEveryRootLinkColumn` (5 parent kinds) |
+| `GetDocumentParentAndNameAsync` (content and versions routes) | Web API single row | `DocumentRootLinks.SelectColumns` | `TheScopingRead_SelectsEveryRootLinkColumn`, through the real fetch (5 parent kinds) |
+| `CheckLiveParentsAsync` (document delete-own) | Web API single row | `BuildLiveParentCheckUrl` adds `DocumentRootLinks.SelectColumns` | `TheDeleteOwnLiveParentRead_SelectsEveryRootLinkColumn`, through the real fetch |
+| `ExternalInvoiceVisibility.DecideSourceDocumentsAsync` (invoice source documents) | Web API by id | `SourceSelectColumns` includes `DocumentRootLinks.SelectColumns` | `TheInvoiceSourceDocumentRead_SelectsEveryRootLinkColumn` (and the existing `TheSourceRead_SelectsEveryColumnTheRuleReads`) |
+| `CreateDocumentAsync` response row | `return=representation` | not a rule input (mapped to the wire DTO only) | n/a |
+
+Test doubles that hand-built a document row now return the root link columns as explicit nulls, as the Web API does for a selected unset lookup: `InvoiceWorld.Document` and `ExternalDataServiceTests.DocumentRowJson`.
+
+### Uniform refusal on `GET /api/v1/external/api/dataverse/record/{entity}/{id}`
+
+A record inside the caller's own accessible set that no longer exists answered 404 (`DV_RECORD_NOT_FOUND`); an id outside the set answered 403 (`sdap.external.module.record_not_in_accessible_set`). The `RecordNotFoundException` branch of `GetScopedRecordCoreAsync` now answers the same `ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible)` as the Tier-2 gate, so a missing id, a record gone from the set and an out-of-set id have one status and one body. A faulted read stays the distinct 500; a 503 for a faulted invoice decision is not part of this route (a root's invoice link is redacted there, not refused) and is unchanged everywhere. The `.ProducesProblem(404)` on the route is removed.
+
+Census of `ExternalModuleDataEndpoints.cs` (the only file with a `/data/record` route; the to-do and project routes were censused in round 3):
+
+| Route | Before | After | Changed |
+|---|---|---|---|
+| `GET /api/dataverse/record/{entity}/{id}` out of the set | 403 `record_not_in_accessible_set` | same | No |
+| `GET /api/dataverse/record/{entity}/{id}` missing id (outside the set) | 403 (same as above) | same | No |
+| `GET /api/dataverse/record/{entity}/{id}` in the set, record gone | 404 `DV_RECORD_NOT_FOUND` | 403 `record_not_in_accessible_set` | Yes |
+| `GET /api/dataverse/record/{entity}/{id}` entity with no module | 403 `module.not_registered` | same | No (names an entity, not a record) |
+| `GET /api/dataverse/record/{entity}/{id}` column outside the allow-list | 400 | same | No (input check, identical for every caller) |
+| `GET /api/dataverse/record/{entity}/{id}` read fails | 500 | same | No (distinct by design) |
+| `POST /api/dataverse/fetch` | rows scoped to the set (never a per-record 404) | same | No |
+| `GET /api/dataverse/metadata/{entity}` | 404 only for a registered module whose entity has no metadata | same | No (schema, not a record) |
+| `GET /api/dataverse/savedquery/{id}`, `/savedqueries/{entity}` | one uniform 404 for unknown, unregistered and denied views | same | No (view definitions, already uniform) |
+
+External SPA (`src/client/external-spa`): no caller depends on a 404 from the record route. `RecordDetailModal` reads a record through the id-filtered module fetch (`RecordDetailFields.tsx` notes the record route is not used) and treats no row as denied. The only path to the route is `gridDataverseClient.retrieveRecord` (a delegating adapter over `BffDataverseClient.retrieveRecord`, which throws the mapped error for any non-2xx); no external-spa source calls it, and its tests (`backend-selection.test.ts`) assert only the URL. The 404 handling in `RecordDetailModal`, `RecordMessages` and `ProjectPage` belongs to other routes (messages, project). The `notfound` UI state in `RecordDetailModal` is now reachable only by a malformed or missing route id, not by this route.
+
+### One notion of an invoice decision fault (A)
+
+Production sets a per-invoice `InvoiceHiddenReason.ReadFailed` only together with `InvoiceVisibilityResult.Faulted`, but the result type allows one without the other, and the sites that asked the whole-result `Faulted` would have read a per-invoice failure as "hidden". `InvoiceVisibilityResult.AnyFaulted` (the whole result faulted, or any invoice's own decision could not be made) is now the one question. A decided "not visible" invoice is not a fault.
+
+| Site | Reads | Before | After |
+|---|---|---|---|
+| `ExternalDataService.HideInvoiceLinkedRowsAsync` (lists of invoice-linked children) | `Truncated` | whole-result fault only | also a row dropped for an invoice whose own decision failed (`IsFaultedFor`) |
+| `ExternalMessageEndpoints` thread filter (`invoiceFault`) | `Truncated` | `Faulted` | `AnyFaulted` |
+| `ExternalModuleDataEndpoints.HideInvoiceRowsAsync` (invoices module list) | `Truncated` | `Faulted` | `AnyFaulted` |
+| `ExternalInvoiceSubmissionEndpoints` submission read and list, submission decision and invoice decision | 503 | `Faulted` | `AnyFaulted` |
+| `ExternalModuleDataEndpoints.RedactRootInvoiceLinksAsync` | link shown | visible and not whole-result faulted | visible and not `AnyFaulted` |
+
+Left on the per-invoice question already: single invoice-linked reads (`DecideInvoiceLinkedRowAsync`, `IsFaultedFor`, round 3). Left on the whole-result question on purpose: `AskInvoiceDecisionAsync` (it classifies the ask, not a row) and the assistant plane.
+
+### `/data/record/{entity}/{id}` gate (B)
+
+`ExternalModuleDescriptor.IsRecordAccessible` (`ExternalModuleRegistry.cs:288-295`) passes only an id that is in one of the module's accessible dimension sets, and the route calls it before any read (`ExternalModuleDataEndpoints.cs:739`). The sets hold root ids (matter, project, work assignment) and the doc comment says a child's own id is never in one (fails closed). So this route serves root tables only, an invoice or an invoice-linked child id never reaches the read, and no per-invoice decision is needed there. A root row it returns goes through `RedactRootInvoiceLinksAsync` (row above). No code change.
+
+### Secure-roots modules and the lineage map (C)
+
+`ValidateRootDimensionsAreTyped` returned early for a table that is not a key of `SecureChildLineage.Children`, so a secure-roots module on such a table was never checked. The early return is now only for a module without the rule. A secure-roots module on a table outside the lineage map is refused at registration: the rule cannot be applied to such a table anyway (`ChildRowRoots.Of` refuses it on the first row), so this moves a per-row failure to registration. Every production module with the rule is in the map (the production registry test builds them all).
+
+### Known limit
+
+- A live-parent lookup column (`ExternalMultiRootRule.LiveParentsOf`, Web API overload) that is absent from a row still reads as "not filed there". Every Web API read that feeds it selects `LiveParentSelect(table)`, but it is not pinned the way the root links now are. Not changed in this round (outside the two requested fixes); reported for a follow-up.
+
+### Tests (fix round 3b)
+
+New:
+- `ExternalDocumentRootLinkReadTests` (integration/contract): single document refused when a root link column is not returned (30 cases: 3 routes by content and versions by the 5 non-route columns, each with a served control); explicit nulls served (6); list hides the rows when a column is not returned (15, each with a listed control); explicit nulls listed; `DocumentRootLinks.From` absent versus null; the four select pins.
+- `ExternalModuleRecordRefusalTests` (integration/auth): missing, gone and out-of-set give an identical status and body (and the read counts); an existing in-set record is returned (must not fire); a failed read stays 500 (must not fire).
+
+Existing tests changed because the behaviour changed on purpose:
+- `ExternalModuleDataContractTests.ModuleRecord_WhenSelectIsReadable_PassesTheColumnCheckAndReachesTheRead` and `ModuleRecord_MatterGrantRowWithALevel_PassesTheTier2Gate`: used the 404 as the proof that the request reached the read. They now expect the 403 and assert the read count on the fixture's `IDataverseService` double (1 past the gate); the no-level test also asserts 0 reads.
+- `ExternalDataServiceTests.DocumentRowJson` and `InvoiceWorld.Document`: explicit null root links (above).
+
+Also new in this round, for the fault notion and the registry check:
+- Per-invoice decision fault (`InvoiceHidingStub.PerInvoiceFault`, the result not faulted as a whole), each with a decided-hidden control: the submission read and list (503 on both), the matter thread (`Truncated`), the invoices module list (`Truncated`), and the invoice-linked child filter (`Truncated`).
+- `ExternalModuleRootTypingTests`: a secure-roots module on a table outside the lineage map is refused; the same module without the rule registers.
+- `Issue963_ExternalDataPagingTests`: its document rows now carry the root link columns as explicit nulls (test double only).
+
+Counts: BFF build 0 errors, 0 warnings. `Spaarke.ArchTests` (full): 2181 passed, 0 failed. Broad filtered run of `Sprk.Bff.Api.Tests` (external access, unified access control, finance, document, dataverse, invoice submission): 17513 total, 17504 passed, 5 skipped, 4 failed. Three of the four were 3-minute client timeouts under machine load (two document identity tests and the external-access admin route characterization test); the fourth was the Issue963 test double above. The re-run of those classes together with every new and changed class (706 tests) passed.
+
+Seeding proofs (production files restored to `ed11b30f95`, plus one `Unreadable` constant so the tests compile; 104 tests of the new and changed classes: 55 failed, 49 passed). Failed before, pass after: single document with a root column not returned (30), document list with a column not returned (15), `DocumentRootLinks.From` absent versus null, `/record` missing, gone and out-of-set (1 refusal test and 3 contract tests that expect 403), root typing outside the lineage map, and each per-invoice fault test (thread, child filter, module list, submission). The must-not-fire controls passed in both states. Files restored byte-identical (SHA-256 checked) and touched:
+
+| File | SHA-256 |
+|---|---|
+| `ExternalDataService.cs` | `179f0f3a4ffae8d81b2386d07f95384a7344fddb599517a0b7a040c78a146676` |
+| `ExternalInvoiceVisibility.cs` | `3790a84e4fe660e9468e77ca3ab648645a717dd5306eb1c1abe6f9ddbfe4bfd4` |
+| `ExternalModuleRegistry.cs` | `bb0547ba4c1adb673d458ba5614985de1f9970782cb6fdbfed6feb61f40f6450` |
+| `ExternalModuleDataEndpoints.cs` | `0711f22c429b86344ca8b142cf1b7d3c2e6d465fb8360d9c58d8bd1342e40753` |
+| `ExternalMessageEndpoints.cs` | `825ee8132ad0d2c31313e70636e692927c1e0ba7649ac94b3892d6d7a2a4cb87` |
+| `ExternalInvoiceSubmissionEndpoints.cs` | `a7d98508ed3492c2fc6913fa4accf112ca2cdbadf0bd1fcbff15ea56dc25e980` |
