@@ -510,11 +510,53 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     [Fact]
-    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind_MatterToInvoice()
+    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind()
     {
         await using var host = await PushHost.StartAsync();
-        // Task 040 fix round 1: sprk_invoice.sprk_assignedtoattorney1 is an Assigned-To column of the registry, so the attorney
-        // rule is pushed only on a request that opts in, which needs Write on the source.
+        // Task 032b-1: this ran Matter to Invoice until the invoice's attorney columns became display copies, which a push never
+        // writes (Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice). The lookup-bind proof is unchanged on the event target,
+        // where sprk_assignedtoattorney1 is plain data; the host gives every target the same schema-cased navigation property.
+        // The request still opts in (with Write on the source), as before.
+        host.Probe.Rights = AccessRights.Read | AccessRights.Write;
+        host.ArrangeHappyPathData(
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: AttorneyColumns(AttorneyId));
+
+        var response = await host.SendAsync(Authenticated(
+            new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo = true }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a lookup rule's push 500ed here (first seen on the live Matter to Invoice profile)");
+        host.SourceReads.Should().ContainSingle().Which.Should().Be(
+            ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+             CallerSystemUserId),
+            "still read AS THE CALLER (field-level security), now with the lookup's Web API property");
+        host.MetadataQueries.Should().Contain(
+            ("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships",
+             (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
+            "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
+        host.Writes.Should().HaveCount(2);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_event" && w.ImpersonatedAs == CallerSystemUserId,
+            "a child is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
+            ["sprk_clientreference"] = "REF-166",
+        }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+    }
+
+    /// <summary>
+    /// Task 032b-1 (U3 (c)): the invoice's attorney and paralegal columns are display copies. A push never writes one — not at
+    /// Manual Refresh, not when the request opts in to the Assigned-To rules — and the response counts it as a skipped rule. The
+    /// plain rule of the same profile is still written.
+    /// </summary>
+    [Fact]
+    public async Task Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice()
+    {
+        await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read | AccessRights.Write;
         host.ArrangeHappyPathData(
             targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
@@ -528,23 +570,12 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(
             new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_invoice", includeAssignedTo = true }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "the live Matter to Invoice (Attorney Matrix) push 500ed here");
-        host.SourceReads.Should().ContainSingle().Which.Should().Be(
-            ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
-             CallerSystemUserId),
-            "still read AS THE CALLER (field-level security), now with the lookup's Web API property");
-        host.MetadataQueries.Should().Contain(
-            ("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships",
-             (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
-            "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
-        host.Writes.Should().HaveCount(2);
-        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId,
-            "an invoice is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
-        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
-        {
-            ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
-            ["sprk_clientreference"] = "REF-166",
-        }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId);
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" },
+            "the display copy is written by the create only; a push never re-maps it"));
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
     }
 
     [Fact]

@@ -1281,7 +1281,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
 
-        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record.
+        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
+        // from its source describes the source's record: it goes unless the thread names that same record.
+        DropDisplayValuesUnlessSameRecord(communication, regarding.Id);
         if (!string.IsNullOrWhiteSpace(thread.RegardingName))
             communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
         communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
@@ -2907,6 +2909,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 primary.EntityType);
         }
 
+        // A reply's copied display values describe the SOURCE's record (CopyRegardingFromSourceAsync): unless the explicit
+        // association names that same record they leave with the id they described, so the row never holds one record's id
+        // beside another's values. The association's own name and url are written below when it gives them; otherwise they
+        // stay unset.
+        DropDisplayValuesUnlessSameRecord(communication, primary.EntityId);
+
         // Set denormalized regarding fields
         if (primary.EntityName is not null)
             communication["sprk_regardingrecordname"] = TruncateTo(primary.EntityName, 100);
@@ -2973,7 +2981,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var columns = new List<string>
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
-                "sprk_regardingrecordurl", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -2996,9 +3004,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Denormalized regarding pointer — copy only populated values (additive).
             CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            // The display values (name, url, number) and the pair's TYPE describe the record the id names, so they are copied
+            // only beside that id: the row must now hold the source's id, and it must parse as an id. A source with display
+            // values but no usable id copies none, so the row never holds values with nothing to say which record they are of.
+            // The type is a lookup to sprk_recordtype_ref, copied as a reference (045c, owner Q6 (c); the string read this
+            // replaces always came back empty, so a reply never carried the type).
+            if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"),
+                    source.GetAttributeValue<string>("sprk_regardingrecordid")))
+            {
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
+
+                if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
+                    && !communication.Attributes.ContainsKey("sprk_regardingrecordtype"))
+                {
+                    communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+                }
+            }
 
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
@@ -3020,6 +3044,30 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Fail closed (task 065 fix round 1): the parent's flag is unknown, so the reply is not shareable.
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whether two stored record ids name the same record: both parse as ids (braces, hyphens and letter case do not matter)
+    /// and are equal. A value that does not parse, or is absent, names no record, so it is different from every other value.
+    /// </summary>
+    private static bool SameRecord(string? left, string? right) =>
+        Guid.TryParse(left, out var a) && Guid.TryParse(right, out var b) && a == b;
+
+    /// <summary>
+    /// The display values of the regarding pointer (type, number, name, url) describe the record the row's
+    /// <c>sprk_regardingrecordid</c> names. Before that id is written for <paramref name="newRecordId"/>, they are removed
+    /// unless the row's current id already names that same record (<see cref="SameRecord"/>); an absent id counts as a
+    /// different record. The caller then writes whatever display values it has for the new record.
+    /// </summary>
+    private static void DropDisplayValuesUnlessSameRecord(DataverseEntity communication, Guid newRecordId)
+    {
+        if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"), newRecordId.ToString()))
+            return;
+
+        communication.Attributes.Remove("sprk_regardingrecordtype");
+        communication.Attributes.Remove("sprk_regardingrecordnumber");
+        communication.Attributes.Remove("sprk_regardingrecordname");
+        communication.Attributes.Remove("sprk_regardingrecordurl");
     }
 
     /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>

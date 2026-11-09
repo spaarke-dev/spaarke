@@ -17,6 +17,10 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// class of a column is decided by <see cref="AssignedToColumnsOf"/> over the BOUND registry, for any table — the one classifier.
 /// The sync-mode script's Assigned-To table and the provisioning seeder's seeded sync modes are pinned to the same answer by
 /// tests (<c>SyncModeMigrationClassDataTests</c>, <c>FieldMappingSeederSyncModeClassTests</c>).</para>
+/// <para><b>Display copies</b> (task 032b-1; <see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>: the invoice's four
+/// attorney and paralegal columns, which confer no access) are never pushed, whatever their sync mode and whatever
+/// <c>includeAssignedTo</c> says; they are counted with the skipped rules. Only the create maps them (no re-map). This is enforced
+/// here, so it does not depend on the rules' stored sync mode.</para>
 /// </remarks>
 internal static class PushRuleSelection
 {
@@ -44,6 +48,14 @@ internal static class PushRuleSelection
         {
             if (rule.MappingType != CreateTimeFieldMapping.MappingTypeCopy)
             {
+                skipped++;
+                continue;
+            }
+
+            if (IsDisplayCopy(targetEntity, rule.TargetField))
+            {
+                // Task 032b-1: a display copy is written by the create only; a push never re-maps it, whatever its sync mode
+                // and whether or not the request asked for the Assigned-To rules.
                 skipped++;
                 continue;
             }
@@ -86,6 +98,15 @@ internal static class PushRuleSelection
 
         return (table, column) => columns.Contains((Normalize(table), Normalize(column)));
     }
+
+    /// <summary>
+    /// Whether (table, column) is a display copy (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>, task 032b-1): an
+    /// <c>sprk_assigned*</c> value copied at create that confers no access and is never pushed. Names are compared as
+    /// <see cref="AssignedToColumnsOf"/> compares them.
+    /// </summary>
+    internal static bool IsDisplayCopy(string? table, string? column) =>
+        MembershipOptionsDefaults.DisplayCopyColumns.TryGetValue(Normalize(table), out var columns)
+        && columns.Contains(Normalize(column));
 
     private static string Normalize(string? name) => (name ?? string.Empty).Split('@')[0].Trim().ToLowerInvariant();
 }

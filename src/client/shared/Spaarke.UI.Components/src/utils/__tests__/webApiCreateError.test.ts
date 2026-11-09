@@ -3,8 +3,9 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * the two Xrm.WebApi create wizards end to end (Project, Matter), and the five BFF-routed create wizards end to end
- * (Event, Invoice, Report Card, To Do, Work Assignment) through the BFF's 403.
+ * the Xrm.WebApi create wizard end to end (Project), and the six BFF-routed create wizards end to end
+ * (Event, Invoice, Report Card, To Do, Work Assignment, Matter) through the BFF's 403. The Matter wizard moved to the
+ * BFF child-records route in field-mapping-server-write-path-r1 task 021.
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -343,24 +344,7 @@ describe('create wizards show the sentence for a privilege refusal and log the f
 
     expect(result.errorMessage).toBe(sentence);
   });
-
-  it('Matter: the sentence, no template, and the full error object in console.error', async () => {
-    const authFetch = jest
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({}), text: async () => '' });
-    const service = new MatterService(
-      rejectingDataService(PRIVILEGE_ERROR),
-      authFetch as unknown as typeof fetch,
-      'https://example.test',
-      'container'
-    );
-
-    const result = await service.createMatter(MATTER_FORM, [], {});
-
-    expect(result.status).toBe('error');
-    expect(result.errorMessage).toBe(NEUTRAL_SENTENCE('matter'));
-    expect(errorSpy).toHaveBeenCalledWith('[MatterService] createRecord error:', PRIVILEGE_ERROR);
-  });
+  // Matter: moved to the BFF child-records route (task 021) -- covered with the BFF-routed wizards below.
 });
 
 // ---------------------------------------------------------------------------
@@ -447,6 +431,7 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       'to do',
       f => new TodoService(readOnlyDataService(), f, BFF).createTodo({ ...EMPTY_TODO_FORM, title: 'Call' }),
     ],
+    ['Matter', 'matter', f => new MatterService(readOnlyDataService(), f, BFF).createMatter(MATTER_FORM, [], {})],
     [
       'Work Assignment',
       'work assignment',
@@ -468,5 +453,80 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
     expect(fetch.mock.calls.some(([url, init]) => CHILD_CREATE.test(url) && init?.method === 'POST')).toBe(true);
     expect(result.errorMessage).toBe(NEUTRAL_SENTENCE(noun));
     expect(result.errorMessage).not.toMatch(/prv|sprk_/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (task 021, F1): a ROOT create (the matter has no parent) answers the uniform 404 when a value it binds
+// is missing or not the caller's to use. The shared sentence says "a record this matter is filed under", which is wrong
+// here: the matter is filed under nothing. The matter's catch maps it to the sentence below.
+// ---------------------------------------------------------------------------
+
+const ROOT_NOT_FOUND_SENTENCE =
+  "One of the values you selected was not found, or you don't have permission to link it to this matter. Ask your administrator.";
+
+const BFF_NOT_FOUND = {
+  type: 'https://tools.ietf.org/html/rfc9110#section-15.5.5',
+  title: 'Not found',
+  status: 404,
+  detail: 'A record this matter is filed under was not found. The matter was not saved.',
+  reasonCode: 'child_record.not_found',
+};
+
+describe('a root create (matter) that gets the BFF uniform not-found', () => {
+  beforeEach(() => {
+    (global as any).fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ value: [] }) });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('describeWebApiCreateError with { rootCreate: true } maps child_record.not_found to the access-denied sentence', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'matter', { rootCreate: true })).toEqual({
+      message: ROOT_NOT_FOUND_SENTENCE,
+      isAccessDenied: true,
+    });
+  });
+
+  it('without the option the not-found keeps its own detail (the child wizards still say "filed under")', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'to do')).toEqual({ message: BFF_NOT_FOUND.detail, isAccessDenied: false });
+  });
+
+  it('the Matter wizard shows the sentence, never "filed under", and does not prefix "Failed to create"', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(404, BFF_NOT_FOUND)
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe(ROOT_NOT_FOUND_SENTENCE);
+    expect(result.errorMessage).not.toMatch(/filed under/i);
+  });
+
+  it('a different reasonCode on the matter create still gets the "Failed to create matter record" prefix', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(400, {
+            title: 'Bad',
+            status: 400,
+            detail: 'Name is required.',
+            reasonCode: 'child_record.invalid',
+          })
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.errorMessage).toBe('Failed to create matter record: Name is required.');
   });
 });

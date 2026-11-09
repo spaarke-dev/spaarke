@@ -62,6 +62,7 @@
 import {
   buildRegardingSelectionPayload,
   findHostNavPropForLookup,
+  nullRecordNumberWhenTargetHasNone,
   CORE_ANCESTOR_LOOKUPS,
   type CoreAncestorDerivationStatus,
   type ICoreAncestorStamp,
@@ -506,6 +507,9 @@ export async function applyRegardingSelection(
 
   // Persist immediately if we have a host record; otherwise return for pre-save staging.
   const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
+  // A re-regard of a SAVED host: when the new target has no number, the old target's number must not stay beside the new
+  // pair (045c). A new host has nothing to overwrite; its number rides the presave bridge (`recordNumber`), not the payload.
+  if (hasHostGuid) nullRecordNumberWhenTargetHasNone(payload, navProps);
   if (!hasHostGuid) {
     // v1.6.0 (task 147 r1): a NEW host's selection rides the form's own save, as the user. Never under a secure record.
     // Every DERIVED ancestor counts here, including one the host has no stamp column for (`unstampable`): the record

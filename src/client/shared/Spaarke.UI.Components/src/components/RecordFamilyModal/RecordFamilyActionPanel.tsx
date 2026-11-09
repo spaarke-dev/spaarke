@@ -45,6 +45,7 @@ import {
   buildPushRequest,
   groupRowsByTable,
   isNoFilingEdgeRefusal,
+  isNoProfileRefusal,
   PUSH_FAILED_TEXT,
   pushFieldMappings,
   type IPushError,
@@ -94,7 +95,17 @@ interface IReview {
   refusedCount: number;
   /** Tables no Filing edge joins to the source: their ticked records cannot be pushed to. */
   unsupportedTables: string[];
+  /** Tables with no field mapping profile from the source (404 `field_mapping_profile_missing`): nothing is set up to push there. */
+  noProfileTables: string[];
+  /**
+   * Rules the push does not apply, summed over the tables (`skippedRuleCount`): One-time rules, rules that are not a Copy, and
+   * (task 032b-1) a display copy such as an invoice's attorney columns. Their fields are set only when a record is created.
+   */
+  skippedRuleCount: number;
 }
+
+/** Task 032b-1 (review F1): one fixed line when the push skips rules, so "already have the current values" is never said for them. */
+const SKIPPED_RULES_TEXT = 'Some fields are copied only when a record is created and are not updated here.';
 
 type Phase =
   | { kind: 'previewing' }
@@ -176,6 +187,8 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
           truncated: false,
           refusedCount: 0,
           unsupportedTables: [],
+          noProfileTables: [],
+          skippedRuleCount: 0,
         };
         for (const { table, ids } of groupRowsByTable(rows)) {
           let response;
@@ -185,16 +198,25 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
               buildPushRequest(from, table, { preview: true, includeAssignedTo, childIds: ids })
             );
           } catch (error) {
-            // No Filing edge joins this table to the source: reported for this table; the other tables still preview.
-            if (!isNoFilingEdgeRefusal(error)) throw error;
-            review.unsupportedTables.push(table);
-            continue;
+            // No Filing edge joins this table to the source, or no mapping profile maps the source to it: reported for this
+            // table; the other tables still preview. Any other failure (including a 404 without the profile code, i.e. the
+            // source itself was not found) fails the whole preview.
+            if (isNoFilingEdgeRefusal(error)) {
+              review.unsupportedTables.push(table);
+              continue;
+            }
+            if (isNoProfileRefusal(error)) {
+              review.noProfileTables.push(table);
+              continue;
+            }
+            throw error;
           }
           if (!response.preview) throw new Error('The server did not treat the request as a preview.');
           review.groups.push({ table, changes: response.changes });
           review.skippedNoWriteCount += response.skippedNoWriteCount;
           review.truncated = review.truncated || response.truncated;
           review.refusedCount += response.refusedChildIds.length;
+          review.skippedRuleCount += response.skippedRuleCount;
         }
         if (!run.cancelled) setPhase({ kind: 'review', ...review });
       } catch (error) {
@@ -215,6 +237,8 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
       truncated: phase.truncated,
       refusedCount: phase.refusedCount,
       unsupportedTables: phase.unsupportedTables,
+      noProfileTables: phase.noProfileTables,
+      skippedRuleCount: phase.skippedRuleCount,
     };
     setPhase({ kind: 'applying', ...review });
     // Each table is applied on its own: a table whose request fails is named, and what the other tables wrote is still
@@ -306,7 +330,8 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
             {includeAssignedTo && (
               <MessageBar intent="info">
                 <MessageBarBody>
-                  This update includes the Assigned To fields. Changing them can change who has access to a record.
+                  This update includes the Assigned To fields. On records where these fields grant access, changing them
+                  can change who has access.
                 </MessageBarBody>
               </MessageBar>
             )}
@@ -342,11 +367,22 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                 </MessageBarBody>
               </MessageBar>
             )}
+            {phase.noProfileTables.map(table => (
+              <Text key={table} className={styles.muted}>
+                {`No field push is set up from this record to ${table}.`}
+              </Text>
+            ))}
+            {phase.skippedRuleCount > 0 && <Text className={styles.muted}>{SKIPPED_RULES_TEXT}</Text>}
             {valueCount === 0 ? (
               <Text>
-                {phase.refusedCount > 0 || phase.unsupportedTables.length > 0 || phase.skippedNoWriteCount > 0
-                  ? 'Nothing to update among the records that can be updated.'
-                  : 'Nothing to update: the selected records already have the current values.'}
+                {phase.skippedRuleCount > 0
+                  ? 'None of the fields updated here would change.'
+                  : phase.refusedCount > 0 ||
+                      phase.unsupportedTables.length > 0 ||
+                      phase.noProfileTables.length > 0 ||
+                      phase.skippedNoWriteCount > 0
+                    ? 'Nothing to update among the records that can be updated.'
+                    : 'Nothing to update: the selected records already have the current values.'}
               </Text>
             ) : (
               <>
