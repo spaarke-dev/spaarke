@@ -115,5 +115,12 @@ Tests (`DirectMessageOwnerTeamTests`, 42 → 60):
   now creates its unit), `CannotBe_InDoubt_AnswersNo` (an unknown team id is "cannot be" once the configured team is
   identified), `CannotBe_IsOneTeamRead` → `CannotBe_ReadsOnlyTheConfiguredUnitAndTeam_ByName`.
 - Not changed: `SecureRecordOwnerTeam`, `SecureChildShareSynchronizer` (its own name compare belongs to another project).
+- **Identify refuses the Secure Record unit and team too** (follow-up commit on `78d2c4076c`): ids only when configured,
+  read and proven by id not to be the Secure Record unit or team; otherwise no ids and `bu_is_secure_record`, or
+  `secure_record_ambiguous` / `secure_record_unreadable` (with the fault) when the Secure Record lookup cannot be decided.
+  So an owner compared with Identify's team id never reads a Secure-owned row as Direct-owned. Fail-first against
+  `78d2c4076c`: 8 failed / 59 passed (must-fire: the Secure unit-and-team settings incl. accent variants, another team in
+  the Secure unit, Secure ambiguous and unreadable; plus the two read-sequence pins that now include the Secure reads);
+  after: 67/67.
 
 rework: none task 054a
