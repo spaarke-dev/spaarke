@@ -69,7 +69,10 @@ internal static class FieldMappingPushFamily
 
     /// <summary>
     /// The preview: per child the caller may write, the columns that would change. Writes nothing. A fault propagates (the
-    /// route's 500); nothing is read app-only.
+    /// route's 500). The children, their rights and their current values are read AS THE CALLER. The source gate
+    /// (<see cref="FieldMappingPushSourceGate"/>, task 022 fix round 4) reads APP-ONLY, as on the apply: the source's gate
+    /// columns (its owner, and the secure flag on a root) once, and, for a secure source only, each asked child's owner and
+    /// the filing columns the payload writes. Nothing it reads is returned; a child it refuses comes back with its code only.
     /// </summary>
     internal static async Task<PushFieldMappingsResponse> PreviewAsync(
         PreviewInput input,
@@ -212,6 +215,10 @@ internal static class FieldMappingPushFamily
     /// <summary>The values the rules would write, decided once: the source value is the same for every child.</summary>
     private static List<PlannedChange> Plan(PreviewInput input, Microsoft.Extensions.Logging.ILogger? logger)
     {
+        // Task 022 fix round 5 (F1): the binds the apply writes. On a reparentable child a lookup rule whose planned bind is
+        // another lookup is refused per rule (#2091 r4) by the helper the apply calls, so the payload the source gate is
+        // asked with below is the apply's, and a child the apply would write is never hidden by a bind it would not write.
+        var lookupBinds = FieldMappingPushLookups.ConfineToNamedColumn(input.TargetEntity, input.LookupBinds);
         var result = new List<PlannedChange>();
         foreach (var rule in input.Rules.OrderBy(r => r.Priority))
         {
@@ -219,7 +226,7 @@ internal static class FieldMappingPushFamily
                 continue;
 
             var scratch = new Dictionary<string, object?>();
-            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, input.LookupBinds, logger).Status != FieldMappingStatus.Mapped
+            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, lookupBinds, logger).Status != FieldMappingStatus.Mapped
                 || scratch.Count != 1)
             {
                 continue;
