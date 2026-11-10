@@ -464,7 +464,7 @@ internal static class OwnedChildWrite
     private const string InvoiceRegardingRecordTypeNavigationProperty = "sprk_regardingrecordtype";
 
     /// <summary>The structured log event an update that kept its pair whole writes (owner ruling Q5 (a): the response is unchanged).</summary>
-    internal static readonly EventId RegardingPairKeptWholeEvent = new(45_201, "RegardingPairKeptWholeOnUpdate");
+    internal static readonly EventId RegardingPairKeptWholeEvent = new(45201, "RegardingPairKeptWholeOnUpdate");
 
     /// <summary>What an update writes about the pair, its display columns and the agreement lookups — the same view whichever
     /// shape the path's payload has (a mapped item, or a Web API dictionary).</summary>
@@ -488,11 +488,14 @@ internal static class OwnedChildWrite
     }
 
     /// <summary>The reads the planner asks: each path passes the reader it already has (the caller's client, or the app-only
-    /// reader of the playbook and push paths), so no path gains a reader (design §2.2, item 4).</summary>
+    /// reader of the playbook and push paths), so no path gains a reader (design §2.2, item 4). <c>MovedRecord</c>, when set,
+    /// is the reader of the display values of a pair the update itself moves (rule 3) only; rules 2 and 4 keep
+    /// <c>Record</c>, and without it rule 3 uses <c>Record</c> too.</summary>
     internal sealed record RegardingPairReaders(
         Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>> Row,
         Func<Guid, CancellationToken, Task<RegardingPairRead<RegardingPairType>>> Type,
-        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> Record);
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> Record,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? MovedRecord = null);
 
     /// <summary>The planner's answer: the columns to write over the update's own (the id as text or <c>null</c>, the type as a
     /// catalog row id or <c>null</c>, each display column as text or <c>null</c>), what it did, or the read that failed.</summary>
@@ -607,7 +610,8 @@ internal static class OwnedChildWrite
     /// own failure and nothing is written.</item>
     /// <item><b>A pair the update moves</b> (a new id, or a new type over the same id): its display columns are re-derived
     /// (owner ruling Q7 (b)), or cleared when the catalog row or the record answers 403 or 404 — never left describing the old
-    /// record. Any other failed read is the read's own, and nothing is written.</item>
+    /// record. Any other failed read is the read's own, and nothing is written. On the app-only paths the display values are
+    /// read as the person the write runs for (<see cref="RegardingPairReaders.MovedRecord"/>); with no person they are cleared.</item>
     /// <item><b>A lookup the pair repeated</b> (same id, the type naming that lookup's table), moved or cleared by an update that
     /// writes no pair column, and no other lookup still repeating it: the pair moves with it (display columns re-derived) or is
     /// cleared with it (owner ruling Q4 (b)). A catalog read that fails refuses, as the work assignment's #1616 rule did.</item>
@@ -703,7 +707,8 @@ internal static class OwnedChildWrite
                     return new RegardingPairPlan(new Dictionary<string, object?>(), null, movedRead.Status, movedRead.Failure);
                 if (movedRead.Value is { Table: { } movedTable } movedNamed)
                 {
-                    var moved = await DeriveDisplayAsync(columns, change, reads, movedTable, movedNamed.NumberColumn, movedTo, ct).ConfigureAwait(false);
+                    var moved = await DeriveDisplayAsync(
+                        columns, change, reads, movedTable, movedNamed.NumberColumn, movedTo, ct, reads.MovedRecord ?? reads.Record).ConfigureAwait(false);
                     return moved.Failed ?? Planned(columns, "the pair was moved" + moved.Suffix);
                 }
 
@@ -786,7 +791,8 @@ internal static class OwnedChildWrite
     /// failed read is the read's own, and nothing is written.</summary>
     private static async Task<DisplayDerivation> DeriveDisplayAsync(
         Dictionary<string, object?> columns, RegardingPairChange change, RegardingPairReaders reads, string pairTable,
-        string? numberColumn, Guid recordId, CancellationToken ct)
+        string? numberColumn, Guid recordId, CancellationToken ct,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? readRecord = null)
     {
         if (PairDisplayColumns.All(change.DisplaySet.Contains))
             return new DisplayDerivation("", null);
@@ -796,7 +802,7 @@ internal static class OwnedChildWrite
         IReadOnlyDictionary<string, string?>? values = null;
         if (asked.Length > 0)
         {
-            var read = await reads.Record(pairTable, recordId, asked, ct).ConfigureAwait(false);
+            var read = await (readRecord ?? reads.Record)(pairTable, recordId, asked, ct).ConfigureAwait(false);
             if (read.Value is null && read.Status is 403 or 404)
             {
                 ClearDisplay(columns, change);
@@ -981,6 +987,20 @@ internal static class OwnedChildWrite
             }
         };
 
+    /// <summary>
+    /// The display read of a pair an app-only update moves (rule 3): as the person the write runs for
+    /// (<see cref="CallerDisplayReader"/>: a record they may not read, or that is missing, answers 403 or 404 and its display
+    /// columns are cleared; any other fault, or no query, answers 500 and the write is refused). With no person (null or empty)
+    /// it answers 403 without reading, so the display columns are cleared.
+    /// </summary>
+    internal static Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>
+        MovedDisplayReader(
+            Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? personQuery, IGenericEntityService? entities,
+            Guid? person) =>
+        person is { } id && id != Guid.Empty
+            ? CallerDisplayReader(personQuery, entities, id)
+            : (_, _, _, _) => Task.FromResult(new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 403, null));
+
     /// <summary>An app-only read: a row, or 404 (it does not exist) or 500 (any other fault). The caller's own cancellation
     /// propagates.</summary>
     private static async Task<RegardingPairRead<Microsoft.Xrm.Sdk.Entity>> AppOnlyAsync(
@@ -1075,7 +1095,8 @@ internal static class OwnedChildWrite
     internal static async Task<Dictionary<string, object?>> KeepRegardingPairWholeAppOnlyAsync(
         IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
         ILogger? logger, CancellationToken ct, bool lookupsAreMapped = false,
-        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null)
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? movedDisplayRecord = null)
     {
         if (!RegardingPairPlannerApplies(table, payload))
             return payload;
@@ -1089,9 +1110,13 @@ internal static class OwnedChildWrite
 
         // displayRecord: the reader of the regarded record's display values when the path reads them otherwise (the push, as
         // the caller: CallerDisplayReader); the row and the catalog are still read with the path's app-only reader.
+        // movedDisplayRecord: the display values of a pair the update itself moves (rule 3) are read as the person the write
+        // runs for (<see cref="MovedDisplayReader"/>); left out, they are cleared, never read app-only. Rules 2 and 4 follow a
+        // lookup the row holds and keep the app-only reader. A path that passes displayRecord reads every rule's display so.
         var readers = AppOnlyReaders(entities, table, recordId);
-        if (displayRecord is not null)
-            readers = readers with { Record = displayRecord };
+        readers = displayRecord is not null
+            ? readers with { Record = displayRecord }
+            : readers with { MovedRecord = movedDisplayRecord ?? MovedDisplayReader(null, entities, null) };
         var plan = await PlanRegardingPairAsync(table, change, readers, ct, lookupsAreMapped).ConfigureAwait(false);
         if (plan.Failed)
         {
