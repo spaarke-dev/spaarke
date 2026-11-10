@@ -465,6 +465,14 @@ plus the owner's in-chat screenshots of the protocol run. Scored against `answer
 4. **Without a playbook Word improvises** (web search; no ask), so the "ask me to attach" line did not hold in W3
    (earlier instruction text; retest with the protocol instruction).
 
+**Owner follow-up (2026-11-09): two Copilot modes in Word desktop.**
+- **Chat mode:** cannot @-mention agents and does **not** read Settings › Personalization (custom instructions).
+- **Agent mode:** accepts `@agent-name` (adds a declarative agent inline to the same chat; seen with "Spaarke AI") and
+  reads the custom instructions. The protocol run above was in this mode; W3's improvising is consistent with chat mode.
+- Owner's proposed direction: users always pick a **specialist declarative agent** (for example `@NDA Review`, a legal
+  hold agent, later patent application, real estate lease, litigation pleading) for a consistent procedure, and we
+  build a library of them. To be spiked before design changes (see the plan in the session, 2026-11-09).
+
 **Gaps.** #33: the Word pane's *Allow editing* mode turns a non-contract playbook review into editing suggestions
 (no ratings, incomplete coverage). #34: stale skill and playbook copies in the user's OneDrive are retrieved as
 sources during reviews (`Cowork/MVP-Evidence/T-02/skills-folder-copy/`, `Cowork/Skills/nda-library-review/`,
