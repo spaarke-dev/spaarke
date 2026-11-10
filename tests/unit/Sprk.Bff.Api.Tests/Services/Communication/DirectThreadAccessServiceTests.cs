@@ -217,6 +217,126 @@ public class DirectThreadAccessServiceTests
             Times.Never);
     }
 
+    // ── uac-r2 198 pass 2 item 7: only a Read share on the thread makes a Direct participant, and a share-read fault is never
+    // read as "no participant" by the membership reconcile (it would remove the other participant from the chat) ──────────
+
+    /// <summary>The thread's POA rows, from both reads (the soft one the code used before item 7, and the strict one).</summary>
+    private void ThreadShares(params DataversePrincipalAccess[] rows)
+    {
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rows);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rows);
+    }
+
+    /// <summary>A share-read fault: the soft read answers empty (as on a 429/5xx), the strict read throws.</summary>
+    private void ThreadShareReadFaults(Guid threadId)
+    {
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", threadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DataversePrincipalAccess>());
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", threadId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Simulated 503 reading the thread's shares."));
+    }
+
+    private static DataversePrincipalAccess ShareRow(Guid user, int mask) => new(User(user), mask, DateTimeOffset.UtcNow);
+
+    [Theory(DisplayName = "198 pass 2 item 7 must-fire: a systemuser row on the thread without the Read bit is not a participant")]
+    [InlineData(0)] // inherited access: a zero-mask row
+    [InlineData(2)] // Write without Read
+    public async Task Item7_AThreadRowWithoutTheReadBit_IsNotAParticipant(int mask)
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        ThreadShares(ShareRow(Other, mask));
+
+        var participants = await BuildSut().GetParticipantSystemUserIdsAsync(ThreadId);
+
+        participants.Should().Equal(new[] { Caller }, "only a row holding Read makes a participant");
+    }
+
+    [Fact(DisplayName = "198 pass 2 item 7 must-fire: a zero-mask row on the thread is not granted the message")]
+    public async Task Item7_AZeroMaskThreadRow_IsNotGrantedTheMessage()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        ThreadShares(ShareRow(Other, 0));
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory(DisplayName = "198 pass 2 item 7 must-not-fire: a Read share on the thread still makes a participant, and is granted")]
+    [InlineData(1)]
+    [InlineData(3)] // Read and Write
+    public async Task Item7_AReadShareOnTheThread_StillCounts(int mask)
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        ThreadShares(ShareRow(Other, mask));
+
+        var participants = await BuildSut().GetParticipantSystemUserIdsAsync(ThreadId);
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        participants.Should().BeEquivalentTo(new[] { Caller, Other });
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact(DisplayName = "198 pass 2 item 7 must-fire: a thread share-read fault fails the participant read, so the membership reconcile retries instead of removing the other participant")]
+    public async Task Item7_AThreadShareReadFault_FailsTheParticipantRead()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        ThreadShareReadFaults(ThreadId);
+
+        var read = () => BuildSut().GetParticipantSystemUserIdsAsync(ThreadId);
+
+        await read.Should().ThrowAsync<Exception>("an unknown answer is not \"the owner alone\"");
+    }
+
+    [Fact(DisplayName = "198 pass 2 item 7 must-not-fire: a thread share-read fault on the grant still grants the owner only (fail closed, unchanged)")]
+    public async Task Item7_AThreadShareReadFault_OnTheGrant_GrantsTheOwnerOnly()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        ThreadShareReadFaults(ThreadId);
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "198 pass 2 item 7 must-not-fire: a candidate thread whose share read faults is skipped, and a new thread is created (unchanged)")]
+    public async Task Item7_FindOrCreate_ACandidateWhoseShareReadFaults_IsSkipped()
+    {
+        var candidate = Guid.NewGuid();
+        SetupCandidates(ownerId: Caller, candidateThreadIds: new[] { candidate });
+        ThreadShareReadFaults(candidate);
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => HasOwnerCondition(q, Other)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        var newThreadId = Guid.NewGuid();
+        _entityService
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newThreadId);
+
+        var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(newThreadId);
+    }
+
     // ── GrantMessageAccessAsync: the CRITICAL RISK fix — grants both participants, no-op otherwise ─
 
     private static readonly Guid MatterA = Guid.Parse("77777777-7777-7777-7777-777777777777");
