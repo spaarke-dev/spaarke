@@ -180,7 +180,8 @@ public sealed class GateDecisionRecordSharing
 
     /// <summary>
     /// D-215 rule 3, at write: after the gate record of a communication was created owned by the team <paramref name="ownerTeamId"/> (not the
-    /// Secure team). Only when the communication is unfiled and Direct-team-owned (the one Direct check) is anything written: the record is
+    /// Secure team). Only when the communication is unfiled and Direct-team-owned (the one Direct check), and the record's live owner (read by
+    /// id) is still <paramref name="ownerTeamId"/>, is anything written: the record is
     /// brought to the Direct team and its audience (<see cref="ShareDirectAsync"/>). For every other communication nothing is written (D-169: a
     /// team-owned record is never shared). Never throws; runs on <see cref="CancellationToken.None"/> (the record has landed).
     /// </summary>
@@ -218,8 +219,30 @@ public sealed class GateDecisionRecordSharing
                 return;
             }
 
-            if (direct == true)
-                await ShareDirectAsync(communicationId, communication, team, [new GateRecord(recordId, null, ownerTeamId, [])]).ConfigureAwait(false);
+            if (direct != true)
+                return;
+
+            // 198 fix round (ontology): the record's LIVE owner, read by id, before any grant or assign. A Secure mirror may have re-owned
+            // it since the create; the read-back in GrantAndConfirmAsync stays as the backstop, but nothing is granted to a record not
+            // still owned by the team the writer created it with. An owner that cannot be read is never assumed: nothing is granted.
+            var (owner, ownerReadFault) = await ReadOwnerOrNullAsync(recordId).ConfigureAwait(false);
+            if (owner is null)
+            {
+                ShareFailed(ownerReadFault, "the record's owner could not be read before the participant grants; nothing is granted, revoked " +
+                    "or re-owned (D-215)", recordId, communicationId);
+                return;
+            }
+
+            if (owner != DataversePrincipalRef.Team(ownerTeamId))
+            {
+                _logger.LogInformation(
+                    "Gate Decision Record {RecordId} of Direct message {CommunicationId} is no longer owned by the team it was created with; " +
+                    "nothing is granted, revoked or re-owned at write, and its current owner's path (the Secure mirror) keeps it (D-215).",
+                    recordId, communicationId);
+                return;
+            }
+
+            await ShareDirectAsync(communicationId, communication, team, [new GateRecord(recordId, null, ownerTeamId, [])]).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
