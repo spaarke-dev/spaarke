@@ -1520,3 +1520,47 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 **Fails without it**: check (g) reports "recorded, re-run not done" with no supported action that clears it in those cases.
 
 ---
+
+### DEF-067 — External callers: rows whose child chain exceeds N hops are withheld (N = 5)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-10 |
+| **Source** | ebilling-r1 task 130-0 F3b fix round 1; owner ruling EB-D-215 (uac-r2 condition C4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2667 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: rows whose child-to-child chain exceeds 5 hops are withheld from external callers (fail closed). On a list, `truncated` is set. On tables with more than one parent edge this can withhold rows that are not invoice-linked, because any one undecidable edge makes the row undecidable. A service request in the chain counts as a hop. Each such row logs one `EXT-INVOICE-WALK-PAST-BOUND` warning (table, row id, hops walked, plane).
+
+**Fix direction**: the deepest chain on dev is measured by a follow-up read-only query (uac-r2 condition C3, not a gate). If any firm-visible row exceeds the bound, raise `InvoiceLinks.MaxWalkHops` to that depth plus 1.
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/InvoiceLinks.cs` (`MaxWalkHops`, `StepAsync`); `projects/ebilling-r1/notes/130-0-external-invoice-firm-rule.md` ("Fix round 1").
+
+**Fails without it**: a row that has no invoice at all is hidden from a caller who should see it, if its chain is longer than the bound.
+
+---
+
+### DEF-068 — Client resolver: `PolymorphicResolverService.ts` warns where it could refuse; consider refusing
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-10 |
+| **Source** | ebilling-r1 task 130-0 F3b fix round 1 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2668 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: `PolymorphicResolverService.ts` (around lines 637-642) logs a warning where it could refuse the operation. Consider refusing instead.
+
+**Fix direction**: return a refusal at that point and cover it with a test.
+
+**Entry-points**: `src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts` (around lines 637-645, the "No nav-prop" warning).
+
+**Fails without it**: the call carries on after the warning instead of stopping.
+
+---

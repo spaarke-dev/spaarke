@@ -1116,3 +1116,82 @@ Counts:
 - `GetServiceRequestInvoiceLinksAsync` is virtual and returns `Guid[]`, so a double that does not set it up (an unmocked Moq) answers "no link".
 - On a REST single read, document narrowing hides a chain that is over the bound or cyclic first (the uniform 403); the 503 for an undecidable chain is reached through a malformed ancestor link or a failed chain read.
 - The documents module fetch given no chain reader treats a row that has a parent as undecidable (hidden). The route always passes the reader; the optional parameter exists so that a caller that omits it fails closed.
+
+Superseded by "Fix round 1" below: the hop bound is 5 (not 3) on the invoice walk; the REST ancestor walk now takes every parent edge of a table; the event self-chain is followed (a cycle is undecidable); the notification feed applies the invoice rule to the caller's service requests.
+
+## Fix round 1 (F3b), range `8b122ae8f5..02fe270f3e`
+
+Review of the first F3b delivery found that the descendant walk was per table, not per row, that the REST walk took one parent edge only, and that the feed skipped the invoice rule for service requests. This round fixes those, then applies the owner's ruling on the walk's bound.
+
+### Commits and results, by step
+
+| Step | Commits | What it does |
+|---|---|---|
+| 1 | `a7ad6b145a` (walk), `55ae7e6cec` (fix), `d3d997511d` (tests) | A per-row descendant walk on REST and on the assistant tools. The REST walk takes every parent edge of a table (`ReadAncestorInvoiceLinksAsync` takes `(row, edge column, parent)`; a row's answer is the union over its edges, and one undecidable edge makes the row undecidable). `55ae7e6cec` fixes a defect found while testing: `ExternalMessageEndpoints.AncestorInvoicesOfAsync` keyed its map by reference, but the read service asks the predicate with a new `MessageRootLookups` built from the same row, so every message read as a failed chain; it is keyed by value now. |
+| 2 | `3b37cc3e8c`, `ac7d8c6c87`, `56cb9617ec` | The notification feed's service requests follow the invoice rule (a request linked to an invoice the caller may not see is not reported; an undecidable one hides it and the feed says `truncated`). Service-request parity across REST and the assistant tools. F1 table families on both planes. A pin for the C2 reading below. |
+| 3 | `0999422061`, `4a5c7c90c7`, `96888754c9`, `02fe270f3e` | The walk's own bound `InvoiceLinks.MaxWalkHops = 5` (EB-D-215). The `EXT-INVOICE-WALK-PAST-BOUND` warning. Lists set `truncated` when they withhold a row whose chain is undecidable. A read-count pin on a full page. |
+
+Test results:
+- **Step 1:** `Sprk.Bff.Api.Tests` ExternalAccess filter 5682 passed, 0 failed; 142 new pins.
+- **Step 2:** fail-before 24 of 32 and 2 of 75 failing on the old code; ArchTests 2229 passed, 0 failed; ExternalAccess filter 5702 passed, 0 failed. A "narrowing off" case does not apply: no such switch exists.
+- **Step 3:** BFF build 0 errors, 0 warnings; ArchTests 2229 passed, 0 failed; ExternalAccess filter 5715 passed, 0 failed. The wide filter (the F3b filter above) ran 31179 passed; 57 tests timed out on load in classes this change does not touch, and those classes passed 749 of 749 on a separate rerun. Fail-before counts across the step 3 test commits: 4, 1 and 6 tests failing on the old code.
+
+### The bound (EB-D-215)
+
+Owner ruling 2026-11-10 ("Raise the limit now", `notes/decisions-log.md`): the invoice walk has its own bound of 5 hops, `InvoiceLinks.MaxWalkHops` (`InvoiceLinks.cs:77`). The task 188 document narrowing keeps `ExternalDocumentNarrowing.MaxHops` = 3; the two are independent. A row whose chain needs a hop past 5 is still undecidable and withheld (fail closed). Conditions from uac-r2 and where each is met:
+
+| Condition | Met by |
+|---|---|
+| C1: a bound hit is never silent | One warning per row, code `EXT-INVOICE-WALK-PAST-BOUND`, fields: table, row id, hops walked, plane (`rest` or `assistant`); no firm, invoice, caller or identity value (`InvoiceLinks.LogPastTheBound`, `:408-420`). A cycle and an unreadable link are not logged by it. **No metrics counter exists for the invoice walk, so none was added** (adding one would be new surface with no existing registry to join). On a list, `truncated` is set (`96888754c9`); a single-record write refuses with the uniform 403 and a single-record read of an undecidable chain answers 503 (see "Re-check (Opus): APPROVED", (a)). |
+| Batched read per hop | One read per hop per parent table per chunk of `CommunicationOpenThreadGate.ChunkSize` (50) over the distinct undecided parents (`StepAsync`, `InvoiceLinks.cs:467-543`), never one per row. Pin (`02fe270f3e`, `InvoiceLinkedDescendantsTests.AFullPage_OfBoundLengthChains_ReadsOncePerHopPerTablePerChunk`): a 200-row page where every row hangs from its own 5-hop chain, covering all eight parent tables, costs 20 reads on the REST walk (5 hops x 2 tables per hop x 2 chunks) and 24 on the assistant walk (4 more for hop 0, the page itself). Every row is decided. |
+| C2: only child-to-child hops count | Confirmed, see below. |
+| C3: depth measurement on dev | **Follow-up, not run.** A read-only dev query for the deepest child-to-child chain is still to be done; if any row a firm can see goes past the bound, raise the bound to that depth plus 1. Not a gate (EB-D-215). |
+| C4: known limit, filed neutrally | DEF-067 / #2667 (see "Known limits" below). |
+
+### C2 confirmation: a core record other than a service request is never walked
+
+Checked against `InvoiceLinks.cs` (line numbers below are after the comment-only edits that follow `02fe270f3e`; the logic is unchanged). Parent edges are added in `BuildDescendants` only through the fixed point at `:262-270`, and only where the child is "plain" and the parent is a decided child or already a descendant:
+- `IsPlain(child)` (`:240-244`) excludes the invoice family, the core tables (`RecordFamilyEdges.CoreTables`: matter, project and work assignment) and any root.
+- The parent must satisfy `IsDecidedChild(parent)` (`:236-237`: in `Tables`, not a root, not in the invoice family) or already be a key of `parents` (a descendant, itself plain, so never a core table).
+- The one other edge is document to document (`:253-258`).
+
+The three core tables are the three grant roots, so a core table is never a decided child; it is never plain, so it is never a descendant. Every edge in `Descendants` therefore points at a child table or a descendant. The walk follows nothing else: `StepAsync` follows only `rowShape.Parents` (`:514`), and the bound check is at `:531`. Reaching a core record means the chain ends, which is "no invoice from here". Only child-to-child hops count toward the 5.
+
+A service request is the exception that follows the child rule on both planes, through `InvoiceLinks.Supplemental` (`:98-99`; uac-r2's earlier ruling). It is a decided child (`Tables`), so it can be a parent in a chain, it is walked, and its hop counts toward the bound. That errs toward hiding.
+
+### Assistant tools: the convention
+
+On `dataverse.search_data`, `read_query` and `describe` the seam is hide-only. A row left undecidable by the walk (including at the bound) is hidden. `read_query` always adds the fixed `RowsLeftOutNote` to a page; it has no `truncated` field and none was added. The warning is logged with plane `assistant`.
+
+### Component justification (root CLAUDE.md section 11), fix round 1
+
+New surface: `InvoiceLinks.MaxWalkHops`, `UndecidableReason` (a flags enum on `RowInvoiceLinks`), `WalkPastTheBoundEvent`, `InvoiceLinks.ParentEdgesOf`, `ParentValueColumnsOf`, `FirstParentsOf`, the `InvoiceAncestorReader` delegate, `ExternalDataService.ReadAncestorLinksOfRowsAsync` and `ReadRowAncestorLinksAsync`, `ExternalModuleDataEndpoints.InvoiceAncestorAttributes`, and the `RestPlane` label.
+
+1. **Existing.** `InvoiceLinks.ReadRowInvoiceLinksAsync` and `ReadAncestorInvoiceLinksAsync` are the one walk; `ExternalDocumentNarrowing.MaxHops` is a bound for access narrowing, not for invoices.
+2. **Extension.** All new members extend those. The walk gained edge columns, a bound and a reason flag instead of a second walker. The delegate follows `ModuleDocumentChainReader`'s pattern, because the data service cannot be injected into the static message filter. The bound is separate from `MaxHops` because the narrowing's 3 is its own task's ruling.
+3. **Cost of doing nothing.** A to-do, event, document or message filed under an invoice-linked row, or under a chain of such rows, is shown with no invoice decision; and a chain longer than 3 hides records that carry no invoice at all.
+
+No package, endpoint or DI registration was added. Publish-size delta against master: not measured; source-only within existing files, as in the earlier rounds.
+
+### Known limits (fix round 1)
+
+- **C4.** Rows whose child-to-child chain exceeds 5 hops are withheld from external callers (fail closed); a list says `truncated`. On a table with more than one parent edge this can withhold a row that is not invoice-linked, because any one undecidable edge makes the row undecidable. A service request in the chain counts as a hop. Filed as DEF-067 in `notes/defer-issues.md` and as GitHub issue #2667. The dev depth query (C3) is the follow-up.
+- Messages are matched to their ancestor chains by the record's value equality (the message row and its stamps). If the read service ever builds its predicate input from a different row object, every message would be withheld (fail closed), which is how `55ae7e6cec` was found. Keying by message id would remove the coupling.
+- The bound-hit warning is one line per row, per request; a page of 200 rows past the bound logs 200 lines. There is no rate limit and no counter.
+
+### Re-check (Opus): APPROVED
+
+The scoped re-check of `8b122ae8f5..02fe270f3e` found no F-class finding. Known limits it listed, accepted:
+- (a) A single-record WRITE (delete-own, to-do PATCH) refuses an undecidable chain with the uniform 403 and does not say `truncated`. A single-record READ of an undecidable chain (the document GET, decided by `ExternalDataService.DecideInvoiceLinkedRowAsync`) answers 503, per D-70 ("a single faulted record returns 503"). The read behaviour is pinned by `Single_AMalformedLinkOnTheChain_IsThe503`. The comment at `ExternalProjectDataEndpoints.InvoiceLinkWriteDecisionAsync` now says so.
+- (b) A service request in a chain counts as a hop, which errs toward hiding.
+- (c) The message list can say `truncated` when the only undecidable row is one the other filters would have dropped anyway. This fails safe and is accepted.
+- (d) On document routes the 3-hop parent-document narrowing hides 4- and 5-deep nested attachments as "chain too long" before the walk runs, without `truncated` and without the warning. This is the task 188 contract, and EB-D-215 keeps it at 3.
+- (e) The live-parent rule's non-GUID case is not reachable against real Dataverse.
+- (f) Read cost is hops x distinct parent tables per hop x ceil(distinct parents / 50). It is bounded and never per row.
+
+Comment-only follow-up edits (no logic change; BFF build 0 errors, 0 warnings): `ExternalProjectDataEndpoints.cs` (the write/read wording above), and `InvoiceLinks.cs` (the `MaxWalkHops` summary, and two comments in `BuildDescendants`, now say a core record other than a service request is never walked and a service request's hop counts toward the bound).
+
+### Observations outside this task (reported, not changed)
+
+- Another project's live-parent rule withholds a row whose lineage link is malformed without setting `truncated` on the list.
+- On document routes the task 188 narrowing bounds a chain at 3 hops before the 5-hop invoice walk applies, so for documents the effective bound is the narrowing's.
