@@ -529,6 +529,85 @@ public class BudgetInquiryEmailFilingTests
     }
 
     // -------------------------------------------------------------------------------------
+    // Review round 3, item R3-1: the reply whose primary is the SERVICE REQUEST is FILED, not held, and owned from its matter
+    // -------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// R3-1: the reply of round 2 slice A's shape (pair = the service request, plus <c>sprk_regardingmatter</c> = M, plus
+    /// <c>sprk_regardingservicerequest</c>) through the REAL <see cref="IncomingCommunicationProcessor.ResolveInboundFilingAsync"/>:
+    /// the real <see cref="IncomingAssociationResolver.OwnershipContextForNewRecordAsync"/> (its stamp derivation over the row as
+    /// written), the REAL <see cref="RecordOwnershipResolver"/> and a REAL <see cref="CoreAncestorResolver"/> (the access value).
+    /// Only Dataverse is doubled. The ordinary matter sits in a business unit OTHER than the service request's, so the matter's
+    /// default team is distinguishable from the request's.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]  // must-fire: a SECURE matter - the Secure team owns, with the secure matter's Restricted value
+    [InlineData(false)] // control: an ordinary matter - the matter's default team owns, with the matter's own Limited value
+    public async Task Reply_WithTheServiceRequestAsPrimary_IsFiledNotHeld_AndOwnedByItsMattersTeam_R3_1(bool secureMatter)
+    {
+        var matter = secureMatter ? OtherMatterId : MatterId;
+        var ownership = Directory.Standard()
+            .WithRecord("sprk_matter", MatterId, Directory.CustomerChildBu, isSecure: false, owningTeam: Directory.CustomerChildTeam)
+            .WithSecureRoot("sprk_matter", OtherMatterId)
+            .WithRecord("sprk_servicerequest", ServiceRequestId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) });
+        var processor = Processor(ownership.Resolver(),
+            ServiceRequestRead(() => ServiceRequest(DirectionOutbound, matter)).Object, FiledToTheServiceRequest(),
+            ancestors: AccessValueAncestors());
+
+        var act = () => processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
+
+        // Not held: no ParentUndetermined (the stamp derivation or the evaluation failing), no owner refusal, no container code.
+        var result = (await act.Should().NotThrowAsync("the reply is filed, never held")).Subject;
+        result.InquiryReply.Should().BeTrue();
+        result.Owner.IsRefused.Should().BeFalse();
+        result.Owner.IsOwned.Should().BeTrue();
+        result.FilingFields.Should().NotBeNull("an owned reply is created WITH its filing");
+        result.FilingFields!["sprk_regardingrecordid"].Should().Be(ServiceRequestId.ToString("D"), "the shape under test: the request is the primary");
+        ((EntityReference)result.FilingFields["sprk_regardingservicerequest"]).Id.Should().Be(ServiceRequestId);
+        ((EntityReference)result.FilingFields["sprk_regardingmatter"]).Id.Should().Be(matter);
+
+        if (secureMatter)
+        {
+            result.Owner.OwningTeamId.Should().Be(Directory.SecureNamedTeam, "a secure matter's reply is the Secure team's");
+            result.Owner.IsSecureOwner.Should().BeTrue();
+        }
+        else
+        {
+            result.Owner.OwningTeamId.Should().Be(Directory.CustomerChildTeam,
+                "the matter's default team, not the service request's (" + Directory.ChildTeam + ")");
+            result.Owner.IsSecureOwner.Should().BeFalse();
+        }
+
+        result.FilingFields.Should().ContainKey(InheritedAccessPermission.Column, "the access value comes from the matter");
+        ((OptionSetValue)result.FilingFields[InheritedAccessPermission.Column]).Value.Should().Be(
+            secureMatter ? InheritedAccessPermission.Restricted : InheritedAccessPermission.Limited);
+    }
+
+    /// <summary>A REAL <see cref="CoreAncestorResolver"/> over a world holding both matters with their own Access Permission:
+    /// the secure one Restricted, the ordinary one Limited.</summary>
+    private static CoreAncestorResolver AccessValueAncestors()
+    {
+        var world = SecureChildShareWorld.Standard()
+            .OrdinaryRoot("sprk_matter", MatterId)
+            .SecureRoot("sprk_matter", OtherMatterId);
+        world.Set("sprk_matter", MatterId, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Limited));
+        world.Set("sprk_matter", OtherMatterId, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        var entities = SecureChildShareWorld.EntitiesOver(() => world);
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                var query = new QueryExpression(table) { ColumnSet = new ColumnSet(columns) };
+                query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
+                return Task.FromResult(world.Answer(query).Entities.SingleOrDefault()
+                                       ?? throw new InvalidOperationException($"Test: {table} {id} does not exist."));
+            });
+        return new CoreAncestorResolver(
+            entities.Object, InheritedAccessPermissionStampTests.Probe(), NullLogger<CoreAncestorResolver>.Instance);
+    }
+
+    // -------------------------------------------------------------------------------------
     // Review round 2, item 6: the matter the reply is filed under is in its provenance (the review surface's list)
     // -------------------------------------------------------------------------------------
 
@@ -1026,7 +1105,8 @@ public class BudgetInquiryEmailFilingTests
 
     private static IncomingCommunicationProcessor Processor(
         IRecordOwnershipResolver ownership, IGenericEntityService entities, IAssociationRung rung,
-        ICommunicationDataverseService? communications = null, IThreadResolver? threadResolver = null)
+        ICommunicationDataverseService? communications = null, IThreadResolver? threadResolver = null,
+        CoreAncestorResolver? ancestors = null)
     {
         var autoFile = new AutoFileOptions { Enabled = true, Threshold = 0.85 };
         var mapper = new AssociationStatusMapper(
@@ -1034,7 +1114,8 @@ public class BudgetInquiryEmailFilingTests
             NullLogger<AssociationStatusMapper>.Instance);
         var association = new IncomingAssociationResolver(
             [rung], Mock.Of<ICommunicationDataverseService>(), Mock.Of<IGenericEntityService>(), mapper,
-            CoreAncestorResolverFixtures.Inert(), new RecordOwnershipResolverDouble(), NullLogger<IncomingAssociationResolver>.Instance);
+            ancestors ?? CoreAncestorResolverFixtures.Inert(), new RecordOwnershipResolverDouble(),
+            NullLogger<IncomingAssociationResolver>.Instance);
 
         return new IncomingCommunicationProcessor(
             graphClientFactory: null!, communicationService: communications!, genericEntityService: entities, accountService: null!,
