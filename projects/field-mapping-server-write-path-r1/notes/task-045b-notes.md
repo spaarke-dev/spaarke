@@ -288,7 +288,7 @@ Rule 3 outcome by reader status:
 
 Display columns the update sends itself are never overwritten. The catalog row (type) is still read app-only, as before.
 
-Tests (`RegardingPairMovedDisplayReaderTests`, 29 cases; the app-only entity service is strict with no setup for the regarded record):
+Tests (`RegardingPairMovedDisplayReaderTests`, 23 cases; the app-only entity service is strict with no setup for the regarded record):
 must-fire: 403 / 404 / no row clear and never read app-only; no person (null, empty, no reader passed) clears; same through
 `DataverseUpdateHandler` and `UpdateRecordActionCore`. Must-not-fire: a person who may read gets their own values; rule 4 and rule 2 still
 derive app-only with no person; the push's `displayRecord` still serves rule 3. Fault and missing-query cases refuse. The existing
