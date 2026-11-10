@@ -66,6 +66,9 @@ public sealed class RateCardImportEndpointsTests
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
+        /// <summary>116 fix round 1 (F4): the body throws the server's 413 when read, as Kestrel does past its body cap.</summary>
+        public bool BodyOverTheServerCap { get; set; }
+
         public Host()
         {
             Service = new Mock<RateCardImportService>(
@@ -111,6 +114,15 @@ public sealed class RateCardImportEndpointsTests
             host._app.UseRouting();
             host._app.UseAuthentication();
             host._app.UseAuthorization();
+            host._app.Use(async (context, next) =>
+            {
+                if (host.BodyOverTheServerCap)
+                {
+                    context.Request.Body = new ProcedureEndpointsTests.OverTheCapBody();
+                }
+
+                await next(context);
+            });
             host._app.MapRateCardImportEndpoints();
             await host._app.StartAsync();
             host.Client = host._app.GetTestClient();
@@ -753,5 +765,31 @@ public sealed class RateCardImportEndpointsTests
         (await Json(r404))["errorCode"]!.GetValue<string>().Should().Be("ratecard.not_found");
         r409.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await Json(r409))["errorCode"]!.GetValue<string>().Should().Be("ratecard.not_draft");
+    }
+
+    [Fact(DisplayName = "116 fix 1 (F4) must-fire: an import whose body the server stops at its cap (a chunked body) is 413 file_too_large, not 400")]
+    public async Task Import_ABodyOverTheServerCap_Is413()
+    {
+        await using var host = await Host.StartAsync();
+        host.BodyOverTheServerCap = true;
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[10])));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.file_too_large");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A1): a workbook refused because the version stopped being a Draft is 409 procedure_version.not_draft")]
+    public async Task Import_AVersionNoLongerADraft_Is409NotDraft()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.FileRefused(StoredFileCreateResult.Refused(StoredFileRefusal.ParentNoLongerAccepts)));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[10])));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("procedure_version.not_draft");
     }
 }

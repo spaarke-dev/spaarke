@@ -1189,4 +1189,45 @@ public sealed class RateCardImportServiceTests
     [InlineData("04/03/2026", false)]
     public void TryParseDate_AcceptsIsoTextAndExcelSerials_Only(string text, bool ok) =>
         RateCardImportService.TryParseDate(text, out _).Should().Be(ok);
+
+    [Fact(DisplayName = "116 fix 1 (A1) must-fire: a version published while the workbook is stored: the new file is withdrawn, every row removed, the earlier file stays Servable")]
+    public async Task Import_AVersionPublishedDuringTheFileWrite_IsRefused_AndRemovesTheRows()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        h.Files.Gateway.BeforeOp = (_, _) =>
+            h.Rows[ProcedureEntity.VersionEntity].Single(r => r.Id == VersionId)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive);
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.FileRefused);
+        outcome.FileRefusal!.RefusalCode.Should().Be(StoredFileRefusal.ParentNoLongerAccepts);
+        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id), "the refusal runs the row compensation");
+        h.FilesWith(StoredFileStatus.Servable).Select(r => r.Id).Should().Equal(new[] { earlier });
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A3) must-fire: a request cancelled once the workbook is Servable completes: rows kept, exactly one Servable file")]
+    public async Task Import_CancelledOnceTheFileIsServable_KeepsTheRowsAndOneFile()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        using var request = new CancellationTokenSource();
+        h.Files.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, earlier, It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string _, Dictionary<string, object> fields, CancellationToken token) =>
+            {
+                request.Cancel(); // the client goes away right after the new file became Servable
+                token.ThrowIfCancellationRequested(); // a real call observes the token it is given
+                h.Files.Dataverse.Rows[id][StoredFileSchema.Status] = fields[StoredFileSchema.Status];
+                return Task.CompletedTask;
+            });
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), request.Token);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
+        h.Deleted.Should().BeEmpty();
+        h.FilesWith(StoredFileStatus.Servable).Should().ContainSingle().Which.Id.Should().Be(outcome.Value!.SourceFileId);
+    }
 }
