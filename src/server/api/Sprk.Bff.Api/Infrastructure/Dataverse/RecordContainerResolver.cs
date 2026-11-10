@@ -1054,6 +1054,11 @@ public sealed partial class RecordContainerResolver
                 || !IsRecordUnderResolution(l, walkRecordEntity, walkRecordId))
             .ToList();
 
+        // Task 176 (D-216): EXCEPT a service request whose own matter is the matter this row is also filed under, read live.
+        setIntermediates = await ReleaseMatchedServiceRequestAsync(
+                row, setIntermediates, sourceColumns, filingThrough, walk, ct)
+            .ConfigureAwait(false);
+
         var held = setIntermediates
             .Where(i => !sourceColumns.Contains(i.Column) && !filingThrough.Contains(i.Column))
             .Select(i => i.Column)
@@ -1190,6 +1195,75 @@ public sealed partial class RecordContainerResolver
 
         return new RowHops(own, extra);
     }
+
+    /// <summary>
+    /// Task 176 (D-216): the matched-root release of a HELD service request. A row filed under a service request AND a matter
+    /// (the budget inquiry email, and a reply to it) stops holding the request ONLY when the row's own non-empty
+    /// <c>sprk_regardingmatter</c> is the SAME id a live read of that request's <c>sprk_regardingmatter</c> returns. The
+    /// released link adds nothing: the request contributes no container, and the matter (a followed root) decides — a secure
+    /// matter gives its Secure container.
+    /// </summary>
+    /// <remarks>
+    /// <para>Every other case stays held (<see cref="AncestorUnverifiableCode"/>) exactly as before: no matter on the row, a
+    /// different matter, an explicit null on the request, the column absent from the read (presence-aware: a missing key is
+    /// never "no matter"), a fault, a request not found, a null row, or the walk's read budget spent. Generic: keyed on the
+    /// two columns only, never on the request's direction.</para>
+    /// <para>§11: existing — the <see cref="ChildAncestorLinks"/> hold on <c>sprk_regardingservicerequest</c>; extension — a
+    /// matched-root release on that rule; cost of doing nothing — an inquiry email with a matter can never be archived.</para>
+    /// </remarks>
+    private async Task<List<StampSourceLink>> ReleaseMatchedServiceRequestAsync(
+        Entity row,
+        List<StampSourceLink> setIntermediates,
+        IReadOnlySet<string> sourceColumns,
+        IReadOnlySet<string> filingThrough,
+        Walk walk,
+        CancellationToken ct)
+    {
+        var request = setIntermediates.FirstOrDefault(l =>
+            string.Equals(l.Column, ServiceRequestLinkColumn, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(l.Intermediate, ServiceRequestEntity, StringComparison.OrdinalIgnoreCase)
+            && !sourceColumns.Contains(l.Column)
+            && !filingThrough.Contains(l.Column));
+        if (request is null
+            || !row.Attributes.TryGetValue(MatterLinkColumn, out var onRow)
+            || onRow is not EntityReference { Id: var matterId }
+            || matterId == Guid.Empty
+            || walk.Reads >= MaxRootReads)
+        {
+            return setIntermediates;
+        }
+
+        walk.Reads++;
+        Entity? live;
+        try
+        {
+            live = await _entityService
+                .RetrieveAsync(ServiceRequestEntity, request.Id, [MatterLinkColumn], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-CONTAINER] Could not read the matter of service request {ServiceRequestId} on {Entity} {RecordId}; "
+                + "the service request stays held ({Code}).",
+                request.Id, walk.RecordEntity, walk.RecordId, AncestorUnverifiableCode);
+            return setIntermediates;
+        }
+
+        if (live is not null
+            && live.Attributes.TryGetValue(MatterLinkColumn, out var liveValue)
+            && liveValue is EntityReference { Id: var liveMatterId }
+            && liveMatterId == matterId)
+        {
+            return setIntermediates.Where(l => l != request).ToList();
+        }
+
+        return setIntermediates;
+    }
+
+    private const string ServiceRequestEntity = "sprk_servicerequest";
+    private const string ServiceRequestLinkColumn = "sprk_regardingservicerequest";
+    private const string MatterLinkColumn = "sprk_regardingmatter";
 
     private static bool IsRecordUnderResolution(StampSourceLink link, string recordEntity, Guid recordId)
         => link.Id == recordId && string.Equals(link.Intermediate, recordEntity, StringComparison.OrdinalIgnoreCase);
