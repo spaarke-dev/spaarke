@@ -136,3 +136,35 @@ The design does not try to detect that. Instead, the editor shows a fixed notice
 - **Q3 (uac-r2):** should decided items match on code too? Recommended: no.
 - **Q4 (uac-r2, maybe the owner):** is the editor notice enough under "whatever the flag"?
 - **Q5 (ontology-r1):** do you accept the three `SignalWriter` changes (§3.3) and the column on your `sprk_policyversion` table, with the preflight refusal as a new stable code?
+
+## 11. Review outcomes
+
+### uac-r2: ACCEPTED with conditions (2026-11-10, design `a58e6ceaa6`)
+
+Answers:
+- **Q1: yes, field-secure the column for write.** Read goes to every profile that reads `sprk_policyversion` today; create and update go to the BFF writer profile only.
+  - `RuleSetService` publish and copy, and `ProcedureAssignmentService` copy, must write the version **as the app**: the billing-admin privilege is checked as the user, the write is made as the app. An impersonated write would be refused once the column is secured.
+  - `-Verify` asserts that no other profile has create or update on the column.
+- **Q2: the same row's `billing.reason` evidence is enough; no code column.**
+  - The version in the match key comes from the Signal's own writer-set version lookup.
+  - The projection reads evidence only from rows passing the `WriterCreatedRecord` gate.
+  - Both are stated in the code and tested.
+- **Q3: no code match for decided items.** The Signals read must still be the ones that decision resolved (as in 130d), never "any Signal on the line".
+- **Q4: the editor notice plus one mechanical guard.** At publish, refuse (422, stable code, text never echoed) a description that contains, case-insensitively, the version's own rule set name or policy name. No owner question; EB-D-210 is not reopened.
+
+Conditions (binding for the build):
+- **C1, replay re-derives the text and never trusts the plan.**
+  - The plan persists the policy version id only, if it isn't already there; it does not persist `firmReason`.
+  - Replay (`InvoiceRuleSignalReconciler.WriteAsync`) reads `sprk_firmdescription` from that version and runs `FirmDescriptionRules.Validate`. Invalid text is dropped exactly as in the mapper: the Signal is kept, there is no preflight fallback, and the log carries the code only.
+  - If `firmReason` is ever kept in the plan, replay ignores it.
+  - Test: a plan whose `firmReason` differs from the version's text writes the version's text.
+  - **This replaces the §3.2 "persisted plan" bullet.**
+- **C2, a published version's description cannot change.** The BFF draft-update path refuses a `firmDescription` change on a version that the shared published predicate (DEF-061) says is published.
+  - Must-fire: an edit on a published version is refused and nothing is written.
+  - Must-not-fire: an edit on a draft is accepted.
+  - Copying the version into a new draft carries the text forward.
+- **C3, the writer preflight never drops a Signal for a mapper caller.** Test: a mapper-built request with invalid stored text reaches `SignalWriter` with `FirmReason = null`, never with the text. So the preflight code can fire only for a non-mapper caller.
+
+uac-r2 receives the build diff when it is ready, plus notices before and after each live step.
+
+### ontology-r1: pending (Q5)
