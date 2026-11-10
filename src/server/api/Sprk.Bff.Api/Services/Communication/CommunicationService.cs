@@ -1511,9 +1511,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <summary>Warning: finding or creating the pair's Direct thread faulted; today's path ran.</summary>
     internal const string PairThreadFailedEventCode = "direct_message.pair_thread_failed";
 
+    /// <summary>Information: an outbound Direct send is being filed into its pair's Direct thread (the thread passed the shape check).</summary>
+    internal const string PairRoutedEventCode = "direct_message.pair_routed";
+
+    /// <summary>Warning: the pair's Direct thread, once found or created, could not be read for its shape; today's path ran.</summary>
+    internal const string PairThreadUnreadEventCode = "direct_message.pair_thread_unread";
+
     private static readonly EventId PairRoutingSkippedEvent = new(5406, PairRoutingSkippedEventCode);
     private static readonly EventId PairRoutingUnresolvedEvent = new(5407, PairRoutingUnresolvedEventCode);
     private static readonly EventId PairThreadFailedEvent = new(5408, PairThreadFailedEventCode);
+    // 5409 is DirectMessageRecipient's recipient_not_expected.
+    private static readonly EventId PairRoutedEvent = new(5410, PairRoutedEventCode);
+    private static readonly EventId PairThreadUnreadEvent = new(5411, PairThreadUnreadEventCode);
 
     /// <summary>The reason codes of <see cref="PairRoutingSkippedEventCode"/>. Never an address.</summary>
     internal static class PairRoutingSkipReason
@@ -1541,6 +1550,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         /// <summary>The one mapped systemuser has no row at the eligibility read.</summary>
         public const string RecipientMissing = "recipient_missing";
+
+        /// <summary>
+        /// The prefix of a refusal by the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>)
+        /// on the thread the find-or-create answered: <c>pair_thread_</c> + its reason (<see cref="Access.DirectPairShapeReason"/>:
+        /// <c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>, <c>not_two_read_participants</c>).
+        /// </summary>
+        public const string PairThreadPrefix = "pair_thread_";
+
+        /// <summary>The found thread is a strict pair, but its two participants are not the sender and the mapped recipient.</summary>
+        public const string PairThreadNotThePair = "pair_thread_not_the_pair";
     }
 
     /// <summary>
@@ -1555,19 +1574,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// The thread step of <see cref="SendMessageAsync"/> (task 054a piece 2b). An outbound Direct send
-    /// (<see cref="IsOutboundDirectSend"/>) whose one recipient resolves (<see cref="FindDirectPairThreadAsync"/>) is filed into
-    /// the pair's Direct thread through the respond path's explicit join (<see cref="AssignExplicitThreadAsync"/>: the join, the
-    /// Direct filing stamp in the same update as the thread lookup, then the grant). Every other send, and an outbound Direct
-    /// send that does not resolve, takes <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
+    /// (<see cref="IsOutboundDirectSend"/>) whose one recipient resolves and whose pair's thread passes the Direct-pair shape rule
+    /// (<see cref="FindDirectPairThreadAsync"/>) is filed into that thread through the respond path's explicit join
+    /// (<see cref="AssignExplicitThreadAsync"/>: the join, the Direct filing stamp in the same update as the thread lookup, then
+    /// the grant), naming the mapped recipient so the stamp writes no other. Every other send, and an outbound Direct send that
+    /// does not resolve, takes <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
     /// </summary>
     private async Task ResolveSentMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, DataverseEntity preparedRecord, Guid senderSystemUserId,
         string? acsThreadId, string correlationId, CancellationToken ct)
     {
         if (IsOutboundDirectSend(request, preparedRecord)
-            && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pairThreadId)
+            && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pair)
         {
-            await AssignExplicitThreadAsync(communicationId, pairThreadId, correlationId, ct);
+            await AssignExplicitThreadAsync(
+                communicationId, pair.ThreadId, correlationId, ct, filing: "outbound Direct pair thread", expectedRecipient: pair.Recipient);
             return;
         }
 
@@ -1575,18 +1596,24 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// The Direct thread of the pair (sender, recipient) for an outbound Direct send, or <c>null</c> for today's path. The
-    /// recipient is resolved on the server (<see cref="ResolveDirectRecipientAsync"/>); then
-    /// <see cref="IDirectThreadAccessService.FindOrCreateDirectThreadAsync"/> answers the pair's thread. Best-effort (NFR-02):
-    /// a refusal logs one Information <see cref="PairRoutingSkippedEventCode"/> with its reason, a fault resolving the
-    /// recipient one Warning <see cref="PairRoutingUnresolvedEventCode"/>, a fault of the find-or-create one Warning
-    /// <see cref="PairThreadFailedEventCode"/>; none of them fails the send. Writes nothing itself and assigns no owner.
+    /// The Direct thread of the pair (sender, recipient) for an outbound Direct send and the mapped recipient, or <c>null</c> for
+    /// today's path. The recipient is resolved on the server (<see cref="ResolveDirectRecipientAsync"/>); then
+    /// <see cref="IDirectThreadAccessService.FindOrCreateDirectThreadAsync"/> answers the pair's thread, which is used only when
+    /// the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>) finds it a strict pair
+    /// AND its two participants are exactly the sender and the mapped recipient. Best-effort (NFR-02): a refusal logs one
+    /// Information <see cref="PairRoutingSkippedEventCode"/> with its reason; a fault resolving the recipient one Warning
+    /// <see cref="PairRoutingUnresolvedEventCode"/>; a fault of the find-or-create one Warning <see cref="PairThreadFailedEventCode"/>;
+    /// a fault reading the found thread one Warning <see cref="PairThreadUnreadEventCode"/>. None of them fails the send. Writes
+    /// nothing itself and assigns no owner.
     /// </summary>
-    private async Task<Guid?> FindDirectPairThreadAsync(
+    private async Task<(Guid ThreadId, Guid Recipient)?> FindDirectPairThreadAsync(
         Guid communicationId, SendCommunicationRequest request, Guid senderSystemUserId, string correlationId, CancellationToken ct)
     {
-        if (_directThreadAccess is null || _contactIdentities is null)
-            return SkipPairRouting(PairRoutingSkipReason.NotConfigured, communicationId, correlationId);
+        if (_directThreadAccess is null || _contactIdentities is null || _recordShares is null)
+        {
+            SkipPairRouting(PairRoutingSkipReason.NotConfigured, communicationId, correlationId);
+            return null;
+        }
 
         (string? SkipReason, Guid Recipient) resolved;
         try
@@ -1605,11 +1632,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
 
         if (resolved.SkipReason is { } reason)
-            return SkipPairRouting(reason, communicationId, correlationId);
+        {
+            SkipPairRouting(reason, communicationId, correlationId);
+            return null;
+        }
 
+        Guid pairThreadId;
         try
         {
-            return await _directThreadAccess.FindOrCreateDirectThreadAsync(senderSystemUserId, resolved.Recipient, ct);
+            pairThreadId = await _directThreadAccess.FindOrCreateDirectThreadAsync(senderSystemUserId, resolved.Recipient, ct);
         }
         catch (Exception ex)
         {
@@ -1621,6 +1652,51 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 PairThreadFailedEventCode, communicationId, correlationId);
             return null;
         }
+
+        // F1-a (fix round 1): the found thread is joined only when it is a strict pair of exactly these two people.
+        // The shape rule answers a fault as ParticipantReadFault itself; only the caller's cancellation is thrown, and that too
+        // leaves the message to today's path.
+        Access.DirectPairShape shape;
+        try
+        {
+            shape = await Access.DirectMessageRecipient.ReadStrictPairShapeAsync(_genericEntityService, _recordShares, pairThreadId, ct);
+        }
+        catch (OperationCanceledException cancelled)
+        {
+            shape = Access.DirectPairShape.Not(Access.DirectPairShapeReason.ParticipantReadFault) with { Fault = cancelled };
+        }
+
+        if (shape.Reason == Access.DirectPairShapeReason.ParticipantReadFault)
+        {
+            _logger.LogWarning(
+                PairThreadUnreadEvent,
+                shape.Fault,
+                "{EventCode}: the Direct thread {ThreadId} found for outbound Direct message {CommunicationId} could not be read; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadUnreadEventCode, pairThreadId, communicationId, correlationId);
+            return null;
+        }
+
+        if (!shape.IsStrictPair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadPrefix + shape.Reason, communicationId, correlationId);
+            return null;
+        }
+
+        var isThePair = (shape.OwnerId == senderSystemUserId && shape.OtherId == resolved.Recipient)
+                        || (shape.OwnerId == resolved.Recipient && shape.OtherId == senderSystemUserId);
+        if (!isThePair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadNotThePair, communicationId, correlationId);
+            return null;
+        }
+
+        _logger.LogInformation(
+            PairRoutedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} is filed into its pair's Direct thread {ThreadId} | " +
+            "CorrelationId: {CorrelationId}",
+            PairRoutedEventCode, communicationId, pairThreadId, correlationId);
+        return (pairThreadId, resolved.Recipient);
     }
 
     /// <summary>
@@ -1670,15 +1746,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         };
     }
 
-    private Guid? SkipPairRouting(string reason, Guid communicationId, string correlationId)
-    {
+    private void SkipPairRouting(string reason, Guid communicationId, string correlationId) =>
         _logger.LogInformation(
             PairRoutingSkippedEvent,
             "{EventCode}: outbound Direct message {CommunicationId} was not filed through its pair's Direct thread ({Reason}); " +
             "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
             PairRoutingSkippedEventCode, communicationId, reason, correlationId);
-        return null;
-    }
 
     /// <summary>
     /// Resolves the outbound message's <c>sprk_communicationthread</c>. Two paths (task 062 / FR-12):
@@ -1753,9 +1826,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// R1-vs-R2 scope note). Chains the SAME task-043 Direct-thread message-access grant the find-or-create
     /// path uses, so a message stamped this way is equally visible under the impersonated read (task 050).
     /// Best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail the already-sent + persisted message.
+    /// <para>Task 054a piece 2b: the outbound Direct pair routing files through here too. <paramref name="filing"/> names the path in
+    /// the log; <paramref name="expectedRecipient"/> is the recipient it routed to, and the Direct filing stamp writes a recipient
+    /// only when the thread's other participant at the filing is that systemuser. A respond passes neither.</para>
     /// </summary>
     private async Task<Guid?> AssignExplicitThreadAsync(
-        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct)
+        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct,
+        string filing = "respond-into-thread", Guid? expectedRecipient = null)
     {
         try
         {
@@ -1774,11 +1851,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 threadId,
                 (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
                     _genericEntityService, _logger, communicationId, threadId, alongside, token),
-                ct);
+                ct,
+                expectedRecipient);
 
             _logger.LogInformation(
-                "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
-                threadId, communicationId, correlationId);
+                "Stamped explicit thread target {ThreadId} ({Filing}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                threadId, filing, communicationId, correlationId);
 
             // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's audience as the
             // stamp read it (#1629: Direct two-party list, the anchor record's grantees, or nobody; never re-read).

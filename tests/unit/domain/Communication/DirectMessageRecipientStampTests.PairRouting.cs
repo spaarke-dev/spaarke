@@ -41,13 +41,15 @@ public partial class DirectMessageRecipientStampTests
     private const string ThirdAddress = "third@contoso.com";
     private const string AppUserAddress = "integration@contoso.com";
 
-    /// <summary>The systemusers the internal-user email read can see: (id, address, disabled).</summary>
-    private readonly List<(Guid Id, string Address, bool Disabled)> _directory = new()
+    /// <summary>
+    /// The systemusers the internal-user email read can see: (id, <c>internalemailaddress</c>, disabled, <c>domainname</c>).
+    /// </summary>
+    private readonly List<(Guid Id, string Address, bool Disabled, string? DomainName)> _directory = new()
     {
-        (Sender, SenderAddress, false),
-        (Other, OtherAddress, false),
-        (Third, ThirdAddress, false),
-        (AppUser, AppUserAddress, false),
+        (Sender, SenderAddress, false, null),
+        (Other, OtherAddress, false, null),
+        (Third, ThirdAddress, false, null),
+        (AppUser, AppUserAddress, false, null),
     };
 
     /// <summary>Every address the internal-user email read was asked for.</summary>
@@ -173,7 +175,7 @@ public partial class DirectMessageRecipientStampTests
     [Fact]
     public async Task AnAddressTwoSystemUsersHold_IsNotRouted()
     {
-        _directory.Add((Guid.Parse("45454545-4545-4545-4545-454545454545"), OtherAddress, false));
+        _directory.Add((Guid.Parse("45454545-4545-4545-4545-454545454545"), OtherAddress, false, null));
 
         await RoutingService().SendAsync(MessageTo(OtherAddress), Caller(), CancellationToken.None);
 
@@ -185,7 +187,7 @@ public partial class DirectMessageRecipientStampTests
     public async Task ADisabledUsersAddress_IsNotRouted()
     {
         _directory.RemoveAll(u => u.Id == Other);
-        _directory.Add((Other, OtherAddress, true));
+        _directory.Add((Other, OtherAddress, true, null));
         _disabled.Add(Other);
 
         await RoutingService().SendAsync(MessageTo(OtherAddress), Caller(), CancellationToken.None);
@@ -419,10 +421,13 @@ public partial class DirectMessageRecipientStampTests
             .ReturnsAsync((string email, CancellationToken _) =>
             {
                 _emailReads.Add(email);
+                // The A9 read: enabled systemusers whose internalemailaddress OR domainname equals the address.
                 return EA.SystemUserEmailLookup.Of(_directory
-                    .Where(u => !u.Disabled && string.Equals(u.Address, email, StringComparison.OrdinalIgnoreCase))
+                    .Where(u => !u.Disabled
+                                && (string.Equals(u.Address, email, StringComparison.OrdinalIgnoreCase)
+                                    || string.Equals(u.DomainName, email, StringComparison.OrdinalIgnoreCase)))
                     .Take(2)
-                    .Select(u => new EA.SystemUserEmailRow(u.Id, false, u.Address, null))
+                    .Select(u => new EA.SystemUserEmailRow(u.Id, false, u.Address, u.DomainName))
                     .ToArray());
             });
         return store;
@@ -459,9 +464,12 @@ public partial class DirectMessageRecipientStampTests
     /// nobody, the message was filed into it with no recipient, and (when <paramref name="skipReason"/> is given) ONE
     /// Information <c>pair_routing_skipped</c> event carries the reason and the message id, and no address.
     /// </summary>
-    private void AssertTodaysPathWithNoRecipient(string? skipReason, bool granted = true)
+    /// <param name="pairThreadAsked">The pair's thread was asked for (and refused after it was found).</param>
+    private void AssertTodaysPathWithNoRecipient(string? skipReason, bool granted = true, bool pairThreadAsked = false)
     {
-        _directAccess.Verify(d => d.FindOrCreateDirectThreadAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _directAccess.Verify(
+            d => d.FindOrCreateDirectThreadAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            pairThreadAsked ? Times.Once() : Times.Never());
 
         var thread = _created.Should().ContainSingle(e => e.LogicalName == "sprk_communicationthread").Which;
         thread.Contains("ownerid").Should().BeFalse("today's create names no owner");

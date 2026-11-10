@@ -377,4 +377,80 @@ No new package, plugin, DI registration, endpoint or Dataverse column. `git diff
 - **CVE:** `dotnet list src/server/api/Sprk.Bff.Api package --vulnerable --include-transitive` reports no vulnerable packages. No package added.
 - **Publish-size delta:** not measured here (`scripts/publish-delta.ps1` runs in the main session). No package or project reference added.
 
+## 054a piece 2b — fix round 1 (review)
+
+Same branch, from a5cacab398. Findings F1-a, F1-b and F-3, plus UAC-r2's addendum (one shape rule on `DirectMessageRecipient`). `DirectThreadAccessService.cs` is still unedited.
+
+### F1-a — the found thread is verified before the join
+
+- **The one Direct-pair shape rule:** `DirectMessageRecipient.ReadStrictPairShapeAsync(IGenericEntityService, IDataverseRecordShareService, Guid threadId, CancellationToken)`, `internal static`. It reads the thread itself (type, owner, privacy, the thread's regarding columns `ThreadResolver.ThreadRegardingColumns`) and answers a `DirectPairShape` (`IsStrictPair`, `OwnerId`, `OtherId`, `Reason`, and `Fault` on a read fault). In order, a thread is a strict pair only when:
+  1. it is typed Direct (a missing row also answers `not_direct`);
+  2. it carries no typed regarding (`CarriesATypedRegarding`) — else `typed_regarding`;
+  3. its privacy is confirmed Open (`CommunicationInternalOnlyFloor.IsConfirmedOpen`; a missing value is not Open) — else `not_open`;
+  4. its Read participants are exactly two distinct systemusers, one of them its user owner — else `not_two_read_participants`. Participants are the user owner plus every systemuser share whose mask has Read, through the strict share read (`GetPrincipalAccessOrThrowAsync`). This is the reader `ReadParticipantsAsync` already used, now one private method (`ParticipantsOfAsync`) both call.
+  - A fault reading the thread or its shares answers `participant_read_fault`, never a pair. Only the caller's cancellation propagates.
+  - Its XML doc names it the one shape rule, shared with the pair-thread lookup (`DirectThreadAccessService.FindExistingAsync` is to call it; that file is not edited here).
+- **The routing** (`FindDirectPairThreadAsync`), after `FindOrCreateDirectThreadAsync` answers a thread:
+  - `participant_read_fault` → one Warning `direct_message.pair_thread_unread` (5411), today's path, no skip event;
+  - not a strict pair → today's path, skip event (5406) with `pair_thread_<reason>`;
+  - a strict pair whose {owner, other} is not {sender, mapped recipient} → today's path, skip event with `pair_thread_not_the_pair`;
+  - otherwise → the join, as before.
+- A thread so refused is not joined, gets no filing write naming it, and no grant is made from it. Nothing is written onto it.
+
+### F1-b — the stamp writes only the mapped recipient
+
+- The mapped recipient goes through as an optional `expectedRecipient`: `AssignExplicitThreadAsync` → `ThreadResolver.JoinThreadAsync` → `DirectFilingColumnsAsync` → `DirectMessageRecipient.ColumnsForDirectFilingAsync`. Every other caller passes nothing, so their behaviour is unchanged.
+- At the filing, when the thread's other participant (read again, strictly) is not the expected recipient, the filing writes the thread lookup and no recipient, and logs one Information `direct_message.recipient_not_expected` (5409). The grant follows as the join decides it.
+
+### F-3 — a routed send is logged as routed
+
+- The explicit-join log names its filing: `AssignExplicitThreadAsync(..., filing:)` defaults to `respond-into-thread`; the routing passes `outbound Direct pair thread`.
+- A routed send also logs one Information `direct_message.pair_routed` (5410) with the message id and the thread id.
+- EventIds 5401–5411 are each used once.
+
+### Known limits (added; stated, not defects)
+
+- **L6.** When `FindOrCreateDirectThreadAsync` creates the thread and then faults on its share grant, the created thread stays, with no message in it. The routing takes today's path (Warning 5408). The fault is inside `DirectThreadAccessService` (UAC-r2's file).
+- **L7.** `FindExistingAsync` reads at most 50 of a user's Direct threads. An existing pair thread past that cap can be missed, and a duplicate created. **Fix: 198b**, landing before the 198 deploy.
+- **L8.** Until 198 deploys, `GrantMessageAccessAsync` on a routed message reads the thread's participants with master's looser participant read, not the strict one the routing checks with. **Fix: 198b.**
+
+### §11 for the new members
+
+`ReadStrictPairShapeAsync`, `DirectPairShape`, `DirectPairShapeReason` (internal, in the existing `DirectMessageRecipient`):
+- **Existing:** `ReadParticipantsAsync` reads a Direct thread's participants; `IsConfirmedOpen` and `CarriesATypedRegarding` read privacy and regarding. Nothing combined them into one answer for a thread the routing did not create.
+- **Extension:** built from those three, with the participant reader extracted (`ParticipantsOfAsync`) rather than copied.
+- **Cost of doing nothing:** the routing has no rule for which found thread it may join; the rule that it joins only a strict 1:1 Direct thread of the sender and the mapped recipient is not enforced.
+
+`expectedRecipient` (optional parameter on four existing methods), the `filing` label, the event codes 5409–5411:
+- **Existing:** the filing stamp derives the recipient from the thread alone.
+- **Extension:** an optional parameter on the existing path; nothing new is registered.
+- **Cost of doing nothing:** the rule that a routed message's recipient is the one its address mapped to is not enforced at the filing.
+
+No new package, plugin, DI registration, endpoint or Dataverse column.
+
+### Evidence
+
+- **Tests** (KEEP paths):
+  - `tests/unit/domain/Communication/DirectMessageRecipientStampTests.PairThreadShape.cs` (new), through `SendAsync` with a stored thread FindOrCreate answers:
+    - (A) owned by the recipient, Read shares to the sender and a third user → `pair_thread_not_two_read_participants`;
+    - (B) Direct with a typed regarding → `pair_thread_typed_regarding`;
+    - (C) owned by the sender, the recipient's share at mask 0, a Read share to a third user → `pair_thread_not_the_pair`;
+    - (D) Private, and no privacy value → `pair_thread_not_open`;
+    - each asserts: FindOrCreate asked once; no filing write names the found thread; no grant on it; no routed event; today's path (the resolver's create, no recipient); the skip reason;
+    - a share-read fault on the found thread → Warning 5411, today's path, no skip event, the send succeeds;
+    - a clean pair thread owned by the recipient → joined, recipient stamped, event 5410, the `outbound Direct pair thread` label (and not `respond-into-thread`);
+    - F1-b: the share read answers the recipient at the check and a third user at the filing → the filing carries the thread lookup and no recipient, and event 5409;
+    - the A9 read's `domainname` match: an address equal to the user's `domainname` (not its `internalemailaddress`), differently cased → routed to that user.
+  - `…PairRoutingRule.cs`: the shape rule, one test per reason code plus a pair: a strict pair (owner and other named; a mask-0 share ignored); `not_direct` (record-anchored; missing row); `typed_regarding`; `not_open` (Private; no value); `not_two_read_participants` (no Read share; three participants; a team owner; owner alone); `participant_read_fault` (the share read throws, carrying the fault; the thread read throws); the caller's cancellation propagates; the five codes' strings.
+- **Fail-then-pass** (filter `FullyQualifiedName~DirectMessageRecipientStampTests`):
+  - Before: `CommunicationService.cs`, `DirectMessageRecipient.cs`, `ThreadResolver.cs` and `…PairRoutingRule.cs` checked out from a5cacab398 (the rule test file names the new symbols). Result: **Failed 8, Passed 69, Total 77.**
+    - The 8: (A), (B), (C), (D), no privacy value, the shape-read fault, the clean recipient-owned pair (event 5410 and label), and F1-b.
+    - The `domainname` test passes before and after: it covers the existing A9 read and changes no behaviour.
+  - After: **Passed 91, Failed 0.**
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each 0 warnings, 0 errors.
+- **Filtered run** (same filter as piece 2b): **2518 passed, 0 failed, 2 skipped.**
+- **ArchTests** (same filter as piece 2b): **153 passed, 0 failed.**
+- **CVE:** no package added; `dotnet list … --vulnerable --include-transitive` reports none.
+- `git diff a9794dbaad -- src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs` is empty.
+
 rework: 054a piece 2b — an outbound Direct send (Message, no ThreadId, no typed regarding) whose To ∪ Cc ∪ Bcc is one address that the A9 internal-user email read maps to one enabled, non-application systemuser other than the sender is filed into FindOrCreateDirectThreadAsync(sender, recipient) through the respond path's explicit join (one filing update carrying the recipient, then the grant); otherwise today's resolver path, with one Information `direct_message.pair_routing_skipped` and its reason; faults log a Warning and take today's path; no owner is written.
