@@ -27,6 +27,9 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
     private const string ReadAccessRights = "ReadAccess";
 
+    /// <summary>uac-r2 198 pass 2 item 7: the Read bit of a POA row's mask (as in GateDecisionRecordSharing).</summary>
+    private const int ReadAccessMask = 1;
+
     /// <summary>
     /// Bounds the find-or-create candidate scan (threads owned by one side of the pair) — a defensive cap,
     /// not an expected R1 ceiling (a user with more than this many Direct threads is not expected in R1).
@@ -144,14 +147,20 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (topology != ThreadTypeDirect)
             return Array.Empty<Guid>(); // topology gate — Open/record-anchored threads are unaffected
 
-        return await ReadOwnerAndSharesAsync(threadId, thread, ct);
+        // uac-r2 198 pass 2 item 7: a share-read fault THROWS here. This list is the ACS membership reconcile's desired set
+        // (DirectThreadExplicitParticipantReader → ThreadMembershipDerivationService → MembershipReconciler), so "the owner
+        // alone" on a fault would remove the other participant from the chat; the reconcile retries instead.
+        return await ReadOwnerAndSharesAsync(threadId, thread, shareFaultIsNoShares: false, ct);
     }
 
     /// <summary>
-    /// A Direct thread's two-party list: its user owner ∪ the systemusers it is POA-shared to. No topology check: the
-    /// caller has decided the thread is Direct (the gate above, or the join for a grant, #1629).
+    /// A Direct thread's two-party list: its user owner ∪ the systemusers holding Read on it through a POA share. No
+    /// topology check: the caller has decided the thread is Direct (the gate above, or the join for a grant, #1629).
+    /// <paramref name="shareFaultIsNoShares"/>: true only for the grant, where a fault grants fewer (fail closed); false
+    /// makes a fault throw.
     /// </summary>
-    private async Task<IReadOnlyList<Guid>> ReadOwnerAndSharesAsync(Guid threadId, Entity thread, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>> ReadOwnerAndSharesAsync(
+        Guid threadId, Entity thread, bool shareFaultIsNoShares, CancellationToken ct)
     {
         var participants = new List<Guid>();
         if (thread.GetAttributeValue<EntityReference>("ownerid") is { } owner
@@ -165,7 +174,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         {
             shared = await GetSharedSystemUserIdsAsync(threadId, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (shareFaultIsNoShares)
         {
             _logger.LogWarning(
                 ex,
@@ -465,7 +474,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var thread = await _entityService.RetrieveAsync(ThreadEntity, threadId, new[] { "ownerid" }, ct);
         if (thread is null || thread.Id == Guid.Empty)
             return Array.Empty<Guid>();
-        return await ReadOwnerAndSharesAsync(threadId, thread, ct);
+        return await ReadOwnerAndSharesAsync(threadId, thread, shareFaultIsNoShares: true, ct); // a fault grants fewer
     }
 
     /// <summary>
@@ -634,7 +643,19 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var candidates = await _entityService.RetrieveMultipleAsync(query, ct);
         foreach (var candidate in candidates.Entities)
         {
-            var shared = await GetSharedSystemUserIdsAsync(candidate.Id, ct);
+            IReadOnlyList<Guid> shared;
+            try
+            {
+                shared = await GetSharedSystemUserIdsAsync(candidate.Id, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // 198 pass 2 item 7: the strict read throws where the soft read answered empty; a candidate that cannot be
+                // read is skipped, exactly as before.
+                _logger.LogWarning(ex, "Failed to read Direct thread {ThreadId} POA shares; the candidate is skipped.", candidate.Id);
+                continue;
+            }
+
             if (shared.Contains(sharedCandidateId))
                 return candidate.Id;
         }
@@ -651,13 +672,16 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// about. That filter is what the pre-060 <c>GetSharedSystemUserIdsAsync</c> primitive merely
     /// ASSUMED, so this tightens the no-leak property rather than relaxing it: a team share on a thread
     /// can no longer be mistaken for a participating user.
+    /// <para>uac-r2 198 pass 2 item 7: only rows holding the Read bit count (a zero-mask row is inherited access, not a
+    /// share of the thread), and the read is strict: a fault throws, never an empty list.</para>
     /// </remarks>
     private async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(Guid threadId, CancellationToken ct)
     {
-        var shares = await _accessGrant.GetPrincipalAccessAsync(ThreadEntity, threadId, ct);
+        var shares = await _accessGrant.GetPrincipalAccessOrThrowAsync(ThreadEntity, threadId, ct);
 
         return shares
-            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser)
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser
+                        && (s.AccessRightsMask & ReadAccessMask) == ReadAccessMask)
             .Select(s => s.Principal.Id)
             .Distinct()
             .ToList();
