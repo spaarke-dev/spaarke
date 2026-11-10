@@ -5,9 +5,11 @@
 > Work head is `origin/work/ebilling-r1` (DEF-061 merged; DEF-060 design docs on top). The dev BFF is uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.**
 >
 > **Agents running (3 of 4):**
-> - F3b fix round 1 (Opus, F3b worktree);
-> - 116 part 2 (Opus, the 116 worktree);
-> - 116 part 3 (Sonnet high, isolated worktree, branch `task/ebilling-116-ui`).
+> - F3b fix round 1, step 1 (Opus, F3b worktree): commit the WIP and repair the 172 failing tests;
+> - 116 verify + code-review + adr-check (Sonnet high, report only);
+> - 116 adversarial pass (Opus, read-only).
+>
+> **Open owner question:** F3b's 3-hop walk now hides any record whose parent chain is longer than 3 links, even with no invoice in it (fail closed). Recommendation: accept. Otherwise ask uac-r2 with diff 3.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -28,13 +30,12 @@
    - The K items: the module parent-column projection, the guard's must-fire control, two exclusion reasons and a stale comment.
    - K-b was ruled NOT a real path by both passes. The client-side `PolymorphicResolverService.ts:637-642` suggestion (refuse instead of warn) is out of F3b's scope: file it via `/project-defer-issue-tracking` without the mechanism detail.
    - **When the round is done:** run a scoped Opus re-check of the fix diff (the approach changed: a per-row walk and the multi-edge REST walk), then send uac-r2 diff 3, covering F3b's ranges `09403449d8..cd4efb3ba6` and `8b122ae8f5..<new head>`.
-2. **116 (running).** The head was `15053b7161`. The schema script (`sprk_notconvertedlist`, field-secured, Pester 95/95), the EB-D-211 code, the two routes, the file helpers and the retirements are done. Two agents are running:
-   - **part 2** (Opus, `task/ebilling-116`): tests, the 6 failing ArchTests ledgers, the rate-card file step, fail-before, the publish-size delta, code-review and adr-check;
-   - **part 3** (Sonnet, `task/ebilling-116-ui` from `15053b7161`): RuleReview, `Deploy-EbillingFormsViews.ps1`, and the read-only `Remove-EbillingSourceDocumentColumns.ps1` with its read-only dev run.
+2. **116 (in review).** Head `68aea7af88` on `task/ebilling-116`, pushed: part 2 (`936699a4b0`) plus part 3 merged in (only the notes conflicted).
+   - Part 2 results: ArchTests 2200/2200; filtered unit tests 7914 passed, 0 failed; publish size +0.31 MB. It found and fixed a defect: the `/file` route stored the client's claimed Content-Type, and now derives it from the file name. The rate-card workbook now goes through `ReplaceForCallerAsync`, and a refused write deletes the card's rows.
+   - Part 3 results: RuleReview Jest 60 passed; Pester 25/25 and 5/5.
+   - **Running:** a Sonnet verify of the combined tip plus code-review and adr-check (report only), and one Opus adversarial pass. Change set `698fd222cc..68aea7af88`.
    - **Then:**
-     - merge `-ui` into `task/ebilling-116`;
-     - verify;
-     - run one adversarial pass;
+     - one fix agent for any F-class findings from both;
      - uac-r2 reviews the two routes (`POST .../procedures/{p}/versions/{v}/draft`, `PUT .../versions/{v}/file`);
      - clear the `RecordOwnershipResolver.cs:1809` citation entry with uac-r2;
      - close out the notes and TASK-INDEX.
@@ -80,8 +81,8 @@
 | `task/ebilling-130c` | `3a49f67f65` | FINAL, approved |
 | `task/ebilling-130d` | `69a8b2db72` | FINAL, approved |
 | `task/ebilling-130-0-f3b` | `b12d14d868`+ | fix round 1 running (two Opus passes: NOT APPROVED, findings F1 ×2) |
-| `task/ebilling-116` | `15053b7161`+ | part 2 running |
-| `task/ebilling-116-ui` | from `15053b7161` | part 3 running |
+| `task/ebilling-116` | `68aea7af88` | parts 2 and 3 done and merged; verify, code-review, adr-check and the adversarial pass running |
+| `task/ebilling-116-ui` | `0c30c25f71` | merged into 116 |
 
 **Agent worktrees to remove at the batch:**
 - earlier rounds: aff95c719a54a6e5b, acfabc1702a61b70f, a0af46b7a8db4e045, af7d21452796b74a4, a56d6943daafbbf5e, ad9cdf00a103ae635, ae2d0b82254167eb0, a7b2594412602599c, aa937999fa605a887, a28d8883986230c2f, abc82a6e0f76f217d, a45f20db996c18d3a;
