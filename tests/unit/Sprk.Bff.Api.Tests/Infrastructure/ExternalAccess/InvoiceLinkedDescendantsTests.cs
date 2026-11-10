@@ -703,6 +703,71 @@ public sealed class InvoiceLinkedDescendantsTests
         logger.Entries.Should().BeEmpty("the walk logs only the bound");
     }
 
+    [Fact(DisplayName = "EB-D-215 read count: a full list page whose every row hangs from its own chain of the bound reads once per hop per parent table per chunk, never per row; every parent table is read")]
+    public async Task AFullPage_OfBoundLengthChains_ReadsOncePerHopPerTablePerChunk()
+    {
+        var store = new Store();
+        var agreementToDocument = InvoiceLinks.ParentEdgesOf("sprk_agreement").First(e => e.ParentTable == "sprk_document");
+        // Two chain shapes of exactly the bound (5 hops), together covering every parent table the walk reads, two tables per hop:
+        //   A: to-do → agreement → document → to-do → event → service request (linked)
+        //   B: to-do → analysis → communication → communication thread → analysis → document (linked)
+        var rows = new List<(Guid Todo, Guid Invoice, string Column, Guid FirstParent)>();
+        for (var i = 0; i < ExternalDataService.CollectionPageSize; i++)
+        {
+            var invoice = Guid.NewGuid();
+            Guid todo;
+            string column;
+            Guid first;
+            if (i % 2 == 0)
+            {
+                var request = store.Row("sprk_servicerequest", ($"_{InvoiceLinks.LinkColumnsOf("sprk_servicerequest")[0]}_value", invoice));
+                var evt = store.Row("sprk_event", ("_sprk_regardingservicerequest_value", request));
+                var upperTodo = store.Row("sprk_todo", ("_sprk_regardingevent_value", evt));
+                var document = store.Row("sprk_document", ("_sprk_relatedtodo_value", upperTodo));
+                first = store.Row("sprk_agreement", (agreementToDocument.ValueColumn, document));
+                column = "sprk_regardingagreement";
+            }
+            else
+            {
+                var document = store.Row("sprk_document", ("_sprk_invoice_value", invoice));
+                var upperAnalysis = store.Row("sprk_analysis", ("_sprk_documentid_value", document));
+                var thread = store.Row("sprk_communicationthread", ("_sprk_regardinganalysis_value", upperAnalysis));
+                var communication = store.Row("sprk_communication", ("_sprk_communicationthread_value", thread));
+                first = store.Row("sprk_analysis", ("_sprk_regardingcommunication_value", communication));
+                column = "sprk_regardinganalysis";
+            }
+
+            todo = store.Row("sprk_todo", ($"_{column}_value", first));
+            rows.Add((todo, invoice, column, first));
+        }
+
+        // The REST walk (rows already read; it starts at their first parents, hop 1).
+        var rest = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+            "sprk_todo", rows.Select(r => (r.Todo, r.Column, r.FirstParent)).ToList(), store.Query, CancellationToken.None);
+
+        foreach (var row in rows)
+            Decided(rest[row.Todo], row.Invoice);
+        var perTablePerHop = (int)Math.Ceiling(rows.Count / 2.0 / CommunicationOpenThreadGate.ChunkSize);
+        var restReads = InvoiceLinks.MaxWalkHops * 2 * perTablePerHop;
+        restReads.Should().Be(20, "5 hops x 2 parent tables per hop x ceil(100 / 50) chunks");
+        store.Reads.Should().HaveCount(restReads);
+        store.Reads.Select(r => r.Set).Distinct().Should().BeEquivalentTo(
+            new[] { "sprk_agreement", "sprk_analysis", "sprk_communication", "sprk_communicationthread", "sprk_document", "sprk_event",
+                "sprk_servicerequest", "sprk_todo" }
+                .Select(t => InvoiceLinks.Tables.TryGetValue(t, out var linked) ? linked.EntitySet : InvoiceLinks.Descendants[t].EntitySet),
+            "every parent table the walk reads is involved");
+        store.Reads.Should().OnlyContain(r => Regex.Matches(r.OData, " eq ").Count <= CommunicationOpenThreadGate.ChunkSize);
+
+        // The assistant walk (hop 0 reads the page itself, then the same hops).
+        store.Reads.Clear();
+        var assistant = await InvoiceLinks.ReadRowInvoiceLinksAsync("sprk_todo", rows.Select(r => r.Todo).ToList(), store.Query, CancellationToken.None);
+
+        foreach (var row in rows)
+            Decided(assistant[row.Todo], row.Invoice);
+        var pageReads = (int)Math.Ceiling(rows.Count / (double)CommunicationOpenThreadGate.ChunkSize);
+        store.Reads.Should().HaveCount(pageReads + restReads, "hop 0: ceil(200 / 50) = 4 reads of the page, then the same 20");
+    }
+
     // ── Part 3: the assistant tools' seam ────────────────────────────────────────────────────────────────────
 
     /// <summary>F3b fix round 1: a seam row of <paramref name="parentTable"/> that leads to <paramref name="invoice"/> (its own link, or an
