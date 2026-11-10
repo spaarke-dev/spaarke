@@ -239,9 +239,14 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
         => Task.FromResult(FailReads ? Array.Empty<DataversePrincipalAccess>() : Rows(entityLogicalName, recordId));
 
+    /// <summary>uac-r2 task 198 fix round: runs before each strict single read (logical name, record) — a change landing between
+    /// an owner check and the grant that follows the share read.</summary>
+    public Action<string, Guid>? BeforeStrictRead { get; set; }
+
     public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
     {
+        BeforeStrictRead?.Invoke(entityLogicalName, recordId);
         lock (_gate)
         {
             StrictReads++;

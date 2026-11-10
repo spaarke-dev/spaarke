@@ -1126,6 +1126,72 @@ public class DirectMessageParticipantSharesTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // 198 fix round: the MESSAGE row's participant grant is confirmed by an owner read-back too (the K1 class on the message)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private int MessageGrants(Guid message) =>
+        _shares.WriteLog.Count(w => w.Action == "GrantAccess" && w.EntitySet == "sprk_communications" && w.RecordId == message);
+
+    [Fact(DisplayName = "198 fix round must-fire: the message re-owned to Secure between its owner pre-check and its grant keeps no participant share, and is retried")]
+    public async Task Message_ReownedToSecureBetweenThePreCheckAndTheGrant_KeepsNoParticipantShare_AndIsRetried()
+    {
+        var (message, _) = DirectMessage();
+        var flipped = false;
+        _shares.BeforeStrictRead = (table, id) =>
+        {
+            // The message row's strict share read sits between its owner pre-check (OwnerUnchangedAsync) and its grant.
+            if (table == "sprk_communication" && id == message && !flipped)
+            {
+                flipped = true;
+                _world.MoveOwner("sprk_communication", message, DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+            }
+        };
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        flipped.Should().BeTrue();
+        MessageGrants(message).Should().BeGreaterThan(0, "the flip landed after the pre-check, so the grant was sent");
+        Holds("sprk_communication", message, Caller).Should().BeFalse("the read-back finds the Secure team, so the grant is undone");
+        Holds("sprk_communication", message, Other).Should().BeFalse();
+        outcome.Complete.Should().BeFalse("a mismatch is retried, never success");
+        outcome.Granted.Should().NotContain(g => g.RowId == message);
+    }
+
+    [Fact(DisplayName = "198 fix round must-fire: a message grant that throws after it was applied, with the owner Secure on read-back, is revoked")]
+    public async Task Message_AGrantThatThrowsAfterItWasApplied_WithTheOwnerSecureOnReadBack_IsRevoked()
+    {
+        var (message, _) = DirectMessage();
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Caller), Read); // Other is the only grant
+        _shares.AfterGrant = (_, id, _) =>
+        {
+            if (id != message)
+                return;
+            _world.MoveOwner("sprk_communication", message, DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+            throw new TimeoutException("Test: the grant committed, then the call timed out.");
+        };
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        Holds("sprk_communication", message, Other).Should().BeFalse("a grant that faulted may have committed; the owner is Secure, so it is undone");
+        Holds("sprk_communication", message, Caller).Should().BeTrue("a share held before the call is never touched");
+        outcome.Complete.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "198 fix round must-not-fire: a message whose owner is unchanged keeps the participants' grants, revokes nothing, and is complete")]
+    public async Task Message_AnUnchangedOwner_KeepsTheParticipantGrants_AndIsComplete()
+    {
+        var (message, _) = DirectMessage();
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+        outcome.Granted.Should().Contain(("sprk_communication", message, Caller)).And.Contain(("sprk_communication", message, Other));
+        outcome.Complete.Should().BeTrue();
+        Revokes().Should().Be(0);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Pass 2, N2: a participant the job grants on the message also gets the message's gate Decision Record
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
