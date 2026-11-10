@@ -55,7 +55,7 @@
      - **A6 (F1):** `Deploy-EbillingFormsViews.ps1:122` still binds the stale `sprk_ruleset.sprk_notconverted` section. Fix: drop it from the spec.
      - **Known limits:** K1, a chunked upload over 30 MB gets 400 instead of 413 (cheap to map, so fix it); K2, a publish during the job's write phase (not traced); K3, a second rate-card import removes the first card's workbook (record in the notes).
      - **Clean:** authorization order and the 404s on both routes, job keys, the clean-up scopes, the ledgers, the removal script, the absence of retired-route callers, and DI.
-     - **Fix round 1 RUNNING** (Opus, from `68aea7af88`) covers:
+     - **Fix round 1 DONE, `ebc4f178d5`** (pushed; the local upstream was wrongly `origin/work/ebilling-r1` and is now corrected). Build 0/0, ArchTests 2200/2200, filtered 7949/0; 28 must-fire tests failed before the fix. §11 merge not done: a remark plus a reason is in the notes. A redraft removes earlier-file drafts by `createdon` < the current file's `createdon`. **Running:** a scoped Opus re-check. **Sent:** to uac-r2 for the route and fix review (in parallel), with an ask about the `:1809` citation entry. The round covered:
        - A1–A6, F4/K1, the 422-vs-409 order (K4) and §11;
        - A2 per EB-D-214: clear the drafted state first, then stage the file; the job re-checks its source; no duplicate drafts on a redraft;
        - uac-r2's NFR-01 route order on BOTH routes: 404 for missing, foreign or unreadable, then 403 without Write on the version, then 409, then 413. The draft route adds the caller's Write on the version, and the POML acceptance criteria are refined to match.
@@ -107,7 +107,7 @@
 | `task/ebilling-130c` | `3a49f67f65` | FINAL, approved |
 | `task/ebilling-130d` | `69a8b2db72` | FINAL, approved |
 | `task/ebilling-130-0-f3b` | `b12d14d868`+ | fix round 1 running (two Opus passes: NOT APPROVED, findings F1 ×2) |
-| `task/ebilling-116` | `68aea7af88` | parts 2 and 3 done and merged; verify, code-review, adr-check and the adversarial pass running |
+| `task/ebilling-116` | `ebc4f178d5` | fix round 1 done; scoped Opus re-check and uac-r2 review running |
 | `task/ebilling-116-ui` | `0c30c25f71` | merged into 116 |
 
 **Agent worktrees to remove at the batch:**
