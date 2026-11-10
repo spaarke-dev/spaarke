@@ -210,7 +210,25 @@ public static class ExternalModuleDataEndpoints
 
         return await ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            dataService.NarrowDocumentsAsync, logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices).ConfigureAwait(false);
+            dataService.NarrowDocumentsAsync, logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices,
+            dataService.ReadModuleDocumentAncestorLinksAsync).ConfigureAwait(false);
+    }
+
+    /// <summary>What a row with no ancestors decides on (F3b).</summary>
+    private static readonly InvoiceLinks.RowInvoiceLinks NoAncestors = new(Array.Empty<Guid>(), false);
+
+    /// <summary>What a row whose parent chain cannot be decided decides on (F3b): the unreadable link, so the row is hidden.</summary>
+    private static readonly InvoiceLinks.RowInvoiceLinks NoAncestorsUndecidable =
+        new(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+
+    private static async Task<(List<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ReadChainsAsync(
+        ModuleDocumentChainReader read, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
+    {
+        var (chains, failed) = await read(rows, idAttribute, ct).ConfigureAwait(false);
+        // A reader that answers the wrong number of rows decides nothing: every row is undecidable (fail closed).
+        return chains.Count == rows.Count
+            ? (chains.ToList(), failed)
+            : (rows.Select(_ => NoAncestorsUndecidable).ToList(), true);
     }
 
     /// <summary>
@@ -258,7 +276,8 @@ public static class ExternalModuleDataEndpoints
         ILogger logger,
         CancellationToken ct,
         LiveParentRootReader? readLiveParents = null,
-        ExternalInvoiceHiding? hideInvoices = null)
+        ExternalInvoiceHiding? hideInvoices = null,
+        ModuleDocumentChainReader? readDocumentChains = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         ArgumentNullException.ThrowIfNull(narrowDocuments);
@@ -417,10 +436,34 @@ public static class ExternalModuleDataEndpoints
             var invoiceLinkedTruncated = false;
             if (InvoiceLinkedChildAttributes(module).Any() && scoped.Count > 0)
             {
-                (scoped, invoiceLinkedTruncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
-                        principal, scoped, row => ExternalDataService.InvoiceLinksOf(module.RecordEntity, row), hideInvoices, logger,
-                        $"module {module.Name}", ct)
+                // F3b: a child document is decided by EVERY invoice link up its parent document chain too (one batched read per hop,
+                // the task 188 bound). A chain that cannot be decided carries the unreadable link, so the row is hidden; a chain read
+                // that fails does the same and the response says truncated. No reader wired: a row that has a parent is undecidable.
+                var chains = Enumerable.Repeat(NoAncestors, scoped.Count).ToList();
+                var chainReadFailed = false;
+                if (InvoiceLinks.Descendants.TryGetValue(module.RecordEntity, out var chained) && chained.Parents.Count == 1)
+                {
+                    if (readDocumentChains is not null)
+                    {
+                        (chains, chainReadFailed) = await ReadChainsAsync(
+                            readDocumentChains, scoped, InvoiceLinks.Tables[module.RecordEntity].IdColumn, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        chains = scoped.Select(row =>
+                            row.TryGetValue(chained.Parents[0].Column, out var raw) && raw is not null ? NoAncestorsUndecidable : NoAncestors).ToList();
+                        chainReadFailed = chains.Any(chain => chain.ChainUndecidable);
+                    }
+                }
+
+                var (kept, hiddenForFault) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+                        principal, Enumerable.Range(0, scoped.Count).ToList(),
+                        index => ExternalDataService.InvoiceLinksOf(module.RecordEntity, scoped[index])
+                            .Concat(chains[index].Invoices).Distinct().ToList(),
+                        hideInvoices, logger, $"module {module.Name}", ct)
                     .ConfigureAwait(false);
+                invoiceLinkedTruncated = hiddenForFault || (chainReadFailed && kept.Count < scoped.Count);
+                scoped = kept.Select(index => scoped[index]).ToList();
             }
 
             // 082c-2 fix round 3 (uac-r2 U1): the invoice's review detail is returned only while the row's statuscode is In Review (the status was

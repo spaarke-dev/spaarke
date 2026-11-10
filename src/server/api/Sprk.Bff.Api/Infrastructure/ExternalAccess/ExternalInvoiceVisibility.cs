@@ -114,11 +114,14 @@ internal static class ExternalInvoiceVisibility
     /// Task 130-0b step 2: a CHILD table with an invoice link (<see cref="InvoiceLinks.Tables"/>, derived from the registries): not a
     /// root (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; a root is never hidden by its invoice link) and not in the invoice family
     /// (<see cref="FamilyTables"/>, which keeps its own path). A row of such a table is hidden when any invoice it links to is.
+    /// F3b: also a DESCENDANT with no invoice link of its own (<see cref="InvoiceLinks.IsDescendantOnly"/>: an analysis output, an event
+    /// log, a file version ...), decided by the invoice links of the rows it hangs from; it is never a root and never in the family.
     /// </summary>
     internal static bool IsInvoiceLinkedChildTable(string? logicalName) =>
-        InvoiceLinks.HasInvoiceLink(logicalName)
-        && !InvoiceLinks.IsRootWithInvoiceLink(logicalName)
-        && !IsInvoiceFamilyTable(logicalName);
+        (InvoiceLinks.HasInvoiceLink(logicalName)
+         && !InvoiceLinks.IsRootWithInvoiceLink(logicalName)
+         && !IsInvoiceFamilyTable(logicalName))
+        || InvoiceLinks.IsDescendantOnly(logicalName);
 
     /// <summary>
     /// Task 130-0b step 3: blanks (sets to null) every form of the invoice link in <paramref name="fields"/>, a row of the ROOT

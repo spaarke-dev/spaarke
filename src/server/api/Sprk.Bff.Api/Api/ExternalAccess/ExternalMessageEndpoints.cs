@@ -799,9 +799,13 @@ public static class ExternalMessageEndpoints
         }
 
         // Task 187 D4: a module with the secure-roots rule reads every attribute the rule reads, not only the dimensions.
+        // ebilling-r1 task 130-0b F3b: a root of the message routes that is an invoice-linked CHILD (a service request) also reads its
+        // invoice link columns, so the invoice rule can be applied to it like any child row.
+        var invoiceLinkedChild = ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(root.EntityLogicalName);
         var attributes = (module.RequireReadOnSecureRoots
                 ? dimensions.Select(d => d.Attribute).Concat(module.RootRuleAttributes)
                 : dimensions.Select(d => d.Attribute))
+            .Concat(invoiceLinkedChild ? InvoiceLinks.LinkColumnsOf(root.EntityLogicalName) : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -830,7 +834,12 @@ public static class ExternalMessageEndpoints
         }
 
         if (!module.RequireReadOnSecureRoots)
-            return (module.ScopeRows(principal, new[] { row }).Count > 0, row, false);
+        {
+            if (module.ScopeRows(principal, new[] { row }).Count == 0)
+                return (false, row, false);
+            return (await InvoiceLinkedChildReadableAsync(root, id, invoiceLinkedChild, record, principal, hideInvoices, logger, ct)
+                .ConfigureAwait(false), row, false);
+        }
 
         var live = await ExternalMultiRootRule.ReadLiveParentsAsync(readLiveParents, new[] { module.LiveParents(row) }, logger, ct)
             .ConfigureAwait(false);
@@ -875,7 +884,44 @@ public static class ExternalMessageEndpoints
             }
         }
 
-        return (true, row, false);
+        return (await InvoiceLinkedChildReadableAsync(root, id, invoiceLinkedChild, record, principal, hideInvoices, logger, ct)
+            .ConfigureAwait(false), row, false);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b (uac-r2 ruling): a root of the message routes that is an invoice-linked child (a service request)
+    /// follows the child rule - every invoice it links to must be visible to <paramref name="principal"/>. Not such a root, or no link:
+    /// readable. A link that is decided not visible, and one that cannot be read, refuse like a missing record. A decision that could
+    /// not be made (no predicate, the caller's firms, the invoice's own decision) throws
+    /// <see cref="ExternalDataService.DataverseUnavailableException"/>, answered as the <c>InvoiceUnreadableReasonCode</c> 503. Reached
+    /// only after the record check, so it is no existence oracle.
+    /// </summary>
+    private static async Task<bool> InvoiceLinkedChildReadableAsync(
+        MessageRoot root, Guid id, bool invoiceLinkedChild, IReadOnlyDictionary<string, object?> record, CallerPrincipal principal,
+        ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
+    {
+        if (!invoiceLinkedChild)
+            return true;
+
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(root.EntityLogicalName))
+        {
+            // The record read projects an unset lookup as null or leaves it out; a value that is not a lookup id cannot be read.
+            if (record.TryGetValue(column, out var value) && value is not null)
+                links.Add(LookupId(value) ?? ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        var state = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+            principal, links.Distinct().ToList(), hideInvoices, logger, "message root", ct).ConfigureAwait(false);
+        if (state == ExternalDataService.InvoiceLinkedRowState.Faulted)
+        {
+            logger.LogWarning(
+                "[EXT-MESSAGES] {Entity} {RecordId}: the decision on its invoice could not be made for a caller who reaches it; answered as unavailable.",
+                root.EntityLogicalName, id);
+            throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+        }
+
+        return state == ExternalDataService.InvoiceLinkedRowState.Visible;
     }
 
     /// <summary>

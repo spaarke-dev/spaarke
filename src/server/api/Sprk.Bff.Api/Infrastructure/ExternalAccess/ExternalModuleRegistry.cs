@@ -530,6 +530,16 @@ public sealed class ExternalModuleRegistry
         {
             throw new ArgumentException("Module RecordEntity is required.", nameof(descriptor));
         }
+        // ebilling-r1 task 130-0b F3b: a descendant of an invoice-linked row (an analysis output, an event log, a file version ...) is
+        // decided through the rows it hangs from, which the module fetch does not read. A module on one would show another firm's
+        // invoice work, so it is refused here (fail-fast at startup) until the fetch decides it.
+        if (InvoiceLinks.IsDescendantOnly(descriptor.RecordEntity))
+        {
+            throw new ArgumentException(
+                $"Module '{descriptor.Name}' reads '{descriptor.RecordEntity}', a descendant of invoice-linked rows: the module fetch " +
+                "cannot decide it by its invoices (InvoiceLinks.Descendants).", nameof(descriptor));
+        }
+
         // Validate the scope model resolves (either ScopeDimensions or the single-attribute shorthand) —
         // EffectiveDimensions throws a descriptive InvalidOperationException if neither is configured.
         var dimensions = descriptor.EffectiveDimensions;

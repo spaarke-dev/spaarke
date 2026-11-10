@@ -542,13 +542,149 @@ public class ExternalDataService
                 readable.Count - visible.Count, readable.Count, parentKind, parentId, narrowing.HiddenSummary(candidates));
         }
 
+        // F3b: a child document is decided by EVERY invoice link up its parent chain; a chain that cannot be read drops its rows.
+        var (documents, chainDropped) = await MapDocumentsWithAncestorLinksAsync(visible, ct).ConfigureAwait(false);
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = visible.Select(MapDocument).ToList(),
+            Value = documents,
             Truncated = read.Truncated
                         || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
-                        || (narrowing.Faulted && visible.Count < readable.Count),
+                        || (narrowing.Faulted && visible.Count < readable.Count)
+                        || chainDropped,
         };
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the list's documents as DTOs, each carrying the invoice links of its own row AND of every ancestor on
+    /// its <c>sprk_parentdocument</c> chain (<see cref="InvoiceLinks.ReadAncestorInvoiceLinksAsync"/>: one batched read per hop, the
+    /// task 188 bound), so the page's invoice decision (<see cref="HideInvoiceLinkedRowsAsync{T}"/>) hides a child of another firm's
+    /// document. A chain that cannot be decided (a cycle, past the bound, a parent that does not come back, an unreadable link) carries
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, so the row is hidden. A chain read that FAILS drops the rows that have a
+    /// parent (fail closed) and says so (<c>Dropped</c>), so the list is flagged truncated. A document with no parent causes no read.
+    /// </summary>
+    private async Task<(List<ExternalDocumentDto> Documents, bool Dropped)> MapDocumentsWithAncestorLinksAsync(
+        IReadOnlyList<DocumentRow> rows, CancellationToken ct)
+    {
+        var parentOf = new Dictionary<DocumentRow, Guid>(ReferenceEqualityComparer.Instance);
+        foreach (var row in rows)
+        {
+            // A row whose columns were not kept (no Extra) is undecidable: its parent reads as unreadable.
+            var parent = row.Extra is null
+                ? ExternalDocumentNarrowing.UnreadableLink
+                : ExternalInvoiceVisibility.LinkOf(row.Extra, ExternalDocumentNarrowing.ParentDocumentValue);
+            if (parent is { } parentId)
+                parentOf[row] = parentId;
+        }
+
+        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains = new Dictionary<Guid, InvoiceLinks.RowInvoiceLinks>();
+        var readFailed = false;
+        if (parentOf.Count > 0)
+        {
+            try
+            {
+                chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+                    DocumentTable, parentOf.Select(kv => (DocumentIdOf(kv.Key), kv.Value)).ToList(), QueryRowsOrThrowAsync, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[EXT-DATA] documents: the parent chain of {Count} document(s) could not be read; they are dropped (fail closed).", parentOf.Count);
+                readFailed = true;
+            }
+        }
+
+        var documents = new List<ExternalDocumentDto>();
+        foreach (var row in rows)
+        {
+            if (!parentOf.ContainsKey(row))
+            {
+                documents.Add(MapDocument(row));
+                continue;
+            }
+
+            if (readFailed)
+                continue;
+            var ancestors = chains.TryGetValue(DocumentIdOf(row), out var chain)
+                ? chain.Invoices
+                : new[] { ExternalDocumentNarrowing.UnreadableLink }; // no answer for this row: undecidable
+            documents.Add(MapDocument(row, ancestors));
+        }
+
+        return (documents, documents.Count < rows.Count);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the invoice links of the document chain ABOVE the document <paramref name="documentId"/> (whose
+    /// Web API <paramref name="row"/> the caller already read, with <see cref="ExternalDocumentNarrowing.ParentDocumentValue"/>), for the
+    /// single-document routes and the module fetch: the same walk and bound as the list. No parent: no links, no read. A row that was
+    /// not read, a parent column that is absent or not a GUID, a cycle, a chain past the bound and a parent that does not come back are
+    /// undecidable (<see cref="InvoiceLinks.RowInvoiceLinks.ChainUndecidable"/>). A failed read THROWS
+    /// <see cref="DataverseUnavailableException"/> (the route answers "could not decide", never a refusal).
+    /// </summary>
+    internal async Task<InvoiceLinks.RowInvoiceLinks> ReadDocumentAncestorLinksAsync(
+        Guid documentId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct)
+    {
+        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+        if (row is null)
+            return undecidable;
+        if (ExternalInvoiceVisibility.LinkOf(row, ExternalDocumentNarrowing.ParentDocumentValue) is not { } parent)
+            return new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+
+        var chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+            DocumentTable, new[] { (documentId, parent) }, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+        return chains.TryGetValue(documentId, out var chain) ? chain : undecidable;
+    }
+
+    /// <summary>
+    /// F3b: <see cref="ReadDocumentAncestorLinksAsync"/> for the rows of a FetchXML (module) page, keyed by position: each row's
+    /// <c>sprk_parentdocument</c> attribute decides. Same answers; a failed read says <c>Failed</c> and no row has a chain verdict.
+    /// </summary>
+    internal async Task<(IReadOnlyList<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ReadModuleDocumentAncestorLinksAsync(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
+    {
+        var none = new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+        var chains = rows.Select(_ => none).ToArray();
+        var asked = new List<(int Index, Guid Row, Guid Parent)>();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (!rows[i].TryGetValue(ExternalDocumentNarrowing.ParentDocumentAttribute, out var raw) || raw is null)
+                continue; // FetchXML omits a null attribute: no parent
+            var parent = ExternalModuleDescriptor.TryGetAttributeId(rows[i], ExternalDocumentNarrowing.ParentDocumentAttribute, out var parentId)
+                ? parentId
+                : ExternalDocumentNarrowing.UnreadableLink;
+            var id = ExternalModuleDescriptor.TryGetAttributeId(rows[i], idAttribute, out var rowId) ? rowId : Guid.NewGuid();
+            asked.Add((i, id, parent));
+        }
+
+        if (asked.Count == 0)
+            return (chains, false);
+        try
+        {
+            var read = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+                DocumentTable, asked.Select(a => (a.Row, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+            foreach (var (index, row, _) in asked)
+                chains[index] = read.TryGetValue(row, out var chain) ? chain : undecidable;
+            return (chains, false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] module documents: the parent chain of {Count} document(s) could not be read; they are dropped (fail closed).", asked.Count);
+            foreach (var (index, _, _) in asked)
+                chains[index] = undecidable;
+            return (chains, true);
+        }
     }
 
     /// <summary>A document row's id (<see cref="Guid.Empty"/> when it did not come back as a GUID: never visible).</summary>
@@ -572,6 +708,7 @@ public class ExternalDataService
     private const string TodoTable = "sprk_todo";
     private const string EventTable = "sprk_event";
     private const string DocumentTable = "sprk_document";
+    private const string ServiceRequestTable = "sprk_servicerequest";
 
     /// <summary>Task 187: <c>,col1,col2...</c>, a child table's live-parent lookups to append to a list <c>$select</c>.</summary>
     private static string LiveParentSelectSuffix(string childTable) =>
@@ -1033,6 +1170,26 @@ public class ExternalDataService
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the invoices a service request links to (<c>sprk_regardinginvoice</c>, through
+    /// <see cref="InvoiceLinks.LinkColumnsOf"/>), so the single-request routes can apply the invoice rule to the request as to any child row.
+    /// An empty array: no invoice link. A row that is gone, a link column that was not returned and a link that is not a GUID read as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible). App-only. A read that FAILS throws
+    /// <see cref="DataverseUnavailableException"/> (the same rule as <see cref="GetServiceRequestRequesterAsync"/>). An array, so a
+    /// substituted service answers "no link" by default.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<Guid[]> GetServiceRequestInvoiceLinksAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var columns = InvoiceLinks.LinkColumnsOf(ServiceRequestTable).Select(c => $"_{c}_value").ToArray();
+        if (columns.Length == 0)
+            return Array.Empty<Guid>();
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select={string.Join(",", columns)}";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return InvoiceLinksOf(ServiceRequestTable, row).ToArray();
     }
 
     /// <summary>
@@ -2167,20 +2324,24 @@ public class ExternalDataService
     /// invoice is decidedly not visible (or a link cannot be read), which is <see cref="InvoiceLinkedRowState.Hidden"/>: that answer does
     /// not depend on the fault. Collections keep hiding a row in every such case (<see cref="HideInvoiceLinkedRowsAsync{T}"/>).
     /// </summary>
+    /// <param name="chainUndecidable">F3b: the chain of rows the record hangs from (a child document's parent documents) could not be
+    /// decided (a cycle, past the bound, a parent that does not come back, an unreadable link). <paramref name="links"/> then holds the
+    /// invoices that WERE read. The record is Visible never; it is Hidden when one of those invoices is decided not visible (that
+    /// answer does not depend on the chain), otherwise Faulted.</param>
     internal static async Task<InvoiceLinkedRowState> DecideInvoiceLinkedRowAsync(
         CallerPrincipal caller, IReadOnlyList<Guid> links, ExternalInvoiceHiding? hideInvoices, ILogger logger, string surface,
-        CancellationToken ct)
+        CancellationToken ct, bool chainUndecidable = false)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(links);
-        if (links.Count == 0)
+        if (links.Count == 0 && !chainUndecidable)
             return InvoiceLinkedRowState.Visible;
 
         var (decision, faulted) = await AskInvoiceDecisionAsync(caller, new[] { links }, hideInvoices, logger, surface, ct)
             .ConfigureAwait(false);
         if (faulted)
             return InvoiceLinkedRowState.Faulted;
-        if (decision is not null && links.All(decision.IsVisible))
+        if (!chainUndecidable && decision is not null && links.All(decision.IsVisible))
             return InvoiceLinkedRowState.Visible;
 
         var anyDecidedHidden = links.Any(link =>
@@ -2331,6 +2492,8 @@ public class ExternalDataService
 
         var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
             .ConfigureAwait(false);
+        if (firms.State == CallerFirmsState.Unknown)
+            throw UnknownFirmsFailTheCall(asked.Count, table);
         if (firms.State != CallerFirmsState.Known)
         {
             _logger.LogInformation(
@@ -2339,11 +2502,40 @@ public class ExternalDataService
             return asked.ToHashSet();
         }
 
-        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(
-            table, asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
-        _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
-            AssistantPlane, table, asked.Count, hidden.Count);
-        return hidden;
+        // F3b (uac-r2 ruling): a fault on the decided rows hides them, on the family path too; it no longer throws. The caller's firms
+        // being unreadable (above) is the whole-read failure that fails the call.
+        try
+        {
+            var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(
+                table, asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
+            _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
+                AssistantPlane, table, asked.Count, hidden.Count);
+            return hidden;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The decision for {Count} {Table} row(s) failed. Failing CLOSED: every one is hidden (plane={Plane}).",
+                asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
+    }
+
+    /// <summary>
+    /// F3b (uac-r2 ruling): firms that cannot be read (a failed or null read, <see cref="CallerFirmsState.Unknown"/>) are a whole-read
+    /// failure of the assistant plane: the tool call fails with no data, never a partial answer. A caller KNOWN to be in no firm is not
+    /// this case: it hides every invoice-linked row.
+    /// </summary>
+    private DataverseUnavailableException UnknownFirmsFailTheCall(int count, string table)
+    {
+        _logger.LogWarning(
+            "[EXT-INVOICE-VISIBILITY] The caller's firms are unknown: the call fails for {Count} {Table} row(s) (plane={Plane}).",
+            count, table, AssistantPlane);
+        return new DataverseUnavailableException("The caller's firms could not be read; the invoice rule cannot be applied.");
     }
 
     /// <summary>
@@ -2408,6 +2600,8 @@ public class ExternalDataService
 
         var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
             .ConfigureAwait(false);
+        if (firms.State == CallerFirmsState.Unknown)
+            throw UnknownFirmsFailTheCall(linkedRows.Count, table); // F3b: the whole read failed; the tool call fails
         if (firms.State != CallerFirmsState.Known)
         {
             _logger.LogInformation(
@@ -4169,7 +4363,7 @@ public class ExternalDataService
         Modifiedon = r.Modifiedon,
     };
 
-    private static ExternalDocumentDto MapDocument(DocumentRow r) => new()
+    private static ExternalDocumentDto MapDocument(DocumentRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkDocumentid = r.SprkDocumentid ?? "",
         SprkName = r.SprkName ?? "",
@@ -4185,7 +4379,10 @@ public class ExternalDataService
         // R3 ISS-011 (#1886): the same truth the download and versions routes use (DocumentStorageResolver.GetSpePointersAsync:
         // a usable drive id AND item id; sprk_hasfile is a hint that can be stale). Only the boolean leaves the BFF.
         HasFile = Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(r.SprkGraphdriveid, r.SprkGraphitemid),
-        InvoiceLinks = InvoiceLinksOf(DocumentTable, r.Extra), // task 130-0 fix round 1; never serialized
+        // task 130-0 fix round 1; never serialized. F3b: plus the invoices of the ancestors on the parent document chain.
+        InvoiceLinks = ancestorLinks is null
+            ? InvoiceLinksOf(DocumentTable, r.Extra)
+            : InvoiceLinksOf(DocumentTable, r.Extra).Concat(ancestorLinks).Distinct().ToList(),
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()

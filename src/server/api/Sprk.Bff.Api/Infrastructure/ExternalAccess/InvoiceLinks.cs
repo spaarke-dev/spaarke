@@ -1,8 +1,17 @@
+using System.Text.Json;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
+
+/// <summary>
+/// ebilling-r1 task 130-0b F3b: the invoice links of the parent document chain above each row of a FetchXML (module) page, by position
+/// (<see cref="ExternalDataService.ReadModuleDocumentAncestorLinksAsync"/>). <c>Failed</c>: the chain read failed, so every row that has a
+/// parent is undecidable.
+/// </summary>
+internal delegate Task<(IReadOnlyList<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ModuleDocumentChainReader(
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct);
 
 /// <summary>
 /// ebilling-r1 task 130-0b (design.md:414, uac-r2 ruling 2026-11-08): the ONE answer to "which invoices does a row of table T link to",
@@ -22,14 +31,29 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// How a row is read (entity set and id column) comes from <see cref="SecureChildLineage.Children"/>, or, for a root, from
 /// <see cref="ExternalGrantRoot"/>. A table with an invoice edge but no known read shape is still listed (<see cref="HasInvoiceLink"/> is
 /// true) and its read THROWS, so it fails closed; <c>InvoiceLinksTests</c> fails the build on such a table.</para>
+/// <para><b>Descendants (ebilling-r1 task 130-0b F3b).</b> A row that has no invoice link of its own but is filed UNDER an
+/// invoice-linked row (an analysis output under its analysis, an event log under its event, a file version under its document, an
+/// attachment or email artifact under its document, ...) is decided by its parent's invoice links, and a child document by EVERY invoice
+/// link up its <c>sprk_parentdocument</c> chain (the same bound as the task 188 narrowing, <see cref="ExternalDocumentNarrowing.MaxHops"/>).
+/// The edge set is derived from the filing edges (<see cref="Descendants"/>, <see cref="BuildDescendants"/>), never listed by hand: a
+/// table with no invoice link of its own, not a root and not in the invoice family, that has a Filing edge to an invoice-linked child
+/// table (or to another descendant). A cycle, a chain past the bound, a parent that does not come back, an unreadable parent link and an
+/// unreadable parent column each make the row undecidable (<see cref="RowInvoiceLinks.ChainUndecidable"/>, and
+/// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> in the flat list): the caller hides the row, and a single read answers
+/// "could not decide". Only edges whose parent is an invoice-linked child or a descendant are followed: a root is decided by its grant.</para>
+/// <para><b>Supplemental links.</b> <see cref="Supplemental"/> lists an invoice link the edge registries do not carry (a service request
+/// is deliberately outside the Secure lineage map). The K-a guard (<c>InvoiceLookupCoverageGuardTests</c>) compares every lookup to
+/// <c>sprk_invoice</c> in the solution source with this class, so a lookup missing from both fails the build.</para>
 /// <para><b>Fail closed.</b> A row that does not come back, and a link that is present but not a GUID, read as
 /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>: an invoice that cannot be decided, so the caller hides the row. A failed read
 /// THROWS. A row with no invoice link reads as an empty list (the rule does not apply to it).</para>
 /// <para><b>Component Justification (CLAUDE.md §11):</b> (1) Existing — <see cref="ExternalInvoiceVisibility.ReadInvoicesOfAsync"/> maps
 /// the closed invoice family only, with one hand-listed link per table; the edge registries list every invoice edge but read nothing.
 /// (2) Extension — widening <see cref="ExternalInvoiceVisibility.FamilyTables"/> would change the closed taint list and every guard that
-/// scans for its table names; this reads the registries instead, beside the predicate. (3) Cost of doing nothing — a to-do, event,
-/// document or message about another firm's invoice reaches a partner through the assistant tools and the external routes.</para>
+/// scans for its table names; this reads the registries instead, beside the predicate. The descendant walk extends the same reader
+/// (one more hop per level) instead of adding a second one. (3) Cost of doing nothing — a to-do, event, document or message about
+/// another firm's invoice reaches a partner through the assistant tools and the external routes, and so does a file version, an
+/// analysis output or a child document of a document that belongs to it.</para>
 /// </remarks>
 internal static class InvoiceLinks
 {
@@ -43,12 +67,48 @@ internal static class InvoiceLinks
         internal IReadOnlyList<string> ValueColumns => LinkColumns.Select(c => $"_{c}_value").ToArray();
     }
 
+    /// <summary>An invoice link the edge registries do not carry: the table, its entity set and the lookup column (logical names).</summary>
+    internal sealed record SupplementalLink(string Table, string EntitySet, string Column);
+
+    /// <summary>
+    /// F3b: a service request links to an invoice (<c>sprk_servicerequest.sprk_regardinginvoice</c>), but a service request is a root of
+    /// its own that the Secure lineage map leaves out, and the filing edges list it only as a PARENT. It follows the child rule on both
+    /// planes (uac-r2 ruling), so its link is listed here; the K-a guard fails the build if this list and the registries together miss a
+    /// lookup to <c>sprk_invoice</c> in the solution source.
+    /// </summary>
+    internal static readonly IReadOnlyList<SupplementalLink> Supplemental =
+        new[] { new SupplementalLink("sprk_servicerequest", "sprk_servicerequests", "sprk_regardinginvoice") };
+
+    /// <summary>One edge a descendant's decision follows UP: the lookup column on the descendant and the table it names.</summary>
+    internal sealed record ParentEdge(string Column, string ParentTable)
+    {
+        /// <summary>The Web API value form of <see cref="Column"/> (<c>_col_value</c>).</summary>
+        internal string ValueColumn => $"_{Column}_value";
+    }
+
+    /// <summary>A table decided through its parent edges (F3b): how it is read and the edges followed up from it. <c>sprk_document</c> is
+    /// both an invoice-linked child (its own links, <see cref="Tables"/>) and a descendant (its parent document chain).</summary>
+    internal sealed record DescendantTable(string LogicalName, string? EntitySet, string IdColumn, IReadOnlyList<ParentEdge> Parents);
+
+    /// <summary>What a row's invoice decision runs on: the invoices it links to (its own and its ancestors') and whether the chain it
+    /// hangs from could be decided. When undecidable the list also carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.</summary>
+    internal sealed record RowInvoiceLinks(IReadOnlyList<Guid> Invoices, bool ChainUndecidable);
+
     /// <summary>Every table with at least one invoice link, keyed by logical name.</summary>
     internal static readonly IReadOnlyDictionary<string, LinkedTable> Tables =
-        Build(RecordFamilyEdges.Of(RecordFamilyEdges.FamilyKind.Filing), SecureChildLineage.Children);
+        Build(RecordFamilyEdges.Of(RecordFamilyEdges.FamilyKind.Filing), SecureChildLineage.Children, Supplemental);
+
+    /// <summary>F3b: every table decided through its parent edges, keyed by logical name (derived: <see cref="BuildDescendants"/>).</summary>
+    internal static readonly IReadOnlyDictionary<string, DescendantTable> Descendants =
+        BuildDescendants(RecordFamilyEdges.Of(RecordFamilyEdges.FamilyKind.Filing), SecureChildLineage.Children, Tables);
 
     /// <summary>True when <paramref name="table"/> has at least one invoice link.</summary>
     internal static bool HasInvoiceLink(string? table) => table is not null && Tables.ContainsKey(table);
+
+    /// <summary>F3b: true for a table that has NO invoice link of its own and is decided only through its parent edges (an analysis
+    /// output, an event log, a file version ...). <c>sprk_document</c> is not one: it has its own links and is in <see cref="Tables"/>.</summary>
+    internal static bool IsDescendantOnly(string? table) =>
+        table is not null && Descendants.ContainsKey(table) && !Tables.ContainsKey(table);
 
     /// <summary>True when <paramref name="table"/> is a root with an invoice link (its link is redacted, the row is never hidden).</summary>
     internal static bool IsRootWithInvoiceLink(string? table) => table is not null && Tables.TryGetValue(table, out var linked) && linked.IsRoot;
@@ -59,10 +119,12 @@ internal static class InvoiceLinks
 
     /// <summary>
     /// The tables with an invoice link, from <paramref name="edges"/> and <paramref name="lineage"/> (the registries; a parameter so the
-    /// guard can seed an edge). Columns keep the registries' order, the edge registry first.
+    /// guard can seed an edge) and <paramref name="supplemental"/> (links the registries do not carry). Columns keep the registries'
+    /// order, the edge registry first.
     /// </summary>
     internal static IReadOnlyDictionary<string, LinkedTable> Build(
-        IEnumerable<RecordFamilyEdges.Edge> edges, IReadOnlyDictionary<string, SecureChildLineage.Table> lineage)
+        IEnumerable<RecordFamilyEdges.Edge> edges, IReadOnlyDictionary<string, SecureChildLineage.Table> lineage,
+        IReadOnlyList<SupplementalLink>? supplemental = null)
     {
         ArgumentNullException.ThrowIfNull(edges);
         ArgumentNullException.ThrowIfNull(lineage);
@@ -83,57 +145,286 @@ internal static class InvoiceLinks
                 Add(table.LogicalName, column);
         }
 
+        foreach (var link in supplemental ?? Array.Empty<SupplementalLink>())
+            Add(link.Table, link.Column);
+
         return columns.ToDictionary(
             kv => kv.Key,
             kv =>
             {
                 var (entitySet, idColumn, isRoot) = ReadShapeOf(kv.Key, lineage);
+                if (entitySet is null
+                    && supplemental?.FirstOrDefault(s => string.Equals(s.Table, kv.Key, StringComparison.OrdinalIgnoreCase)) is { } extra)
+                    entitySet = extra.EntitySet;
                 return new LinkedTable(kv.Key, entitySet, idColumn, kv.Value.ToArray(), isRoot);
             },
             StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
+    /// F3b: the descendant tables, derived from <paramref name="edges"/> (a parameter so the guard can seed an edge). (1) The document's
+    /// parent chain: the Filing edge <c>sprk_document.sprk_parentdocument → sprk_document</c>
+    /// (<see cref="ExternalDocumentNarrowing.ParentDocumentAttribute"/>, the chain the task 188 narrowing walks). (2) Every PLAIN table (no
+    /// invoice link of its own, not in the invoice family, not a core record) with a Filing edge to an invoice-linked child table
+    /// (<paramref name="tables"/>: not a root, not in the family) or to another descendant, followed to a fixed point. An edge to a root
+    /// is not followed (a root is decided by its grant). The registry decides which tables these are; nothing here names one.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, DescendantTable> BuildDescendants(
+        IEnumerable<RecordFamilyEdges.Edge> edges, IReadOnlyDictionary<string, SecureChildLineage.Table> lineage,
+        IReadOnlyDictionary<string, LinkedTable> tables)
+    {
+        ArgumentNullException.ThrowIfNull(edges);
+        ArgumentNullException.ThrowIfNull(lineage);
+        ArgumentNullException.ThrowIfNull(tables);
+        var all = edges.ToList();
+        var parents = new Dictionary<string, List<ParentEdge>>(StringComparer.OrdinalIgnoreCase);
+
+        static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        bool IsDecidedChild(string table) =>
+            tables.TryGetValue(table, out var linked) && !linked.IsRoot && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table);
+        bool IsPlain(string table) =>
+            !tables.ContainsKey(table) && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table)
+            && !RecordFamilyEdges.CoreTables.Contains(table);
+        bool Add(string child, string column, string parent)
+        {
+            if (!parents.TryGetValue(child, out var list))
+                parents[child] = list = new List<ParentEdge>();
+            if (list.Any(e => Same(e.Column, column)))
+                return false;
+            list.Add(new ParentEdge(column, parent));
+            return true;
+        }
+
+        foreach (var edge in all.Where(e => Same(e.ChildTable, ExternalDocumentNarrowing.DocumentTable)
+                     && Same(e.ParentTable, ExternalDocumentNarrowing.DocumentTable)
+                     && Same(e.LookupColumn, ExternalDocumentNarrowing.ParentDocumentAttribute)))
+        {
+            Add(edge.ChildTable, edge.LookupColumn, edge.ParentTable);
+        }
+
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var edge in all.Where(e => IsPlain(e.ChildTable) && !Same(e.ChildTable, e.ParentTable)
+                         && (IsDecidedChild(e.ParentTable) || parents.ContainsKey(e.ParentTable))))
+            {
+                changed |= Add(edge.ChildTable, edge.LookupColumn, edge.ParentTable);
+            }
+        }
+
+        return parents.ToDictionary(
+            kv => kv.Key,
+            kv =>
+            {
+                var shape = ReadShapeOf(kv.Key, lineage);
+                return new DescendantTable(kv.Key, shape.EntitySet, shape.IdColumn, kv.Value.ToArray());
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The invoices each row of <paramref name="rowIds"/> (rows of <paramref name="table"/>) links to, through every invoice link column,
-    /// read BY ID through <paramref name="query"/> in one read per chunk of <see cref="CommunicationOpenThreadGate.ChunkSize"/>. An empty list:
-    /// the row links to no invoice. <see cref="ExternalDocumentNarrowing.UnreadableLink"/> in the list: a link that cannot be decided (the
-    /// row did not come back, or a link is not a GUID). A failed read THROWS, as does a table with no invoice link or no known read shape.
+    /// read BY ID through <paramref name="query"/> in one read per chunk of <see cref="CommunicationOpenThreadGate.ChunkSize"/>. F3b: for a
+    /// descendant (<see cref="Descendants"/>) the list also carries the invoices of the rows it hangs from (its parent chain, bounded by
+    /// <see cref="ExternalDocumentNarrowing.MaxHops"/>). An empty list: the row links to no invoice.
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> in the list: a link that cannot be decided (the row did not come back, a
+    /// link is not a GUID, or the chain is undecidable: <see cref="ReadRowInvoiceLinksAsync"/>). A failed read THROWS, as does a table
+    /// with no invoice link or no known read shape.
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> ReadLinkedInvoicesAsync(
+        string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct) =>
+        (await ReadRowInvoiceLinksAsync(table, rowIds, query, ct).ConfigureAwait(false))
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Invoices);
+
+    /// <summary>
+    /// <see cref="ReadLinkedInvoicesAsync"/> with the chain verdict kept apart (F3b): per row, the invoices it decides on and whether
+    /// the chain it hangs from was undecidable. The walk: hop 0 is the row (its own links and its parent edges); each following hop is one
+    /// batched read per parent table over the distinct parents not yet in hand, up to <see cref="ExternalDocumentNarrowing.MaxHops"/>
+    /// hops, as the 188 narrowing walks a document. A parent column absent from a row, a parent link that is not a GUID, a parent that
+    /// does not come back, a parent already on THIS row's path (a cycle) and a parent needed past the bound each make the row
+    /// undecidable. Two edges to the same parent (a diamond) are not a cycle. A failed read THROWS.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, RowInvoiceLinks>> ReadRowInvoiceLinksAsync(
         string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(query);
-        if (table is null || !Tables.TryGetValue(table, out var linked))
+        if (table is null || ShapeOf(table) is not { } shape)
             throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table with an invoice link.");
-        if (linked.EntitySet is null)
-            throw new InvalidOperationException($"No read shape for {linked.LogicalName}; its invoice links cannot be read (fail closed).");
+        if (shape.EntitySet is null)
+            throw new InvalidOperationException($"No read shape for {shape.LogicalName}; its invoice links cannot be read (fail closed).");
 
         var distinct = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
-        var found = new Dictionary<Guid, IReadOnlyList<Guid>>();
-        if (distinct.Count == 0)
-            return found;
+        var walks = distinct.ToDictionary(id => id, _ => new RowWalk());
+        var known = new Dictionary<(string Table, Guid Id), IReadOnlyDictionary<string, JsonElement>?>();
+        var level = distinct.Select(id => new Pending(id, table, id, new[] { (table, id) })).ToList();
 
-        var values = linked.ValueColumns;
-        var select = string.Join(",", new[] { linked.IdColumn }.Concat(values));
-        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(distinct, (chunk, c) => query(linked.EntitySet,
-            $"$select={select}" +
-            $"&$filter={string.Join(" or ", chunk.Select(id => $"{linked.IdColumn} eq {id:D}"))}&$top={chunk.Length}", c), ct)
-            .ConfigureAwait(false);
-        foreach (var (chunk, rows) in chunks)
+        for (var hop = 0; level.Count > 0; hop++)
+            level = await StepAsync(level, hop, walks, known, query, ct).ConfigureAwait(false);
+
+        return walks.ToDictionary(kv => kv.Key, kv => kv.Value.Result());
+    }
+
+    /// <summary>
+    /// The ancestors' invoice links for rows the caller has ALREADY read (F3b, the REST plane): <paramref name="parents"/> are the rows'
+    /// first parents (hop 1) with each row's id. Same walk, same bound, same undecidable cases as
+    /// <see cref="ReadRowInvoiceLinksAsync"/>; the rows' own links are not read here. Only a table with exactly ONE parent edge (the
+    /// document's parent document) can be given its first parent as one id; any other table is refused. A failed read THROWS.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, RowInvoiceLinks>> ReadAncestorInvoiceLinksAsync(
+        string table, IReadOnlyCollection<(Guid Row, Guid Parent)> parents, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        ArgumentNullException.ThrowIfNull(query);
+        if (table is null || ShapeOf(table) is not { } shape || shape.Parents.Count != 1)
+            throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table with exactly one parent edge.");
+
+        var walks = new Dictionary<Guid, RowWalk>();
+        var known = new Dictionary<(string Table, Guid Id), IReadOnlyDictionary<string, JsonElement>?>();
+        var level = new List<Pending>();
+        foreach (var (row, parent) in parents.Where(p => p.Row != Guid.Empty).Distinct())
         {
-            var inChunk = chunk.ToHashSet();
-            foreach (var row in rows)
+            var walk = walks.TryGetValue(row, out var existing) ? existing : walks[row] = new RowWalk();
+            // An unreadable parent link, or a row that is its own parent, cannot be decided.
+            if (parent == ExternalDocumentNarrowing.UnreadableLink || parent == Guid.Empty || parent == row)
             {
-                if (ExternalInvoiceVisibility.LinkOf(row, linked.IdColumn) is not { } id || !inChunk.Contains(id))
-                    continue;
-                found[id] = values.Select(column => ExternalInvoiceVisibility.LinkOf(row, column)).OfType<Guid>().Distinct().ToList();
+                walk.Undecidable = true;
+                continue;
+            }
+
+            foreach (var edge in shape.Parents)
+                level.Add(new Pending(row, edge.ParentTable, parent, new[] { (table, row), (edge.ParentTable, parent) }));
+        }
+
+        for (var hop = 1; level.Count > 0; hop++)
+            level = await StepAsync(level, hop, walks, known, query, ct).ConfigureAwait(false);
+
+        return walks.ToDictionary(kv => kv.Key, kv => kv.Value.Result());
+    }
+
+    private sealed record Pending(Guid Origin, string Table, Guid Id, IReadOnlyList<(string Table, Guid Id)> Path);
+
+    private sealed class RowWalk
+    {
+        private readonly List<Guid> _invoices = new();
+
+        internal bool Undecidable { get; set; }
+
+        internal void AddLink(Guid? link)
+        {
+            // A link column that was not read, or is not a GUID, cannot be decided: the row is undecidable (never "no link").
+            if (link == ExternalDocumentNarrowing.UnreadableLink)
+            {
+                Undecidable = true;
+                return;
+            }
+
+            if (link is { } id && !_invoices.Contains(id))
+                _invoices.Add(id);
+        }
+
+        internal RowInvoiceLinks Result()
+        {
+            var invoices = _invoices.ToList();
+            if (Undecidable && !invoices.Contains(ExternalDocumentNarrowing.UnreadableLink))
+                invoices.Add(ExternalDocumentNarrowing.UnreadableLink);
+            return new RowInvoiceLinks(invoices, Undecidable);
+        }
+    }
+
+    /// <summary>One hop: reads the distinct rows of <paramref name="level"/> not in hand (one batched read per table and chunk), adds each
+    /// row's own links to its walk and returns the next level (the parents still to read).</summary>
+    private static async Task<List<Pending>> StepAsync(
+        List<Pending> level, int hop, Dictionary<Guid, RowWalk> walks,
+        Dictionary<(string Table, Guid Id), IReadOnlyDictionary<string, JsonElement>?> known,
+        CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+    {
+        foreach (var group in level.Where(p => !known.ContainsKey((p.Table, p.Id))).GroupBy(p => p.Table, StringComparer.OrdinalIgnoreCase))
+        {
+            var rowShape = ShapeOf(group.Key)
+                ?? throw new InvalidOperationException($"No read shape for {group.Key}; its invoice links cannot be read (fail closed).");
+            if (rowShape.EntitySet is null)
+                throw new InvalidOperationException($"No read shape for {rowShape.LogicalName}; its invoice links cannot be read (fail closed).");
+            var ids = group.Select(p => p.Id).Distinct().ToList();
+            foreach (var id in ids)
+                known[(group.Key, id)] = null; // asked: a row that does not come back stays null
+            var select = string.Join(",", new[] { rowShape.IdColumn }
+                .Concat(rowShape.ValueColumns).Concat(rowShape.Parents.Select(e => e.ValueColumn)).Distinct());
+            var entitySet = rowShape.EntitySet;
+            var idColumn = rowShape.IdColumn;
+            var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(ids, (chunk, c) => query(entitySet,
+                $"$select={select}" +
+                $"&$filter={string.Join(" or ", chunk.Select(id => $"{idColumn} eq {id:D}"))}&$top={chunk.Length}", c), ct)
+                .ConfigureAwait(false);
+            foreach (var (chunk, rows) in chunks)
+            {
+                var inChunk = chunk.ToHashSet();
+                foreach (var row in rows)
+                {
+                    if (ExternalInvoiceVisibility.LinkOf(row, idColumn) is { } rowId && inChunk.Contains(rowId))
+                        known[(group.Key, rowId)] = row;
+                }
             }
         }
 
-        // A row that did not come back links to invoices that cannot be decided.
-        IReadOnlyList<Guid> undecidable = new[] { ExternalDocumentNarrowing.UnreadableLink };
-        return distinct.ToDictionary(id => id, id => found.TryGetValue(id, out var invoices) ? invoices : undecidable);
+        var next = new List<Pending>();
+        foreach (var pending in level)
+        {
+            var walk = walks[pending.Origin];
+            if (known[(pending.Table, pending.Id)] is not { } row)
+            {
+                walk.Undecidable = true; // a row that did not come back
+                continue;
+            }
+
+            var rowShape = ShapeOf(pending.Table)!.Value;
+            foreach (var column in rowShape.ValueColumns)
+                walk.AddLink(ExternalInvoiceVisibility.LinkOf(row, column));
+
+            foreach (var edge in rowShape.Parents)
+            {
+                var parent = ExternalInvoiceVisibility.LinkOf(row, edge.ValueColumn);
+                if (parent is null)
+                    continue;
+                if (parent == ExternalDocumentNarrowing.UnreadableLink
+                    || pending.Path.Contains((edge.ParentTable, parent.Value), TableIdComparer.Instance)
+                    || hop >= ExternalDocumentNarrowing.MaxHops)
+                {
+                    walk.Undecidable = true; // an unreadable column or link, a cycle, or a chain past the bound
+                    continue;
+                }
+
+                next.Add(new Pending(pending.Origin, edge.ParentTable, parent.Value,
+                    pending.Path.Append((edge.ParentTable, parent.Value)).ToArray()));
+            }
+        }
+
+        return next;
+    }
+
+    private sealed class TableIdComparer : IEqualityComparer<(string Table, Guid Id)>
+    {
+        internal static readonly TableIdComparer Instance = new();
+
+        public bool Equals((string Table, Guid Id) x, (string Table, Guid Id) y) =>
+            x.Id == y.Id && string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Table, Guid Id) obj) =>
+            HashCode.Combine(obj.Id, StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Table));
+    }
+
+    /// <summary>How <paramref name="table"/> is read: from <see cref="Tables"/> (own links) and <see cref="Descendants"/> (parent edges);
+    /// null when it is in neither.</summary>
+    private static (string LogicalName, string? EntitySet, string IdColumn, IReadOnlyList<string> ValueColumns, IReadOnlyList<ParentEdge> Parents)? ShapeOf(string table)
+    {
+        var inTables = Tables.TryGetValue(table, out var linked);
+        var inDescendants = Descendants.TryGetValue(table, out var descendant);
+        if (!inTables && !inDescendants)
+            return null;
+        return inTables
+            ? (linked!.LogicalName, linked.EntitySet, linked.IdColumn, linked.ValueColumns,
+                inDescendants ? descendant!.Parents : Array.Empty<ParentEdge>())
+            : (descendant!.LogicalName, descendant.EntitySet, descendant.IdColumn, Array.Empty<string>(), descendant.Parents);
     }
 
     private static bool IsInvoice(string? table) =>
