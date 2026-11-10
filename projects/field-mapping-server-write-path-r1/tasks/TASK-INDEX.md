@@ -83,7 +83,7 @@
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
 | 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 (033 dropped; its Repair metadata-reader wiring is in scope here) | 🔄 split into 052a–e. 052a ✅ on master via #2629. Owner: exclude task and account; contacts go to the `ExternalAccess:CustomerBusinessUnitId` default team (fail closed), also for the chat contact create. 052b job waits on 032b-1 (shared gates); then 052c trigger, 052d report, 052e cascade design |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
-| 054 | [Direct 1:1 messages: owner team, BFF-only thread flags, existing-row move](054-direct-message-owner-team.poml) | FR-26 (owner ruling 2026-11-08) | opus / high | FULL | none | 060, 045b; UAC-r2 share side | 🔲 POML approved by UAC-r2 2026-11-08; parts 054a/b/c; live steps need the owner's go |
+| 054 | [Direct 1:1 messages: owner team, BFF-only thread flags, existing-row move](054-direct-message-owner-team.poml) | FR-26 (owner ruling 2026-11-08) | opus / high | FULL | none | 060, 045b; UAC-r2 share side | 🔄 054a piece 1 is in UAC-r2's 198. Piece 2 (`sprk_directrecipient` live on dev, plus the BFF stamp) is merged to the work branch (4605e234c8, UAC-r2 approved). Piece 3 is blocked on the owner's routing decision (the resolver-CREATE gap). 054b and 054c are not started, and their live steps need the owner's go |
 
 ## Phase 6 — W6 Standard, guards, docs, retirement
 
