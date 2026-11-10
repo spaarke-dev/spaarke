@@ -202,6 +202,33 @@ public sealed partial class ExternalInvoiceVisibilityTests
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Unreadable_AnAccessPermissionColumnTheSourceReadDidNotReturn_HidesTheInvoice(string caller)
+    {
+        // Fix round 3f: an absent column was not read, so the source is unreadable (never "not narrowed"); an explicit null is.
+        var plain = _world.OwnedInvoice();
+        var plainSource = _world.Source(plain, permission: null);
+        var marked = _world.OwnedInvoice();
+        var markedSource = _world.Source(marked, permission: Restricted, eml: true, marker: true);
+        var markedAbsent = _world.OwnedInvoice();
+        var markedAbsentSource = _world.Source(markedAbsent, permission: Restricted, eml: true, marker: true);
+        await ShouldBeVisible(caller, plain);
+        await ShouldBeVisible(caller, marked); // control: an explicit Restricted .eml with the marker keeps the own-leg lift
+
+        _world.OmitDocumentColumn(plainSource, "sprk_accesspermission");
+        _world.OmitDocumentColumn(markedAbsentSource, "sprk_accesspermission");
+
+        await ShouldBeHidden(caller, plain, InvoiceHiddenReason.SourceHidden);
+        await ShouldBeHidden(caller, markedAbsent, InvoiceHiddenReason.SourceHidden); // the marker never lifts an unreadable value
+        _ = markedSource;
+    }
+
+    [Fact]
+    public void TheSourceRead_SelectsTheAccessPermission()
+    {
+        ExternalInvoiceVisibility.SourceSelectColumns.Should().Contain(ExternalDocumentNarrowing.AccessPermissionField);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
     public async Task Unreadable_AnOwnValueThatIsNotAKnownLevel_HidesTheInvoice(string caller)
     {
         var invoice = _world.OwnedInvoice();
@@ -2204,6 +2231,16 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     {
         lock (_sets)
             _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString())[column] = value;
+    }
+
+    /// <summary>
+    /// Fix round 3f: removes <paramref name="column"/> from the stored document, so a read that selects it does not get it back (the
+    /// Web API omits a column it did not return; an explicit null is a stored key holding null).
+    /// </summary>
+    public void OmitDocumentColumn(Guid id, string column)
+    {
+        lock (_sets)
+            _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString()).Remove(column);
     }
 
     private void Seed(string set, Dictionary<string, object?> row)

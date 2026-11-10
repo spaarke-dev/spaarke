@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <para><b>The legs</b> (each hides the document):</para>
 /// <list type="number">
 /// <item><b>Own Restricted.</b> The document's own <c>sprk_accesspermission</c> reads Restricted (100000002), or a value
-/// that is not a known level (unreadable). Null or absent counts as Standard, as everywhere else
+/// that is not a known level (unreadable). An explicit null counts as Standard, as everywhere else
 /// (<see cref="InheritedAccessPermission.MostRestrictive"/>). Because visibility is "root AND own", an own value wider than
 /// the root changes nothing: the root still decides.</item>
 /// <item><b>An internal-only or non-Open communication.</b> The document's communication is its own
@@ -96,8 +96,8 @@ internal static class ExternalDocumentNarrowing
 
     /// <summary>
     /// The Web API <c>$select</c> columns every surface that decides a document must read (pinned by test). A dropped link column
-    /// reads as unreadable since fix round 3d (the document is hidden); the permission choice column is not a lookup and reads
-    /// as "not set" as before (every caller selects it; the pin is the boundary).
+    /// reads as unreadable since fix round 3d (the document is hidden); the permission choice column reads as unreadable too
+    /// since fix round 3f (only an explicit null is "not set"). Every caller selects it; the pins hold that.
     /// </summary>
     internal static IReadOnlyList<string> SelectColumns { get; } =
         new[] { AccessPermissionField, RelatedCommunicationValue, ParentDocumentValue };
@@ -195,6 +195,12 @@ internal static class ExternalDocumentNarrowing
         return ExternalModuleDescriptor.TryGetAttributeId(row, attribute, out var id) ? id : UnreadableLink;
     }
 
+    /// <summary>
+    /// A Web API row lists a column it was asked for, an unset choice as an explicit JSON <c>null</c> (not narrowed, as
+    /// everywhere else: <see cref="InheritedAccessPermission.MostRestrictive"/>). A column the row does not carry was not
+    /// read, which says nothing about its value, so it is treated as unreadable (fix round 3f); <c>SkipsOwnLeg</c>
+    /// never lifts an unreadable own value.
+    /// </summary>
     private static DocumentNarrowingRow FromJson(Guid documentId, Func<string, JsonElement?> valueOf)
     {
         var own = valueOf(AccessPermissionField) is { } permission
@@ -204,7 +210,7 @@ internal static class ExternalDocumentNarrowing
                 JsonValueKind.Number when permission.TryGetInt32(out var value) => PermissionOf(value),
                 _ => DocumentPermission.Unreadable,
             }
-            : DocumentPermission.NotNarrowed;
+            : DocumentPermission.Unreadable;
         return new DocumentNarrowingRow(
             documentId, own, JsonLink(valueOf(RelatedCommunicationValue)), JsonLink(valueOf(ParentDocumentValue)));
     }

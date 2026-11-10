@@ -2464,6 +2464,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             // Fix round 3c: and every live-parent lookup column as an explicit null (an absent one reads as unreadable).
             Row = InvoiceLinks.LinkColumnsOf("sprk_document").Select(c => $"_{c}_value")
                 .Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+                // Fix round 3f: and the document narrowing's columns (the own Access Permission too), each an explicit null.
+                .Concat(ExternalDocumentNarrowing.SelectColumns)
                 .Distinct()
                 .ToDictionary(c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
         };

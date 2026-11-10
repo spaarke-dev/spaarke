@@ -697,7 +697,7 @@ Controls: an unreviewed read is caught; each spelling of a lookup read is caught
 - `ExternalOrganizationMembership.ContactOrganizationRow`: a membership row that does not carry the lookup column the read selected. Closed in fix round 3e (below).
 - `NoAccessEnforcementStore.EntryFrom` and `ReadOwnerAsync`: an entry or owner row that does not carry a column the read selected. Closed in fix round 3e (below).
 - `CommunicationThreadReadService` `ThreadRegardingFields`: a thread row that does not carry every typed regarding column. Closed in fix round 3e (below).
-- Adjacent, not a lookup: `sprk_accesspermission` (a choice column) absent reads as `DocumentPermission.NotNarrowed` in `ExternalDocumentNarrowing.FromWebApi`. Every caller selects it. Not yet changed; it touches about 35 test doubles and has its own step in fix round 3e.
+- Adjacent, not a lookup: `sprk_accesspermission` (a choice column) absent reads as `DocumentPermission.NotNarrowed` in `ExternalDocumentNarrowing.FromWebApi`. Every caller selects it. Closed in fix round 3f (below).
 - Outside the guard's scope in round 3d: the impersonated regarding resolution (`CommunicationThreadReadService.ResolveRegardingFromRow`, `Api/Filters/CommunicationRecordAuthorizationFilter.cs`; both closed in fix round 3e) and the internal reconciler `Services/Access/ChildAccessPermissionReconciler.cs` (a read-only census is in the fix round 3e report; the file is unchanged).
 
 ### Tests (fix round 3d)
@@ -772,3 +772,65 @@ The same rule as round 3d (a column the row does not carry was not read; an expl
 - `CommunicationListThreadsSeamTests`: a thread row without a regarding column is withheld and does not hide a further page; explicit nulls list as record-less; the select contains every regarding column.
 - `CommunicationRecordAuthorizationContractTests`: confirm-affinity with the regarding column not returned, and with an explicit null, is the no-op (two cases of the existing deny theory); a send into a thread, or inheriting from a communication, whose regarding column was not returned is a 403 and nothing is sent; the selects contain every regarding column.
 - Test doubles changed to return explicit nulls for unset lookups: `NoAccessEnforcementTestDoubles`, the membership-row doubles in the four caller test classes above, `CommunicationListThreadsSeamTests.ThreadRow`, and the thread and communication doubles in `CommunicationRecordAuthorizationContractTests`.
+
+## Fix round 3f: the `sprk_accesspermission` choice column
+
+The same rule as rounds 3d and 3e, applied to the one adjacent item that was not a lookup: a document's own Access Permission (a choice column) in a Web API (JSON) row. A column the row does not carry was not read, so it says nothing about the value. An explicit JSON `null` is "not set".
+
+### The change
+
+- `ExternalDocumentNarrowing.FromJson` (`ExternalDocumentNarrowing.cs:204`, reached by both `FromWebApi` overloads): a row without the column reads the document's own value as `DocumentPermission.Unreadable` (before: `NotNarrowed`). A null row (no row at all) reads the same way. `SkipsOwnLeg` lifts only a `Restricted` own value that carries the submission marker, so it never lifts `Unreadable`: an absent column is at least as strict as `Restricted`.
+- Unchanged: an explicit null is `NotNarrowed` (Standard), as in `InheritedAccessPermission.MostRestrictive` (`Services/Dataverse/ParentLineage.cs:512`, "null counts as Standard") and `docs/data-model/child-access-permission.md:12` ("A null ... counts as Standard") and `:37` (the column's default is Standard, not required). Standard and Limited are `NotNarrowed`, Restricted is `Restricted`, any other number or a non-number is `Unreadable`.
+- Effect on the surfaces, with no new rule: a list hides the row (`OwnUnreadable`, counted in the hidden summary; not a read fault, so the page is not marked truncated); a single-document route (`content`, `versions`) answers its one "not part of this record" 403, before any storage pointer is resolved; an invoice whose source document lacks the column is hidden (`SourceHidden`), including an `.eml` that carries the submission marker; the assistant's by-id reads decide the same way.
+- Not changed: `FromFetch` and `FromEntity` (SDK / FetchXML rows). The SDK omits a null attribute, so absence and null cannot be told apart there; the projection is pinned instead (below).
+
+### Callers and projections pinned
+
+Web API (JSON) rows, every `FromWebApi` caller:
+
+| Caller (file:line) | Select | Pin |
+|---|---|---|
+| `ExternalDataService.GetDocumentsAsync` (`:535`), list URL `BuildDocumentListUrl` (`:735`) | `ExternalDocumentNarrowing.SelectColumns` | `TheListSelect_NamesTheAccessPermission` (all five parent kinds) |
+| `ExternalDataService.IsDocumentVisibleAsync` (`:1986`), read `GetDocumentParentAndNameAsync` (`:1003`) | `SelectColumns` | `TheScopingRead_SelectsTheAccessPermission` (all five kinds, through the real fetch) |
+| `ExternalInvoiceVisibility.DecideSourceDocumentsAsync` (`:329`), select `SourceSelectColumns` (`:180`) | `SelectColumns` | `TheInvoiceSourceDocumentRead_SelectsTheAccessPermission` (also in `ExternalInvoiceVisibilityTests`) |
+| `ExternalDocumentNarrowing.ReadDocumentsByIdAsync` (parent hops, `ReadAndDecideAsync` for the assistant's tools and the internal routes), query `HopQuery` | `SelectColumns` | `TheByIdRead_SelectsTheAccessPermission` |
+| the constant itself | `SelectColumns` (`:102`) | `TheNarrowingColumns_NameTheAccessPermission` |
+
+No other code builds a `DocumentNarrowingRow` from a JSON row.
+
+SDK / FetchXML rows (absent = not set, because the query projects the attribute):
+
+| Read | Projection | Pin |
+|---|---|---|
+| Documents module that narrows (`ExternalModuleDataEndpoints.cs:348-352`, `FromFetch` at `:389`) | `NarrowingAttributes` (`ExternalModuleRegistry.cs:224`) = `FetchAttributes` | `EveryNarrowingModule_ProjectsTheAccessPermission` (every module that narrows) and the executed-FetchXML assertion in `ExternalDocumentNarrowingRouteTests.DocumentsModuleFetch_...` |
+| `ChildAccessPermissionReconciler` (`FromEntity`, `:654`, `:658`): every document query goes through `ColumnSetAsync` (`:847`), which takes the walk's columns (`ParentLineageWalk` built with `InheritedAccessPermission.Column`, `:198`) | the column, when the table has it | `TheReconcilerColumnSet_SelectsTheAccessPermission` (with and without the column in the table's metadata) |
+
+### Guard
+
+`ExternalLookupAbsentReadGuardTests` recognises lookup reads (`"_..._value"` literals and constants, SDK reference reads). `FromJson` reads the choice column through the `AccessPermissionField` constant and a callback, which the guard does not see as a site, and the file has no entry; the guard is unchanged (`ReviewedSites` 54 entries, `KnownOpenSites` 0). The choice-column read is covered by the unit, route and pin tests above. Recognising choice columns in the guard is a later round's work (the guard is not re-keyed here).
+
+### Tests (fix round 3f)
+
+New: `ExternalDocumentAccessPermissionAbsentColumnTests` (contract, over the real routes and `ExternalDataService` on `FakeDataverse`, whose `MaskedColumns` omits a selected column):
+- must fire: a single read (`content` and `versions`, projects, matters, work assignments) is refused with the route's one 403, nothing resolved from storage, and the response equals the refusal for a document of another record (never a 500); a list is empty and not truncated; `FromWebApi` (with and without a row, with the marker overload); the decision hides the document, also with the submission marker and with `honourSubmissionMarker`;
+- must not fire: an explicit null, Standard and Limited serve and list; Restricted is refused and hidden; an explicit Restricted `.eml` with the marker keeps the own-leg lift, and without the marker stays hidden; `FromFetch` / `FromEntity` still read an absent attribute as not set;
+- pins as in the table.
+
+`ExternalInvoiceVisibilityTests.Unreadable_AnAccessPermissionColumnTheSourceReadDidNotReturn_HidesTheInvoice` (both caller kinds): an invoice source without the column is hidden, a marked `.eml` source without it is hidden, with controls for an explicit null and an explicit Restricted marked `.eml`; `InvoiceWorld.OmitDocumentColumn` is the new helper.
+
+### Test doubles changed (rows that now return `sprk_accesspermission` as an explicit null when unset)
+
+A first run of the filtered suite (23596 tests) found 32 failures: 28 came from doubles that returned document rows without the column, and 4 were client timeouts under load (rerun, see the counts below). The doubles:
+
+1. `ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.NoLinks` (tests/integration/contract/Api/ExternalAccess/ExternalRecordDocumentRoutesTests.cs): the document scoping read answered by the in-memory service now carries `ExternalDocumentNarrowing.SelectColumns` as explicit nulls. It is the shared double for `ExternalRecordDocumentRoutesTests`, `ExternalAccessContractTests` (the service at `:1550`), `ExternalProjectDocumentUploadContractTests` and `ProcedureLibraryExternalDownloadTests` (`ProcedureLibraryCiamDenyTests.cs`).
+2. `ExternalDataServiceTests.DocumentRowJson`: every list row carries the column as an explicit null (the five `DocumentList_*` tests).
+3. `ExternalDocumentNarrowingTests` (two hand-built rows, `ACommunicationLinkThatIsNotAGuid_IsHidden_WithoutARead`, `AParentLinkThatIsNotAGuid_IsHidden_WithoutARead`): explicit null permission.
+
+Already explicit (checked, no change needed because they project every selected column and so return a null for an unset one): `ExternalRootEventReadTests.FakeDataverse` (all document and ancestor rows through `Project`), `InvoiceWorld.Document`, `ExternalDocumentNarrowingTests.Row`. The doubles of the assistant's tools (`DataverseDescribeHandlerTests`, `DataverseReadQueryHandlerTests`, `DataverseSearchDataHandlerTests`) were green with no change. The ruling's estimate was about 35 doubles; the suite showed three double sites (the shared ones fan out to many tests).
+
+### Counts (fix round 3f)
+
+- BFF build (`dotnet build src/server/api/Sprk.Bff.Api/`): 0 errors, 0 warnings.
+- `Spaarke.ArchTests` (full, from the worktree path): 2208 passed, 0 failed, 0 skipped (unchanged from round 3e).
+- Filtered run of `Sprk.Bff.Api.Tests` (External, MultiRoot, LiveParent, Communication, Document, Invoice, UnifiedAccess, Finance, Issue963, NoAccess, Todo, Event, Dataverse, ChildAccess, Narrowing, ProvisionProject): 23636 total, 23613 passed, 10 skipped, 13 failed. All 13 were client or host-start timeouts under load (`TaskCanceledException` / `TimeoutException`, 1 to 3 minutes each, none in a class this round touched); the 12 classes they belong to were rerun together: 185 total, 185 passed.
+- Fail-before: `ExternalDocumentNarrowing.cs` restored to `21bdb6076e`, touched, then the new class and the new invoice test run: 39 tests, 13 failed, 26 passed. Failed: `FromWebApi` (1), the decision with the marker (1), the single read (6: three segments by `content` and `versions`), the list (3), the invoice source (2: contact and flagged systemuser). Passed in both states: the explicit-value controls, the SDK-row control, and the pins (the selects and projections were already complete, so those pins hold the line rather than fail before). The changed file was then restored byte for byte (SHA-256 `651ab1b039ec2bed5b88d2237912eed88f2c90654f320b4cd881e1b59b347f9c`, compared with the saved copy); the only later change to it is one XML-doc `cref` turned into `<c>`.

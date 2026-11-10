@@ -150,6 +150,7 @@ public sealed class ExternalDocumentNarrowingTests
     {
         var doc = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
         {
+            ["sprk_accesspermission"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3f: explicit null (absent is unreadable)
             ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement("not-a-guid"),
         });
 
@@ -283,6 +284,7 @@ public sealed class ExternalDocumentNarrowingTests
     {
         var doc = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
         {
+            ["sprk_accesspermission"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3f: explicit null (absent is unreadable)
             ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement<object?>(null), // fix round 3d: explicit null (absent is unreadable)
             ["_sprk_parentdocument_value"] = JsonSerializer.SerializeToElement(42),
         });
