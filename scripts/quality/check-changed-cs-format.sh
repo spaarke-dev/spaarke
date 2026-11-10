@@ -29,11 +29,14 @@ cd "$repo_root" || exit 2
 
 scope=(':(glob)src/**/*.cs' ':(glob)tests/**/*.cs')
 
+check_all=false
 if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-  mode="all C# files under src/ and tests/"
+  check_all=true
+  mode="C# files under src/ and tests/ (no diff base)"
   mapfile -t files < <(git ls-files -- "${scope[@]}")
 else
-  mode="C# files changed between ${base:0:10} and ${head:0:10}"
+  short() { [[ "$1" =~ ^[0-9a-f]{40}$ ]] && echo "${1:0:10}" || echo "$1"; }
+  mode="C# files changed between $(short "$base") and $(short "$head")"
   if ! diff_out=$(git diff --name-only --no-renames --diff-filter=ACMRT "$base" "$head" -- "${scope[@]}"); then
     echo "::error::check-changed-cs-format: cannot diff $base..$head (is the base commit fetched?)" >&2
     exit 2
@@ -47,8 +50,21 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 echo "check-changed-cs-format: checking ${#files[@]} $mode"
-out=$(dotnet format whitespace . --folder --verify-no-changes --verbosity minimal --include "${files[@]}" 2>&1)
-rc=$?
+# Check-all passes the two folders; a diff passes its files in batches, because thousands of paths overflow the
+# command line on Windows (32 KB) and a large merge can touch hundreds of files.
+out=""
+rc=0
+if [[ "$check_all" == true ]]; then
+  out=$(dotnet format whitespace . --folder --verify-no-changes --verbosity minimal --include src/ tests/ 2>&1) || rc=$?
+else
+  batch=150
+  for ((i = 0; i < ${#files[@]}; i += batch)); do
+    part=$(dotnet format whitespace . --folder --verify-no-changes --verbosity minimal --include "${files[@]:i:batch}" 2>&1)
+    part_rc=$?
+    out+="$part"$'\n'
+    if [[ $part_rc -ne 0 ]]; then rc=$part_rc; fi
+  done
+fi
 
 if [[ $rc -eq 0 ]]; then
   echo "check-changed-cs-format: all ${#files[@]} file(s) formatted."
