@@ -625,6 +625,43 @@ N1/N3/N4 fail-first: 4 fail, 3 pass (the controls).
 | `tests/Spaarke.ArchTests` (full) | 2119 | 2119/2119 (the census holds with the new revoke and assign call sites) |
 | BFF build (full rebuild, `--no-incremental`) | 0 warnings | 0 warnings, 0 errors |
 
+### §7.7 Final fix round (K1/K2, gate record live owner, message-row confirm) and the merge
+
+**Fixes** (fail-first commits first, then the fix):
+
+| Commit | What |
+|---|---|
+| `ab43dee237` | Fail-first for FIX A and FIX B (`DirectMessageParticipantSharesTests`, through `AfterRefileAsync`). |
+| `1975c5a45a` | Fail-first for FIX C (`DecisionRecordWriterTests.GateDecision`): a Secure-owned or unreadable gate record is never granted at write. |
+| `d1116b0ef5` | **FIX A (K1):** the content-row grant's undo covers every ATTEMPTED grant (not only the confirmed ones) and runs in `finally`, so a cancellation cannot skip it. |
+| `ad96240617` | **FIX B (K2):** a content-row grant never revokes a share the holder already had before the call. A holder of a non-Read share is skipped, never revoked. |
+| `4c3a7c5336` | **FIX C:** the gate record's at-write share reads the record's LIVE owner before granting, and grants only when that owner is still the record's creating team. Comparing against the creating team, not the literal Direct team, keeps D-215 rule 3, where a record the writer gave an ordinary team is re-owned to Direct. In the hazard case the writer chose Direct, so the two rules agree. Ontology passed it. |
+| `c06ae85c86` | **FIX D:** the comment states what the membership reconcile does after a share-read fault. It retries every fault `IsRetryable` lists, not only 429/503/504. |
+| `778687223b` | The doc comment on `GrantContentRowAndConfirmAsync` names its new parameters. |
+| `b844296a6c` / `28208ed81b` | The message row's own participant grant is confirmed by an owner read-back and undone if the owner changed, the same as the content rows. This closes the gap the FIX A–D run reported in `ReconcileCoreAsync`. |
+
+**Reviews:**
+- My scoped re-check of the fix diff and its direct callers and callees found no F-class finding.
+- Ontology's re-check of FIX C and the F2 tests (`127f76bd54`) passed.
+
+**Behaviour notes:**
+- A cancelled pass now revokes, even when the row is still Direct-owned. This is fail-closed, and the share job re-grants on its next run.
+- A participant who holds only a non-Read share on a content row is retried on every run, with the job's backoff, until that share changes.
+
+**Known limits** (each under-shares and none exposes; each recovers at the next grant, re-file or sweep):
+- **K-E-4** (§7.5, narrowed by N2): a message that fm piece 3 / 054c moves to Direct, whose participants already hold their message shares, keeps its gate records unchanged until a re-file or a grant.
+- **K-F3** (race): two mirrors run unserialised. A filing keeps X, and mirror A's rejected read-back revokes X because it counted X as granted on a no-op.
+- **K-N3** (race): the audience is computed once. Mirror B grants Y, then A's revoke removes Y. `ReownToDirectAsync` has the same race.
+- **K-N2:** a mirror that faults, or is cancelled on the last id, after a pass that granted is only logged. Nothing re-mirrors until the next grant or re-file.
+- **K3** (carry overflow): with 1,000 or more rows stuck undecided, the safety-net sweep can stall until they clear. The stall is bounded and logged (§7.6 F2).
+- **K4:** a thread whose share rows can never be read never reconciles. That is safe, because nobody loses access through it.
+
+**Merge:** fm's #2659 landed as `534a0e36b4`. Master merged into this branch with no hand resolutions: `--remerge-diff` is empty. `SecureChildShareSynchronizer.cs` differs from master only by this task's commits (`9466c92004`, `b2eea298a4`). Gates after the merge, on `a0e867796f`:
+- **Builds and suites:** BFF and solution build 0/0; ArchTests 2144/2144; Core 64/64; IntegrationTests 212/0 (8 skipped); Spe.Integration 353/0 (23 skipped).
+- **Full `Sprk.Bff.Api.Tests` run:** 40,680 passed and 381 failed. 379 were load timeouts, 1 was an HTTP 499 and 1 was a Compose fidelity assertion. All 351 failed methods passed on a batched re-run.
+- **Publish size:** +0.06 MB against fresh master `534a0e36b4` (39.32 → 39.38 MB, 191/191 files).
+- **CVE:** none.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
