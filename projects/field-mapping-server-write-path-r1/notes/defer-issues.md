@@ -246,3 +246,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K, known limit; accepted by UAC-r2 2026-11-09 |
 | **Failure** | Step 3½ fills an adapter default only where the column is still empty (`RecordCreationService.cs` ~:587). When the mapping-source strip later removes the mapped value, the rebuild keeps only the surviving mapped values (`RecordCreationService.Mapping.cs` ~:513-517), so the displaced default is lost. Concrete case: the Office To Do's Assigned To (the caller's own contact, `OfficeService.cs` ~:2969-2987) ends up empty. Fix: re-run the defaults fill over the stripped columns AND re-run the caller's write checks (AppendTo on a lookup) on what it fills. The seam test `..._IsNotReapplied_KnownLimitK4` pins today's behaviour; flip it when fixed |
 | **Status** | Open |
+
+## DI-025 — Converge the Direct recipient stamp's participant read onto the shared Direct-thread reader
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-10, task 054a piece 2 fix round 1; UAC-r2 review condition (follow-up) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2652 |
+| **Class** | Follow-up; blocked on unified-access-control-r2 task 198 reaching master |
+| **Failure** | `DirectMessageRecipient.ReadParticipantsAsync` deliberately duplicates the participant rule of `IDirectThreadAccessService.GetParticipantSystemUserIdsAsync`: the thread typed Direct; the user owner plus systemuser shares carrying the Read bit; a strict read. Two readers can drift, and then the stamp and the grant path would disagree on who a message's participants are. Fix: once 198 is on master, call the shared reader and delete the duplicate, keeping the stamp's tests passing |
+| **Status** | Open |
