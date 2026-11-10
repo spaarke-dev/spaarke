@@ -241,6 +241,9 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                         return;
                     case true:
                         await GrantDirectTeamMessageAsync(communicationId, assignment, owningTeam, ct);
+                        // Ontology D-215 (task 198 Part E): a Direct message's gate Decision Records follow its participants who read it now.
+                        // No revoke path removes a participant's Read here, so no revoke mirror exists (D-215 rule 5).
+                        await _gateDecisionRecords.MirrorCommunicationSharesAsync(communicationId, ct);
                         return;
                 }
             }
@@ -297,7 +300,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// Task 198 Part B: the content rows of a Direct-team-owned message that its readers need, each as (table, the lookup to
     /// the message). They are granted to the same participants when the same Direct team owns them. Entity sets come from
     /// <see cref="SecureChildLineage.Children"/>. Gate Decision Records (<c>sprk_decisionrecord</c>) also follow the message to
-    /// the Direct team, but their shares are <c>GateDecisionRecordSharing</c>'s (task 198 Part E), never this list's.
+    /// the Direct team, but their shares are <c>GateDecisionRecordSharing</c>'s (task 198 Part E, D-215: the mirror after this grant), never
+    /// this list's.
     /// </summary>
     private static readonly (string Table, string MessageLookup)[] DirectContentRows =
     [

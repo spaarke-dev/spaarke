@@ -1334,20 +1334,8 @@ public sealed class SecureChildReconciler
             }
         }
 
-        // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
-        // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
         if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
-                    CommunicationTable, childId);
-            }
-
             // uac-r2 task 198 Part D (owner 2026-11-09): filed under a Restricted record, every user flagged external loses
             // their shares on the message and its content rows. Every communication; after the mirror, so a Secure target's
             // shares are the synchronizer's first. Never thrown; nothing granted.
@@ -1376,6 +1364,21 @@ public sealed class SecureChildReconciler
             // test composition) the step does not run; the host always registers it.
             if (_directMessageOwnerTeam is not null)
                 await DirectParticipantsAfterRefileAsync(childId, ct).ConfigureAwait(false);
+
+            // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
+            // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
+            // Ontology D-215 (task 198 Part E): LAST, after the Restricted bar and the Direct participant step, because a Direct message's gate
+            // records take the participants who read the message NOW (a secure exit back to Direct revokes their message shares, and the
+            // participant step grants them again before this step reads them).
+            try
+            {
+                await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
+                    CommunicationTable, childId);
+            }
         }
 
         return report;
