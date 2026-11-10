@@ -1057,6 +1057,75 @@ public class DirectMessageParticipantSharesTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // 198 fix round K1/K2: every ATTEMPTED content-row grant is undone when the read-back does not confirm the Direct team (a
+    // grant that faulted may have committed; a cancellation does not skip the undo), and a share held before the call is never
+    // revoked (a user holding any share is not granted here)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private const int Write = 2;
+
+    [Fact(DisplayName = "198 K1 must-fire: a content-row grant that throws after it was applied, on a row re-owned to Secure, is revoked")]
+    public async Task K1_AGrantThatThrowsAfterItWasApplied_OnARowReownedToSecure_IsRevoked()
+    {
+        var (message, rows) = DirectMessage();
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        _shares.Seed("sprk_communicationattachment", attachment, DataversePrincipalRef.User(Caller), Read); // Other is the only grant
+        _shares.AfterGrant = (_, id, _) =>
+        {
+            if (id != attachment)
+                return;
+            _world.MoveOwner("sprk_communicationattachment", attachment, DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+            throw new TimeoutException("Test: the grant committed, then the call timed out.");
+        };
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        Holds("sprk_communicationattachment", attachment, Other).Should().BeFalse(
+            "a grant that faulted may have committed; the row is Secure on read-back, so the attempt is undone");
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeTrue("a share held before the call is never touched");
+        outcome.Complete.Should().BeFalse();
+        outcome.Granted.Should().NotContain(g => g.RowId == attachment);
+    }
+
+    [Fact(DisplayName = "198 K1 must-fire: a cancellation after a content-row grant still revokes it, and the cancellation still propagates")]
+    public async Task K1_ACancellationAfterAContentRowGrant_StillRevokesIt_AndStillThrows()
+    {
+        var (message, rows) = DirectMessage();
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        _shares.Seed("sprk_communicationattachment", attachment, DataversePrincipalRef.User(Caller), Read); // Other is the only grant
+        using var cts = new CancellationTokenSource();
+        _shares.AfterGrant = (_, id, _) =>
+        {
+            if (id != attachment)
+                return;
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token); // the server applied the grant; the caller's token was observed after it
+        };
+
+        var act = () => Reconciler198().AfterRefileAsync(message, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the caller's cancellation propagates after the undo");
+        Holds("sprk_communicationattachment", attachment, Other).Should().BeFalse("the undo runs on its own token, not the cancelled one");
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeTrue("a share held before the call is never touched");
+    }
+
+    [Fact(DisplayName = "198 K2 must-not-fire: a participant holding a Write-only share on a content row is not granted Read, and keeps that share when the read-back fails")]
+    public async Task K2_AWriteOnlyShare_IsNotGrantedRead_AndIsNotRevoked_WhenTheReadBackFails()
+    {
+        var (message, rows) = DirectMessage();
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        _shares.Seed("sprk_communicationattachment", attachment, DataversePrincipalRef.User(Other), Write);
+        ReownAttachmentOnItsFirstGrant(rows, SecureChildShareWorld.SecureTeam);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        _shares.MaskOf("sprk_communicationattachment", attachment, DataversePrincipalRef.User(Other)).Should().Be(Write,
+            "a share held before the call is never revoked, and no Read is added to it on a row that may turn Secure");
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeFalse("this call's own grant is undone on the mismatch");
+        outcome.Complete.Should().BeFalse();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Pass 2, N2: a participant the job grants on the message also gets the message's gate Decision Record
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
