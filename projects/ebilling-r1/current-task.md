@@ -37,7 +37,17 @@
 2. **116 (in review).** Head `68aea7af88` on `task/ebilling-116`, pushed: part 2 (`936699a4b0`) plus part 3 merged in (only the notes conflicted).
    - Part 2 results: ArchTests 2200/2200; filtered unit tests 7914 passed, 0 failed; publish size +0.31 MB. It found and fixed a defect: the `/file` route stored the client's claimed Content-Type, and now derives it from the file name. The rate-card workbook now goes through `ReplaceForCallerAsync`, and a refused write deletes the card's rows.
    - Part 3 results: RuleReview Jest 60 passed; Pester 25/25 and 5/5.
-   - **Running:** a Sonnet verify of the combined tip plus code-review and adr-check (report only), and one Opus adversarial pass. Change set `698fd222cc..68aea7af88`.
+   - **Running:** a Sonnet verify of the combined tip plus code-review and adr-check (report only). Change set `698fd222cc..68aea7af88`.
+   - **Adversarial pass (Opus): NOT APPROVED, 6 F-class findings.**
+     - **A1 (F1):** a PUT can replace the file on a version published mid-upload (the Draft check sits at `ProcedureEndpoints.cs:331`; `ReplaceForCallerAsync` never re-checks). The rate-card import has the same gap (`:193` vs `:338`). Fix: after the new row is Servable and before the withdraw, re-read the status; if it is no longer Draft, withdraw the new row and return 409 `procedure_version.not_draft`.
+     - **A2 (F1, OWNER DECISION):** a replace after drafting leaves the proposals and the list stale, and the draft route then returns 409 `ruleset.already_drafted` forever. A PUT during a running job causes the same. Option (a): the PUT refuses a drafted version (recommended). Option (b): the replace clears the marker and the list.
+     - **A3 (F2):** a cancelled request skips the rollback (`StoredFileService.cs:943-945` passes the request token, and the catch excludes OCE), which leaves two Servable files. Fix: use `CancellationToken.None` once the new file is Servable, in the rate-card import too.
+     - **A4 (F1):** the rule-set read shows `sprk_notconvertedlist` without checking the marker (`RuleSetService.cs:496-508`; contract `ruleSetApi.ts:80`). Fix: return null unless `sprk_notconverted` is Yes.
+     - **A5 (F1):** the replace's prior-row read is capped at 100 with no status filter (`StoredFileService.cs:900`). Fix: filter on Servable, or refuse when the read could be incomplete.
+     - **A6 (F1):** `Deploy-EbillingFormsViews.ps1:122` still binds the stale `sprk_ruleset.sprk_notconverted` section. Fix: drop it from the spec.
+     - **Known limits:** K1, a chunked upload over 30 MB gets 400 instead of 413 (cheap to map, so fix it); K2, a publish during the job's write phase (not traced); K3, a second rate-card import removes the first card's workbook (record in the notes).
+     - **Clean:** authorization order and the 404s on both routes, job keys, the clean-up scopes, the ledgers, the removal script, the absence of retired-route callers, and DI.
+     - **Next:** one Opus fix agent for A1–A6, K1 and the verify findings, then a scoped re-check.
    - **Then:**
      - one fix agent for any F-class findings from both;
      - uac-r2 reviews the two routes (`POST .../procedures/{p}/versions/{v}/draft`, `PUT .../versions/{v}/file`);
