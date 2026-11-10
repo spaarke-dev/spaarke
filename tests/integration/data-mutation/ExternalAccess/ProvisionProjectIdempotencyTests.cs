@@ -707,7 +707,10 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler>.Instance,
             Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.GraphResilienceOptions
             {
-                RetryCount = 3, RetryBackoffSeconds = 0, HonorRetryAfterHeader = false, TimeoutSeconds = 30,
+                RetryCount = 3,
+                RetryBackoffSeconds = 0,
+                HonorRetryAfterHeader = false,
+                TimeoutSeconds = 30,
                 CircuitBreakerFailureThreshold = 100
             }))
         { InnerHandler = new HttpClientHandler() };

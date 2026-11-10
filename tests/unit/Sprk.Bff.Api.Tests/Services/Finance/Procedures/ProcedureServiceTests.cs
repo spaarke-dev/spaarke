@@ -74,7 +74,8 @@ public sealed class ProcedureServiceTests
             H.OwnerAnswer = RecordOwnerResolution.Owned(TeamId) with { CreatedByPerson = CallerUserId };
             var writer = (SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter)); // never called: the close is substituted
             Closure = new Mock<SignalClosureService>(MockBehavior.Loose, writer, H.Entities.Object, TimeProvider.System,
-                NullLogger<SignalClosureService>.Instance) { CallBase = true };
+                NullLogger<SignalClosureService>.Instance)
+            { CallBase = true };
 
             // The REAL selection over the fake store, recorded.
             Closure.Setup(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))

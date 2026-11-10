@@ -1332,8 +1332,14 @@ internal sealed class RepairWorld
             Copy("sprk_practicearea", "sprk_practicearea", 2),
             new FieldMappingRuleEntity
             {
-                Id = Guid.NewGuid(), Name = "priority", SourceField = string.Empty, TargetField = "sprk_priorityname", TargetFieldType = 0,
-                MappingType = CreateTimeFieldMapping.MappingTypeDefault, DefaultValue = DefaultPriority, ExecutionOrder = 3,
+                Id = Guid.NewGuid(),
+                Name = "priority",
+                SourceField = string.Empty,
+                TargetField = "sprk_priorityname",
+                TargetFieldType = 0,
+                MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+                DefaultValue = DefaultPriority,
+                ExecutionOrder = 3,
                 IsActive = true,
             });
     }
@@ -1635,25 +1641,43 @@ internal sealed class RepairWorld
     /// <summary>A Concat or Template rule into a text column.</summary>
     public static FieldMappingRuleEntity Expression(int mappingType, string expression, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"expr -> {target}", SourceField = string.Empty, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = mappingType, Expression = expression,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"expr -> {target}",
+        SourceField = string.Empty,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = mappingType,
+        Expression = expression,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>A Copy rule of a lookup.</summary>
     public static FieldMappingRuleEntity CopyLookup(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source, SourceFieldType = 1, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = 1,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>A Default rule of a literal into a text column.</summary>
     public static FieldMappingRuleEntity DefaultText(string target, string value, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"default -> {target}", SourceField = string.Empty, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
-        DefaultValue = value, ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"default -> {target}",
+        SourceField = string.Empty,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+        DefaultValue = value,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     public static readonly Guid OrdinaryProject = Guid.Parse("a0160000-0000-4000-8000-00000000000a");
@@ -1682,10 +1706,15 @@ internal sealed class RepairWorld
     /// <summary>A Copy rule of a two-option (boolean) column.</summary>
     public static FieldMappingRuleEntity CopyBoolean(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source,
-        SourceFieldType = CreateTimeFieldMapping.FieldTypeBoolean, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeBoolean, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = CreateTimeFieldMapping.FieldTypeBoolean,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeBoolean,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>The matter holds lookups to a document and the communication (sources of the D7-link rules).</summary>
@@ -1907,54 +1936,54 @@ internal sealed class RepairWorld
         switch (table)
         {
             case "team":
-            {
-                var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid") };
-                query.Criteria.AddCondition("teamid", ConditionOperator.Equal, id);
-                return Directory.Answer(query).Entities.Single();
-            }
+                {
+                    var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid") };
+                    query.Criteria.AddCondition("teamid", ConditionOperator.Equal, id);
+                    return Directory.Answer(query).Entities.Single();
+                }
 
             case "systemuser":
-            {
-                if (SystemUserReadFault is { } userFault)
-                    throw userFault;
-                if (MissingSystemUsers.Contains(id))
-                    return null!; // no such row: the application-user check cannot tell
-                var user = new Entity("systemuser", id);
-                if (id == AppUser)
-                    user[ApplicationUserCheck.ApplicationIdAttribute] = Guid.Parse("a0160000-0000-4000-8000-0000000000ff");
-                return user;
-            }
+                {
+                    if (SystemUserReadFault is { } userFault)
+                        throw userFault;
+                    if (MissingSystemUsers.Contains(id))
+                        return null!; // no such row: the application-user check cannot tell
+                    var user = new Entity("systemuser", id);
+                    if (id == AppUser)
+                        user[ApplicationUserCheck.ApplicationIdAttribute] = Guid.Parse("a0160000-0000-4000-8000-0000000000ff");
+                    return user;
+                }
 
             case "businessunit":
-            {
-                var unit = new Entity("businessunit", id);
-                if (SearchIndexDefaults.TryGetValue(id, out var defaults))
                 {
-                    if (defaults.Name is { } name)
-                        unit["sprk_searchindexname"] = name;
-                    if (defaults.Index is { } index)
-                        unit["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", index);
-                }
+                    var unit = new Entity("businessunit", id);
+                    if (SearchIndexDefaults.TryGetValue(id, out var defaults))
+                    {
+                        if (defaults.Name is { } name)
+                            unit["sprk_searchindexname"] = name;
+                        if (defaults.Index is { } index)
+                            unit["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", index);
+                    }
 
-                return unit;
-            }
+                    return unit;
+                }
 
             default:
-            {
-                // A mapping source's columns (the system principal's app-only read).
-                if (SourceReadFault is { } readFault)
-                    throw readFault;
-                SourceReads.Add((table, columns));
-                var row = Directory.Row(table, id);
-                var copy = new Entity(table, id);
-                foreach (var column in columns)
                 {
-                    if (row.Attributes.TryGetValue(column, out var value))
-                        copy[column] = value;
-                }
+                    // A mapping source's columns (the system principal's app-only read).
+                    if (SourceReadFault is { } readFault)
+                        throw readFault;
+                    SourceReads.Add((table, columns));
+                    var row = Directory.Row(table, id);
+                    var copy = new Entity(table, id);
+                    foreach (var column in columns)
+                    {
+                        if (row.Attributes.TryGetValue(column, out var value))
+                            copy[column] = value;
+                    }
 
-                return copy;
-            }
+                    return copy;
+                }
         }
     }
 
@@ -1970,9 +1999,15 @@ internal sealed class RepairWorld
 
     private static FieldMappingRuleEntity Copy(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source, SourceFieldType = 0, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = 0,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>The REAL resolver, recording every owner decision asked of it; throwing the fault given, when one is.</summary>

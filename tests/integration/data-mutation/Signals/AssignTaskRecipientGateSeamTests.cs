@@ -202,7 +202,8 @@ public sealed class AssignTaskRecipientGateSeamTests
         links.UsersByLink.GetOrAdd(Contact, _ => new List<AssignedLinkCandidate>())
             .Add(new AssignedLinkCandidate(User, Contact, Guid.NewGuid(), false, 0, null, true));
         var gate = new Mock<AssignTaskRecipientGate>(identities.Object, links, flags, null!, null!, null!, null!,
-            NullLogger<AssignTaskRecipientGate>.Instance) { CallBase = true };
+            NullLogger<AssignTaskRecipientGate>.Instance)
+        { CallBase = true };
         gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SecureShareWallOutcome.NotSecure);
         gate.Setup(g => g.TaskRightsAsync(User, TaskId, It.IsAny<CancellationToken>())).ReturnsAsync(AccessRights.Read);

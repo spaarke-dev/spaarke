@@ -667,7 +667,8 @@ public class UploadTestFixture : IntegrationTestFixture
             PlaybookId: TestPlaybookId,
             CreatedAt: now,
             LastActivity: now,
-            Messages: []) { OwnerOid = ownerOid };
+            Messages: [])
+        { OwnerOid = ownerOid };
 
         // A session is live if some test REGISTERED it (see CreateTestSession) and it is not
         // archived. The owner comes from that registration rather than a constant, so the caller and

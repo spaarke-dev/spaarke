@@ -419,8 +419,10 @@ public static class ChildRecordEndpoints
                 Problem(StatusCodes.Status403Forbidden, DeniedCode, refusal.Detail),
             // Task 049 fix round 2 (UAC-r2 D1): the secure-from-creation create's rights refusal is the delegation filter's,
             // in the filter's own shape.
-            { Kind: RecordCreationRefusalKind.Forbidden, Code: DelegationRuleFilter.DenyWriteRequired
-                    or DelegationRuleFilter.DenyShareRequired or DelegationRuleFilter.DenyCheckFailed } =>
+            {
+                Kind: RecordCreationRefusalKind.Forbidden, Code: DelegationRuleFilter.DenyWriteRequired
+                    or DelegationRuleFilter.DenyShareRequired or DelegationRuleFilter.DenyCheckFailed
+            } =>
                 DelegationRuleFilter.DenyResult(refusal.Code, refusal.Detail, traceId),
             { Kind: RecordCreationRefusalKind.Invalid, Code: RecordCreationRefusal.InvalidPayloadCode } =>
                 Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, refusal.Detail),

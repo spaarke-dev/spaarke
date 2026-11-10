@@ -186,12 +186,20 @@ public sealed class SearchIndexGenericUpdatePathTests
 
     private static FieldMappingRuleDto TextRule(string source, string target) => new()
     {
-        SourceField = source, TargetField = target, SourceFieldType = "Text", TargetFieldType = "Text", Priority = 1,
+        SourceField = source,
+        TargetField = target,
+        SourceFieldType = "Text",
+        TargetFieldType = "Text",
+        Priority = 1,
     };
 
     private static readonly FieldMappingRuleDto IndexLookupRule = new()
     {
-        SourceField = "sprk_sourceindex", TargetField = LookupColumn, SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+        SourceField = "sprk_sourceindex",
+        TargetField = LookupColumn,
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 2,
     };
 
     [Theory]
@@ -245,7 +253,11 @@ public sealed class SearchIndexGenericUpdatePathTests
         var log = new CapturingLog<object>();
         var aliasRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_sourceindex", TargetField = "sprk_alias", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+            SourceField = "sprk_sourceindex",
+            TargetField = "sprk_alias",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 2,
         };
 
         await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(

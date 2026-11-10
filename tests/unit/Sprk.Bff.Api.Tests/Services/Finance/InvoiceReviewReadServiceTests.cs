@@ -211,10 +211,20 @@ public sealed class InvoiceReviewReadServiceTests
         var line = LineId(1);
         var finding = new JsonObject
         {
-            ["index"] = 0, ["ruleType"] = "RateCard", ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = "BILL-RATE",
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Schedule A, section 2", ["clauseLocation"] = "page 4",
-            ["subject"] = "Line", ["line"] = 0, ["reasonCode"] = "rate.above_card", ["detailWithheld"] = withheld,
-            ["consequence"] = "Reject", ["rejects"] = true, ["heldBecause"] = null,
+            ["index"] = 0,
+            ["ruleType"] = "RateCard",
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = "BILL-RATE",
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Schedule A, section 2",
+            ["clauseLocation"] = "page 4",
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = "rate.above_card",
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Reject",
+            ["rejects"] = true,
+            ["heldBecause"] = null,
         };
         if (!withheld)
         {
@@ -224,34 +234,62 @@ public sealed class InvoiceReviewReadServiceTests
 
         var second = new JsonObject
         {
-            ["index"] = 1, ["ruleType"] = "RateCard", ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = "BILL-RATE",
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Schedule A, section 3", ["clauseLocation"] = null,
-            ["subject"] = "Line", ["line"] = 0, ["reasonCode"] = "rate.increase_unapproved", ["detailWithheld"] = withheld,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = 1,
+            ["ruleType"] = "RateCard",
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = "BILL-RATE",
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Schedule A, section 3",
+            ["clauseLocation"] = null,
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = "rate.increase_unapproved",
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         var invoiceFinding = new JsonObject
         {
-            ["index"] = 2, ["ruleType"] = "Staffing", ["policyId"] = Guid.NewGuid().ToString("D"), ["policyCode"] = "BILL-STAFF",
-            ["policyVersionId"] = Guid.NewGuid().ToString("D"), ["clause"] = "Guideline 7", ["clauseLocation"] = null,
-            ["subject"] = "Invoice", ["line"] = null, ["reasonCode"] = "staffing.too_many", ["detailWithheld"] = false,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = 2,
+            ["ruleType"] = "Staffing",
+            ["policyId"] = Guid.NewGuid().ToString("D"),
+            ["policyCode"] = "BILL-STAFF",
+            ["policyVersionId"] = Guid.NewGuid().ToString("D"),
+            ["clause"] = "Guideline 7",
+            ["clauseLocation"] = null,
+            ["subject"] = "Invoice",
+            ["line"] = null,
+            ["reasonCode"] = "staffing.too_many",
+            ["detailWithheld"] = false,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         var root = new JsonObject
         {
-            ["schema"] = 1, ["kind"] = "Accepted", ["reasonCode"] = null,
+            ["schema"] = 1,
+            ["kind"] = "Accepted",
+            ["reasonCode"] = null,
             ["decision"] = new JsonObject { ["outcome"] = "Rejected" },
             ["findings"] = new JsonArray(finding, second, invoiceFinding),
             ["pipelineFindings"] = new JsonArray(new JsonObject { ["reasonCode"] = "invoice_number_mismatch", ["values"] = new JsonObject { ["read"] = "x" } }),
             ["signalPlan"] = new JsonArray(
                 new JsonObject
                 {
-                    ["policyCode"] = "BILL-RATE", ["subjectId"] = line.ToString("D"), ["severity"] = 100000002,
-                    ["sentence"] = "The rate is above the agreed card.", ["reasonCodes"] = new JsonArray("rate.above_card", "rate.increase_unapproved"),
+                    ["policyCode"] = "BILL-RATE",
+                    ["subjectId"] = line.ToString("D"),
+                    ["severity"] = 100000002,
+                    ["sentence"] = "The rate is above the agreed card.",
+                    ["reasonCodes"] = new JsonArray("rate.above_card", "rate.increase_unapproved"),
                 },
                 new JsonObject
                 {
-                    ["policyCode"] = "BILL-STAFF", ["subjectId"] = InvoiceId.ToString("D"), ["severity"] = 100000001,
-                    ["sentence"] = "Too many timekeepers.", ["reasonCodes"] = new JsonArray("staffing.too_many"),
+                    ["policyCode"] = "BILL-STAFF",
+                    ["subjectId"] = InvoiceId.ToString("D"),
+                    ["severity"] = 100000001,
+                    ["sentence"] = "Too many timekeepers.",
+                    ["reasonCodes"] = new JsonArray("staffing.too_many"),
                 }),
         };
         return root.ToJsonString();
@@ -683,7 +721,12 @@ public sealed class InvoiceReviewReadServiceTests
 
     private static JsonObject Value(string name, string? value, string? field = null) => new()
     {
-        ["name"] = name, ["value"] = value, ["line"] = 0, ["field"] = field, ["confidence"] = field is null ? null : 0.97, ["belowReliabilityThreshold"] = false,
+        ["name"] = name,
+        ["value"] = value,
+        ["line"] = 0,
+        ["field"] = field,
+        ["confidence"] = field is null ? null : 0.97,
+        ["belowReliabilityThreshold"] = false,
     };
 
     /// <summary>A stored finding as 049 writes DuplicateHandler's: the line's values, the current invoice number, then (when visible at write
@@ -693,10 +736,20 @@ public sealed class InvoiceReviewReadServiceTests
     {
         var finding = new JsonObject
         {
-            ["index"] = index, ["ruleType"] = ruleType, ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = policy,
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Guideline 9", ["clauseLocation"] = null,
-            ["subject"] = line is null ? "Invoice" : "Line", ["line"] = line, ["reasonCode"] = reason, ["detailWithheld"] = withheld,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = index,
+            ["ruleType"] = ruleType,
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = policy,
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Guideline 9",
+            ["clauseLocation"] = null,
+            ["subject"] = line is null ? "Invoice" : "Line",
+            ["line"] = line,
+            ["reasonCode"] = reason,
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         if (withheld)
         {
@@ -713,14 +766,21 @@ public sealed class InvoiceReviewReadServiceTests
 
     private static JsonObject Plan(string policy, Guid subjectId, string sentence, params string[] reasons) => new()
     {
-        ["policyCode"] = policy, ["subjectId"] = subjectId.ToString("D"), ["severity"] = 100000001, ["sentence"] = sentence,
+        ["policyCode"] = policy,
+        ["subjectId"] = subjectId.ToString("D"),
+        ["severity"] = 100000001,
+        ["sentence"] = sentence,
         ["reasonCodes"] = new JsonArray(reasons.Select(r => (JsonNode)JsonValue.Create(r)!).ToArray()),
     };
 
     private static string Stored(JsonObject[] findings, JsonObject[] plan) => new JsonObject
     {
-        ["schema"] = 1, ["kind"] = "Accepted", ["reasonCode"] = null, ["decision"] = new JsonObject { ["outcome"] = "Accepted" },
-        ["findings"] = new JsonArray(findings.Cast<JsonNode>().ToArray()), ["pipelineFindings"] = new JsonArray(),
+        ["schema"] = 1,
+        ["kind"] = "Accepted",
+        ["reasonCode"] = null,
+        ["decision"] = new JsonObject { ["outcome"] = "Accepted" },
+        ["findings"] = new JsonArray(findings.Cast<JsonNode>().ToArray()),
+        ["pipelineFindings"] = new JsonArray(),
         ["signalPlan"] = new JsonArray(plan.Cast<JsonNode>().ToArray()),
     }.ToJsonString();
 

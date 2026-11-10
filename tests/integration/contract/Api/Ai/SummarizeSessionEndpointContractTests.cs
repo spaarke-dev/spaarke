@@ -412,7 +412,8 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: files)
+        { OwnerOid = TestSessionOwner.Oid };
     }
 }
 

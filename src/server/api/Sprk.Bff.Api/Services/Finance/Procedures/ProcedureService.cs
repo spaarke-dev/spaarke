@@ -921,9 +921,9 @@ public class ProcedureService
         if (!IsRetired(procedure))
         {
             if (ConditionalUpdate(ProcedureEntity.Entity, procedure, new Dictionary<string, object>
-                {
-                    [ProcedureEntity.StatusColumn] = new OptionSetValue(ProcedureEntity.StatusRetired),
-                }) is not { } retire)
+            {
+                [ProcedureEntity.StatusColumn] = new OptionSetValue(ProcedureEntity.StatusRetired),
+            }) is not { } retire)
             {
                 return WriteFailed<ProcedureRetired>("The Procedure could not be retired. Reload it and try again.");
             }

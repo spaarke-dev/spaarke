@@ -1931,7 +1931,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
                     value = Versions.Where(v => v.Value.PolicyId == policy)
                         .Select(v => new
                         {
-                            sprk_policyversionid = v.Key.ToString("D"), sprk_versionnumber = v.Value.Number, sprk_inforceto = v.Value.InForceTo,
+                            sprk_policyversionid = v.Key.ToString("D"),
+                            sprk_versionnumber = v.Value.Number,
+                            sprk_inforceto = v.Value.InForceTo,
                             versionnumber = v.Value.RowVersion,
                         })
                         .ToArray(),
@@ -2043,27 +2045,27 @@ public sealed class AuthoringWorld : IDataverseUserClient
             switch (absoluteApiPath)
             {
                 case "/api/data/v9.2/sprk_policies":
-                {
-                    var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
-                    AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
-                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
-                        matter: MatterOf(json));
-                    foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
                     {
-                        AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
+                        AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
+                            json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
+                            matter: MatterOf(json));
+                        foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
+                        {
+                            AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        }
+
+                        Writes.Add(new Write("POST sprk_policies", json, null));
+                        return NoContent();
                     }
 
-                    Writes.Add(new Write("POST sprk_policies", json, null));
-                    return NoContent();
-                }
-
                 case "/api/data/v9.2/sprk_policyversions":
-                {
-                    var policy = Guid.Parse(Regex.Match(json.GetProperty("sprk_Policy@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
-                    AddVersion(Guid.Parse(json.GetProperty("sprk_policyversionid").GetString()!), policy, json.GetProperty("sprk_versionnumber").GetInt32(), null);
-                    Writes.Add(new Write("POST sprk_policyversions", json, null));
-                    return NoContent();
-                }
+                    {
+                        var policy = Guid.Parse(Regex.Match(json.GetProperty("sprk_Policy@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
+                        AddVersion(Guid.Parse(json.GetProperty("sprk_policyversionid").GetString()!), policy, json.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        Writes.Add(new Write("POST sprk_policyversions", json, null));
+                        return NoContent();
+                    }
 
                 default:
                     throw new InvalidOperationException($"Unexpected create: {absoluteApiPath}");

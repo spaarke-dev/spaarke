@@ -1321,14 +1321,14 @@ public partial class ContactGrantAuthorizationTests
         var ids = Enumerable.Range(1, 9).Select(i => Guid.Parse($"e1400000-0000-0000-0000-00000000000{i}")).ToArray();
         ExternalParticipationService.ColleagueMembershipRow Row(Guid contact, Guid org, string? email = ColleagueEmail,
             int contactState = 0, bool expanded = true, DateOnly? end = null, int orgState = 0) => new()
-        {
-            ContactId = contact,
-            OrganizationId = org,
-            StateCode = 0,
-            EndDate = end,
-            Organization = new ExternalParticipationService.OrganizationStateRow { StateCode = orgState },
-            Contact = expanded ? new ExternalParticipationService.ColleagueContactRow { Email = email, StateCode = contactState } : null,
-        };
+            {
+                ContactId = contact,
+                OrganizationId = org,
+                StateCode = 0,
+                EndDate = end,
+                Organization = new ExternalParticipationService.OrganizationStateRow { StateCode = orgState },
+                Contact = expanded ? new ExternalParticipationService.ColleagueContactRow { Email = email, StateCode = contactState } : null,
+            };
 
         var rows = new[]
         {

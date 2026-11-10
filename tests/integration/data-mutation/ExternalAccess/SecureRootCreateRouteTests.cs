@@ -425,7 +425,8 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: null) { OwnerOid = WorkspaceTestConstants.TestUserId };
+            UploadedFiles: null)
+        { OwnerOid = WorkspaceTestConstants.TestUserId };
     }
 
     /// <summary>The maker's mapping profile files a new project under <paramref name="matter"/> (the polymorphic pair).</summary>

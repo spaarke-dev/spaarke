@@ -603,9 +603,17 @@ public partial class InvoiceSubmissionPersisterTests
     public void LineFindingCodeFor_Cases(string? narrative, LineCodingStatus status, string? expected) =>
         InvoiceSubmissionPersister.LineFindingCodeFor(narrative, new LineCodingResult
         {
-            LineKey = "0", Status = status, Task = new LineCodeValue(null, null, false), Activity = new LineCodeValue(null, null, false),
-            Expense = new LineCodeValue(null, null, false), Confidence = 0m, Observations = [], RefusedCodes = [],
-            CodeSetId = Guid.Empty, CodeSetName = "x", CodeSetSource = CodeSetSource.FirmCodes,
+            LineKey = "0",
+            Status = status,
+            Task = new LineCodeValue(null, null, false),
+            Activity = new LineCodeValue(null, null, false),
+            Expense = new LineCodeValue(null, null, false),
+            Confidence = 0m,
+            Observations = [],
+            RefusedCodes = [],
+            CodeSetId = Guid.Empty,
+            CodeSetName = "x",
+            CodeSetSource = CodeSetSource.FirmCodes,
         }).Should().Be(expected);
 
     [Fact(DisplayName = "EB-D-175/176 END TO END: a persisted NotReturned line is Flagged and blocks approval; the reviewer accepts it through InvoiceLineDecisionService; the invoice is then approved")]

@@ -19,7 +19,7 @@ This guide explains the complete code quality system in the Spaarke development 
 |-------|------|-------|-----------|
 | **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
 | **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
-| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
+| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates, format of changed C# files (Tier 1, blocking); whole-solution format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
 | **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
 | **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
 | **Quarterly** | Manual trigger | Full audit runbook | Advisory |
@@ -85,7 +85,7 @@ Pre-commit hooks are the first quality layer, catching formatting and lint issue
 |-----------|------|--------|
 | `*.ts`, `*.tsx` | Prettier + ESLint | Format, then lint (from nearest eslint.config directory) |
 | `*.json`, `*.yaml`, `*.yml` | Prettier | Format |
-| `*.cs` | dotnet format | Format (scoped to staged files) |
+| `*.cs` | `dotnet format whitespace --folder` | Whitespace-format the staged files (~2 s; no MSBuild workspace). A commit that skips the hook (`--no-verify`) is caught by Tier 1 `Format (changed C# files)` |
 
 ### Performance Target
 
@@ -716,8 +716,9 @@ The legacy `sdap-ci.yml` pipeline was **retired on 2026-10-14** (archived at `do
 | **Compile (Debug)** | Tier 1 | Whole-solution `dotnet build` | Yes |
 | **Arch Tests** | Tier 1 | Full NetArchTest suite (`tests/Spaarke.ArchTests`) | Yes |
 | **Eval Gate**, **Tenant Isolation**, **Naming Conformance**, **Compose Fidelity Gate**, smoke + guard jobs | Tier 1 | Golden-utterance evals, I1–I5 invariants, naming, Compose round-trip, changed-surface/auth smoke, Xrm capability guard | Yes |
+| **Format (changed C# files)** | Tier 1 | `scripts/quality/check-changed-cs-format.sh`: `dotnet format whitespace --folder --verify-no-changes` over the PR's changed `*.cs` under `src/` and `tests/` (<1 min, parallel) | Yes |
 | **Client lint (type-aware ratchet)** | `client-lint.yml` | Typed ESLint ratchet over the client packages | Yes (required) |
-| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes`; Prettier + PCF ESLint | Advisory |
+| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes` over the whole solution (a backstop for the Tier 1 changed-files check); Prettier + PCF ESLint | Advisory |
 | **Full Unit Tests (Debug)** | Tier 2 | Whole unit suite in 4 shards, two-pass retry classifier | Advisory |
 | **ADR Compliance**, **Plugin Size**, **Markdown Link Validator**, **Last Reviewed Stamp** | Tier 2 | As named; one "Tier 2 Advisory Report" PR comment | Advisory |
 | **Dependencies audit** | `ci-standalone-checks.yml` | `dotnet list package --vulnerable --include-transitive` outside the accepted-risk list | Advisory (alert on master) |
@@ -735,7 +736,8 @@ Advisory does not mean ignorable. On master every red check raises a **quality a
 npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
 cd src/client/pcf && node_modules/.bin/eslint .
 
-# Tier 2 format / Tier 1 arch tests
+# Tier 1 format of changed C# files (base = the commit you branched from) / Tier 2 format / Tier 1 arch tests
+bash scripts/quality/check-changed-cs-format.sh origin/master
 dotnet format whitespace --verify-no-changes
 dotnet test tests/Spaarke.ArchTests/
 
