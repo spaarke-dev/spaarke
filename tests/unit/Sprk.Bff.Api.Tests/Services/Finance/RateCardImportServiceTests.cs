@@ -411,9 +411,13 @@ public sealed class RateCardImportServiceTests
         typeof(UpdateDocumentRequest).GetProperties()
             .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
             .Should().OnlyContain(p => p.GetValue(pointers) == null, "the source document is created unlinked (DEF-015)");
+        // The create carries links too (task 030b's Association, task 034's ParentDocumentLookup): the one this import sends
+        // sets none of them.
+        var create = h.DocumentCreates[0];
+        create.Association.Should().BeNull("the source document is created unlinked (DEF-015)");
         typeof(CreateDocumentRequest).GetProperties()
             .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
-            .Should().BeEmpty();
+            .Should().OnlyContain(p => p.GetValue(create) == null, "the source document is created unlinked (DEF-015)");
     }
 
     [Fact]
