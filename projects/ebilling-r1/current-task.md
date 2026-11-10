@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-10 (session ebilling-r1-c7, authoritative). Work head is `origin/work/ebilling-r1` at `b178e65d54`. The dev BFF is uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.** The previous version of this file is archived at `notes/handoff-history/current-task-2026-11-10a.md`.
+> **Last Updated**: 2026-11-10 (session ebilling-r1-c7, authoritative). Work head is `origin/work/ebilling-r1` at `0775d2a443` (DEF-061 merged; tip verified: build 0 errors, ArchTests 2200/0, filtered unit tests 7747/0). The dev BFF is uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.** The previous version of this file is archived at `notes/handoff-history/current-task-2026-11-10a.md`.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -15,22 +15,7 @@
 ## Exact next action
 
 Wait for the running agents and act on each one:
-1. **DEF-061 fix round 1.** The agent is on `task/ebilling-def061`; its last report said it was waiting on ArchTests. Scope:
-   - ontology-r1 F1: `OpenedAWindow` = `From && (Active/Superseded || (PublishedOn && !Draft) || Retired && publishedRules)`, as one shared predicate with `ScopeLockedAsync`.
-   - `PublishedOn` becomes required.
-   - Review F1: the backfill's audit date parse is culture/offset-safe, with Pester tests under en-US and en-GB.
-   - `-Verify` and `-Backfill` report counts and fail unless the operator has org-depth Read; they also report the audit-versus-fallback split.
-   - The chat-create refusal message for procedure versions.
-   - The Repair reason (K1).
-   - The K4 test name.
-
-   When it's done: send ontology-r1 the SHA range for its scoped re-check. Once they pass it, run the live steps on dev (the owner's go was given 2026-11-09):
-   1. the plain run (creates the column);
-   2. `-Backfill -WhatIf`;
-   3. `-Backfill`;
-   4. `-Verify`.
-
-   Send uac-r2 notices before and after. Then merge into work.
+1. **DEF-061: DONE.** Merged into work `0775d2a443` (branch head `340b6c53ad`). Applied on dev 2026-11-10: column created, `-Backfill` read 0 rows, `-Verify` PASS. uac-r2 after-notice and ontology-r1 `-Verify` line sent. #2640 closed. Remove its agent worktree at the batch.
 2. **F3b** (Sonnet xhigh, `task/ebilling-130-0-f3b`, base c5c30a9fc4 plus 130-0b `0f6b49b5ab`; it merges the 3g tip `79f5d1a508` before final verification). When it's done: one Opus adversarial pass, then a second (tenant isolation), then uac-r2 as split diff 3.
 3. **116** (Opus high, `task/ebilling-116` from `8770b2c659`).
    - When it's done: an adversarial pass; uac-r2 reviews its two new routes.
@@ -76,7 +61,7 @@ Wait for the running agents and act on each one:
 | `task/ebilling-130c` | `3a49f67f65` | FINAL, approved |
 | `task/ebilling-130d` | `69a8b2db72` | FINAL. uac-r2 APPROVED all rounds; two Opus passes. Firm-safe reason table (10 codes); Duplicate is uniform and never overridden; read-side rune filter. |
 | `task/ebilling-130-0-f3b` | running | diff 3 |
-| `task/ebilling-def061` | `fd8a259460` + fix round 1 running | ontology-r1 re-check after the fix |
+| `task/ebilling-def061` | `340b6c53ad` | MERGED into work `0775d2a443` |
 | `task/ebilling-116` | running | — |
 
 Agent worktrees to remove at the batch: aff95c719a54a6e5b, acfabc1702a61b70f, a0af46b7a8db4e045, af7d21452796b74a4, a56d6943daafbbf5e, ad9cdf00a103ae635, ae2d0b82254167eb0, a7b2594412602599c, aa937999fa605a887, a28d8883986230c2f, abc82a6e0f76f217d, a45f20db996c18d3a, and later the F3b, DEF-061 and 116 worktrees.
@@ -124,7 +109,7 @@ Agent worktrees to remove at the batch: aff95c719a54a6e5b, acfabc1702a61b70f, a0
   - the 089d SHA.
 - **word-add-in-r1:** the 095c-2..4 dev deploy master SHA; the 095a/095b/151e PR plus SHA.
 - **uac-r2:** F3b (diff 3); the 116 routes; the batch diff note; the 165e/165f batch sha.
-- **ontology-r1:** the DEF-061 fix SHA; the RowReads rerun; the DEF-060 design once the owner decides; the DEF-059 outcome (never delivered).
+- **ontology-r1:** the RowReads rerun; the DEF-060 design once the owner decides; the DEF-059 outcome (never delivered).
 
 ## Standing gates
 
