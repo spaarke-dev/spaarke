@@ -32,7 +32,7 @@
 
 ## Active Lanes
 - None running. Runbook: `notes/drafts/connector-registration-runbook.md` (its step (b) says Mobile and desktop and no secret; that is **superseded**: Web platform plus a secret, see decisions 2026-11-08).
-- **Spike on dev:** `6fbb3a7642` (= master `23567b2f93` + spike), live since 2026-11-08 04:00Z. Every `uac-r2` dev deploy carries the spike until we declare Phase 0 done. PR #2615 is never merged.
+- **Spike on dev:** `755987b385` (= master `26d135bc8f`, which includes ontology #2660 / task 176, + spike), deployed 2026-11-10 by mcp-r1. The owner's per-SHA go was relayed by uac-r2 and confirmed in this session. Verified: remote DLL ProductVersion, SHA-256 of 4 files, /healthz 200, anonymous MCP POST 401. Replaces `6fbb3a7642`. The spike stays off master: 2 spike-only commits, master→spike merges only, PR #2615 is a draft. Every `uac-r2` dev deploy carries the spike until we declare Phase 0 done. PR #2615 is never merged.
 
 ## Next Actions (after 002)
 1. 003: Phase 0 live tests (T0–T14, E1–E5) into `notes/phase0-results.md`. The size-test widgets (1/3/6 MB) are not built yet and would need a new spike SHA. Notify `uac-r2` before the window and when Phase 0 is done.
