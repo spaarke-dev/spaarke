@@ -1392,7 +1392,8 @@ public sealed class FirmFindingsProjectionTests
     {
         ["schema"] = 1,
         ["kind"] = kind,
-        ["reasonCode"] = BillingReasonCodes.RateAboveApproved,
+        // A code that can never reject: a test that the document's own top-level code is never shown must be able to tell it from a finding's.
+        ["reasonCode"] = BillingReasonCodes.CurrencyNotUsd,
         ["findings"] = new JsonArray(entries),
         ["signalPlan"] = new JsonArray(new JsonObject { ["sentence"] = InternalSentence }),
     }.ToJsonString();
@@ -1449,14 +1450,24 @@ public sealed class FirmFindingsProjectionTests
     [Fact(DisplayName = "130c: only the stored values and rule fields are projected; the stored clause, sentence, policy code and confidence never are")]
     public async Task Rejected_NothingInternalInTheStoredFindingsIsProjected()
     {
-        var world = TwoFindingsWorld();
+        // The document's top-level code (CurrencyNotUsd, which cannot reject) and a finding that did not reject (its own distinct code) are
+        // internal: neither may reach the partner, while the rejecting findings' own codes do.
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("RequiredData", VersionB, null, values: ("invoice.firmInvoiceNumber", null)),
+            Stored("ApprovedRate", VersionA, 2, values: [("line.rate", "450.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")]),
+            Stored("ApprovedRate", VersionA, 5, rejects: false, reason: BillingReasonCodes.RateUnresolved)));
         world.Clause = _ => FlagOnText;
         world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
 
-        var json = JsonSerializer.Serialize(await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None));
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+        var json = JsonSerializer.Serialize(outcome);
 
         json.Should().Contain(ClauseQuote).And.Contain("Your rate is above the agreed rate.");
-        json.Should().Contain(BillingReasonCodes.RateAboveApproved, "130d: the reason code is projected, as reasonCode");
+        outcome!.Items.Select(i => i.ReasonCode).Should().Equal(BillingReasonCodes.RateAboveApproved, BillingReasonCodes.RequiredFieldMissing);
+        json.Should().Contain(BillingReasonCodes.RateAboveApproved, "130d: the rejecting finding's own reason code is projected, as reasonCode");
+        json.Should().NotContain(BillingReasonCodes.CurrencyNotUsd, "the document's top-level reason code is never shown")
+            .And.NotContain(BillingReasonCodes.RateUnresolved, "a finding that did not reject is never shown, nor its code");
         json.Should().NotContain(InternalClause).And.NotContain(InternalSentence).And.NotContain("INTERNAL location")
             .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("0.42").And.NotContain("400.00").And.NotContain("Internal rule set name")
             .And.NotContain("Internal procedure name");
@@ -2544,5 +2555,41 @@ public sealed class FirmFindingsProjectionTests
         first.GetProperty("reasonCode").GetString().Should().Be(BillingReasonCodes.RateAboveApproved);
         first.GetProperty("firmReasons").EnumerateArray().Select(e => e.GetString()).Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]);
         first.GetProperty("citations").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130d K3: a Duplicate rejection reads byte-identically whether its detail is withheld or in scope (reasonCode and description)")]
+    public async Task Rejected_ADuplicate_HasOneUniformReason_WithheldOrNot()
+    {
+        async Task<FirmOutcome> Project(bool withheld)
+        {
+            var world = new World();
+            // The writer's real difference between the two: a withheld group stores its values without text; an in-scope one stores them with it.
+            world.AddRejectedSubmission(RejectedDocument(
+                Stored("Duplicate", VersionA, null, withheld: withheld, reason: BillingReasonCodes.DuplicateInvoiceNumber,
+                    values: [("invoice.firmInvoiceNumber", withheld ? null : "INV-100"), ("duplicateOf.trackingNumber", withheld ? null : "TRK-0")])));
+            world.Clause = _ => FlagOnText;
+            return (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!;
+        }
+
+        var hidden = await Project(withheld: true);
+        var shown = await Project(withheld: false);
+
+        var expected = "This invoice number has already been used with this client. Please check it or contact the client.";
+        foreach (var outcome in new[] { hidden, shown })
+        {
+            var item = outcome.Items.Should().ContainSingle().Subject;
+            item.ReasonCode.Should().Be(BillingReasonCodes.DuplicateInvoiceNumber);
+            item.FirmReasons.Should().Equal([expected]);
+        }
+
+        JsonSerializer.Serialize(hidden.Items[0].FirmReasons).Should().Be(JsonSerializer.Serialize(shown.Items[0].FirmReasons));
+        hidden.Items[0].ReasonCode.Should().Be(shown.Items[0].ReasonCode);
+
+        // What else could tell the two cases apart: the whole response, member by member. Nothing in the outcome differs (the projection shows no
+        // value for a Duplicate either way; NotShownCount, the item count, citations, line number and degraded flag are the same).
+        hidden.NotShownCount.Should().Be(shown.NotShownCount);
+        hidden.Degraded.Should().Be(shown.Degraded);
+        hidden.Items.Count.Should().Be(shown.Items.Count);
+        JsonSerializer.Serialize(hidden, WebJson).Should().Be(JsonSerializer.Serialize(shown, WebJson));
     }
 }

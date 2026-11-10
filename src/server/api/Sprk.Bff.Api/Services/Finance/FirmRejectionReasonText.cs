@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// rejection finding whatever the rule set's visible-to-firms flag says, and a non-blank <c>sprk_signal.sprk_firmreason</c> replaces it
 /// (<see cref="FirmFindingsProjection"/>). Adding a reject-capable reason to the catalogue without an entry here fails
 /// <c>FirmRejectionReasonTextGuardTests</c> (and, if one ships anyway, the rejection fails closed to <see cref="GenericSentence"/>).</para>
+/// <para><b>One text per code.</b> The text never varies with what else is known about the finding: a Duplicate rejection reads the same whether
+/// or not its detail was withheld (the earlier invoice is outside the caller's scope), so the reason cannot tell a firm which case it is in.</para>
 /// <para><b>Why a separate file.</b> <see cref="FirmRejectionFindings"/> is the allow-list parse of the stored findings document; this table is
 /// reviewed wording, a different reason to change, and the guard and the future Signal writer (DEF-060) read it without the parser.</para>
 /// </remarks>
@@ -42,7 +44,7 @@ internal static class FirmRejectionReasonText
         [BillingReasonCodes.CoreRecordClosedToBilling] =
             "The matter or project this invoice is billed against is closed to new billing.",
         [BillingReasonCodes.DuplicateInvoiceNumber] =
-            "This invoice number matches one that has already been received.",
+            "This invoice number has already been used with this client. Please check it or contact the client.",
         [BillingReasonCodes.RequiredFieldMissing] =
             "A required invoice field is missing.",
     };

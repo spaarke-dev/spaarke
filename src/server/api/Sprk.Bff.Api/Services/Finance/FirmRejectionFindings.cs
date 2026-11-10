@@ -343,8 +343,9 @@ internal static class FirmRejectionFindings
     }
 
     /// <summary>
-    /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "..."; a cut that would fall between the two
-    /// halves of a surrogate pair (one character) steps back so the text stays valid.
+    /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "...", so a cut text is at most
+    /// <see cref="MaxValueTextLength"/> + 3 characters (203); a cut that would fall between the two halves of a surrogate pair (one character)
+    /// steps back so the text stays valid. Used for a value read and (130d) for a rejection finding's firm reason.
     /// </summary>
     internal static string Truncate(string text)
     {

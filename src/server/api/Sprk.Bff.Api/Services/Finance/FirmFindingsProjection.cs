@@ -98,11 +98,12 @@ public sealed record FirmOutcome(
 /// <param name="Reason">The reviewer's reason; null when none is on record for this item (never substituted).</param>
 /// <param name="FirmReasons">
 /// The explanations addressed to the firm (<c>sprk_signal.sprk_firmreason</c>) of the Billing rules the item's decision resolved: one per rule
-/// version that has one (the first non-blank in creation order), duplicates removed, in the order those chosen Signals were created (then by id);
-/// empty when none
-/// (never substituted). NOT a citation and not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an
-/// invoice-level adjustment (it resolves no Signal). A rejection finding (130d) always has exactly one: the writer-created Signal's firm reason
-/// when it has one (trimmed and cut to 200 characters), otherwise the firm-safe text for its reason code (<see cref="FirmRejectionReasonText"/>).
+/// version that has one (the first non-blank in creation order), duplicates removed, in the order those chosen Signals were created (then by id).
+/// For a decided line or an adjustment: empty when none (never substituted); this text is shown as the writer stored it, uncut. NOT a citation and
+/// not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an invoice-level adjustment (it resolves no
+/// Signal). A rejection finding (130d) is different: it always has exactly one entry, the writer-created Signal's firm reason when it has one
+/// (trimmed and cut: at most 200 characters, plus "..." when cut, so up to 203), otherwise the firm-safe text for its reason code
+/// (<see cref="FirmRejectionReasonText"/>), whatever the firm flag says.
 /// </param>
 /// <param name="LineNumber">
 /// A rejection finding only (130c): the one-based position of the line it is about, counting the lines in the order the submission read
