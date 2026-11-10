@@ -48,8 +48,6 @@ public class WriterOnlyTablesDeleteGuardTests
             "Removes a stored-file row (StoredFileSchema.Entity)."),
         (typeof(Sprk.Bff.Api.Services.Finance.RateCardImportService), "CompensateAsync",
             "Rolls back rate-card rows this import just created; the tables are the import's own."),
-        (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "CompensateAsync",
-            "Rolls back policy and version rows this call just created; fixed finance tables."),
         (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "CreateDraftRuleAsync",
             "Rolls back the rule rows it just created; fixed finance tables."),
         (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "DeleteIfPresentAsync",

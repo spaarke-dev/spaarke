@@ -915,35 +915,9 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // ebilling-r1 task 092 deleted InvoiceSubmissionService's UploadSmallAsync and DeleteFileAsync sites (task 044): the submitted
         // invoice PDF is staged in the Finance file store (a Stored File, procedure-and-file-model 9.1), never an SPE document.
 
-        new SinkSite("Services/Finance/RateCardImportService.cs", "UploadSmallAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
-            "ebilling-r1 task 078 (FR-29): the imported rate card workbook is stored in the internal-only Procedure Library "
-            + "container, whose drive id is read from FinanceOptions on the server and never from the request. No owning record "
-            + "exists at the moment of the write (the document row is created unlinked, DEF-015), so configuration is the only "
-            + "source; a missing value refuses the import with 503 before anything is written (ADR-003; ADR-028)."),
-
-        new SinkSite("Services/Finance/RateCardImportService.cs", "DeleteFileAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
-            "ebilling-r1 task 078 (FR-29): compensation only. It deletes the workbook this same call uploaded (the item id is the "
-            + "upload result, never client input) from the same server-configured Procedure Library drive when a later write in the "
-            + "import fails, so a failed import leaves no file behind (ADR-003; ADR-028)."),
-
-        new SinkSite("Services/Finance/RuleSetService.cs", "UploadSmallAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
-            "ebilling-r1 task 076 (FR-28): the source document of a rule set (guideline, rate card or internal procedure) is stored in "
-            + "the internal-only Procedure Library container, whose drive id is read from FinanceOptions on the server and never from "
-            + "the request. No owning record exists at the moment of the write (the document row is created unlinked, DEF-015), so "
-            + "configuration is the only source; a missing value refuses the create with 503 before anything is written (ADR-003; ADR-028)."),
-
-        new SinkSite("Services/Finance/RuleSetService.cs", "DeleteFileAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
-            "ebilling-r1 task 076 (FR-28): compensation only. It deletes the source document this same call uploaded (the item id is "
-            + "the upload result, never client input) from the same server-configured Procedure Library drive when a later write in the "
-            + "create fails, so a failed create leaves no file behind (ADR-003; ADR-028)."),
+        // ebilling-r1 task 116 deleted RateCardImportService's and RuleSetService's UploadSmallAsync and DeleteFileAsync sites (tasks 078,
+        // 076): a rate card workbook and a rule set source are the Procedure Version's Stored File (procedure-and-file-model 7.2, 12),
+        // never an SPE document; RuleSetService.CreateAsync, the uploaded rule set, is retired.
 
         new SinkSite("Api/Ai/ChatWordExportEndpoints.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
