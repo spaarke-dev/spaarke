@@ -70,7 +70,8 @@ internal static class InvoiceLinks
     /// <summary>
     /// EB-D-215 (owner 2026-11-10, conditions from uac-r2): the most parent hops the invoice walk takes up from a row, on both
     /// planes (<see cref="ReadRowInvoiceLinksAsync"/> and the REST <see cref="ReadAncestorInvoiceLinksAsync"/>). Only hops between
-    /// child rows count: a core record above a chain is never walked. A row whose chain needs a hop past this bound is undecidable
+    /// child rows count: a core record other than a service request is never walked; a service request follows the child rule
+    /// (<see cref="Supplemental"/>), so it is walked and its hop counts toward the bound. A row whose chain needs a hop past this bound is undecidable
     /// (hidden, and logged once). Independent of the task 188 narrowing's <see cref="ExternalDocumentNarrowing.MaxHops"/>.
     /// </summary>
     internal const int MaxWalkHops = 5;
@@ -234,6 +235,8 @@ internal static class InvoiceLinks
         static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
         bool IsDecidedChild(string table) =>
             tables.TryGetValue(table, out var linked) && !linked.IsRoot && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table);
+        // A core record other than a service request is never a parent here and never a descendant, so it is never walked; a service
+        // request follows the child rule (Supplemental), so it is walked and its hop counts toward the bound.
         bool IsPlain(string table) =>
             !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table) && !RecordFamilyEdges.CoreTables.Contains(table)
             && !(tables.TryGetValue(table, out var linked) && linked.IsRoot);
@@ -254,6 +257,8 @@ internal static class InvoiceLinks
             Add(edge.ChildTable, edge.LookupColumn, edge.ParentTable);
         }
 
+        // Fixed point: an edge is followed only toward a decided child (a service request included) or a descendant, never toward a
+        // core record, so only child-to-child hops are walked.
         for (var changed = true; changed;)
         {
             changed = false;

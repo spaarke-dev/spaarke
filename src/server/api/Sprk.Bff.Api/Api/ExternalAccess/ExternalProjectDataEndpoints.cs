@@ -2801,7 +2801,10 @@ public static class ExternalProjectDataEndpoints
             return (false, false);
         if (links.Count == 0)
             return (true, false);
-        // EB-D-215: a single record keeps its uniform refusal for an undecidable link; only a list says truncated for it.
+        // EB-D-215: a single-record WRITE (delete-own, to-do PATCH) refuses an undecidable link with the uniform 403, so it never says
+        // truncated; only a list does. A single-record READ with an undecidable chain (the document GET, decided by
+        // ExternalDataService.DecideInvoiceLinkedRowAsync) answers 503 instead, per D-70 (a single faulted record returns 503); that
+        // is pinned by Single_AMalformedLinkOnTheChain_IsThe503.
         var (visible, faulted) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
             caller, new[] { links }, l => l, hideInvoices, logger, surface, ct, undecidableTruncates: false).ConfigureAwait(false);
         return (visible.Count == 1, visible.Count == 0 && faulted);
