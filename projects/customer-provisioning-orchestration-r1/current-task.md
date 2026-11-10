@@ -8,8 +8,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None active. The business-unit id fix is ON MASTER: PR #2661 merged 2026-11-10 as `d64a45071b` (34 checks pass, 9 skipped). uac-r2 told the SHA. |
-| **Next Action** | Owner decisions (below). **Dev control plane redeployed 2026-11-10** from `7489f5b6b0` (master `d64a45071b` + H6 access logging; run log). ACME gets the new handlers only through a NEW run (owner OK). |
+| **Task** | **267 in progress (FULL, opus)** — `tasks/267-writer-unit-and-customer-team-basic-user.poml` (#2618: writer in its own unit "Spaarke Ontology Writer"; Basic User on the customer default team; H7b v8). Code delegated to one implementer agent (Step 8.0: coupled via InterStepState). Then Step 9.5 here: code-review, adr-check, adversarial ×2. |
+| **Next Action** | Wait for the implementer's report; review its commits on the branch. Then owner decisions (below). **Dev control plane redeployed 2026-11-10** from `7489f5b6b0` (master `d64a45071b` + H6 access logging; run log). ACME gets the new handlers only through a NEW run (owner OK). |
 | **Done 2026-11-10** | H6 org-settings contract adds `isuseraccessauditenabled=true` (owner: include it) — `7489f5b6b0`, on branch, not on master; Validate-DeployedEnvironment check 6 + guide updated. |
 | **Done 2026-11-08/09** | #2605 reply posted; PR #2638 (S23 + 49ba9a70d3 + 266) merged to master `3fa6a061`, #2605 closed. ACME still needs a control-plane deploy (owner OK) to get S23/S24 and the BU id fix. |
 | **Quality alert** | #2060 tier2-master/full-unit-tests (nightly) open — mention to owner; not started. |
