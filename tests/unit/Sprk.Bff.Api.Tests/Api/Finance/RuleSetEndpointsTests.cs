@@ -48,7 +48,6 @@ public sealed class RuleSetEndpointsTests
 
     public static TheoryData<string, string> AllRoutes => new()
     {
-        { "POST", $"{Base}?name=OCG&sourceKind=Guideline" },
         { "GET", Base },
         { "GET", $"{Base}/{SetId}" },
         { "PATCH", $"{Base}/{SetId}/proposals/{PolicyId}" },
@@ -57,7 +56,6 @@ public sealed class RuleSetEndpointsTests
         { "POST", $"{Base}/{SetId}/publish" },
         { "PUT", $"{Base}/{SetId}/assignment" },
         { "PUT", $"{Base}/{SetId}/visibility" },
-        { "POST", $"{Base}/{SetId}/draft" },
     };
 
     internal sealed class Host : IAsyncDisposable
@@ -77,20 +75,14 @@ public sealed class RuleSetEndpointsTests
 
         public Host()
         {
-            var gcf = Mock.Of<IGraphClientFactory>();
-            var spe = new SpeFileStore(
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()));
             var entities = Mock.Of<IGenericEntityService>();
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
             Service = new Mock<RuleSetService>(
                 MockBehavior.Strict,
-                entities, Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(), validator,
+                entities, Mock.Of<IRecordOwnershipResolver>(), validator,
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
+                Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
             // uac-r2 D: the proposal routes read the set's Procedure; a legacy set (none) unless a test says otherwise.
             Service.Setup(s => s.ProcedureOfRuleSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
             // 089e: every by-id route asks the caller's Read on the set, then reads its record home; a readable set that is not
@@ -212,13 +204,6 @@ public sealed class RuleSetEndpointsTests
     private static HttpRequestMessage Req(string method, string url, bool authenticated = true, HttpContent? content = null) =>
         RateCardImportEndpointsTests.Req(method, url, authenticated, content);
 
-    private static MultipartFormDataContent Upload(byte[] bytes)
-    {
-        var content = new MultipartFormDataContent();
-        content.Add(new ByteArrayContent(bytes), "file", "ocg.pdf");
-        return content;
-    }
-
     private static HttpContent? BodyFor(string method) => method is "PATCH" or "PUT" or "POST" ? JsonContent.Create(new { }) : null;
 
     private static async Task<JsonObject> Json(HttpResponseMessage r) => JsonNode.Parse(await r.Content.ReadAsStringAsync())!.AsObject();
@@ -252,7 +237,7 @@ public sealed class RuleSetEndpointsTests
     {
         await using var host = await Host.StartAsync(admin: false);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode);
@@ -271,7 +256,7 @@ public sealed class RuleSetEndpointsTests
         await using var host = await Host.StartAsync();
         host.StepZero.Kind = kind;
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
         host.Probe.Calls.Should().BeEmpty();
@@ -285,7 +270,7 @@ public sealed class RuleSetEndpointsTests
         await using var host = await Host.StartAsync(admin: false);
         host.StepZero.Kind = kind;
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode);
@@ -300,7 +285,7 @@ public sealed class RuleSetEndpointsTests
         await using var host = await Host.StartAsync();
         host.BecomeOntologyAdminOnly();
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "policy privileges alone must not make an Ontology administrator a billing admin");
         host.Service.VerifyNoOtherCalls();
@@ -396,55 +381,12 @@ public sealed class RuleSetEndpointsTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // uac-r2 re-check round 2 (2026-10-22, I-P5): /draft needs Write on the set's Procedure; the reads need Read on it
+    // uac-r2 re-check round 2 (2026-10-22, I-P5): the write routes need Write on the set's Procedure; the reads need Read on it (task 116 retired /draft)
     // ═══════════════════════════════════════════════════════════════════════════
 
     private static void SetBelongsToProcedure(Host host, Guid procedureId) =>
         host.Service.Setup(s => s.ProcedureOfRuleSetAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(procedureId);
 
-    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: /draft on a Procedure's rule set without Write on that Procedure is 403 and queues nothing")]
-    public async Task Draft_OnAProceduresSet_WithoutWriteOnTheProcedure_Is403_AndNothingIsQueued()
-    {
-        await using var host = await Host.StartAsync();
-        var procedureId = Guid.NewGuid();
-        SetBelongsToProcedure(host, procedureId);
-        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read); // Read only
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
-        host.Service.Verify(s => s.GetDraftSourceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        host.Jobs.VerifyNoOtherCalls();
-    }
-
-    [Fact(DisplayName = "081 uac r2 I-P5 must-not-fire: /draft on a rule set with no Procedure is unchanged (no Procedure check is asked)")]
-    public async Task Draft_OnALegacySet_AsksNoProcedureCheck_AndReachesTheService()
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(404, RuleSetService.CodeNotFound, "no such rule set"));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "the request reached the service, as before");
-        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
-    }
-
-    [Fact(DisplayName = "081 uac r2 I-P5: /draft on a Procedure's rule set with Write on that Procedure reaches the service")]
-    public async Task Draft_OnAProceduresSet_WithWriteOnTheProcedure_ReachesTheService()
-    {
-        await using var host = await Host.StartAsync();
-        var procedureId = Guid.NewGuid();
-        SetBelongsToProcedure(host, procedureId);
-        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read | AccessRights.Write);
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(422, RuleSetService.CodeSourceMissing, "no source"));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity, "the request reached the service, which answered");
-    }
 
     [Theory(DisplayName = "081 uac r2 I-P5: an UNKNOWN rights answer on the Procedure is system_failure, not insufficient_rights, on the write-gated routes too")]
     [MemberData(nameof(ProposalRoutes))]
@@ -464,7 +406,7 @@ public sealed class RuleSetEndpointsTests
 
     private static void ServiceReadsTheSet(Host host) =>
         host.Service.Setup(s => s.GetAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summary(), Guid.NewGuid(), null, new[] { Proposal() })));
+            .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summary(), null, new[] { Proposal() })));
 
     [Fact(DisplayName = "081 uac r2 I-P5 must-fire: GET of a Procedure's rule set without Read on that Procedure is 403 insufficient_rights and never reads the set")]
     public async Task Get_OnAProceduresSet_WithoutReadOnTheProcedure_Is403_AndNeverReadsTheSet()
@@ -770,8 +712,6 @@ public sealed class RuleSetEndpointsTests
     }
 
     [Theory]
-    [InlineData("POST", $"{Base}?name=OCG&sourceKind=Guideline", BillingAdminAuthorization.CreateRuleSetPrivilege)]
-    [InlineData("POST", $"{Base}?name=OCG&sourceKind=Guideline", BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData("PATCH", "{set}/proposals/{p}", BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
     [InlineData("PATCH", "{set}/proposals/{p}", BillingAdminAuthorization.WritePolicyVersionPrivilege)]
     [InlineData("PATCH", "{set}/proposals/{p}", BillingAdminAuthorization.WriteRuleSetPrivilege)]
@@ -780,9 +720,6 @@ public sealed class RuleSetEndpointsTests
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WritePolicyVersionPrivilege)]
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WritePolicyPrivilege)]
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WriteRuleSetPrivilege)]
-    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.WriteRuleSetPrivilege)]
-    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.CreatePolicyPrivilege)]
-    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
     [InlineData("GET", "{set}", BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData("GET", "", BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData("PUT", "{set}/assignment", BillingAdminAuthorization.WriteRuleSetPrivilege)]
@@ -795,7 +732,7 @@ public sealed class RuleSetEndpointsTests
             ? path
             : Base + (path.Length == 0 ? "" : "/" + path.Replace("{set}", SetId.ToString()).Replace("{p}", PolicyId.ToString()));
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         host.Service.VerifyNoOtherCalls();
@@ -807,7 +744,7 @@ public sealed class RuleSetEndpointsTests
     {
         await using var host = await Host.StartAsync(ebillingEnabled: false);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
@@ -820,88 +757,9 @@ public sealed class RuleSetEndpointsTests
     {
         await using var host = await Host.StartAsync(ebillingEnabled: false, admin: false);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: method == "POST" && url.Contains("sourceKind") ? Upload(new byte[] { 1 }) : BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Create
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public async Task Create_HandsTheDocumentAndParametersToTheService_AndReturns201()
-    {
-        await using var host = await Host.StartAsync();
-        RuleSetCreateRequest? seen = null;
-        byte[]? seenBytes = null;
-        var created = new RuleSetCreated(SetId, Guid.NewGuid(), "Draft", "Firm", FirmId, "RateCard", true);
-        host.Service.Setup(s => s.CreateAsync(It.IsAny<RuleSetCreateRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .Callback((RuleSetCreateRequest r, byte[] b, CancellationToken _) => { seen = r; seenBytes = b; })
-            .ReturnsAsync(RuleSetOutcome<RuleSetCreated>.Done(created));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}?name=%20Acme%20OCG%20&sourceKind=ratecard&scope=firm&firmId={FirmId}", content: Upload(new byte[] { 9, 8, 7 })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        response.Headers.Location!.ToString().Should().EndWith($"{Base}/{SetId}");
-        (await Json(response))["ruleSetId"]!.GetValue<Guid>().Should().Be(SetId);
-        seen!.Name.Should().Be("Acme OCG");
-        seen.SourceKind.Should().Be(RuleSetSourceKind.RateCard);
-        seen.Scope.Should().Be(RuleSetScope.Firm);
-        seen.FirmId.Should().Be(FirmId);
-        seen.FileName.Should().Be("ocg.pdf");
-        seen.CallerObjectId.Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId));
-        seenBytes.Should().Equal(9, 8, 7);
-    }
-
-    [Theory]
-    [InlineData("sourceKind=Guideline", "name")]
-    [InlineData("name=X", "sourceKind")]
-    [InlineData("name=X&sourceKind=1", "sourceKind")]
-    [InlineData("name=X&sourceKind=Guideline&scope=everyone", "scope")]
-    [InlineData("name=X&sourceKind=Guideline&firmId=nope", "firmId")]
-    public async Task Create_BadQuery_Returns400WithTheFieldNamed_AndNeverReachesTheService(string query, string field)
-    {
-        await using var host = await Host.StartAsync();
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}?{query}", content: Upload(new byte[] { 1 })));
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var body = await Json(response);
-        body["errorCode"]!.GetValue<string>().Should().Be("ruleset.invalid");
-        body["errors"]!.AsArray().Select(e => e!["field"]!.GetValue<string>()).Should().Contain(field);
-        host.Service.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Create_WithNoFile_Returns400_AndAFileOverTheLimitReturns413()
-    {
-        await using var host = await Host.StartAsync(maxMb: 1);
-
-        var empty = await host.Client.SendAsync(Req("POST", $"{Base}?name=X&sourceKind=Guideline", content: Upload(Array.Empty<byte>())));
-        var large = await host.Client.SendAsync(Req("POST", $"{Base}?name=X&sourceKind=Guideline", content: Upload(new byte[(1024 * 1024) + 10])));
-
-        empty.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        large.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
-        (await Json(large))["errorCode"]!.GetValue<string>().Should().Be("ruleset.file_too_large");
-        host.Service.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Create_OwnerRefused_Returns409WithTheOwnerReasonCode_AndContainerNotConfiguredReturns503()
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.SetupSequence(s => s.CreateAsync(It.IsAny<RuleSetCreateRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<RuleSetCreated>.OwnerRefused(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team")))
-            .ReturnsAsync(RuleSetOutcome<RuleSetCreated>.Refused(503, RuleSetService.CodeContainerNotConfigured, "not configured"));
-
-        var owner = await host.Client.SendAsync(Req("POST", $"{Base}?name=X&sourceKind=Guideline", content: Upload(new byte[] { 1 })));
-        var container = await host.Client.SendAsync(Req("POST", $"{Base}?name=X&sourceKind=Guideline", content: Upload(new byte[] { 1 })));
-
-        owner.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await Json(owner))["reasonCode"]!.GetValue<string>().Should().Be(RecordOwnerRefusal.NoOwnerSource);
-        container.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await Json(container))["errorCode"]!.GetValue<string>().Should().Be("ruleset.container_not_configured");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -915,7 +773,7 @@ public sealed class RuleSetEndpointsTests
         host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { Summary() }));
         host.Service.Setup(s => s.GetAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summary(), Guid.NewGuid(), null, new[] { Proposal() })));
+            .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summary(), null, new[] { Proposal() })));
         var unknown = Guid.NewGuid();
         host.Service.Setup(s => s.GetAsync(unknown, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Refused(404, RuleSetService.CodeNotFound, "no such rule set"));
@@ -1201,82 +1059,27 @@ public sealed class RuleSetEndpointsTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Draft (task 075, FR-27): queue the rule drafting job
+    // Task 116 (model 12, 019/076/077): the upload-create and the rule-set draft routes are retired
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static DraftSource Source(bool drafted = false) =>
-        new(SetId, "Acme OCG", Guid.NewGuid(), "b!lib", "item-1", "ocg.pdf", drafted);
-
-    [Fact]
-    public async Task Draft_QueuesTheJob_AndReturns202WithTheRuleSetReadAsItsLocation()
+    [Fact(DisplayName = "Task 116: POST /api/finance/rulesets and POST /api/finance/rulesets/{id}/draft are not mapped, and a call reaches no service and queues no job")]
+    public async Task RetiredRoutes_AreNotMapped_AndACallReachesNothing()
     {
         await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
-        JobContract? queued = null;
-        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Callback((JobContract job, CancellationToken _) => queued = job)
-            .Returns(Task.CompletedTask);
+        host.GrantAdmin();
 
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
+        host.Routes.Where(e => e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("POST") == true)
+            .Select(e => e.RoutePattern.RawText!.TrimEnd('/'))
+            .Should().NotContain(new[] { Base, $"{Base}/{{ruleSetId:guid}}/draft" });
+        host.Routes.Should().NotContain(e => e.RoutePattern.RawText!.EndsWith("/draft", StringComparison.Ordinal));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        response.Headers.Location!.ToString().Should().Be($"{Base}/{SetId}");
-        var body = await Json(response);
-        body["ruleSetId"]!.GetValue<Guid>().Should().Be(SetId);
-        body["statusUrl"]!.GetValue<string>().Should().Be($"{Base}/{SetId}");
-        body["jobId"]!.GetValue<Guid>().Should().Be(queued!.JobId);
+        var create = await host.Client.SendAsync(Req("POST", $"{Base}?name=OCG&sourceKind=Guideline", content: JsonContent.Create(new { })));
+        var draft = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
 
-        queued.JobType.Should().Be(BillingRuleDraftJobHandler.JobTypeName);
-        queued.SubjectId.Should().Be(SetId.ToString());
-        queued.IdempotencyKey.Should().Be(SetId.ToString());
-        var payload = queued.Payload!.RootElement;
-        payload.GetProperty("ruleSetId").GetGuid().Should().Be(SetId);
-        payload.GetProperty("callerObjectId").GetGuid().Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId),
-            "the caller's id is server-derived from the token, never from a body");
-        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Theory]
-    [InlineData(404, "ruleset.not_found")]
-    [InlineData(409, "ruleset.retired")]
-    [InlineData(422, "ruleset.source_missing")]
-    public async Task Draft_ARefusedSource_IsReportedNow_AndNoJobIsQueued(int status, string code)
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(status, code, "refused"));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
-
-        ((int)response.StatusCode).Should().Be(status);
-        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(code);
-        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Draft_AFinishedRun_Is409AlreadyDrafted_AndNoJobIsQueued()
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source(drafted: true)));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.already_drafted");
-        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Draft_WhenTheQueueIsDown_Is503WithItsCode_NotAnUnhandled500()
-    {
-        await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
-        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("bus down"));
-
-        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.draft_not_queued");
+        create.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+        draft.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+        host.VerifyNoServiceOperation();
+        host.Jobs.VerifyNoOtherCalls();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1286,7 +1089,6 @@ public sealed class RuleSetEndpointsTests
     /// <summary>Every route here that takes a rule set id, with a body its handler accepts (so a refusal is the filter's, not a 400).</summary>
     public static TheoryData<string, string> ByIdRoutes => new()
     {
-        { "POST", $"{Base}/{SetId}/draft" },
         { "GET", $"{Base}/{SetId}" },
         { "PATCH", $"{Base}/{SetId}/proposals/{PolicyId}" },
         { "POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept" },
@@ -1375,7 +1177,7 @@ public sealed class RuleSetEndpointsTests
         var mapped = MappedByIdRoutes(host);
 
         (await ByIdRoutesWithoutTheUniform404(host, missing)).Should().BeEmpty();
-        mapped.Should().HaveCount(8, "non-vacuity: the eight by-id routes MapRuleSetEndpoints maps today");
+        mapped.Should().HaveCount(7, "non-vacuity: the seven by-id routes MapRuleSetEndpoints maps today (task 116 retired /draft)");
         mapped.Should().BeEquivalentTo(
             ByIdRoutes.Select(row => ((string)row[0], (string)row[1])),
             "the hand-written ByIdRoutes theory list is the routing table's, so every theory above covers every by-id route");

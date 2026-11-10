@@ -12,6 +12,8 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
@@ -33,8 +35,10 @@ namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
 /// </remarks>
 public sealed class BillingRuleDraftJobHandlerTests
 {
+    private static readonly Guid VersionId = Guid.NewGuid();
+    private static readonly Guid ProcedureId = Guid.NewGuid();
     private static readonly Guid SetId = Guid.NewGuid();
-    private static readonly Guid DocId = Guid.NewGuid();
+    private static readonly Guid FileId = Guid.NewGuid();
     private static readonly Guid Caller = Guid.NewGuid();
     private const string SecretText = "CONFIDENTIAL-GUIDELINE-TEXT-7731";
     private const string SecretQuote = "CONFIDENTIAL-CLAUSE-QUOTE-4412";
@@ -61,7 +65,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     {
         public readonly Mock<RuleSetService> RuleSets;
         public readonly Mock<IInvoiceAi> Ai = new(MockBehavior.Strict);
-        public readonly Mock<ISpeFileOperations> Spe = new(MockBehavior.Strict);
+        public readonly StoredFileRig Files = new();
         public readonly Mock<ITextExtractor> Text = new(MockBehavior.Strict);
         public readonly Mock<IIdempotencyService> Lock = new(MockBehavior.Strict);
         public readonly CapturingLogger<BillingRuleDraftJobHandler> Log = new();
@@ -74,35 +78,31 @@ public sealed class BillingRuleDraftJobHandlerTests
 
         public Rig()
         {
-            var gcf = Mock.Of<IGraphClientFactory>();
-            var spe = new SpeFileStore(
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()));
             var entities = Mock.Of<IGenericEntityService>();
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
             RuleSets = new Mock<RuleSetService>(
                 MockBehavior.Strict,
-                entities, Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(), validator,
+                entities, Mock.Of<IRecordOwnershipResolver>(), validator,
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
+                Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
+
+            // Task 116: the version's source file, in the real file store over its fakes (a Clean scan unless a test says otherwise).
+            Files.SeedFile(FileId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), new byte[] { 1, 2, 3 },
+                purpose: StoredFilePurpose.ProcedureSource);
 
             Lock.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => LockAvailable);
             Lock.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", false)));
-            RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+            RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, FileId, "ocg.pdf", false)));
+            RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(VersionId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() =>
                 {
                     Calls.Add("compensate");
                     return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(0, 0));
                 });
-            Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new MemoryStream(new byte[] { 1 }));
             Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TextExtractionResult.Succeeded($"4.2 Bill in tenth hours. {SecretText} {SecretQuote}", TextExtractionMethod.Native));
             Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
@@ -126,7 +126,7 @@ public sealed class BillingRuleDraftJobHandlerTests
                         NotConverted = new[] { new BillingRuleNotConverted { Text = "Staff sensibly.", Location = "9.3", Reason = "Nothing to check." } },
                     };
                 });
-            RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid _, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> nc, Guid? caller, CancellationToken _) =>
                 {
                     Calls.Add("store");
@@ -137,7 +137,7 @@ public sealed class BillingRuleDraftJobHandlerTests
                 });
         }
 
-        public BillingRuleDraftJobHandler Handler() => new(RuleSets.Object, Ai.Object, Spe.Object, Text.Object, Lock.Object, Log);
+        public BillingRuleDraftJobHandler Handler() => new(RuleSets.Object, Ai.Object, Files.Service, Text.Object, Lock.Object, Log);
 
         public void Extracts(string text) =>
             Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
@@ -146,7 +146,7 @@ public sealed class BillingRuleDraftJobHandlerTests
 
     private static JobContract Job(int attempt = 1, int max = 3, int delivery = 1)
     {
-        var job = BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), SetId, Caller, "corr-1");
+        var job = BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), VersionId, Caller, "corr-1");
         job.Attempt = attempt;
         job.MaxAttempts = max;
         job.DeliveryCount = delivery;
@@ -156,19 +156,20 @@ public sealed class BillingRuleDraftJobHandlerTests
     // ── the job contract ────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void BuildJob_CarriesTheRuleSetAndTheCaller_AndUsesTheRuleSetIdAsItsIdempotencyKey()
+    public void BuildJob_CarriesTheProcedureVersionAndTheCaller_AndUsesTheVersionIdAsSubjectAndIdempotencyKey()
     {
         var jobId = Guid.NewGuid();
 
-        var job = BillingRuleDraftJobHandler.BuildJob(jobId, SetId, Caller, "corr-1");
+        var job = BillingRuleDraftJobHandler.BuildJob(jobId, VersionId, Caller, "corr-1");
 
         job.JobId.Should().Be(jobId);
-        job.JobType.Should().Be("BillingRuleDraft").And.Be(new Rig().Handler().JobType);
-        job.SubjectId.Should().Be(SetId.ToString());
-        job.IdempotencyKey.Should().Be(SetId.ToString());
+        job.JobType.Should().Be("BillingRuleDraft").And.Be(new Rig().Handler().JobType, "task 116 keeps the job type");
+        job.SubjectId.Should().Be(VersionId.ToString());
+        job.IdempotencyKey.Should().Be(VersionId.ToString());
         job.CorrelationId.Should().Be("corr-1");
-        job.Payload!.RootElement.GetProperty("ruleSetId").GetGuid().Should().Be(SetId);
+        job.Payload!.RootElement.GetProperty("procedureVersionId").GetGuid().Should().Be(VersionId);
         job.Payload.RootElement.GetProperty("callerObjectId").GetGuid().Should().Be(Caller);
+        job.Payload.RootElement.TryGetProperty("ruleSetId", out _).Should().BeFalse("the payload no longer names a rule set");
     }
 
     // ── happy path ──────────────────────────────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ public sealed class BillingRuleDraftJobHandlerTests
         rig.AiRequests.Should().ContainSingle();
         var request = rig.AiRequests[0];
         request.DocumentText.Should().Contain(SecretText);
-        request.DocumentId.Should().Be(DocId);
+        request.DocumentId.Should().Be(FileId, "the Stored File id, logged only");
         request.RuleTypes.Select(t => t.RuleType).Should().Equal(BillingRuleCatalogue.Types.Select(t => t.ToString()),
             "the whole closed catalogue and nothing else is offered");
         request.RuleTypes.Should().HaveCount(13);
@@ -252,13 +253,13 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_ARuleSetThatIsAlreadyDrafted_CompletesWithoutDownloadingAskingTheModelOrWriting()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", AlreadyDrafted: true)));
+        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, FileId, "ocg.pdf", AlreadyDrafted: true)));
 
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Completed);
-        rig.Spe.VerifyNoOtherCalls();
+        rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
         rig.Ai.VerifyNoOtherCalls();
         rig.RuleSets.Verify(r => r.AddDraftsAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -267,7 +268,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_WhenAnotherDeliveryFinishedFirst_TheStoreAnswersAlreadyDrafted_AndTheJobCompletes()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsAdded>.Refused(409, RuleSetService.CodeAlreadyDrafted, "done"));
 
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
@@ -281,7 +282,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_ClearsTheEarlierRunsUntouchedDrafts_BeforeTheModelIsAsked_AndBeforeAnythingIsStored()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 rig.Calls.Add("compensate");
@@ -300,14 +301,14 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_ACompensationFault_FailsTheRun_WithoutAskingTheModelOrDrafting_SoTheNextDeliveryCompensatesAgain(int delivery, JobStatus expected)
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsCompensated>.Refused(500, RuleSetService.CodeWriteFailed, "could not clear"));
 
         var outcome = await rig.Handler().ProcessAsync(Job(delivery: delivery), CancellationToken.None);
 
         outcome.Status.Should().Be(expected);
         outcome.ErrorMessage.Should().Be(RuleSetService.CodeWriteFailed);
-        rig.Spe.VerifyNoOtherCalls();
+        rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
         rig.Ai.VerifyNoOtherCalls();
         rig.RuleSets.Verify(r => r.AddDraftsAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -316,22 +317,22 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_WhenTheCompensationFindsTheMarker_AnotherDeliveryFinishedFirst_TheJobCompletes_AndAsksNothing()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsCompensated>.Refused(409, RuleSetService.CodeAlreadyDrafted, "done"));
 
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Completed);
         rig.Ai.VerifyNoOtherCalls();
-        rig.Spe.VerifyNoOtherCalls();
+        rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
     }
 
     [Fact]
     public async Task Process_ARuleSetThatIsAlreadyDrafted_NeverRunsTheCompensation()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", AlreadyDrafted: true)));
+        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, FileId, "ocg.pdf", AlreadyDrafted: true)));
 
         await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
@@ -348,28 +349,77 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_ASourceThatCannotBeFound_IsPoisoned_NotRetried(int status, string code)
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(status, code, "no"));
 
         var outcome = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
         outcome.ErrorMessage.Should().Be(code);
-        rig.Spe.VerifyNoOtherCalls();
+        rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
     }
 
     [Theory]
     [InlineData(1, JobStatus.Failed)]
     [InlineData(2, JobStatus.Failed)]
     [InlineData(3, JobStatus.Poisoned)]
-    public async Task Process_ADownloadThatReturnsNothing_IsRetried_UntilTheLastAttempt(int attempt, JobStatus expected)
+    public async Task Process_ASourceFileWithNoScanVerdictYet_IsRetried_UntilTheLastAttempt(int attempt, JobStatus expected)
     {
         var rig = new Rig();
-        rig.Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>())).ReturnsAsync((Stream?)null);
+        rig.Files.SeedFile(FileId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), new byte[] { 1, 2, 3 },
+            purpose: StoredFilePurpose.ProcedureSource, tags: new Dictionary<string, string>()); // no scan tags yet: Pending
 
         var outcome = await rig.Handler().ProcessAsync(Job(attempt, 3), CancellationToken.None);
 
         outcome.Status.Should().Be(expected);
+        rig.Ai.VerifyNoOtherCalls();
+        rig.Text.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Task 116: a Malicious source file is Poisoned at once and never read")]
+    public async Task Process_AMaliciousSourceFile_IsPoisoned_AndNeverExtracted()
+    {
+        var rig = new Rig();
+        rig.Files.SeedFile(FileId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), new byte[] { 1, 2, 3 },
+            purpose: StoredFilePurpose.ProcedureSource,
+            tags: new Dictionary<string, string> { [StoredFileBlobs.ScanResultTagKey] = StoredFileBlobs.ScanMaliciousValue });
+
+        var outcome = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.Text.VerifyNoOtherCalls();
+        rig.Ai.VerifyNoOtherCalls();
+        rig.Stored.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "Task 116: a source file that is no longer servable is ruleset.source_missing, Poisoned at once")]
+    [InlineData("removed since the source was found")]
+    [InlineData("row gone")]
+    [InlineData("blob gone")]
+    public async Task Process_ASourceFileThatIsMissing_IsPoisonedSourceMissing(string how)
+    {
+        var rig = new Rig();
+        switch (how)
+        {
+            case "removed since the source was found":
+                rig.Files.SeedFile(FileId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), new byte[] { 1, 2, 3 },
+                    StoredFileStatus.Removed, StoredFilePurpose.ProcedureSource);
+                break;
+            case "row gone":
+                rig.RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, Guid.NewGuid(), "ocg.pdf", false)));
+                break;
+            default:
+                rig.Files.Gateway.Remove(StoredFileSchema.ContainerOf(StoredFilePurpose.ProcedureSource),
+                    StoredFileBlobName.Build(rig.Files.TenantId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), FileId));
+                break;
+        }
+
+        var outcome = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(RuleSetService.CodeSourceMissing);
+        rig.Text.VerifyNoOtherCalls();
         rig.Ai.VerifyNoOtherCalls();
     }
 
@@ -450,7 +500,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_WhenTheNewRulesCannotBeOwned_IsPoisoned_WithTheOwnerRefusalCode()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsAdded>.OwnerRefused(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team")));
 
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
@@ -472,7 +522,7 @@ public sealed class BillingRuleDraftJobHandlerTests
         first.Status.Should().Be(JobStatus.Failed);
         last.Status.Should().Be(JobStatus.Poisoned);
         rig.RuleSets.Verify(r => r.GetDraftSourceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        rig.Spe.VerifyNoOtherCalls();
+        rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
         rig.Ai.VerifyNoOtherCalls();
         rig.Stored.Should().BeNull();
         rig.Lock.Verify(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "a lock this delivery never held is not released");
@@ -483,12 +533,12 @@ public sealed class BillingRuleDraftJobHandlerTests
     {
         var rig = new Rig();
         var failing = new Rig();
-        failing.Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("graph 503"));
+        failing.Files.Gateway.FailEverything = new HttpRequestException("blob store 503");
 
         await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
         await failing.Handler().ProcessAsync(Job(), CancellationToken.None);
 
-        var key = BillingRuleDraftJobHandler.LockKeyPrefix + SetId.ToString("N");
+        var key = BillingRuleDraftJobHandler.LockKeyPrefix + VersionId.ToString("N");
         foreach (var r in new[] { rig, failing })
         {
             r.Lock.Verify(l => l.TryAcquireProcessingLockAsync(key, BillingRuleDraftJobHandler.LockDuration, It.IsAny<CancellationToken>()), Times.Once);
@@ -515,11 +565,11 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_AFailedWrite_IsRetried_ButARefusalIsNot()
     {
         var rig = new Rig();
-        rig.RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsAdded>.Refused(500, RuleSetService.CodeWriteFailed, "write"));
         var retried = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
 
-        rig.RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftsAdded>.Refused(404, RuleSetService.CodeNotFound, "gone"));
         var refused = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
 
@@ -531,7 +581,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     public async Task Process_AnUnexpectedException_IsRetried_NotSwallowed()
     {
         var rig = new Rig();
-        rig.Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("graph 503"));
+        rig.Files.Gateway.FailEverything = new HttpRequestException("blob store 503");
 
         var outcome = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
 
@@ -544,12 +594,11 @@ public sealed class BillingRuleDraftJobHandlerTests
     {
         var rig = new Rig();
         using var cts = new CancellationTokenSource();
-        rig.Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>()))
-            .Returns(() =>
-            {
-                cts.Cancel();
-                throw new OperationCanceledException(cts.Token);
-            });
+        rig.Files.Gateway.BeforeOp = (_, _) =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        };
 
         var act = () => rig.Handler().ProcessAsync(Job(), cts.Token);
 
@@ -559,8 +608,9 @@ public sealed class BillingRuleDraftJobHandlerTests
     [Theory]
     [InlineData(null)]
     [InlineData("{}")]
-    [InlineData("""{"ruleSetId":"00000000-0000-0000-0000-000000000000"}""")]
-    [InlineData("""{"ruleSetId":"not-a-guid"}""")]
+    [InlineData("""{"procedureVersionId":"00000000-0000-0000-0000-000000000000"}""")]
+    [InlineData("""{"procedureVersionId":"not-a-guid"}""")]
+    [InlineData("""{"ruleSetId":"11111111-1111-4111-8111-111111111111","callerObjectId":"22222222-2222-4222-8222-222222222222"}""")] // task 116: a message queued before the re-key
     public async Task Process_AnInvalidPayload_IsPoisoned(string? payload)
     {
         var rig = new Rig();
@@ -587,7 +637,7 @@ public sealed class BillingRuleDraftJobHandlerTests
             _ => { },
             r => r.Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvoiceAiException(InvoiceAiException.OutputInvalid, ConsumerTypes.BillingRuleDraft, "bad output")),
-            r => r.RuleSets.Setup(x => x.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            r => r.RuleSets.Setup(x => x.AddDraftsAsync(VersionId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RuleSetOutcome<DraftsAdded>.Refused(500, RuleSetService.CodeWriteFailed, "write")),
             r => r.Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("extractor failed")),

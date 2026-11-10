@@ -10,6 +10,8 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
@@ -37,8 +39,6 @@ public sealed class BillingRuleDraftSeamTests
 {
     private const string ActionCode = "billing-rule-draft";
     private static readonly Guid ActionId = Guid.Parse("66666666-6666-6666-6666-666666666666");
-    private static readonly Guid SourceId = Guid.Parse("77777777-7777-7777-7777-777777777777");
-    private const string Drive = "b!procedurelibrary";
     private const string DocumentText = "4.2 Time is billed in tenth-hour increments.\n\n5.1 No timekeeper may bill over 99 hours a day.\n\n6.3 Hourly rates are capped at the agreed rate card.\n\n9.3 Staff sensibly.";
 
     private static string Params(string member, string value, params (string Member, string Value)[] more)
@@ -95,18 +95,19 @@ public sealed class BillingRuleDraftSeamTests
         public readonly Mock<IConsumerRoutingService> Routing = new();
         public readonly Mock<IScopeResolverService> Catalog = new();
         public readonly Mock<IOpenAiClient> Model = new();
-        public readonly Mock<ISpeFileOperations> Spe = new();
+        public readonly Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files = new();
         public readonly Mock<ITextExtractor> Text = new();
         public readonly List<string> Prompts = new();
-        public readonly Guid RuleSetId;
+        public readonly RuleSetServiceTests.Harness.Drafting Target;
+        public Guid RuleSetId => Target.RuleSet;
         public BillingRuleDraftJobHandler Handler { get; }
 
         public Rig()
         {
-            RuleSetId = Store.RuleSet();
-            Store.Row("sprk_ruleset", RuleSetId)["sprk_sourcedocument"] = new EntityReference("sprk_document", SourceId);
-            Store.Documents.Setup(d => d.GetDocumentAsync(SourceId.ToString(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Spaarke.Dataverse.DocumentEntity { Id = SourceId.ToString(), Name = "ocg", GraphDriveId = Drive, GraphItemId = "item-1", FileName = "ocg.pdf" });
+            // Task 116: a Draft version of a Billing Procedure; its source file is in the real file store over its fakes.
+            Target = Store.DraftVersion();
+            Files.SeedFile(Target.File, new StoredFileParent(StoredFileParentKind.ProcedureVersion, Target.Version), new byte[] { 1 },
+                purpose: StoredFilePurpose.ProcedureSource);
 
             Routing.Setup(r => r.ResolveActionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ActionId);
@@ -125,8 +126,7 @@ public sealed class BillingRuleDraftSeamTests
                 .Callback((string prompt, BinaryData _, string _, string? _, int? _, float? _, CancellationToken _) => Prompts.Add(prompt))
                 .ReturnsAsync(ModelReply);
 
-            Spe.Setup(s => s.DownloadFileAsync(Drive, "item-1", It.IsAny<CancellationToken>())).ReturnsAsync(() => new MemoryStream(new byte[] { 1 }));
-            Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
+            Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "guidelines.pdf", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TextExtractionResult.Succeeded(DocumentText, TextExtractionMethod.Native));
 
             var resolver = new ActionResolver(Routing.Object, Catalog.Object, NullLogger<ActionResolver>.Instance);
@@ -138,11 +138,11 @@ public sealed class BillingRuleDraftSeamTests
                 runner,
                 ContentUnderstandingTestHost.Unconfigured(),
                 NullLogger<InvoiceAi>.Instance);
-            Handler = new BillingRuleDraftJobHandler(Store.Service(), ai, Spe.Object, Text.Object, new InMemoryLock(), NullLogger<BillingRuleDraftJobHandler>.Instance);
+            Handler = new BillingRuleDraftJobHandler(Store.Service(), ai, Files.Service, Text.Object, new InMemoryLock(), NullLogger<BillingRuleDraftJobHandler>.Instance);
         }
 
         public Task<JobOutcome> RunAsync() =>
-            Handler.ProcessAsync(BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), RuleSetId, Guid.NewGuid(), "corr"), CancellationToken.None);
+            Handler.ProcessAsync(BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), Target.Version, Guid.NewGuid(), "corr"), CancellationToken.None);
     }
 
     [Fact]
@@ -189,7 +189,8 @@ public sealed class BillingRuleDraftSeamTests
         version.GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
 
         // Refused, not dropped: the 99-hour cap (schema) and the rate rule with a parameter its type lacks; plus the model's own entry.
-        var marker = (string)rig.Store.Writes.Last().Fields["sprk_notconverted"];
+        var marker = rig.Store.Row(ProcedureEntity.VersionEntity, rig.Target.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn);
+        rig.Store.Row(ProcedureEntity.VersionEntity, rig.Target.Version).GetAttributeValue<bool>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
         using var list = JsonDocument.Parse(marker);
         var entries = list.RootElement.EnumerateArray().ToList();
         entries.Select(e => e.GetProperty("text").GetString()).Should().BeEquivalentTo(

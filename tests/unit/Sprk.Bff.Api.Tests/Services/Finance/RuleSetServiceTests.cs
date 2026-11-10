@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -62,17 +63,11 @@ public sealed class RuleSetServiceTests
     internal sealed class Harness
     {
         public readonly Mock<IGenericEntityService> Entities = new();
-        public readonly Mock<IDocumentDataverseService> Documents = new();
-        public readonly Mock<SpeFileStore> Spe;
         public readonly Mock<IRecordOwnershipResolver> Ownership = new();
-        public readonly FinanceOptions Options = new() { ProcedureLibraryContainerId = Drive };
 
         public readonly Dictionary<string, List<Entity>> Rows = new();
         public readonly List<(Write Kind, string Entity, Guid Id, Dictionary<string, object> Fields)> Writes = new();
         public readonly List<QueryExpression> Queries = new();
-        public readonly List<(string Drive, string Name, byte[] Bytes)> Uploads = new();
-        public readonly List<string> FileDeletes = new();
-        public readonly List<CreateDocumentRequest> DocumentCreates = new();
         public readonly List<string> Order = new();
         public readonly List<(string Entity, int Size)> BulkCalls = new();
         public Func<string, bool>? FailBulkFor;
@@ -126,38 +121,6 @@ public sealed class RuleSetServiceTests
         {
             Seed(new Entity("sprk_organization", FirmId));
 
-            var gcf = Mock.Of<IGraphClientFactory>();
-            Spe = new Mock<SpeFileStore>(
-                MockBehavior.Strict,
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
-                null!);
-            Spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken _) =>
-                {
-                    using var copy = new MemoryStream();
-                    content.CopyTo(copy);
-                    Uploads.Add((drive, name, copy.ToArray()));
-                    return new FileHandleDto("item-1", name, null, copy.Length, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, "https://web/item-1", drive);
-                });
-            Spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, string item, CancellationToken _) =>
-                {
-                    FileDeletes.Add(item);
-                    return true;
-                });
-
-            Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((CreateDocumentRequest r, CancellationToken _) =>
-                {
-                    DocumentCreates.Add(r);
-                    Seed(new Entity("sprk_document", DocumentId));
-                    return DocumentId.ToString();
-                });
-            Documents.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
             Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => OwnerAnswer);
 
@@ -473,9 +436,8 @@ public sealed class RuleSetServiceTests
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
             return new RuleSetService(
-                Entities.Object, Documents.Object, Spe.Object, Ownership.Object, validator,
+                Entities.Object, Ownership.Object, validator,
                 new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(m => m.CurrentValue == Options),
                 Lease,
                 new ListLogger(Logs));
         }
@@ -513,7 +475,7 @@ public sealed class RuleSetServiceTests
 
         public Guid RuleSet(
             int status = RuleSetService.RuleSetDraft, bool visible = true, int? scope = (int)RuleSetScope.ClientDefault, Guid? firm = null,
-            int? domain = RuleDomains.PolicyDomainBilling, DateTime? effectiveFrom = null, string? notConverted = null, Guid? procedure = null)
+            int? domain = RuleDomains.PolicyDomainBilling, DateTime? effectiveFrom = null, Guid? procedure = null)
         {
             var e = new Entity("sprk_ruleset", Guid.NewGuid());
             e["sprk_name"] = "Acme guidelines";
@@ -524,9 +486,74 @@ public sealed class RuleSetServiceTests
             if (firm is { } f) e["sprk_firm"] = new EntityReference("sprk_organization", f);
             if (domain is { } d) e["sprk_domain"] = new OptionSetValue(d);
             if (effectiveFrom is { } from) e["sprk_effectivefrom"] = from;
-            if (notConverted is not null) e["sprk_notconverted"] = notConverted;
             Seed(e);
             return e.Id;
+        }
+
+        /// <summary>Task 116: a drafting target — the version, its Procedure, the Procedure's rule set (empty when none) and its source file(s).</summary>
+        public sealed record Drafting(Guid Version, Guid Procedure, Guid RuleSet, IReadOnlyList<Guid> Files)
+        {
+            public Guid File => Files.Single();
+        }
+
+        /// <summary>
+        /// Task 116: a version (Draft unless <paramref name="versionStatus"/>; null = no status) of a Billing Procedure (or <paramref name="procedure"/>,
+        /// whose rule set is reused), the Procedure's rule set, and <paramref name="servableFiles"/> Servable Procedure-source Stored Files.
+        /// <paramref name="drafted"/> is the version's Yes/No marker (null = never written); <paramref name="notConvertedList"/> its memo.
+        /// </summary>
+        public Drafting DraftVersion(
+            int? versionStatus = ProcedureEntity.VersionStatusDraft, bool? drafted = null, int servableFiles = 1, int setStatus = RuleSetService.RuleSetDraft,
+            int? area = RuleDomains.PolicyDomainBilling, int procedureStatus = ProcedureEntity.StatusActive, int number = 1, Guid? procedure = null,
+            string? notConvertedList = null, bool withRuleSet = true)
+        {
+            Guid procedureId, ruleSetId = Guid.Empty;
+            if (procedure is { } existing)
+            {
+                procedureId = existing;
+                ruleSetId = Rows.GetValueOrDefault("sprk_ruleset")?
+                    .FirstOrDefault(r => r.GetAttributeValue<EntityReference>("sprk_procedure")?.Id == existing)?.Id ?? Guid.Empty;
+            }
+            else
+            {
+                var p = new Entity(ProcedureEntity.Entity, Guid.NewGuid());
+                p[ProcedureEntity.NameColumn] = "Acme outside counsel guidelines";
+                if (area is { } a) p[ProcedureEntity.AreaColumn] = new OptionSetValue(a);
+                p[ProcedureEntity.StatusColumn] = new OptionSetValue(procedureStatus);
+                Seed(p);
+                procedureId = p.Id;
+                if (withRuleSet)
+                {
+                    ruleSetId = RuleSet(status: setStatus, procedure: procedureId);
+                }
+            }
+
+            var v = new Entity(ProcedureEntity.VersionEntity, Guid.NewGuid());
+            v[ProcedureEntity.VersionProcedureColumn] = new EntityReference(ProcedureEntity.Entity, procedureId);
+            v[ProcedureEntity.VersionNumberColumn] = number;
+            if (versionStatus is { } vs) v[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(vs);
+            if (drafted is { } d) v[RuleSetService.VersionDraftedColumn] = d;
+            if (notConvertedList is not null) v[RuleSetService.VersionNotConvertedListColumn] = notConvertedList;
+            Seed(v);
+
+            var files = new List<Guid>();
+            for (var i = 0; i < servableFiles; i++)
+            {
+                files.Add(SourceFile(v.Id, StoredFileStatus.Servable, i == 0 ? "guidelines.pdf" : $"guidelines-{i}.pdf"));
+            }
+
+            return new Drafting(v.Id, procedureId, ruleSetId, files);
+        }
+
+        /// <summary>Task 116: a Procedure-source Stored File row of <paramref name="versionId"/> in <paramref name="status"/>.</summary>
+        public Guid SourceFile(Guid versionId, StoredFileStatus status, string name = "guidelines.pdf", StoredFilePurpose purpose = StoredFilePurpose.ProcedureSource)
+        {
+            var f = new Entity(StoredFileSchema.Entity, Guid.NewGuid());
+            f[StoredFileSchema.Name] = name;
+            f[StoredFileSchema.ProcedureVersionTable] = new EntityReference(ProcedureEntity.VersionEntity, versionId);
+            f[StoredFileSchema.Purpose] = new OptionSetValue((int)purpose);
+            f[StoredFileSchema.Status] = new OptionSetValue((int)status);
+            Seed(f);
+            return f.Id;
         }
 
         /// <summary>A policy (domain per <paramref name="domain"/>; null = empty = Ontology) and its first version.</summary>
@@ -675,10 +702,6 @@ public sealed class RuleSetServiceTests
         }
     }
 
-    private static RuleSetCreateRequest CreateRequest(
-        RuleSetSourceKind kind = RuleSetSourceKind.Guideline, RuleSetScope scope = RuleSetScope.ClientDefault, Guid? firm = null, string name = "Acme OCG") =>
-        new(name, kind, scope, firm, "ocg.pdf", CallerOid);
-
     private static ProposalEdit Edit(
         string? type = null, string? body = null, string? template = null, string? headline = null, string? consequence = null,
         string? quote = null, string? location = null) =>
@@ -710,148 +733,6 @@ public sealed class RuleSetServiceTests
         h.Invoice(FindingsWith(SnapshotOf(versions.Select(AppliedOn).ToArray())));
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Create
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    [Theory]
-    [InlineData(RuleSetSourceKind.Guideline, true)]
-    [InlineData(RuleSetSourceKind.RateCard, true)]
-    [InlineData(RuleSetSourceKind.InternalProcedure, false)]
-    public async Task Create_StartsDraftBillingWithTheFlagFromTheSourceKind_AndStoresTheDocumentInTheProcedureLibrary(
-        RuleSetSourceKind kind, bool expectedVisible)
-    {
-        var h = new Harness();
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(kind), new byte[] { 1, 2, 3 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        outcome.Value!.VisibleToFirms.Should().Be(expectedVisible);
-        outcome.Value.Status.Should().Be("Draft");
-        outcome.Value.SourceKind.Should().Be(kind.ToString());
-        h.Uploads.Should().ContainSingle().Which.Drive.Should().Be(Drive, "the source document goes to the Procedure Library, through SpeFileStore");
-        h.Uploads[0].Bytes.Should().Equal(1, 2, 3);
-        h.DocumentCreates.Should().ContainSingle().Which.ContainerId.Should().Be(Drive);
-        var row = h.Rows["sprk_ruleset"].Single();
-        row.GetAttributeValue<bool>("sprk_visibletofirms").Should().Be(expectedVisible);
-        row.GetAttributeValue<OptionSetValue>("sprk_domain").Value.Should().Be(RuleDomains.PolicyDomainBilling);
-        row.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetDraft);
-        row.GetAttributeValue<EntityReference>("sprk_sourcedocument").Id.Should().Be(DocumentId);
-        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
-    }
-
-    [Fact(DisplayName = "Task 090 (UAC answer to 081 Q5): an uploaded rule set records the calling admin as its creator person")]
-    public async Task Create_RecordsTheCallerAsCreatorPerson()
-    {
-        var caller = Guid.Parse("09000000-0000-4000-8000-0000000000c5");
-        var h = new Harness { OwnerAnswer = RecordOwnerResolution.Owned(TeamId) with { CreatedByPerson = caller } };
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        var creator = h.Rows["sprk_ruleset"].Single().GetAttributeValue<EntityReference>(RecordCreatorPerson.Column);
-        creator.Should().NotBeNull("sprk_ruleset is a stamped table: the owner decision's person is written on create");
-        creator!.Id.Should().Be(caller);
-    }
-
-    [Fact]
-    public async Task Create_ForAFirm_SetsScopeAndFirm()
-    {
-        var h = new Harness();
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(scope: RuleSetScope.Firm, firm: FirmId), new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        var row = h.Rows["sprk_ruleset"].Single();
-        row.GetAttributeValue<OptionSetValue>("sprk_scope").Value.Should().Be((int)RuleSetScope.Firm);
-        row.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
-    }
-
-    [Fact]
-    public async Task Create_WithoutAConfiguredContainer_Is503_AndWritesNothing()
-    {
-        var h = new Harness { Options = { ProcedureLibraryContainerId = "" } };
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
-        outcome.ErrorCode.Should().Be("ruleset.container_not_configured");
-        outcome.StatusCode.Should().Be(503);
-        h.Uploads.Should().BeEmpty();
-        h.Writes.Should().BeEmpty();
-    }
-
-    [Theory]
-    [InlineData("firmScopeNoFirm")]
-    [InlineData("defaultWithFirm")]
-    [InlineData("unknownFirm")]
-    [InlineData("blankName")]
-    public async Task Create_InvalidInput_IsRefusedWithFieldErrors_AndWritesNothing(string scenario)
-    {
-        var h = new Harness();
-        var request = scenario switch
-        {
-            "firmScopeNoFirm" => CreateRequest(scope: RuleSetScope.Firm),
-            "defaultWithFirm" => CreateRequest(firm: FirmId),
-            "unknownFirm" => CreateRequest(scope: RuleSetScope.Firm, firm: Guid.NewGuid()),
-            _ => CreateRequest(name: "  "),
-        };
-
-        var outcome = await h.Service().CreateAsync(request, new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
-        outcome.ErrorCode.Should().Be("ruleset.invalid");
-        outcome.Errors.Should().NotBeEmpty();
-        h.Uploads.Should().BeEmpty();
-        h.Writes.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task Create_WhenTheRuleSetWriteFails_RemovesTheDocumentRowAndTheUploadedFile()
-    {
-        var h = new Harness { FailCreateWhen = e => e.LogicalName == "sprk_ruleset" };
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
-        outcome.ErrorCode.Should().Be("ruleset.write_failed");
-        h.FileDeletes.Should().Equal("item-1");
-        h.Writes.Should().Contain(w => w.Kind == Write.Delete && w.Entity == "sprk_document");
-        h.Rows.GetValueOrDefault("sprk_ruleset").Should().BeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task Create_WhenTheCallerCancelsMidWay_StillRemovesTheDocumentRowAndTheUploadedFile_AndRethrows()
-    {
-        using var cts = new CancellationTokenSource();
-        var h = new Harness
-        {
-            FailCreateWhen = e =>
-            {
-                cts.Cancel();
-                throw new OperationCanceledException(cts.Token);
-            },
-        };
-
-        var act = () => h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, cts.Token);
-
-        await act.Should().ThrowAsync<OperationCanceledException>();
-        h.FileDeletes.Should().Equal("item-1");
-        h.Writes.Should().Contain(w => w.Kind == Write.Delete && w.Entity == "sprk_document");
-    }
-
-    [Fact]
-    public async Task Create_OwnerRefused_WritesNothing()
-    {
-        var h = new Harness { OwnerAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team") };
-
-        var outcome = await h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.OwnerRefused);
-        h.Uploads.Should().BeEmpty();
-        h.Writes.Should().BeEmpty();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // Reads and domain isolation
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -877,7 +758,7 @@ public sealed class RuleSetServiceTests
     public async Task Get_ShowsEachRuleBesideItsClause_WithDescriptionStateAndConsequence()
     {
         var h = new Harness();
-        var set = h.RuleSet(notConverted: """[{"text":"Travel","reason":"unsupported"}]""");
+        var set = h.DraftVersion(drafted: true, notConvertedList: """[{"text":"Travel","reason":"unsupported"}]""").RuleSet;
         var (policy, version) = h.Rule(set, "BILL-A", ProposalState.Accepted);
 
         var outcome = await h.Service().GetAsync(set, default);
@@ -895,6 +776,27 @@ public sealed class RuleSetServiceTests
         p.DescriptionText.Should().Contain("at most 10 hours per day");
         p.InForce.Should().BeFalse();
         p.ValidationErrors.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 116 (EB-D-211): the detail's not-converted list is the HIGHEST-numbered version's memo, not an earlier version's, and not a set column")]
+    public async Task Get_NotConverted_IsTheHighestNumberedVersionsList()
+    {
+        var h = new Harness();
+        var v1 = h.DraftVersion(versionStatus: ProcedureEntity.VersionStatusActive, drafted: true, number: 1,
+            notConvertedList: """[{"text":"v1 clause","reason":"r"}]""");
+        h.DraftVersion(procedure: v1.Procedure, number: 2, drafted: true, notConvertedList: """[{"text":"v2 a","reason":"r"},{"text":"v2 b","reason":"r"}]""");
+        // Another Procedure's version 3 never answers for this set.
+        h.DraftVersion(number: 3, drafted: true, notConvertedList: """[{"text":"other","reason":"r"}]""");
+
+        var outcome = await h.Service().GetAsync(v1.RuleSet, default);
+
+        outcome.Value!.NotConverted!.AsArray().Select(n => n!["text"]!.GetValue<string>()).Should().Equal("v2 a", "v2 b");
+
+        // The highest version not drafted yet: no list, although version 1 has one.
+        var h2 = new Harness();
+        var w1 = h2.DraftVersion(versionStatus: ProcedureEntity.VersionStatusActive, drafted: true, notConvertedList: "[]");
+        h2.DraftVersion(procedure: w1.Procedure, number: 2);
+        (await h2.Service().GetAsync(w1.RuleSet, default)).Value!.NotConverted.Should().BeNull();
     }
 
     [Fact(DisplayName = "089e: RecordHomeOfRuleSetAsync names a record-scoped set's one record (the by-id routes' check), and the set still reads as no set here")]
