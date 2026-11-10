@@ -517,6 +517,69 @@ Adversarial review pass 1, finding R2 (F, security): the participants were deriv
 - **K-R2-4:** the live grant adds one message-row read per Direct-team message (the pair). The ownership read is unchanged.
 - **C-c (Part C open) narrows:** a writer who changes a filed message's thread lookup before an unfile can no longer choose the audience. At most they decide whether the message's own stamped pair is granted (a Direct thread) or nobody is (any other thread).
 
+### §7.5 Part E (D-215): gate Decision Records of Direct messages
+
+Ontology ruling D-215 (commit `33b44037dd`) amends D-169 for Direct 1:1 messages only: the gate Decision Records of a message the Direct-message owner team owns follow the message's participants. The change is in `GateDecisionRecordSharing.cs` plus three call sites.
+
+**Before:** a gate record of a team-owned communication was never shared (D-123), whichever team owned it. A Direct message is owned by the memberless Direct team, so its gate records were readable by nobody but administrators. Filing re-owned only user-owned records. An unfile back to Direct left the record with the filed record's team.
+
+**After:**
+- A communication is a Direct message only when the ONE Direct check (`DirectMessageParticipantShares.IsDirectOwnerTeamAsync`, ids only) says so. Unknown → nothing is granted, revoked or re-owned; a Warning is logged.
+- The audience is the stamped pair (`ParticipantsOf` over the message row) that holds Read on the message NOW (strict POA read), kept to internal users (`InternalUsersAsync`).
+- While unfiled, the record is owned by the Direct team and its audience gets Read: at write, and on every participant grant of the message.
+- Filing re-owns the record as D-169 does, but keeps the RECOMPUTED audience's Read and revokes the rest. A later filing's leftover revoke spares that audience too. A Secure target writes nothing.
+- An unfile back to Direct re-owns the record to the Direct team, then grants the audience and revokes everyone else.
+- Every other owner (a business unit's default team, the Secure team, any other team, a user) is unchanged.
+
+**Conditions → code → tests** (`GateDecisionRecordSharingDirectTests` unless named):
+
+| # | Condition | Code | Tests |
+|---|---|---|---|
+| 1 | Identified by id only; unknown changes nothing, logged | `IsDirectTeamAsync` → `IsDirectOwnerTeamAsync`, at the 4 entry points (`ShareTeamOwnedAtWriteAsync`, `ShareWithCommunicationShareesAsync`, `ReownAfterFilingAsync` for the message and for a team-owned record); `null` → `ShareFailed`/`ReownFailed`, return | `WhenTheDirectTeamCannotBeIdentified_NothingIsWritten_AndItIsLogged` ×5 (at write team-owned, at write user-owned, mirror, unfile, filing) |
+| 2 | Audience = pair ∩ current strict Read readers → internal; a read fault writes nothing; an invalid pair grants/revokes nothing | `DirectAudienceAsync` (pair → `GetPrincipalAccessOrThrowAsync` → Read bit → ∩ → `InternalUsersAsync`); callers catch faults before any write | `UnfiledDirect_BothInternalParticipants…` ×2, `AParticipantWhoDoesNotReadTheMessage_IsNotGranted` ×2, `AnExternalParticipant_IsFilteredOut` ×2, `AnInvalidPair_GrantsNothing_AndRevokesNothing` (mirror, unfile) ×4 |
+| 3 | While unfiled, owned by the Direct team; Direct branch BEFORE the team-owned skip; the owner re-read accepts exactly the Direct team | `ShareWithCommunicationShareesAsync` (branch before the skip) → `ShareDirectAsync`; `GrantAndConfirmAsync(acceptedTeam:)`; at write `ShareTeamOwnedAtWriteAsync` (called by `DecisionRecordWriter.CreateAsync` for a team-owned, non-Secure gate record) | the two above, `AtWrite_ARecordTheWriterGaveAnotherTeam_IsReownedToTheDirectTeam…`, `Mirror_ARecordReownedToAnOrdinaryTeam…HasTheGrantsRevoked`; `DecisionRecordWriterTests.Gate_ADirectMessagesRecord_IsReownedToTheDirectTeam…_D215`; `DirectThreadAccessServiceTests.DirectTeamMessage_TheGrantIsMirroredToTheMessagesGateDecisionRecords_D215` |
+| 4 | Filing: re-own as today, keep the recomputed participants' Read; leftover revoke spares it; a Secure target unchanged (the ONE Secure check, unknown → nothing) | `ReownAsync(keepAudience: true)` (`SecureOfAsync` → `IsSecureOwnerTeamAsync` before the assign; `kept` recomputed after the read-back); `RevokeLeftoverSharesAsync(communication)` | `Filing_ADirectRecord_IsReowned_KeepsTheRecomputedParticipantsRead…InOrder`, `Filing_TheKeptAudienceIsRecomputed…`, `Filing_ALaterFilingsLeftoverRevoke_SparesTheParticipants…`, `Filing_IntoASecureRecord_TheResolversSecureAnswer_WritesNothing`, `Filing_IntoASecureRecord_TheOneSecureCheck_WritesNothing_AndKeepsNoOne` |
+| 5 | Unfile to Direct: (a) assign via the writer identity, (b) evict once, (c) read back, (d) only then recompute, grant, revoke the rest; a failed read-back keeps owner and shares + Warning | `ReownToDirectAsync`, reached from `ReownAfterFilingAsync` (hook: `SecureChildReconciler.AfterRefileCoreAsync`, now run LAST, after the Restricted bar and the Direct participant step) | `Unfile_ReownsToTheDirectTeam_EvictsOnce_ReadsBack_ThenGrants_ThenRevokes_InThatOrder`, `Unfile_AReadBackThatDoesNotNameTheDirectTeam…` ×2, `Unfile_ASecureTeamOwnedRecord_IsLeftToTheSecureReconciler`; `SecureChildReconcilerGateDecisionRecordTests.AfterRefile_OfACommunication_RunsTheGateStepLast…_D215` |
+| 6 | Revoke-side mirror: none by design | class remarks, "Revoke side" item; `DirectThreadAccessService` comment | — |
+| 7 | Class remarks cite D-215 for every new branch | `GateDecisionRecordSharing` remarks (`<para>` + list) and each member's summary | — |
+| — | Must-not-fire: other owners byte-for-byte | Direct branches gated on the one Direct check; `DirectBranchAvailable` | `AnotherOwner_WritesExactlyWhatD169Writes_WithOrWithoutTheDirectBranch` ×6 (default team, Secure team, user; unfiled and filed), `AtWrite_ATeamOwnedRecordOfAnotherTeamsMessage_WritesNothing` ×2, `DecisionRecordWriterTests.Gate_ARecordOfAnotherTeamsMessage_GetsNoShare_D169_D123`; every D-169 test in `GateDecisionRecordSharingTests` now runs with the Direct branch available (`GateSharingWorld` default) |
+
+**Retry (condition 5):** no job re-runs the gate-record step. A failed unfile read-back is retried by the message's next re-file (`ReownAfterFilingAsync`) or its next participant grant (`MirrorCommunicationSharesAsync`, from `DirectThreadAccessService.GrantMessageAccessAsync`).
+
+**Host wiring:** the two new constructor parameters (`DirectMessageOwnerTeam?`, `IConfiguration?`) are optional and already registered. `GateDecisionRecordSharingRegistrationTests.TheRealContainer_GivesTheHelperTheDirectLookupAndTheSettings_SoTheD215BranchesRun` pins that the host injects both. ArchTest census: a new `AssignCaller("GateDecisionRecordSharing.cs", "ReownToDirectAsync", 1)` and the `UnscannedWriter` text are updated.
+
+**Commits:** tests `d5466214e0` (fail-first), implementation `c52f14ce1d`.
+
+**Fail-first** (tests commit `d5466214e0`, with a surface stub only: the two parameters and a no-op `ShareTeamOwnedAtWriteAsync`):
+- Gate filter (`GateDecisionRecordSharing|SecureChildReconcilerGateDecisionRecord|DirectTeamMessage_TheGrantIsMirrored|DecisionRecordWriterTests`): 21 failed, 354 passed (375).
+- The must-not-fire tests and the Secure and unknown pins pass both ways, as intended.
+- Copy-back check of the stub for the two tests added after that commit: the registration test failed 1/3, and the ArchTest census failed 1/44.
+
+**Counts** (40 new tests: 35 in `GateDecisionRecordSharingDirectTests`, 2 writer, 1 Direct grant, 1 reconciler order, 1 registration):
+
+| Run | Before | After |
+|---|---|---|
+| Brief filter (§7.3) | 2936 | 2938/2938 (+2 call-site tests) |
+| The same plus `MembershipReconcile` | 2950 | 2952/2952 |
+| `GateDecisionRecord` + `Services.Signals` + `DecisionRecordWriter` | — | 676/676 |
+| `tests/Spaarke.ArchTests` (full) | 2119 | 2119/2119 (census entry added in an existing test) |
+| BFF build | 0 warnings | 0 warnings, 0 errors |
+
+**Known limits (K):**
+- **K-E-1 (cost):** a team-owned gate record's write reads the communication once more (plus the team row). A re-file of a communication with gate records reads it once more. When one of those records is team-owned, the team row and the Direct lookup (cached) are read too.
+- **K-E-2 (retry):** no scheduled retry for the gate-record step (above). A Direct record whose unfile read-back failed stays with the filed record's team and its shares until the next re-file or grant.
+- **K-E-3 (other-team leftovers):** with the Direct branch on, the leftover revoke spares the pair audience for ANY communication with a valid stamped pair, including a user-owned Direct message from before fm 054a. That only narrows what is revoked, to the two participants who read the message now.
+- **K-E-4 (job):** the Direct share job (`DirectMessageParticipantShares` job pass) does not mirror gate records. A message moved to Direct by fm piece 3 / 054c without a re-file or grant keeps its gate records as they were until one of those happens.
+- **K-E-5 (race at write):** a filing that lands between the writer's owner decision and the create of a Direct-team-owned record is not re-checked at write (D-169's at-write re-own covers user-owned records only). The next re-file's filing pass handles it.
+- **K-E-6 (other-team record of a Direct message):** a gate record owned by any non-Secure team other than the Direct team (before piece 3 the resolver answers the Direct unit's default team) is re-owned to the Direct team when its message is Direct-team-owned.
+- **K-E-7 (invalid pair on filing):** filing a Direct record whose pair is invalid keeps nobody and revokes every share (D-169 behaviour, fail closed). Condition 2's "an invalid pair grants and revokes nothing" is applied to the unfiled and unfile paths. **Needs ontology's confirmation.**
+- **K-E-8 (composition):** without the lookup or the configuration, no Direct branch runs (D-169 as before). The host injects both (pinned).
+
+**Needs a ruling (ontology review):**
+- The writer call site (`DecisionRecordWriter.CreateAsync` → `ShareTeamOwnedAtWriteAsync`) is new surface outside `GateDecisionRecordSharing.cs`. It is needed because a Direct message's gate record is team-owned at write, and so never reached `ShareAtWriteAsync`.
+- The reconciler order: the gate step moved from the start to the end of the communication block in `AfterRefileCoreAsync`. D-169's own re-own runs later than before, after the Restricted bar and the Direct participant step.
+- K-E-7.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
