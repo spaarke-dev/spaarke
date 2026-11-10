@@ -573,15 +573,15 @@ internal sealed class DirectMessageParticipantShares
     }
 
     /// <summary>
-    /// 198 pass 2 F1: grants Read on one content row of a Direct message to <paramref name="users"/> (the ones that do not hold it;
-    /// the caller read the row's shares), then reads the row's owner back by id. When it is no longer exactly
+    /// 198 pass 2 F1: grants Read on one content row of a Direct message to the <paramref name="participants"/> that hold no share on
+    /// it (<paramref name="existingShares"/>, read by the caller), then reads the row's owner back by id. When it is no longer exactly
     /// <paramref name="directTeam"/> (a filing into a Secure or Restricted record re-owned it between the listing and the grant), or
     /// cannot be read, every grant ATTEMPTED here is revoked (a share held before the call is never touched) and the answer is
     /// incomplete, so the caller retries the message. Grant-then-confirm, not check-then-grant: a re-own that lands after the
     /// read-back lands after the grant too, so the re-owning path (the Secure synchronizer, the Restricted bar) sees the grant.
     /// <para>198 fix round K1: a grant that throws may still have committed (a timeout after the server applied it), so every
-    /// ATTEMPTED user counts: the read-back runs whenever one was attempted, and its undo covers them all (each was verified by the
-    /// caller to hold no Read before the grant, so revoking it removes only what this call may have added). The undo runs in a
+    /// ATTEMPTED user counts: the read-back runs whenever one was attempted, and its undo covers them all (each held no share at all
+    /// before the grant, K2, so revoking it removes only what this call may have added). The undo runs in a
     /// <c>finally</c> on its own short token (<see cref="UndoTimeout"/>), so a cancellation after a grant does not skip it; the
     /// caller's cancellation still propagates after it.</para>
     /// <para>198 fix round K2: only a participant holding NO share on the row is granted, so the undo never removes a share held
