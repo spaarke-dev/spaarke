@@ -1025,6 +1025,26 @@ public class ExternalMessageEndpointsTests
         messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
     }
 
+    [Fact]
+    public async Task ExternalContactOnTheMatter_NeverSeesTheBudgetInquiryEmailOrItsReply_InTheMattersThread()
+    {
+        // Ontology task 176 (D-216; must-not-fire): the inquiry email and a reply to it are now filed under the MATTER too, so
+        // they sit in the matter's thread — written internal-only (BudgetInquiryEmailFilingTests pins both flags on the real
+        // rows). A partner holding the matter sees neither (an internal user sees internal-only rows:
+        // SystemUserCaller_ReceivesInternalOnlyMessages).
+        var matter = Guid.NewGuid();
+        var visible = Guid.NewGuid();
+        var inquiry = Guid.NewGuid();
+        var reply = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(visible, "sprk_regardingmatter", matter, internalOnly: false, "2026-11-01T09:00:00Z"),
+            MessageRow(inquiry, "sprk_regardingmatter", matter, internalOnly: true, "2026-11-02T09:00:00Z", "Budget inquiry: Q3", Outgoing),
+            MessageRow(reply, "sprk_regardingmatter", matter, internalOnly: true, "2026-11-03T09:00:00Z", "Re: Budget inquiry: Q3"));
+
+        Messages(await Get("matters", matter, Ciam(matter: matter)))
+            .Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
+    }
+
     // ── isMine: the caller-relative author flag (task 034, review fix) ─────────────────────────────
 
     /// <summary>A message row authored by the given contact (a task-034 external post) or sent by the given systemuser.</summary>

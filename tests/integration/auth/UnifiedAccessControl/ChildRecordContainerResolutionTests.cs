@@ -2314,6 +2314,117 @@ public partial class ChildRecordContainerResolutionTests
             "retrying cannot place it; as 'transient' it is a retry loop that loses the message capture");
     }
 
+    // ============================================================================================
+    // Task 176 (D-216) — an email filed under a service request AND that request's own matter: the matched-root release
+    // ============================================================================================
+
+    /// <summary>A communication the budget inquiry sends: regarding the service request AND the matter, pair = the request.</summary>
+    private static World InquiryEmailWorld(Guid? matterOnTheEmail = null) => new World()
+        .WithCommunication(
+            regardingMatter: matterOnTheEmail,
+            intermediate: ("sprk_regardingservicerequest", ServiceRequestId),
+            pairId: ServiceRequestId.ToString())
+        .WithBusinessUnit(BusinessUnitContainer);
+
+    private static Entity ServiceRequestRow(Guid? regardingMatter)
+    {
+        var row = new Entity("sprk_servicerequest", ServiceRequestId);
+        if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
+        return row;
+    }
+
+    [Theory(DisplayName = "Task 176 (must-fire): an email filed under a service request AND that request's OWN matter resolves the MATTER's container — ordinary and secure")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Communication_UnderAServiceRequest_AndThatRequestsOwnMatter_ResolvesTheMattersContainer(bool secure)
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: secure, secure ? RootContainer : null);
+
+        var container = await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        container.Should().Be(secure ? RootContainer : ArchiveContainer,
+            "the released service request adds no container of its own; the matter's resolution decides");
+        world.ColumnsRead("sprk_servicerequest").Should().Contain("sprk_regardingmatter");
+    }
+
+    [Fact(DisplayName = "Task 176 regression: secure matter + service request — the SECURE container when the request's matter matches, container_ancestor_unverifiable when it does not")]
+    public async Task Communication_UnderASecureMatter_AndAServiceRequest_IsSecureWhenMatched_UnverifiableOtherwise()
+    {
+        var matched = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await matched.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
+
+        var mismatched = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: OtherMatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null);
+
+        var act = async () => await mismatched.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+    }
+
+    public static TheoryData<string> UnmatchedServiceRequestReads => new()
+    {
+        "mismatch", "explicit-null", "column-absent", "absent-in-row", "fault", "not-found", "null-row",
+    };
+
+    [Theory(DisplayName = "Task 176 (must-not-fire): the service request's matter not READ as the email's own matter keeps the request HELD — container_ancestor_unverifiable")]
+    [MemberData(nameof(UnmatchedServiceRequestReads))]
+    public async Task Communication_UnderAServiceRequest_WhoseMatterIsNotProvenTheSame_IsStillHeld(string read)
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null);
+
+        world = read switch
+        {
+            "mismatch" => world.WithRawRow(ServiceRequestRow(regardingMatter: OtherMatterId)),
+            // A value the read returned as NULL (the key present, no record).
+            "explicit-null" => world.WithRawRow(new Entity("sprk_servicerequest", ServiceRequestId)
+            {
+                ["sprk_regardingmatter"] = null
+            }),
+            // The column is not in this environment: Dataverse faults the read (AttributeDoesNotExist).
+            "column-absent" => world.WithRootFault("sprk_servicerequest", ServiceRequestId,
+                new FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103) },
+                    new FaultReason("'sprk_servicerequest' entity doesn't contain attribute"))),
+            // The SDK omits a null column: the row came back without the key.
+            "absent-in-row" => world.WithRawRow(ServiceRequestRow(regardingMatter: null)),
+            "fault" => world.WithRootFault("sprk_servicerequest", ServiceRequestId,
+                new TimeoutException("Dataverse did not answer")),
+            "not-found" => world.WithRootFault("sprk_servicerequest", ServiceRequestId, NotFound()),
+            "null-row" => world.WithNullRoot("sprk_servicerequest", ServiceRequestId),
+            _ => throw new ArgumentOutOfRangeException(nameof(read)),
+        };
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, $"read '{read}' never proves the same matter");
+    }
+
+    [Fact(DisplayName = "Task 176 (must-not-fire): an email under a service request with NO matter on the email is held exactly as before — the request is never read")]
+    public async Task Communication_UnderAServiceRequest_WithNoMatterOnTheEmail_IsHeld_WithoutReadingTheRequest()
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: null)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        world.Reads("sprk_servicerequest").Should().Be(0);
+    }
+
     [Fact(DisplayName = "Task 155 f4: an email regarding a NON-secure work assignment under a SECURE matter routes to the MATTER's container (transitive)")]
     public async Task Communication_UnderANonSecureWorkAssignment_UnderASecureMatter_RoutesToTheMattersContainer()
     {
@@ -2866,6 +2977,13 @@ public partial class ChildRecordContainerResolutionTests
         public World WithNullRoot(string entity, Guid id)
         {
             _rows[(entity, id)] = () => null!;
+            return this;
+        }
+
+        /// <summary>Task 176: exactly <paramref name="row"/>, served for its own entity and id (null values kept as written).</summary>
+        public World WithRawRow(Entity row)
+        {
+            _rows[(row.LogicalName, row.Id)] = () => row;
             return this;
         }
 
