@@ -53,7 +53,7 @@ internal static class FirmRejectionFindings
     internal sealed record ValueRead(string Name, string Value);
 
     /// <summary>One finding that rejected the submission. <paramref name="LineIndex"/> is zero-based; null for an invoice-level finding.</summary>
-    internal sealed record Finding(RuleType RuleType, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
+    internal sealed record Finding(RuleType RuleType, string ReasonCode, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
 
     /// <summary>
     /// The result of a parse: the findings to show and how many rejecting findings could not be shown (<paramref name="NotShown"/>; zero when
@@ -337,7 +337,8 @@ internal static class FirmRejectionFindings
             }
         }
 
-        finding = new Finding(ruleType, versionId, lineIndex, values);
+        // reasonCode is non-blank and on the type's reject-capable allow-list here (checked above), so it is one of the catalogue's own codes.
+        finding = new Finding(ruleType, reasonCode!, versionId, lineIndex, values);
         return EntryResult.Accepted;
     }
 
@@ -345,7 +346,7 @@ internal static class FirmRejectionFindings
     /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "..."; a cut that would fall between the two
     /// halves of a surrogate pair (one character) steps back so the text stays valid.
     /// </summary>
-    private static string Truncate(string text)
+    internal static string Truncate(string text)
     {
         if (text.Length <= MaxValueTextLength)
         {
