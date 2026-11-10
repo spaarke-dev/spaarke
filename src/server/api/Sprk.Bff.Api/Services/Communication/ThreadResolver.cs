@@ -1906,15 +1906,19 @@ public sealed class ThreadResolver : IThreadResolver
     private Task AssignThreadAsync(Guid communicationId, Guid threadId, CancellationToken ct) =>
         AssignThreadAsync(communicationId, threadId, Access.DirectMessageRecipient.None, ct);
 
-    /// <summary>Writes the message's thread lookup together with <paramref name="alongside"/> in one update (task 054).</summary>
+    /// <summary>
+    /// Writes the message's thread lookup together with <paramref name="alongside"/> in one update (task 054), through the
+    /// one filing write (<see cref="Access.DirectMessageRecipient.WriteThreadFilingAsync"/>).
+    /// </summary>
     private Task AssignThreadAsync(
         Guid communicationId, Guid threadId, IReadOnlyDictionary<string, object> alongside, CancellationToken ct) =>
-        _entityService.UpdateAsync("sprk_communication", communicationId, ThreadFilingFields(threadId, alongside), ct);
+        Access.DirectMessageRecipient.WriteThreadFilingAsync(_entityService, _logger, communicationId, threadId, alongside, ct);
 
     /// <summary>
     /// The one update that files a message into <paramref name="threadId"/>: the thread lookup, plus
-    /// <paramref name="alongside"/> (a Direct message's two participants, task 054; empty otherwise). Shared with
-    /// <see cref="CommunicationService"/>'s respond-into-thread so both writers put the same columns in the same write.
+    /// <paramref name="alongside"/> (a Direct message's two participants, task 054; empty otherwise). Written only by
+    /// <see cref="Access.DirectMessageRecipient.WriteThreadFilingAsync"/>, which this resolver and
+    /// <see cref="CommunicationService"/>'s respond-into-thread both use, so both writers put the same columns in the same write.
     /// </summary>
     internal static Dictionary<string, object> ThreadFilingFields(Guid threadId, IReadOnlyDictionary<string, object> alongside)
     {

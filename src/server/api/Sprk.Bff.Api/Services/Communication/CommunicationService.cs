@@ -1582,11 +1582,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 _recordShares,
                 communicationId,
                 threadId,
-                (alongside, token) => _genericEntityService.UpdateAsync(
-                    "sprk_communication",
-                    communicationId,
-                    ThreadResolver.ThreadFilingFields(threadId, alongside),
-                    token),
+                (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
+                    _genericEntityService, _logger, communicationId, threadId, alongside, token),
                 ct);
 
             _logger.LogInformation(

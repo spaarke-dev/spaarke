@@ -42,7 +42,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// the test seeds plus every share granted on it during the run. The default thread has the shape
 /// <c>POST /threads/direct</c> creates: owned by one party, shared with Read to the other.</para>
 /// </remarks>
-public class DirectMessageRecipientStampTests
+public partial class DirectMessageRecipientStampTests
 {
     private const string RecipientColumn = "sprk_directrecipient";
     private const string SenderColumn = "sprk_sentby";
@@ -74,8 +74,20 @@ public class DirectMessageRecipientStampTests
     private readonly Mock<IDirectThreadAccessService> _directAccess = new();
     private readonly Mock<IDataverseRecordShareService> _shares = new();
     private readonly RecordingLogger<ThreadResolver> _resolverLog = new();
+    private readonly RecordingLogger<CommunicationService> _serviceLog = new();
     private readonly List<Entity> _created = new();
+
+    /// <summary>Every update the message received that landed.</summary>
     private readonly List<Dictionary<string, object>> _messageUpdates = new();
+
+    /// <summary>Every update sent for the message, landed or faulted, in order.</summary>
+    private readonly List<Dictionary<string, object>> _messageUpdateAttempts = new();
+
+    /// <summary>The fault an update of the message answers with, by its columns; <c>null</c> lands it.</summary>
+    private Func<Dictionary<string, object>, Exception?> _messageUpdateFault = static _ => null;
+
+    /// <summary>When set, a thread the run creates is stored owned by the sender and shared with Read to the other party.</summary>
+    private bool _createdThreadHoldsThePair;
     private readonly HashSet<Guid> _disabled = new();
     private Entity _messageRow = MessageRow(sentBy: Sender);
 
@@ -106,8 +118,14 @@ public class DirectMessageRecipientStampTests
 
         _entities
             .Setup(e => e.UpdateAsync("sprk_communication", MessageId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) => _messageUpdates.Add(fields))
-            .Returns(Task.CompletedTask);
+            .Returns<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) =>
+            {
+                _messageUpdateAttempts.Add(fields);
+                if (_messageUpdateFault(fields) is { } fault)
+                    return Task.FromException(fault);
+                _messageUpdates.Add(fields);
+                return Task.CompletedTask;
+            });
 
         // systemuser reads: the chat-identity map (sprk_communicationuserid) and the enabled check (isdisabled).
         _entities
@@ -450,7 +468,7 @@ public class DirectMessageRecipientStampTests
             Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            NullLogger<CommunicationService>.Instance,
+            _serviceLog,
             resolver is null ? null : Resolver(resolver),
             scopeFactory: null,
             directThreadAccess: _directAccess.Object,
@@ -525,9 +543,9 @@ public class DirectMessageRecipientStampTests
         foreach (var attribute in created.Attributes)
             stored[attribute.Key] = attribute.Value;
         if (!stored.Contains("ownerid"))
-            stored["ownerid"] = new EntityReference("systemuser", AppUser);
+            stored["ownerid"] = new EntityReference("systemuser", _createdThreadHoldsThePair ? Sender : AppUser);
         _threadRow = stored;
-        _threadShares = new();
+        _threadShares = _createdThreadHoldsThePair ? new() { UserShare(Other, ReadMask) } : new();
     }
 
     private static DataversePrincipalAccess UserShare(Guid systemUserId, int mask) =>
