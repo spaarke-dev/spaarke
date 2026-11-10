@@ -126,14 +126,16 @@ Four known-open sites (admin, revoke and impersonated paths) plus the `sprk_acce
 
 DEF-063 #2642 (Import-SolutionScoped exits 1 when there is nothing to publish), DEF-064 #2643 (guard: every BFF writer of invoice core lookups calls InvoiceFamilyCoreRecordGuard), DEF-065 #2644 (BillingFactLoader half only; waits for 198's `IsSecureOwnerTeamAsync` on master, no local copy).
 
-## Open owner questions
+## Owner answers 2026-11-09 (typed in THIS session)
 
-1. Typed go for task **166** dev apply (field security incl. invoice totals + forms).
-2. OK to run `FinanceBaseValuesSeamTests` live (creates/sweeps `zz-025b-` rows on dev).
-3. DEF-061: schema change `sprk_publishedon` on `sprk_procedureversion`.
-4. 130c: show the rule set name when the firm flag is off (D-79 wording) or keep it hidden (current; the reviewer recommends keeping it hidden and amending FR-28/D-79 to match).
-4b. 130c: with the flag off and no `sprk_firmreason` writer (DEF-060), a rejection finding explains nothing. Should there be a closed, firm-safe text table keyed by the 7 reject-capable reason codes, shown regardless of the flag? (Reviewer suggestion.)
-5. provisioning-r1 needs the owner's go to open its DEF-059 H10 task.
+1. **166 go:** applied on dev, `-Verify` passed (notes 166 section 7). Follow-up filed as DEF-066 #2651 (a new business unit's default team doesn't get the Readers profile).
+2. **`FinanceBaseValuesSeamTests` live: OK.** SpendQueries passes. RowReads fails before writing anything because dev lacks `sprk_invoicesubmission.sprk_trackingscope` (095c-1 schema). Rerun after 095c-1's dev apply. AuthorableColumns live guard passes (tell ontology-r1).
+3. **DEF-061 go:** agent running on `task/ebilling-def061`. It does the column, writer, resolver and backfill, `-WhatIf` only; I run the live apply. Then ontology-r1 reviews the resolver.
+4. Answered in uac-r2's session (relayed): EB-D-209 (rule set name hidden when the flag is off) and EB-D-210 (firm-safe reason text table, option C) → **130d** running on `task/ebilling-130d`. The DEF-060 writer is in scope: design first, to uac-r2 and ontology-r1.
+5. **provisioning H10: go.** b8 forwarded it to `provisioning-r1`, which is NOT reachable by that name from here. The 166 grants message is unsent: resend when it appears.
+6a. **120 role change:** already done live on 2026-10-23 (task 120 ✅). Nothing to do.
+6b. **116 `sprk_sourcedocument` delete:** yes, if it's unused. Task 116 retires the readers and writers on `sprk_ruleset`/`sprk_ratecard` (the `sprk_storedfile` column stays). The delete script is read-only by default, and the delete runs after 079. Confirm zero code use and zero live data (non-null counts) before deleting.
+- Owner also asked: **move the uac-r2 review cycle as fast as possible.** Use split diffs: diff 1 `ed11b30f95..c5c30a9fc4` was APPROVED by uac-r2 with no F (nit checked: a malformed body in `ParseRows` → caught at :795 → the chunk is denied). Diff 2 = 3g, diff 3 = F3b.
 
 ## Owed to peers
 

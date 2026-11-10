@@ -141,6 +141,8 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-77: any user with Write on the invoice decides lines.
 - 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
+  **Amended 2026-11-09 by EB-D-209 (owner):** with the flag off the firm sees the reason only: no clause text, no section reference, **no rule set name**.
+- 2026-11-09 — EB-D-210 (owner, option C): every rejection a firm sees carries its reason code plus a description from a closed firm-safe text table in code (every `RejectCapableReasons` code, guard-enforced, no interpolated data, generic fallback), shown whatever the flag; a non-blank `sprk_signal.sprk_firmreason` replaces it. The DEF-060 writer is in R1 scope (design reviewed by uac-r2 and ontology-r1 before build). Task 130d.
 - 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
 - 2026-10-15 — D-81: extraction GO on Content Understanding with a preview exception (path A): preview analyzer primary, GA fallback analyzer kept in step and selectable by config, REST client for both versions (no beta SDK), 161 / 162 measure both.
 - 2026-10-17 — D-96: an invoice core-lookup change is refused if its lines name another core; the line check runs as the app identity.

@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-066 — Readers field-security profile is not guaranteed on business units created after provisioning
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-09 |
+| **Source** | unified-access-control-r2 review of the task 166 dev apply |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2651 |
+
+**Description**: EB-D-200 (task 166) field-secures seven `sprk_invoice` columns. Users read them through the "Spaarke BFF-Managed Field Readers" profile on each business unit's default team. That is checked only when the 166 script ((p8), `-Verify`) or the provisioning stamp check runs. A business unit created later (a Customer business unit, #2270/#2278, or one an administrator adds) gets a default team without the profile, so its users see blank totals and a blank firm.
+
+**Fix direction**: a read-only check that every business unit's default team holds the Readers profile, runnable nightly or by an administrator, plus a step in the business-unit create path that assigns it. Coordinate with customer-provisioning-orchestration-r1 and unified-access-control-r2.
+
+**Entry-points**: `scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1` ((p8), `-Verify`); `src/dataverse/solutions/SpaarkeMaster/Other/FieldSecurityProfiles.xml`; `projects/ebilling-r1/notes/166-invoice-field-security.md`.
+
+**Estimated effort**: 0.5–1 day. **Related**: #2270, #2278, EB-D-200, task 166.
+
+---
+
 ### DEF-065 — Billing fact loader: an unknown secure-root answer must fail closed
 
 | Field | Value |

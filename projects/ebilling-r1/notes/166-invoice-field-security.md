@@ -1,6 +1,6 @@
 # Task 166 - field-secure the invoice money and firm columns (EB-D-200 part 1)
 
-Branch `task/ebilling-166` (from `work/ebilling-r1` at `1df8f38a8c`). Status: source, script and tests done; **no live apply** (needs the owner's go in the ebilling session, and a notice to uac-r2 before and after).
+Branch `task/ebilling-166` (from `work/ebilling-r1` at `1df8f38a8c`). Status: **applied on dev 2026-11-09** (owner's go typed in the ebilling session; uac-r2 notified before and after). See section 7.
 
 ## 1. Scope
 
@@ -72,3 +72,15 @@ The read-only `-WhatIf` against dev (the dev application ids as in the script's 
 - `InvoiceLineAddService` (task 164a, Add line): a WRITER of a line's `sprk_vendororg` only (it copies the invoice's confirmed firm onto the added line, like `InvoiceAdjustmentService`), through `IGenericEntityService` (app-only). It reads the invoice's billed total and firm; it writes no invoice money column (the totals go through `InvoiceTotalsService`, and its version-only invoice update sets no column).
 - `InvoiceFindingsDiff` (164a-4a): a READER of the invoice's `sprk_vendororg` (the rule facts' firm).
 
+
+## 7. Live apply on dev (2026-11-09)
+
+- **Owner's go:** typed in the ebilling session on 2026-11-09. uac-r2 was notified before and after.
+- **Plain run:** `Set-EbillingInvoiceMoneyFieldSecurity.ps1 -BffApplicationIds <dev ids>` exited 0. It secured the seven columns one at a time and granted the writer and reader profiles at once (a masked window of a few seconds per column, 172 s for the whole run), then published `sprk_invoice`.
+- **`-Verify`:** exited 0. Each of the seven columns is secured. The writer profile holds read/create/update and the reader profile holds read. No other profile grants access, apart from the System Administrator profile.
+- **Forms:** `Deploy-EbillingFormsViews.ps1 -FormsOnly` exited 0. The invoice main form's totals are now read-only (F3 closed). The script has no per-table filter, so the same run also rebuilt the invoice submission main form (165c pass 1, `13a10bcbfc`: link columns read-only) and the billing export main form (`61ac61d5bc`: New and Delete hidden, legacy fields dropped) from the work-branch source. **Neither change is on master yet.** Until the work branch merges, a forms deploy from master would revert those two forms on dev.
+- **Read check (requested by uac-r2): pass.** One known invoice was read with a single-record Web API read, impersonating each identity that reads these columns server-side, plus an ordinary non-admin user. All seven values came back non-null and unchanged, before and after the apply. Caveat (section 5): on dev, these server identities also have platform-level full field access, so dev cannot prove the profile path on its own. The proof is a customer stamp.
+- **F2 (`_base` companions), resolved as a non-issue under EB-D-200's read model.** EB-D-200 restricts writes, not reads: every user reads the totals through the Readers profile on their business unit's default team, so the system-calculated base value exposes nothing further. This holds under two preconditions:
+  - **(1)** If a later decision restricts *read* of these totals to some users, the base columns become an exposure. That decision must then keep them off forms, views and quick find, enforce this with a guard, and pin the BFF never to project them.
+  - **(2)** Every business unit's default team holds the Readers profile, including business units created after provisioning. This is not yet checked: **DEF-066 (#2651)**.
+- **Live guards:** `SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema` passes on dev with the shared exception list (F1 follow-up closed). `FinanceBaseValuesSeamTests.SpendQueries_AreAcceptedByDataverse_ReadOnly` passes. `RowReads_OnRealRows_...` fails before writing anything, because dev does not yet carry `sprk_invoicesubmission.sprk_trackingscope` (task 095c-1's schema, not yet applied on dev). No `zz-025b-` rows were left behind. Rerun it after 095c-1's dev apply.
