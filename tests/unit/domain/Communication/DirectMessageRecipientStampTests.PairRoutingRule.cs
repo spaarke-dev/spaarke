@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -40,7 +41,7 @@ public partial class DirectMessageRecipientStampTests
     public async Task Shape_OfAStrictPairThread_IsAPair_NamingTheOwnerAndTheOther()
     {
         _threadRow = ThreadRow(ThreadTypeDirect, owner: Sender);
-        _threadShares = new() { UserShare(Other, ReadMask), UserShare(Third, 0) };
+        _threadShares = new() { UserShare(Other, ReadMask | AppendMask) };
 
         var shape = await Shape();
 
@@ -48,6 +49,34 @@ public partial class DirectMessageRecipientStampTests
         shape.OwnerId.Should().Be(Sender);
         shape.OtherId.Should().Be(Other);
         shape.Reason.Should().BeNull();
+    }
+
+    private const int AppendMask = 4;
+
+    public static TheoryData<string> ExtraPrincipalCases =>
+        new() { "user-zero-mask", "user-append-only", "user-read-and-team", "team-zero-mask", "owner-own-share" };
+
+    /// <summary>
+    /// Fix round 2 (F2-1): beside the other participant's Read share, ANY other share row refuses — a systemuser at mask 0 or
+    /// Append only, a team at any mask, a row naming the owner itself.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ExtraPrincipalCases))]
+    public async Task Shape_OfAThreadWithAnyOtherShareBesideTheOthersRead_IsExtraPrincipal(string extra)
+    {
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: Sender);
+        _threadShares = new() { UserShare(Other, ReadMask) };
+        _threadShares.Add(extra switch
+        {
+            "user-zero-mask" => UserShare(Third, 0),
+            "user-append-only" => UserShare(Third, AppendMask),
+            "user-read-and-team" => new DataversePrincipalAccess(DataversePrincipalRef.Team(ATeam), ReadMask, DateTimeOffset.UtcNow),
+            "team-zero-mask" => new DataversePrincipalAccess(DataversePrincipalRef.Team(ATeam), 0, DateTimeOffset.UtcNow),
+            _ => UserShare(Sender, ReadMask),
+        });
+
+        (await Shape()).Should().Match<DirectPairShape>(s =>
+            !s.IsStrictPair && s.Reason == DirectPairShapeReason.ExtraPrincipal && s.OwnerId == null && s.OtherId == null);
     }
 
     [Fact]
@@ -155,12 +184,14 @@ public partial class DirectMessageRecipientStampTests
     }
 
     [Fact]
-    public void ShapeReasonCodes_AreTheFiveNamedCodes()
+    public void ShapeReasonCodes_AreTheSixNamedCodes()
     {
         new[]
         {
             DirectPairShapeReason.NotDirect, DirectPairShapeReason.TypedRegarding, DirectPairShapeReason.NotOpen,
-            DirectPairShapeReason.NotTwoReadParticipants, DirectPairShapeReason.ParticipantReadFault,
-        }.Should().Equal("not_direct", "typed_regarding", "not_open", "not_two_read_participants", "participant_read_fault");
+            DirectPairShapeReason.NotTwoReadParticipants, DirectPairShapeReason.ExtraPrincipal, DirectPairShapeReason.ParticipantReadFault,
+        }.Should().Equal(
+            "not_direct", "typed_regarding", "not_open", "not_two_read_participants", "extra_principal", "participant_read_fault");
+        DirectPairFilingRefusedException.NotThePair.Should().Be("not_the_pair");
     }
 }

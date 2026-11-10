@@ -453,4 +453,76 @@ No new package, plugin, DI registration, endpoint or Dataverse column.
 - **CVE:** no package added; `dotnet list … --vulnerable --include-transitive` reports none.
 - `git diff a9794dbaad -- src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs` is empty.
 
+## 054a piece 2b — fix round 2 (security review)
+
+Same branch, from 82da70c50d. Findings F2-1, F2-2 and F2-5. `DirectThreadAccessService.cs` is still unedited.
+
+### F2-1 — a strict pair has exactly one share
+
+- **What the rule sees.** `ReadStrictPairShapeAsync` reads the thread's shares with the strict read (`IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync`). That read is every `principalobjectaccess` row of the thread whose principal is a systemuser or a team, at any `accessrightsmask`. Zero-mask rows are included (a zero mask is how an inherited-access row reads). Rows naming another principal kind are skipped by the seam itself, so the rule never sees them. A row whose principal, mask or `changedon` cannot be read, or a response that continues on another page, throws, and the rule answers `participant_read_fault`.
+- **The rule** (`DirectMessageRecipient.StrictOtherOf`):
+  - the thread is owned by a systemuser;
+  - exactly one systemuser other than the owner holds a share that grants Read — else `not_two_read_participants`;
+  - that share is the thread's only share row — else **`extra_principal`** (new code). Any other row refuses, whatever its mask (zero, Append only, Read) and whatever its principal (another systemuser, a team, the owner itself).
+- The grant (`GrantMessageAccessAsync`) reads the same share rows. On a thread with the user owner and exactly one share row, its audience is the pair.
+- `ReadStrictPairShapeAsync` keeps its signature. Its reason codes are now `not_direct`, `typed_regarding`, `not_open`, `not_two_read_participants`, `extra_principal` and `participant_read_fault`.
+
+### F2-2 — the routed filing is decided before any write
+
+- The routing passes the pair it decided as `ExpectedDirectPair(Sender, Recipient)`. This replaces round 1's `Guid? expectedRecipient` on `AssignExplicitThreadAsync`, `ThreadResolver.JoinThreadAsync`, `DirectFilingColumnsAsync` and `ColumnsForDirectFilingAsync`.
+- With a pair, `JoinCoreAsync` adds `sprk_privacystate` to its one read of the thread. Before any write, it requires all of:
+  - the row exists, is typed Direct, and has a Direct audience (else `not_direct`);
+  - it carries no typed regarding lookup (else `typed_regarding`);
+  - its privacy is confirmed Open (else `not_open`);
+  - its filing columns are exactly the routed pair (else `not_the_pair`). The recipient must be the routed recipient, any sender column must be the routed sender, and no other column may appear. With a pair, `ColumnsForDirectFilingAsync` checks the row's own `sprk_sentby` against the routed sender and reads the participants under the strict-pair rule above, so a share added in the window refuses too.
+- When it refuses, it writes nothing (no filing, no reparent, no owner write) and throws `DirectPairFilingRefusedException`. `AssignExplicitThreadAsync` lets that one exception through without granting. The routing logs one Information `direct_message.pair_filing_refused` (5412) with the reason and takes today's path (`ResolveOutboundMessageThreadAsync`, unchanged). A sender or recipient mismatch also logs 5409.
+- Without a pair (the respond path, and every other join), `JoinCoreAsync` reads the same columns and writes the same rows as before.
+- The grant after a routed filing still reads the shares itself (L8).
+
+### F2-5 — the caller's cancellation
+
+- At this point `SendMessageAsync` has sent and persisted the message, and every later step is best-effort and never throws. Today's path itself (`ResolveOutboundMessageThreadAsync`) catches everything.
+- So in `FindDirectPairThreadAsync`, the caller's cancellation (`OperationCanceledException` while `ct.IsCancellationRequested`) during the recipient read, the find-or-create or the shape read returns null quietly: no Warning, and no `participant_read_fault`.
+- The message then takes today's path, which handles the cancellation as it always has.
+- A cancellation that is not the caller's (for example an HTTP timeout) is still a fault and logs its Warning.
+
+### Known limits (added; stated, not defects)
+
+- **L9.** Once the join has started writing, a fault in the join or the filing leaves that message unthreaded and ungranted. The sender still gets success, with the explicit path's Warning. Today's resolver path does not run as a fallback.
+  - F2-2 does not change this: its refusals happen before any write, and those do fall back.
+  - A fallback after a write fault is not safe. The fault can arrive after the filing update landed (a timeout on a committed write), and the resolver would then file the message a second time, into its own thread, with the pair's recipient already on the row.
+- **L10.** When `FindExistingAsync` returns a thread for a pair that is not a strict pair, routing for that pair is blocked. It never shares more than the pair, so it fails safe. **Fix: 198b**, which applies the shape rule in `FindExistingAsync`.
+
+### §11 for the new members
+
+`ExpectedDirectPair` (record struct) and `DirectPairFilingRefusedException`, internal, beside `DirectMessageRecipient`; `RoutedDirectFilingRefusal` and `IsExactlyThePair` (private, `ThreadResolver`); `StrictOtherOf`, `UserOwnerOf` and `ReadStrictParticipantsAsync` (private, `DirectMessageRecipient`); event 5412.
+- **Existing:** round 1's `expectedRecipient` covered the stamp only; the join's one thread read and `ColumnsForDirectFilingAsync` already decide the audience and the columns.
+- **Extension:** the pair replaces that parameter. The refusal is decided inside the existing join, from its own read. The exception carries the refusal out of the join's existing call chain without changing its return type for every other caller.
+- **Cost of doing nothing:** the rule that a routed message is filed only into a strict Direct thread of its pair, as the join itself reads the thread, is not enforced at the write.
+
+No new package, plugin, DI registration, endpoint or Dataverse column.
+
+### Evidence
+
+- **Tests** (KEEP paths):
+  - `…PairRoutingRule.cs`:
+    - the pair test now has one Read|Append share;
+    - `extra_principal` for a user at mask 0, a user with Append only, a team at Read, a team at mask 0, and the owner's own row;
+    - the reason-strings test includes `extra_principal` and `not_the_pair`.
+  - `…PairThreadShape.cs`:
+    - (C) now refuses as `pair_thread_extra_principal`;
+    - a new strict pair of the sender and a third user refuses as `pair_thread_not_the_pair`;
+    - routing refuses `extra_principal` for {recipient Read + third user at mask 0}, {+ third user Append only} and {+ team}; the clean recipient-owned pair still routes;
+    - window cases, each with the thread changing after the shape check: the pair changes (`not_the_pair`, plus 5409); a typed regarding appears (`typed_regarding`, and no update attempt carries `ownerid`); the thread turns Private (`not_open`); another share appears at mask 0 (`not_the_pair`). Each asserts: no filing write names the pair's thread; `GrantMessageAccessAsync` is never called for it; one 5412 with the reason; no "Explicit thread stamp failed"; and today's path ran (the resolver's create, filed with no recipient, its own single grant);
+    - cancellation: the caller cancels in the find-or-create, and in the recipient read → no routing Warning, and the send succeeds; a timeout that is not the caller's → Warning 5408, today's path.
+- **Fail-then-pass** (filter `FullyQualifiedName~DirectMessageRecipientStampTests`):
+  - Before: the three source files checked out from 82da70c50d. In the rule test file, `DirectPairShapeReason.ExtraPrincipal` and `DirectPairFilingRefusedException.NotThePair` were replaced by their literal strings so it compiles. Result: **Failed 15, Passed 91, Total 106.**
+    - The 15: the 5 shape `extra_principal` cases, the 3 routing `extra_principal` cases, (C), the 4 window cases, and the 2 caller-cancellation cases.
+    - These pass before as well as after: the timeout-is-a-fault test, the new `not_the_pair` scenario, and the reason-strings test in its literal form.
+  - After: **Passed 106, Failed 0.**
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each 0 warnings, 0 errors.
+- **Filtered run** (same filter as piece 2b): **2533 passed, 0 failed, 2 skipped.**
+- **ArchTests** (same filter as piece 2b): **153 passed, 0 failed.**
+- `git diff a9794dbaad -- src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs` is empty.
+
 rework: 054a piece 2b — an outbound Direct send (Message, no ThreadId, no typed regarding) whose To ∪ Cc ∪ Bcc is one address that the A9 internal-user email read maps to one enabled, non-application systemuser other than the sender is filed into FindOrCreateDirectThreadAsync(sender, recipient) through the respond path's explicit join (one filing update carrying the recipient, then the grant); otherwise today's resolver path, with one Information `direct_message.pair_routing_skipped` and its reason; faults log a Warning and take today's path; no owner is written.

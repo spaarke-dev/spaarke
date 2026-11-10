@@ -78,8 +78,8 @@ internal static class DirectMessageRecipient
     private static readonly EventId RecipientColumnMissingEvent = new(5405, RecipientColumnMissingEventCode);
 
     /// <summary>
-    /// Information: the filing named the recipient it expects (the outbound Direct pair routing, task 054a piece 2b) and the
-    /// thread's other participant at the filing is someone else; no recipient is stamped.
+    /// Information: the filing named the pair it expects (the outbound Direct pair routing, task 054a piece 2b) and the row's
+    /// sender, or the thread's other participant at the filing, is someone else; no recipient is stamped.
     /// </summary>
     internal const string RecipientNotExpectedEventCode = "direct_message.recipient_not_expected";
 
@@ -132,6 +132,11 @@ internal static class DirectMessageRecipient
     /// </summary>
     /// <param name="senderChatIdentity">The provider identity of an inbound message's sender (the ACS raw id); <c>null</c> on
     /// the send paths, whose row already carries <c>sprk_sentby</c>.</param>
+    /// <param name="expected">The routed send's pair (task 054a piece 2b), or <c>null</c>. When given, the participants are
+    /// read under the strict-pair rule (the thread's user owner plus its only share, a systemuser with Read), and a recipient is
+    /// stamped only when the row's sender is <see cref="ExpectedDirectPair.Sender"/> and the other participant is
+    /// <see cref="ExpectedDirectPair.Recipient"/>; otherwise one Information <see cref="RecipientNotExpectedEventCode"/> and no
+    /// recipient. Without it, the rule above, unchanged.</param>
     internal static async Task<IReadOnlyDictionary<string, object>> ColumnsForDirectFilingAsync(
         IGenericEntityService entities,
         IDataverseRecordShareService recordShares,
@@ -140,7 +145,7 @@ internal static class DirectMessageRecipient
         string? senderChatIdentity,
         ILogger logger,
         CancellationToken ct,
-        Guid? expectedRecipient = null)
+        ExpectedDirectPair? expected = null)
     {
         if (assignment.Audience != ThreadGrantAudience.DirectParticipants)
             return None;
@@ -169,11 +174,23 @@ internal static class DirectMessageRecipient
                 return None;
             }
 
+            if (expected is { } pair && senderId != pair.Sender)
+            {
+                logger.LogInformation(
+                    RecipientNotExpectedEvent,
+                    "{EventCode}: Direct message {CommunicationId}: its sender is not the sender the send was routed for " +
+                    "(thread {ThreadId}); no recipient is stamped",
+                    RecipientNotExpectedEventCode, communicationId, assignment.ThreadId);
+                return None;
+            }
+
             var result = new Dictionary<string, object>();
             if (stampedSender is null)
                 result[SenderColumn] = new EntityReference(SystemUserTable, senderId);
 
-            var participants = await ReadParticipantsAsync(entities, recordShares, assignment.ThreadId, ct);
+            var participants = expected is null
+                ? await ReadParticipantsAsync(entities, recordShares, assignment.ThreadId, ct)
+                : await ReadStrictParticipantsAsync(entities, recordShares, assignment.ThreadId, ct);
             if (OtherParticipant(senderId, participants) is not { } recipient)
             {
                 logger.LogInformation(
@@ -182,7 +199,7 @@ internal static class DirectMessageRecipient
                     "participants including the sender; no recipient is stamped",
                     NotTwoParticipantsEventCode, communicationId, assignment.ThreadId);
             }
-            else if (expectedRecipient is { } expected && recipient != expected)
+            else if (expected is { } routed && recipient != routed.Recipient)
             {
                 logger.LogInformation(
                     RecipientNotExpectedEvent,
@@ -286,8 +303,8 @@ internal static class DirectMessageRecipient
 
     /// <summary>
     /// The two-party list of a Direct thread row already read (it must carry <c>ownerid</c>): its user owner first, then every
-    /// systemuser holding a share on the thread that grants Read. The one participant reader of <see cref="ReadParticipantsAsync"/>
-    /// and <see cref="ReadStrictPairShapeAsync"/>. The share read is strict: a failed read throws.
+    /// systemuser holding a share on the thread that grants Read. The participant reader of <see cref="ReadParticipantsAsync"/>
+    /// (the stamp on every unrouted filing). The share read is strict: a failed read throws.
     /// </summary>
     private static async Task<IReadOnlyList<Guid>> ParticipantsOfAsync(
         IDataverseRecordShareService recordShares, Entity thread, Guid threadId, CancellationToken ct)
@@ -323,10 +340,15 @@ internal static class DirectMessageRecipient
     ///   <item>no typed regarding lookup (<see cref="CarriesATypedRegarding"/>) — else <see cref="DirectPairShapeReason.TypedRegarding"/>;</item>
     ///   <item>privacy confirmed Open (<see cref="CommunicationInternalOnlyFloor.IsConfirmedOpen"/>) — else
     ///   <see cref="DirectPairShapeReason.NotOpen"/>;</item>
-    ///   <item>its Read participants (<see cref="ParticipantsOfAsync"/>: the user owner and every systemuser holding a share
-    ///   with Read, the strict share read) are exactly two distinct, non-empty systemusers, one of them the user owner — else
-    ///   <see cref="DirectPairShapeReason.NotTwoReadParticipants"/>.</item>
+    ///   <item>it is owned by a systemuser, and exactly one systemuser other than the owner holds a share on it that grants
+    ///   Read — else <see cref="DirectPairShapeReason.NotTwoReadParticipants"/>;</item>
+    ///   <item>that share is the thread's ONLY share — else <see cref="DirectPairShapeReason.ExtraPrincipal"/>: any other
+    ///   share row, at any mask (a zero mask, Append only, Read), of any principal (another systemuser, a team, the owner
+    ///   itself), refuses (<see cref="StrictOtherOf"/>).</item>
     /// </list>
+    /// The shares are the strict read's (<see cref="IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync"/>): every
+    /// <c>principalobjectaccess</c> row of the thread naming a systemuser or a team, whatever its mask, zero-mask rows
+    /// included; a row it cannot read completely throws.
     /// A fault reading the thread or its shares answers <see cref="DirectPairShapeReason.ParticipantReadFault"/>, never a pair.
     /// Only the caller's cancellation propagates. Who the two are is the caller's question; this answers the owner and the other.
     /// </summary>
@@ -351,15 +373,14 @@ internal static class DirectMessageRecipient
             if (!CommunicationInternalOnlyFloor.IsConfirmedOpen(thread))
                 return DirectPairShape.Not(DirectPairShapeReason.NotOpen);
 
-            var participants = await ParticipantsOfAsync(recordShares, thread, threadId, ct);
-            var owner = thread.GetAttributeValue<EntityReference>(OwnerColumn) is { } o
-                        && string.Equals(o.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase)
-                ? o.Id
-                : Guid.Empty;
-            if (owner == Guid.Empty || OtherParticipant(owner, participants) is not { } other)
+            if (UserOwnerOf(thread) is not { } owner)
                 return DirectPairShape.Not(DirectPairShapeReason.NotTwoReadParticipants);
 
-            return new DirectPairShape(true, owner, other, null);
+            var shares = await recordShares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct);
+            var (other, reason) = StrictOtherOf(owner, shares);
+            return other is { } o
+                ? new DirectPairShape(true, owner, o, null)
+                : DirectPairShape.Not(reason!);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -369,6 +390,61 @@ internal static class DirectMessageRecipient
         {
             return DirectPairShape.Not(DirectPairShapeReason.ParticipantReadFault) with { Fault = ex };
         }
+    }
+
+    /// <summary>The thread's owner when it is a systemuser with a non-empty id; otherwise <c>null</c>.</summary>
+    private static Guid? UserOwnerOf(Entity thread) =>
+        thread.GetAttributeValue<EntityReference>(OwnerColumn) is { } owner
+        && string.Equals(owner.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase)
+        && owner.Id != Guid.Empty
+            ? owner.Id
+            : null;
+
+    /// <summary>
+    /// The strict-pair rule on a thread's shares (fix round 2): the one systemuser other than <paramref name="owner"/> holding a
+    /// share that grants Read, when that share is the thread's only share row. Exactly one such reader, else
+    /// <see cref="DirectPairShapeReason.NotTwoReadParticipants"/>; no other row at any mask and of any principal kind, else
+    /// <see cref="DirectPairShapeReason.ExtraPrincipal"/>. The same rule decides the routed filing's participants
+    /// (<see cref="ReadStrictParticipantsAsync"/>).
+    /// </summary>
+    private static (Guid? Other, string? Reason) StrictOtherOf(Guid owner, IReadOnlyList<DataversePrincipalAccess> shares)
+    {
+        var readers = shares
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser
+                        && RecordShareLevels.CanRead(s.AccessRightsMask)
+                        && s.Principal.Id != Guid.Empty
+                        && s.Principal.Id != owner)
+            .Select(s => s.Principal.Id)
+            .Distinct()
+            .ToList();
+        if (readers.Count != 1)
+            return (null, DirectPairShapeReason.NotTwoReadParticipants);
+
+        if (shares.Count != 1)
+            return (null, DirectPairShapeReason.ExtraPrincipal);
+
+        return (readers[0], null);
+    }
+
+    /// <summary>
+    /// A Direct thread's two participants under the strict-pair rule (<see cref="StrictOtherOf"/>): its user owner and the
+    /// one other systemuser, or an empty list when the thread is missing, not typed Direct, not owned by a systemuser, or its
+    /// shares are not exactly that one Read share. Used by the routed filing (<see cref="ColumnsForDirectFilingAsync"/> with an
+    /// expected pair). The share read is strict: a failed read throws.
+    /// </summary>
+    private static async Task<IReadOnlyList<Guid>> ReadStrictParticipantsAsync(
+        IGenericEntityService entities, IDataverseRecordShareService recordShares, Guid threadId, CancellationToken ct)
+    {
+        var thread = await entities.RetrieveAsync(ThreadTable, threadId, new[] { ThreadTypeColumn, OwnerColumn }, ct);
+        if (thread is null || thread.Id == Guid.Empty
+            || thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value != ThreadTypeDirect
+            || UserOwnerOf(thread) is not { } owner)
+        {
+            return Array.Empty<Guid>();
+        }
+
+        var shares = await recordShares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct);
+        return StrictOtherOf(owner, shares).Other is { } other ? new[] { owner, other } : Array.Empty<Guid>();
     }
 
     /// <summary>
@@ -456,11 +532,52 @@ internal static class DirectPairShapeReason
     /// <summary>The thread's privacy is not confirmed Open.</summary>
     public const string NotOpen = "not_open";
 
-    /// <summary>The Read participants are not exactly two distinct systemusers, one of them the user owner.</summary>
+    /// <summary>
+    /// The thread is not owned by a systemuser, or not exactly one systemuser other than the owner holds a share that grants
+    /// Read.
+    /// </summary>
     public const string NotTwoReadParticipants = "not_two_read_participants";
+
+    /// <summary>
+    /// Beside the one Read share of the other participant, the thread carries another share row: any principal (a systemuser,
+    /// a team, the owner), at any mask (zero, Append only, Read).
+    /// </summary>
+    public const string ExtraPrincipal = "extra_principal";
 
     /// <summary>The thread or its shares could not be read.</summary>
     public const string ParticipantReadFault = "participant_read_fault";
+}
+
+/// <summary>
+/// The sender and the recipient an outbound Direct send was routed to (task 054a piece 2b): the filing into the pair's thread
+/// goes ahead only when the thread, as the join reads it, files the message to exactly these two
+/// (<see cref="DirectMessageRecipient.ColumnsForDirectFilingAsync"/>, <see cref="ThreadResolver"/>'s routed join).
+/// </summary>
+internal readonly record struct ExpectedDirectPair(Guid Sender, Guid Recipient);
+
+/// <summary>
+/// The routed join (an <see cref="ExpectedDirectPair"/> was given) refused to file the message, before any write: the thread,
+/// as the join read it, is not a Direct thread with no typed regarding and confirmed Open privacy, or its filing columns are
+/// not exactly the expected sender and recipient. Nothing was written and nothing granted; the caller files the message by its
+/// unrouted path.
+/// </summary>
+internal sealed class DirectPairFilingRefusedException : Exception
+{
+    /// <summary>The filing columns are not exactly the expected sender and recipient.</summary>
+    public const string NotThePair = "not_the_pair";
+
+    public DirectPairFilingRefusedException(Guid threadId, string reason)
+        : base($"The routed Direct filing into thread {threadId} was refused before any write ({reason}).")
+    {
+        ThreadId = threadId;
+        Reason = reason;
+    }
+
+    /// <summary>The thread the join refused.</summary>
+    public Guid ThreadId { get; }
+
+    /// <summary>A <see cref="DirectPairShapeReason"/> code (<c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>) or <see cref="NotThePair"/>.</summary>
+    public string Reason { get; }
 }
 
 /// <summary>What one <c>systemuser</c> read says about a Direct message's participant (<see cref="DirectMessageRecipient.ReadEligibilityAsync"/>).</summary>
