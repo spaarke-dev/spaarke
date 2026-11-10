@@ -42,6 +42,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Team-role disassociations are accepted but do not stick (verify-phase tests).</summary>
     internal bool TeamRoleDisassociationsIgnored { get; set; }
 
+    /// <summary>Team-role associations are accepted but do not stick (S25 verify-phase test).</summary>
+    internal bool TeamRoleAssociationsIgnored { get; set; }
+
     /// <summary>User-role associations are accepted but do not stick (S23 verify-phase test).</summary>
     internal bool UserRoleAssociationsIgnored { get; set; }
 
@@ -108,8 +111,19 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
 
-    /// <summary>T266 S24 (#2605): H10's ontology writer application user, in the customer unit, holding no role.</summary>
+    /// <summary>T266 S24 (#2605): H10's ontology writer application user, holding no role — since task 267 ALONE in its own unit.</summary>
     internal Guid WriterAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f3");
+
+    /// <summary>Task 267 (#2618): the writer's own unit "Spaarke Ontology Writer" (H10) — a direct child of the root.</summary>
+    internal Guid WriterUnitId { get; private set; }
+    internal Guid WriterDefaultTeamId { get; private set; }
+
+    /// <summary>Task 267: the writer unit's copy of "Spaarke Ontology Service" (Dataverse copies root roles into every unit).</summary>
+    internal Guid WriterOntologyRoleId { get; private set; }
+
+    /// <summary>Task 267 S25: "Spaarke Basic User" as SpaarkeMaster ships it — the root copy and the customer unit's copy.</summary>
+    internal Guid RootBasicUserRoleId { get; private set; }
+    internal Guid BasicUserRoleId { get; private set; }
     internal Guid OntologyWriterFieldWritersProfileId { get; private set; }
     internal Guid OntologyWriterFirmReasonProfileId { get; private set; }
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
@@ -120,8 +134,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// permissions on four tables (secured), the two identity-link profiles with their permissions on
     /// contact.sprk_externalobjectid and systemuser.sprk_primarycontact (secured) exactly as SpaarkeMaster ships them, the
     /// platform System Administrator profile (read/create/update on every secured column, as the platform grants it),
-    /// and H10's three application users IN the customer's own unit (T259 — a direct child of the root, with its default
-    /// team; T266 — the ontology writer's, holding no role) and the two ontology-writer profiles with no members.
+    /// and H10's two BFF application users IN the customer's own unit (T259 — a direct child of the root, with its default
+    /// team), the ontology writer's application user (T266, holding no role) alone in ITS own unit "Spaarke Ontology Writer"
+    /// (task 267 — a direct child of the root, with its default team and its copy of "Spaarke Ontology Service"), the two
+    /// ontology-writer profiles with no members, and "Spaarke Basic User" (Deep Read on every codified table, as
+    /// SpaarkeMaster ships it) in the root and the customer unit, held by no team.
     /// </summary>
     internal static FakeSecureRecordSetupDataverse NewEnvironment(SecureRecordOwnerRoleSet roleSet)
     {
@@ -201,10 +218,24 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.CustomerDefaultTeamId = dv.AddTeam(dv.CustomerUnitId, CustomerUnitName, isDefault: true);
         dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
         dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
-        dv.UserUnit[dv.WriterAppUser] = dv.CustomerUnitId;
+        dv.WriterUnitId = Guid.NewGuid();
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName, dv.RootUnitId));
+        dv.WriterDefaultTeamId = dv.AddTeam(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName, isDefault: true);
+        dv.UserUnit[dv.WriterAppUser] = dv.WriterUnitId;
         dv.OntologyWriterFieldWritersProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFieldWritersProfileName);
         dv.OntologyWriterFirmReasonProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFirmReasonProfileName);
         dv.OntologyRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
+        dv.WriterOntologyRoleId = dv.AddRole(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
+
+        dv.RootBasicUserRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.BasicUserRoleName);
+        dv.BasicUserRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.BasicUserRoleName, parentRootRoleId: dv.RootBasicUserRoleId);
+        foreach (var basicUser in new[] { dv.RootBasicUserRoleId, dv.BasicUserRoleId })
+        {
+            foreach (var privilege in roleSet.Tables.SelectMany(table => dv.TableReadPrivileges[table.LogicalName]))
+            {
+                dv.RolePrivileges[basicUser][privilege.Id] = (privilege.Name, "Deep");
+            }
+        }
         return dv;
     }
 
@@ -449,6 +480,12 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return Task.FromResult<IReadOnlyList<Guid>>(ProfileUsers.Where(p => p.Value.Contains(systemUserId)).Select(p => p.Key).ToArray());
     }
 
+    public Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListTeamProfilesAsync));
+        return Task.FromResult<IReadOnlyList<Guid>>(ProfileTeams.Where(p => p.Value.Contains(teamId)).Select(p => p.Key).ToArray());
+    }
+
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
     {
         Read(nameof(ListTeamRolesAsync));
@@ -589,7 +626,10 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task AssociateTeamRoleAsync(SecureRecordSetupTarget target, Guid teamId, Guid roleId, CancellationToken cancellationToken)
     {
         Write($"AssociateTeamRole {teamId} {roleId}");
-        TeamRoles[teamId].Add(roleId);
+        if (!TeamRoleAssociationsIgnored)
+        {
+            TeamRoles[teamId].Add(roleId);
+        }
         return Task.CompletedTask;
     }
 

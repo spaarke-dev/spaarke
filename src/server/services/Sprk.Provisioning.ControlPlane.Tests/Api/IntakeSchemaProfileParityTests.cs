@@ -409,7 +409,7 @@ public sealed class IntakeSchemaProfileParityTests
     /// T259 (ISS-010): displayName — the customer business unit's name H10 creates — is sent to POST /api/runs under the
     /// same key and refused there by CustomerBusinessUnitIntake. The schema keeps it optional (the skill defaults it to the
     /// customerId, which always passes), and is never looser than the endpoint: the same length limit, no leading/trailing
-    /// whitespace or control character, and never the Secure Record unit's name in any case.
+    /// whitespace or control character, and never a reserved unit's name (Secure Record, the ontology writer's unit) in any case.
     /// </summary>
     [Fact]
     public void T259_DisplayName_SchemaBoundsAreTheEndpointRule()
@@ -432,11 +432,17 @@ public sealed class IntakeSchemaProfileParityTests
         secureName.IsMatch(secureUnit).Should().BeTrue();
         secureName.IsMatch(secureUnit.ToUpperInvariant()).Should().BeTrue();
         secureName.IsMatch("Secure Records Ltd").Should().BeFalse();
+        // Task 267: the ontology writer's own unit is reserved too, at intake as at the endpoint.
+        var writerUnit = Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordSetupProcedure.OntologyWriterBusinessUnitName;
+        secureName.IsMatch(writerUnit).Should().BeTrue();
+        secureName.IsMatch(writerUnit.ToLowerInvariant()).Should().BeTrue();
+        secureName.IsMatch(writerUnit + "s").Should().BeFalse();
 
         foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
         {
             Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.Validate(
-                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! }, secureUnit)
+                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! },
+                    Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.ReservedBusinessUnitNames)
                 .Should().BeOfType<Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntakeOutcome.Valid>();
         }
     }

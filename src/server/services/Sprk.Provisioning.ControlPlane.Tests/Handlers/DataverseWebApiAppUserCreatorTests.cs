@@ -371,6 +371,161 @@ public sealed class DataverseWebApiAppUserCreatorTests
         http.Requests.Should().NotContain(r => r.Uri.Contains("GetRootBusinessUnitId"), "no name-only or root fallback");
     }
 
+    // ---------------- task 267 (#2618): the one move — the ontology writer out of the customer's unit ----------------
+
+    private const string WriterBu = "90000000-0000-0000-0000-000000000009";
+
+    private static DataverseAppUserCreationRequest WriterMoveRequest()
+        => new(EnvUrl, TenantId, AppId, SecurityRoleName: null, Guid.Parse(WriterBu), UamiObjectId,
+            MoveFromBusinessUnitId: Guid.Parse(CustomerBu));
+
+    [Fact]
+    public async Task Move_TheWritersRowInTheMoveFromUnit_IsPatchedIntoItsUnit_ReadBack_AndReported()
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser, MovedFromBusinessUnitId: Guid.Parse(CustomerBu)));
+        var patch = http.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Patch).Subject;
+        patch.Uri.Should().EndWith($"/api/data/v9.2/systemusers({SystemUser})");
+        patch.Body.Should().Contain($"\"businessunitid@odata.bind\":\"/businessunits({WriterBu})\"");
+        http.Requests.Last().Uri.Should().Contain($"systemusers({SystemUser})").And.Contain("_businessunitid_value",
+            "the move is read back after the PATCH");
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post, "nothing is created and no role is associated");
+        http.Requests.Should().NotContain(r => r.Uri.Contains("/roles?") || r.Uri.Contains("systemuserroles_association"));
+    }
+
+    [Fact]
+    public async Task Move_TheWriterAlreadyInItsUnit_WritesNothing()
+    {
+        var http = MoveFake(existingUnit: WriterBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Theory]
+    [InlineData(RootBu)]
+    [InlineData(OtherBu)]
+    public async Task Move_FromAnyOtherUnit_IsInForeignBusinessUnit_NeverMoved(string unit)
+    {
+        var http = MoveFake(existingUnit: unit, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.InForeignBusinessUnit(SystemUser, Guid.Parse(unit)));
+        http.Requests.Should().ContainSingle("nothing after the read: no PATCH");
+    }
+
+    [Theory]
+    [InlineData(AppId)]
+    [InlineData(null)]
+    public async Task Move_ARowHoldingAnotherObjectId_IsNeverMoved_AndNamesTheReason(string? heldObjectId)
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: heldObjectId, readBackUnit: WriterBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        var foreign = outcome.Should().BeOfType<DataverseAppUserCreationOutcome.InForeignBusinessUnit>().Subject;
+        foreign.BusinessUnitId.Should().Be(Guid.Parse(CustomerBu));
+        foreign.Reason.Should().Contain("azureactivedirectoryobjectid").And.Contain(UamiObjectId);
+        http.Requests.Should().ContainSingle("the object id is checked BEFORE any write: no PATCH");
+    }
+
+    [Fact]
+    public async Task Move_ThatDoesNotReadBack_IsAFailure()
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: CustomerBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseAppUserCreationOutcome.Failure>().Which.Diagnostic
+            .Should().Contain(WriterBu).And.Contain(CustomerBu);
+    }
+
+    [Fact]
+    public async Task Move_ThePatchRefused_IsAFailure()
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu, patchStatus: HttpStatusCode.BadRequest);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseAppUserCreationOutcome.Failure>();
+    }
+
+    [Fact]
+    public async Task Move_ANewWriter_IsCreatedInItsUnit_NotMoved()
+    {
+        var http = MoveFake(existingUnit: null, existingObjectId: null, readBackUnit: WriterBu);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(WriterMoveRequest(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+        http.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Post).Which.Body
+            .Should().Contain($"/businessunits({WriterBu})");
+    }
+
+    [Fact]
+    public async Task Move_WithARoleRequested_IsACallerBug()
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+
+        var act = () => Creator(http).EnsureAppUserAsync(WriterMoveRequest() with { SecurityRoleName = "System Administrator" },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Move_WithoutAnObjectId_OrFromTheTargetUnit_OrFromEmpty_IsACallerBug(bool fromTarget, bool fromEmpty)
+    {
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+        var request = fromTarget
+            ? WriterMoveRequest() with { MoveFromBusinessUnitId = Guid.Parse(WriterBu) }
+            : fromEmpty
+                ? WriterMoveRequest() with { MoveFromBusinessUnitId = Guid.Empty }
+                : WriterMoveRequest() with { SystemUserAzureActiveDirectoryObjectId = null };
+
+        var act = () => Creator(http).EnsureAppUserAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Requests.Should().BeEmpty();
+    }
+
+    private static FakeHttp MoveFake(string? existingUnit, string? existingObjectId, string readBackUnit,
+        HttpStatusCode patchStatus = HttpStatusCode.NoContent)
+        => new(req =>
+        {
+            var uri = req.RequestUri!.AbsoluteUri;
+            if (req.Method == HttpMethod.Patch)
+            {
+                return new HttpResponseMessage(patchStatus) { Content = new StringContent(patchStatus == HttpStatusCode.NoContent ? "" : "refused") };
+            }
+            if (req.Method == HttpMethod.Post && uri.EndsWith("/api/data/v9.2/systemusers", StringComparison.Ordinal))
+            {
+                return Created($"{EnvUrl}api/data/v9.2/systemusers({SystemUser})");
+            }
+            if (uri.Contains("/systemusers?"))
+            {
+                return Json(existingUnit is null
+                    ? """{"value":[]}"""
+                    : $$"""{"value":[{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{existingUnit}}","azureactivedirectoryobjectid":{{(existingObjectId is null ? "null" : $"\"{existingObjectId}\"")}}}]}""");
+            }
+            if (uri.Contains($"/systemusers({SystemUser})?"))
+            {
+                return Json($$"""{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{readBackUnit}}"}""");
+            }
+            return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent($"unexpected {req.Method} {uri}") };
+        });
+
     // ---------------- helpers ----------------
 
     private static DataverseAppUserCreationRequest Request(string? objectId = null)
