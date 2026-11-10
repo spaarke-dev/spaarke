@@ -33,7 +33,8 @@ public partial class BillingFactLoaderTests
         _world.Add(ProcedureEntity.VersionEntity, procedureVersion,
             (ProcedureEntity.VersionProcedureColumn, Ref(ProcedureEntity.Entity, procedure)), (ProcedureEntity.VersionNumberColumn, 1),
             (ProcedureEntity.VersionStatusColumn, new OptionSetValue(ProcedureEntity.VersionStatusActive)),
-            (ProcedureEntity.VersionEffectiveFromColumn, new DateTime(2026, 1, 1)));
+            (ProcedureEntity.VersionEffectiveFromColumn, new DateTime(2026, 1, 1)),
+            (ProcedureEntity.VersionPublishedOnColumn, new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc))); // DEF-061: published by the BFF
 
         var set = RuleSet(setScope, setScope == RuleSetScope.Firm ? FirmId : null);
         _world.Set("sprk_ruleset", set, "sprk_procedure", Ref(ProcedureEntity.Entity, procedure));

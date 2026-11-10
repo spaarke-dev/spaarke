@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Moq;
@@ -11,6 +12,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
@@ -126,10 +128,14 @@ public sealed class ProcedureServiceTests
             new SignalClosureService((SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter)), H.Entities.Object,
                 TimeProvider.System, NullLogger<SignalClosureService>.Instance).SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct);
 
+        /// <summary>DEF-061: the clock the publish stamp reads.</summary>
+        public TimeProvider Clock = TimeProvider.System;
+
         public ProcedureService Service() => new(
             H.Entities.Object, H.Service(), Closure.Object,
             new AffectedInvoiceCounter(H.Entities.Object, Probe.Object, NullLogger<AffectedInvoiceCounter>.Instance),
-            H.Ownership.Object, NullLogger<ProcedureService>.Instance);
+            H.Ownership.Object, NullLogger<ProcedureService>.Instance)
+        { Clock = Clock };
 
         // ── Seeding ──────────────────────────────────────────────────────────────────────────────────
 
@@ -162,7 +168,7 @@ public sealed class ProcedureServiceTests
             return id;
         }
 
-        public Guid Version(Guid procedureId, int number, int status, DateOnly? from = null, DateOnly? to = null, Guid? previous = null)
+        public Guid Version(Guid procedureId, int number, int status, DateOnly? from = null, DateOnly? to = null, Guid? previous = null, DateTime? publishedOn = null)
         {
             var v = new Entity("sprk_procedureversion", Guid.NewGuid())
             {
@@ -174,6 +180,7 @@ public sealed class ProcedureServiceTests
             if (from is { } f) v["sprk_effectivefrom"] = f.ToDateTime(TimeOnly.MinValue);
             if (to is { } t) v["sprk_effectiveto"] = t.ToDateTime(TimeOnly.MinValue);
             if (previous is { } p) v["sprk_previousversion"] = new EntityReference("sprk_procedureversion", p);
+            if (publishedOn is { } stamp) v[ProcedureEntity.VersionPublishedOnColumn] = stamp;
             H.Seed(v);
             return v.Id;
         }
@@ -985,6 +992,165 @@ public sealed class ProcedureServiceTests
         s.W.H.Writes.Should().NotContain(x => x.Id == s.OtherDraft);
         s.W.H.Row("sprk_policyversion", s.A1).GetAttributeValue<OptionSetValue>("sprk_publishstate").Value
             .Should().Be(Published, "v1's version stays as it was: v1 is still in force for its own window");
+    }
+
+    // ── DEF-061: the publish stamp (sprk_publishedon) ──────────────────────────────────────────────────────────
+
+    private static readonly DateTimeOffset PublishInstant = new(2027, 3, 1, 10, 15, 30, TimeSpan.Zero);
+
+    private static DateTime? StampOf(World w, Guid versionId) =>
+        w.H.Row("sprk_procedureversion", versionId).GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn);
+
+    [Fact(DisplayName = "DEF-061: publish stamps sprk_publishedon with the server's UTC now, in the same transaction that makes the version Active, on that version alone")]
+    public async Task Publish_StampsPublishedOn_WithTheServersUtcNow_InTheSameTransaction()
+    {
+        var s = ScenePublish();
+        s.W.Clock = new FakeTimeProvider(PublishInstant);
+
+        var outcome = await s.W.Service().PublishVersionAsync(s.Procedure, s.V2, Mar1, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        StampOf(s.W, s.V2).Should().Be(PublishInstant.UtcDateTime);
+        StampOf(s.W, s.V1).Should().BeNull("the superseded predecessor keeps the stamp it had (none here): this publish does not stamp it");
+        var transaction = s.W.H.Transactions.Should().ContainSingle("one BFF operation").Subject;
+        var stamping = transaction.OfType<UpdateRequest>().Where(u => u.Target.Contains(ProcedureEntity.VersionPublishedOnColumn)).ToList();
+        stamping.Should().ContainSingle().Which.Target.Id.Should().Be(s.V2);
+        stamping[0].Target.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn).Value
+            .Should().Be(ProcedureEntity.VersionStatusActive, "the stamp rides the very write that makes the version Active");
+    }
+
+    [Fact(DisplayName = "DEF-061: the stamp is all or nothing with the publish: a publish whose transaction fails leaves the version a Draft with no stamp")]
+    public async Task Publish_WhenTheTransactionFails_LeavesNoStamp()
+    {
+        var s = ScenePublish();
+        s.W.H.FailTransactionRequest = r => r is UpdateRequest u && u.Target.Id == s.V1;
+
+        var outcome = await s.W.Service().PublishVersionAsync(s.Procedure, s.V2, Mar1, default);
+
+        outcome.ErrorCode.Should().Be("procedure.write_failed");
+        StampOf(s.W, s.V2).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "DEF-061: a version that is not a Draft cannot be published again (409, nothing written), so a re-publish never moves its stamp")]
+    [InlineData(ProcedureEntity.VersionStatusActive)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded)]
+    [InlineData(ProcedureEntity.VersionStatusRetired)]
+    public async Task Publish_OfAVersionThatIsNotADraft_IsRefused_AndKeepsItsStamp(int status)
+    {
+        var w = new World();
+        var p = w.Procedure();
+        w.RuleSetOf(p);
+        var first = new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var v1 = w.Version(p, 1, status, Jan1, status == ProcedureEntity.VersionStatusSuperseded ? Mar1 : null, publishedOn: first);
+        w.SourceFile(v1);
+        w.Clock = new FakeTimeProvider(PublishInstant);
+
+        var outcome = await w.Service().PublishVersionAsync(p, v1, Mar1, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("procedure.version_not_draft");
+        w.H.Transactions.Should().BeEmpty();
+        StampOf(w, v1).Should().Be(first);
+    }
+
+    [Fact(DisplayName = "DEF-061: publishing a version twice in a row stamps it once: the second publish is refused and the first stamp stays")]
+    public async Task Publish_TwiceInARow_StampsOnce()
+    {
+        var s = ScenePublish();
+        s.W.Clock = new FakeTimeProvider(PublishInstant);
+        var service = s.W.Service();
+        (await service.PublishVersionAsync(s.Procedure, s.V2, Mar1, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        s.W.Clock = new FakeTimeProvider(PublishInstant.AddDays(30));
+        var again = await s.W.Service().PublishVersionAsync(s.Procedure, s.V2, Mar1, default);
+
+        again.ErrorCode.Should().Be("procedure.version_not_draft");
+        StampOf(s.W, s.V2).Should().Be(PublishInstant.UtcDateTime);
+        s.W.H.Transactions.Should().ContainSingle("the second publish wrote nothing");
+    }
+
+    [Fact(DisplayName = "DEF-061: a Draft that already carries a stamp (written outside the BFF) keeps it through its publish: the stamp is never moved")]
+    public async Task Publish_OfADraftThatAlreadyHasAStamp_KeepsIt()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var earlier = new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusDraft, Jan1, publishedOn: earlier);
+        w.Rule(set, "BILL-A", v1, published: false);
+        w.SourceFile(v1);
+        w.Clock = new FakeTimeProvider(PublishInstant);
+
+        var outcome = await w.Service().PublishVersionAsync(p, v1, null, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        StampOf(w, v1).Should().Be(earlier);
+        w.StatusOf("sprk_procedureversion", v1).Should().Be(ProcedureEntity.VersionStatusActive);
+    }
+
+    [Fact(DisplayName = "DEF-061 must-not-fire: retiring a Draft, changing its dates, retiring a published version and creating a version never write or change the stamp")]
+    public async Task EveryOtherVersionWrite_LeavesTheStampAlone()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        w.RuleSetOf(p);
+        var stamped = new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var active = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1, publishedOn: stamped);
+        var draft = w.Version(p, 2, ProcedureEntity.VersionStatusDraft, previous: active);
+        w.Clock = new FakeTimeProvider(PublishInstant);
+        var service = w.Service();
+
+        (await service.ChangeDatesAsync(p, draft, Mar1, null, false, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.RetireVersionAsync(p, draft, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.RetireVersionAsync(p, active, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        StampOf(w, draft).Should().BeNull("a Draft is never stamped by anything but its publish");
+        StampOf(w, active).Should().Be(stamped, "retiring a published version leaves its stamp");
+        w.H.Transactions.SelectMany(t => t.OfType<UpdateRequest>()).Should().NotContain(u => u.Target.Contains(ProcedureEntity.VersionPublishedOnColumn));
+        w.H.Writes.Should().NotContain(x => x.Fields.ContainsKey(ProcedureEntity.VersionPublishedOnColumn));
+
+        // Creating a version (copy-forward from a stamped, published predecessor) does not carry the stamp into the new Draft.
+        var c = new World();
+        var cp = c.Procedure();
+        c.RuleSetOf(cp);
+        var predecessor = c.Version(cp, 1, ProcedureEntity.VersionStatusActive, Jan1, publishedOn: stamped);
+        var created = await c.Service().CreateVersionAsync(cp, Mar1, null, CallerOid, c.TypeOf(cp), default);
+
+        created.Kind.Should().Be(RuleSetOutcomeKind.Done, created.Detail);
+        StampOf(c, created.Value!.Version.Id).Should().BeNull("a new Draft is not published: it carries no stamp, whatever its predecessor has");
+        StampOf(c, predecessor).Should().Be(stamped);
+        c.H.Rows[ProcedureEntity.VersionEntity].Count(r => r.Contains(ProcedureEntity.VersionPublishedOnColumn)).Should().Be(1);
+    }
+
+    [Theory(DisplayName = "DEF-061 fix round 1: the Procedure's scope lock and the resolver's OpenedAWindow are one definition: they agree on every status, stamp and published-rule combination")]
+    [InlineData(ProcedureEntity.VersionStatusActive, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, false, true)] // a stamped rate-card-only (or rule-less) version, retired: locked, as the resolver's gap says
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, false, true, true)] // retired before the stamp existed: the policy-version fallback
+    [InlineData(ProcedureEntity.VersionStatusRetired, false, false, false)] // a Draft retired unpublished
+    [InlineData(ProcedureEntity.VersionStatusDraft, false, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, true, false)]
+    public async Task TheScopeLock_AndTheResolversOpenedAWindow_Agree(int status, bool stamped, bool publishedRule, bool expected)
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, status, Jan1, publishedOn: stamped ? new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc) : null);
+        if (publishedRule) w.Rule(set, "BILL-A", v1, published: true);
+
+        var outcome = await w.Service().UpdateAsync(p, Update(appliesTo: "Firm", firm: FirmId), default);
+
+        var locked = outcome.ErrorCode == "procedure.scope_locked";
+        var resolver = new ProcedureVersionRow(v1, p, 1, status, Jan1, null, stamped ? new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc) : null)
+            .OpenedAWindow(publishedRule ? new HashSet<Guid> { v1 } : new HashSet<Guid>());
+        locked.Should().Be(expected);
+        resolver.Should().Be(expected);
+        locked.Should().Be(resolver, "the lock and the resolver cannot drift: both ask ProcedureEntity.VersionWasPublished");
     }
 
     [Theory]

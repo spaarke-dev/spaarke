@@ -122,7 +122,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: merged into work `0775d2a443` (branch head `340b6c53ad`, ontology-r1 approved). Applied on dev 2026-11-10: column created; `-Backfill` read 0 rows; `-Verify` PASS. The new BFF reaches dev with the next batch deploy. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-08 |
 | **Source** | ebilling-r1 task 085 pass 2, ontology-r1 ruling (c) on D-203 |

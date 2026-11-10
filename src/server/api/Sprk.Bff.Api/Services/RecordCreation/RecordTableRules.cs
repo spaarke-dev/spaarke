@@ -355,6 +355,22 @@ internal static partial class RecordTableRules
             // (CreatedOnlyByItsWriter, which also drives those refusals, stays false).
             GenericCreateOnlyRefused = true,
         },
+        // ebilling-r1 DEF-061 (owner-approved schema change, 2026-11-09): the Procedure Version's publish stamp. Only ProcedureService.PublishVersionAsync
+        // writes it, and the resolver reads "this version opened a window" from it, so no generic writer that asks InheritedAccessPermission.RefuseAppOnlyWrite
+        // (a field-mapping rule, an AI output mapping, the Update Record node, the record-creation mapping) sets, moves or clears it: a user-set stamp
+        // would make a never-published Draft hold work as a gap, and a cleared one would hide a published version's window. Registered for those two
+        // columns only, and every other column of the table is exactly as it was. A Procedure Version is created by ProcedureService alone, so the generic
+        // create is refused (GenericCreateOnlyRefused): RecordCreationService answers record_creation.table_unsupported, the same as for an unregistered
+        // table, and the chat create tool answers in its own words (DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage). Repair
+        // skips the table (RecordCreationService.AppendOnlyTables) because it has no generic owner to repair.
+        new RecordTableRule
+        {
+            Table = "sprk_procedureversion",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            WriterOnlyColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            GenericCreateOnlyRefused = true,
+        },
 
         // ── The rest of the invoice family (task 017): InvoiceFamilyCoreRecordGuard.CoreRecordLookups keys ──────────
         // Registered so the invoice-family rule guards every family table a server create path can write (the chat create
