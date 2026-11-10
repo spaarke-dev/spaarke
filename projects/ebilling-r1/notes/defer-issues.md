@@ -102,7 +102,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | In progress (branch task/ebilling-def061) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-08 |
 | **Source** | ebilling-r1 task 085 pass 2, ontology-r1 ruling (c) on D-203 |
