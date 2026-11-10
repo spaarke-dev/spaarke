@@ -140,6 +140,11 @@ No new package, plugin, DI registration or Dataverse column (the column was crea
   - `--blame-crash` names no single test, and every class passes on its own (above), so the crash depends on load, not on one class.
   - Under that load, `ChatMessageStreamingContractTests.SendMessage_ModelThrowsAfterTwoTokens_EmitsTypingEndThenSafeErrorAndNothingAfter` also timed out once (about 2 minutes). Its class passes alone, 7 of 7.
   - The combined gate is therefore run as the slices above, with `FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.` on the combined filter, and the `Api.Office.` classes are run one at a time.
+- **After the commit** (58e846040b; the pre-commit `dotnet format` changed nothing): BFF and test project each 0 warnings / 0 errors. The whole filter with `!~Sprk.Bff.Api.Tests.Api.Office.` finished: **9118 passed, 2 failed, 3 skipped.**
+  - The 2 failures are wall-clock timing assertions:
+    - `CallerChecksConcurrencyTests.TheWholeCheck_TakesItsLongestChain_NotTheSumOfItsReads` (1.67 s against a 1.2 s bound);
+    - `RecordCreationServiceMappingSeamTests.CreatePath_ANamedSourceMappedCreate_WithDelayedReads_OverlapsTheMappingReads_AndAnswersAsTheSequentialRun`.
+  - Both classes run alone: **244 passed, 0 failed.** Neither class touches the communication write path. The bounds miss under the machine's parallel load.
 - **CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` reports no vulnerable packages. No package was added.
 - **Publish-size delta:** not measured here, because `scripts/publish-delta.ps1` runs in the main session only. This change adds no package and no project reference.
 
