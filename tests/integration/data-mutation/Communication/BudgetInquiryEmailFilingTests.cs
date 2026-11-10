@@ -396,8 +396,185 @@ public class BudgetInquiryEmailFilingTests
         strict.Invocations.Should().BeEmpty();
     }
 
+    // -------------------------------------------------------------------------------------
+    // Review round 2, item 4: the reply's denormalized primary is the service request, as the send's is
+    // -------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(false)] // the processor adds the matter (the usual reply: the tracking token names the inquiry)
+    [InlineData(true)]  // the rungs already filed it to the inquiry's matter too
+    public async Task Reply_ToAnInquiry_KeepsTheServiceRequestAsTheDenormalizedPrimary_LikeTheSend(bool matterAlreadyFiled)
+    {
+        IAssociationRung rung = matterAlreadyFiled
+            ? new FilingRungs(("sprk_regardingservicerequest", "sprk_servicerequest", ServiceRequestId), ("sprk_regardingmatter", "sprk_matter", MatterId))
+            : FiledToTheServiceRequest();
+        var processor = Processor(ReplyWorld(MatterId).Resolver(),
+            ServiceRequestRead(() => ServiceRequest(DirectionOutbound, MatterId)).Object, rung);
+
+        var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
+
+        result.InquiryReply.Should().BeTrue();
+        result.FilingFields.Should().NotBeNull();
+        result.FilingFields!["sprk_regardingrecordid"].Should().Be(ServiceRequestId.ToString("D"),
+            "the send's primary is the service request; a reply whose primary is the matter puts the matter in the next "
+            + "reply's footer, and that reply resolves to the matter alone, losing the inquiry rule");
+        ((EntityReference)result.FilingFields["sprk_regardingservicerequest"]).Id.Should().Be(ServiceRequestId);
+        ((EntityReference)result.FilingFields["sprk_regardingmatter"]).Id.Should().Be(MatterId, "the matter stays the extra typed lookup");
+    }
+
+    [Theory]
+    [InlineData(DirectionInbound)]
+    [InlineData(null)]
+    public async Task Reply_FiledToANonInquiryServiceRequestAndAMatter_KeepsTheMatterAsItsPrimary(int? direction)
+    {
+        // Must-not-fire: the global regarding priority (matter before service request) is unchanged for every other email.
+        var processor = Processor(ReplyWorld(MatterId).Resolver(),
+            ServiceRequestRead(() => ServiceRequest(direction, MatterId)).Object,
+            new FilingRungs(("sprk_regardingservicerequest", "sprk_servicerequest", ServiceRequestId), ("sprk_regardingmatter", "sprk_matter", MatterId)));
+
+        var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
+
+        result.InquiryReply.Should().BeFalse();
+        result.FilingFields.Should().NotBeNull();
+        result.FilingFields!["sprk_regardingrecordid"].Should().Be(MatterId.ToString("D"));
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Review round 2, item 6: the matter the reply is filed under is in its provenance (the review surface's list)
+    // -------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Reply_ToAnInquiry_ListsItsMatterInTheProvenanceAsFiled()
+    {
+        var processor = Processor(ReplyWorld(MatterId).Resolver(),
+            ServiceRequestRead(() => ServiceRequest(DirectionOutbound, MatterId)).Object, FiledToTheServiceRequest());
+
+        var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
+
+        var matter = result.Decision.Provenance.Candidates.Should()
+            .ContainSingle(c => c.Field == "sprk_regardingmatter").Subject;
+        matter.TargetEntity.Should().Be("sprk_matter");
+        matter.TargetId.Should().Be(MatterId.ToString("D"));
+        matter.Written.Should().BeTrue("the reply IS filed under it");
+        matter.Conflict.Should().BeFalse();
+        result.Decision.Provenance.Candidates.Should().Contain(c => c.Field == "sprk_regardingservicerequest" && c.Written);
+        var json = result.FilingFields!["sprk_associationprovenance"].Should().BeOfType<string>().Subject;
+        json.Should().Contain("sprk_regardingmatter").And.Contain(MatterId.ToString("D"));
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Review round 2, item 1: the reply's internal-only wiring, through the real filing AND the real steps 4.5-4.6b
+    // -------------------------------------------------------------------------------------
+
+    private static readonly Guid ReplyThreadId = Guid.Parse("17600000-0000-4000-8000-0000000000c1");
+    private static readonly Guid ReplyRowId = Guid.Parse("17600000-0000-4000-8000-0000000000c2");
+    private static readonly Guid EarlierInquiryEmailId = Guid.Parse("17600000-0000-4000-8000-0000000000c3");
+
+    private sealed record ThreadStepWorld(
+        IncomingCommunicationProcessor Processor, Mock<IGenericEntityService> Entities, Mock<IThreadResolver> Resolver);
+
+    /// <summary>
+    /// A reply that lands in an OPEN matter thread. <paramref name="parent"/>: "shareable-parent" — its In-Reply-To finds an
+    /// inquiry email sent before task 176, explicitly NOT internal-only; "no-parent" — its In-Reply-To and References find
+    /// nothing. Both are shapes step 4.6b LOWERS for any other email.
+    /// </summary>
+    private static ThreadStepWorld ThreadStep(int? direction, string parent)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_servicerequest", ServiceRequestId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ServiceRequest(direction, MatterId));
+        var thread = new DataverseEntity("sprk_communicationthread", ReplyThreadId)
+        {
+            ["sprk_privacystate"] = new OptionSetValue((int)Sprk.Bff.Api.Services.Communication.Membership.ThreadPrivacyState.Open),
+        };
+        entities.Setup(e => e.RetrieveAsync("sprk_communicationthread", ReplyThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+
+        var communications = new Mock<ICommunicationDataverseService>();
+        if (parent == "shareable-parent")
+        {
+            communications.Setup(c => c.GetCommunicationByInternetMessageIdAsync("<inquiry@contoso.com>", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DataverseEntity("sprk_communication", EarlierInquiryEmailId));
+            entities.Setup(e => e.RetrieveAsync("sprk_communication", EarlierInquiryEmailId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DataverseEntity("sprk_communication", EarlierInquiryEmailId) { ["sprk_isinternalonly"] = false });
+        }
+        else if (parent != "no-parent")
+        {
+            throw new ArgumentOutOfRangeException(nameof(parent));
+        }
+
+        var resolver = new Mock<IThreadResolver>();
+        resolver.Setup(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ReplyThreadId);
+
+        var processor = Processor(ReplyWorld(MatterId).Resolver(), entities.Object, FiledToTheServiceRequest(),
+            communications.Object, resolver.Object);
+        return new ThreadStepWorld(processor, entities, resolver);
+    }
+
+    private static async Task FileAndThread(ThreadStepWorld world)
+    {
+        var envelope = ReplyEnvelope();
+        var filing = await world.Processor.ResolveInboundFilingAsync(envelope, account: null, "graph-176", CancellationToken.None);
+        await world.Processor.FileAndThreadNewRecordAsync(
+            ReplyRowId, envelope, "graph-176", filing.Decision, filing.FilingFields, filing.InquiryReply, CancellationToken.None);
+    }
+
+    private static void VerifyLoweredTimes(ThreadStepWorld world, Times times) =>
+        world.Entities.Verify(
+            e => e.UpdateAsync("sprk_communication", ReplyRowId,
+                It.Is<Dictionary<string, object>>(f => f.ContainsKey("sprk_isinternalonly") && f["sprk_isinternalonly"].Equals(false)),
+                It.IsAny<CancellationToken>()),
+            times);
+
+    public static TheoryData<string> ReplyParents => new() { "shareable-parent", "no-parent" };
+
+    [Theory]
+    [MemberData(nameof(ReplyParents))]
+    public async Task Reply_ToAnInquiry_ThroughTheRealFilingAndThreadSteps_StaysInternalOnly_InAnOpenThread(string parent)
+    {
+        var world = ThreadStep(DirectionOutbound, parent);
+
+        await FileAndThread(world);
+
+        world.Resolver.Verify(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        VerifyLoweredTimes(world, Times.Never());
+    }
+
+    [Theory]
+    [MemberData(nameof(ReplyParents))]
+    public async Task Reply_ToANonInquiryServiceRequest_ThroughTheSameSteps_IsLowered_TheControl(string parent)
+    {
+        // Must-fire control: the same thread and parent lower any other reply, so the test above fails if the inquiry flag
+        // stops reaching step 4.6b.
+        var world = ThreadStep(DirectionInbound, parent);
+
+        await FileAndThread(world);
+
+        VerifyLoweredTimes(world, Times.Once());
+    }
+
     private static IAssociationRung FiledToTheServiceRequest() =>
         new FilingRung("sprk_regardingservicerequest", "sprk_servicerequest", ServiceRequestId);
+
+    /// <summary>Several deterministic explicit references at once (each field its own target).</summary>
+    private sealed class FilingRungs(params (string Field, string Entity, Guid Id)[] filings) : IAssociationRung
+    {
+        public RungKind Kind => RungKind.ExplicitReference;
+        public int Order => 0;
+
+        public Task<IReadOnlyList<RungMatch>> EvaluateAsync(NormalizedMessage message, AssociationContext context, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<RungMatch>>(filings
+                .Select(f => new RungMatch
+                {
+                    RegardingFieldName = f.Field,
+                    Target = new EntityReference(f.Entity, f.Id),
+                    Confidence = 1.0,
+                    Provenance = "test:tracking-token",
+                    Rung = RungKind.ExplicitReference,
+                })
+                .ToList());
+    }
 
     /// <summary>The tracking token's answer: a deterministic explicit reference to the service request.</summary>
     private sealed class FilingRung(string field, string entity, Guid id) : IAssociationRung
@@ -430,7 +607,8 @@ public class BudgetInquiryEmailFilingTests
     };
 
     private static IncomingCommunicationProcessor Processor(
-        IRecordOwnershipResolver ownership, IGenericEntityService entities, IAssociationRung rung)
+        IRecordOwnershipResolver ownership, IGenericEntityService entities, IAssociationRung rung,
+        ICommunicationDataverseService? communications = null, IThreadResolver? threadResolver = null)
     {
         var autoFile = new AutoFileOptions { Enabled = true, Threshold = 0.85 };
         var mapper = new AssociationStatusMapper(
@@ -441,12 +619,12 @@ public class BudgetInquiryEmailFilingTests
             CoreAncestorResolverFixtures.Inert(), new RecordOwnershipResolverDouble(), NullLogger<IncomingAssociationResolver>.Instance);
 
         return new IncomingCommunicationProcessor(
-            graphClientFactory: null!, communicationService: null!, genericEntityService: entities, accountService: null!,
+            graphClientFactory: null!, communicationService: communications!, genericEntityService: entities, accountService: null!,
             associationResolver: association, messageNormalizer: new GraphMessageNormalizer(),
             emlConverter: null!, scopeFactory: null!, jobSubmissionService: null!, notificationService: null!,
             enrichmentService: null!, options: Options.Create(new CommunicationOptions()), textExtractor: null!,
             attachmentMatchOptions: Options.Create(new AttachmentMatchOptions { Enabled = false }),
             configuration: new ConfigurationBuilder().Build(), ownership: ownership,
-            logger: NullLogger<IncomingCommunicationProcessor>.Instance);
+            logger: NullLogger<IncomingCommunicationProcessor>.Instance, threadResolver: threadResolver);
     }
 }

@@ -368,35 +368,8 @@ public sealed class IncomingCommunicationProcessor
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
 
-        // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
-        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
-        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
-        // The row was created with the owner this decision resolved, so this writes only the association fields, status
-        // and provenance — no reparent re-derivation is needed.
-        if (filingFields is null)
-        {
-            try
-            {
-                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-            }
-            catch (Exception ex)
-            {
-                // Association resolution failure is non-fatal
-                _logger.LogWarning(
-                    ex,
-                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                    "GraphMessageId: {GraphMessageId}",
-                    communicationId, graphMessageId);
-            }
-        }
-
-        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
-        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
-        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
-        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
-        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
-        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
-        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct, keepInternalOnly: inquiryReply);
+        // ── Steps 4.5 and 4.6 (with 4.6b) ──
+        await FileAndThreadNewRecordAsync(communicationId, envelope, graphMessageId, decision, filingFields, inquiryReply, ct);
 
         // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
         // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
@@ -788,23 +761,98 @@ public sealed class IncomingCommunicationProcessor
                     serviceRequest.Id, filed.Id, matterId, graphMessageId);
             }
 
-            return (decision, true);
+            // Review round 2, item 4: the service request stays the denormalized primary, as on the send.
+            return (decision with { PrimaryRegardingField = InquiryRequestLookup }, true);
         }
 
         var writes = new Dictionary<string, EntityReference>(decision.RegardingWrites, StringComparer.OrdinalIgnoreCase)
         {
             [InquiryMatterLookup] = new EntityReference("sprk_matter", matterId),
         };
+
+        // Review round 2, item 6: the matter the reply is now filed under is listed with what it is filed under, so the review
+        // surface (which reads per-candidate "written") shows it. Deterministic: it is the inquiry's own matter, read live.
+        var matterCandidate = new CandidateTrace
+        {
+            Field = InquiryMatterLookup,
+            TargetEntity = "sprk_matter",
+            TargetId = matterId.ToString("D"),
+            ReinforcedConfidence = 1.0,
+            DeterministicConfidence = 1.0,
+            Written = true,
+            Conflict = false,
+            Contributors =
+            [
+                new ContributorTrace
+                {
+                    Rung = InquiryMatterContributor,
+                    Confidence = 1.0,
+                    Provenance = $"the matter of inquiry {serviceRequest.Id:D} (D-216)",
+                },
+            ],
+        };
+
         _logger.LogInformation(
             "Reply to inquiry {ServiceRequestId} is filed under its matter {MatterId} too (D-216) | GraphMessageId: {GraphMessageId}",
             serviceRequest.Id, matterId, graphMessageId);
-        return (decision with { RegardingWrites = writes }, true);
+        return (decision with
+        {
+            RegardingWrites = writes,
+            // Review round 2, item 4: the service request stays the denormalized primary (sprk_regardingrecordid / name /
+            // type), as on the send; the matter is the extra typed lookup. Not a reorder of the global priority list.
+            PrimaryRegardingField = InquiryRequestLookup,
+            Provenance = decision.Provenance with { Candidates = [.. decision.Provenance.Candidates, matterCandidate] },
+        }, true);
     }
+
+    /// <summary>The provenance contributor name for the matter a reply to an inquiry is filed under (review round 2, item 6).</summary>
+    internal const string InquiryMatterContributor = "InquiryMatter";
 
     private const string InquiryRequestEntity = "sprk_servicerequest";
     private const string InquiryRequestLookup = "sprk_regardingservicerequest";
     private const string InquiryMatterLookup = "sprk_regardingmatter";
     private const string InquiryDirectionColumn = "sprk_direction";
+
+    /// <summary>
+    /// Steps 4.5 and 4.6 (with 4.6b) for a newly created inbound row, exactly as <see cref="ProcessAsync"/> runs them after
+    /// the create: the association evaluated in step 3.7, then the thread and the internal-only floor. <c>internal</c> so a
+    /// test composes it with the real <see cref="ResolveInboundFilingAsync"/> (ontology task 176, review round 2 item 1): the
+    /// inquiry-reply flag that keeps the reply internal-only travels from the filing to step 4.6b only through here.
+    /// </summary>
+    internal async Task FileAndThreadNewRecordAsync(
+        Guid communicationId, NormalizedMessage envelope, string graphMessageId, AssociationDecision decision,
+        Dictionary<string, object>? filingFields, bool inquiryReply, CancellationToken ct)
+    {
+        // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
+        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
+        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
+        // The row was created with the owner this decision resolved, so this writes only the association fields, status
+        // and provenance — no reparent re-derivation is needed.
+        if (filingFields is null)
+        {
+            try
+            {
+                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+            }
+            catch (Exception ex)
+            {
+                // Association resolution failure is non-fatal
+                _logger.LogWarning(
+                    ex,
+                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                    "GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+
+        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
+        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
+        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
+        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
+        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
+        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
+        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct, keepInternalOnly: inquiryReply);
+    }
 
     /// <summary>
     /// Steps 4.6 and 4.6b: resolves the email's thread (best-effort, non-fatal) and then lowers
