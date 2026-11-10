@@ -165,6 +165,12 @@ Conditions (binding for the build):
   - Copying the version into a new draft carries the text forward.
 - **C3, the writer preflight never drops a Signal for a mapper caller.** Test: a mapper-built request with invalid stored text reaches `SignalWriter` with `FirmReason = null`, never with the text. So the preflight code can fire only for a non-mapper caller.
 
+- **C4, the name guard also runs at copy time** (uac-r2, after EB-D-213). A form edit skips publish, so the Q4 name check must also run in the shared check used by the mapper and the replay (C1); both already read the version and hold its rule set and policy names.
+  - A name match is handled like any invalid text: the text is dropped, the Signal is kept with the table text, the log carries the code only, and no preflight fallback is taken.
+  - The 422 refusal at publish stays for the editor.
+  - Must-fire: a stored text naming its own rule set or policy gives `FirmReason = null` on both the mapper path and the replay path.
+  - Must-not-fire: text naming neither is copied.
+
 uac-r2 receives the build diff when it is ready, plus notices before and after each live step.
 
 ### ontology-r1: ACCEPTED with conditions (2026-11-10, Q5)
