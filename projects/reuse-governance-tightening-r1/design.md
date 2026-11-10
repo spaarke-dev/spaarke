@@ -1,10 +1,10 @@
 # reuse-governance-tightening-r1 — Design
 
 > **Status**: Design draft for owner review. Do **not** run `/design-to-spec` or `/project-pipeline` until the owner has answered the Open Questions (§11).
-> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-16 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds.
+> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-16 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds. Then OQ-1 to OQ-7 and OQ-9 decided; the reuse scan moved to `/design-to-spec` (OQ-6); OQ-8 has a revised proposal awaiting the owner.
 > **Created**: 2026-11-10 (recreated; the 2026-09-02 draft was lost: it was in no worktree and never committed).
 > **Sources**: the owner's 2026-11-10 evaluation of an external "Claude Code Quality Recommendations" document (items B1, B2, B4, B7, B8); the Sept 2026 owner decision recorded in auto-memory `project_reuse-governance-tightening-r1.md` (the only surviving summary of the lost draft); the current repo at `d64a45071b`.
-> **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `[Obsolete]` attributes and `Directory.Build.props`; no new surface), SpaarkeAi (N), root CLAUDE.md (N, unless OQ-7 is answered "yes").
+> **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `[Obsolete]` attributes and `Directory.Build.props`; no new surface), SpaarkeAi (N), root CLAUDE.md (Y — one pointer line in §11, OQ-7). **Portfolio**: Epic #427, the code-quality program (OQ-9).
 
 ---
 
@@ -101,6 +101,7 @@ Row 30 is deliberate: where the index cannot name one canonical component, the r
 
 - `task-create` Step 3.5.6: `<existing>` **consults the capability index first**, then Greps. The answer cites either `CAPABILITY-INDEX row N` plus file:line, or `CAPABILITY-INDEX: no row` plus the Grep command shown (today's rule).
 - `code-review` Step 6.6 and the adversarial reviewer (item 3) use the same index.
+- Root `CLAUDE.md` §11 gets one line pointing at the index ("`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`"). **Decided (OQ-7).** This makes root CLAUDE.md a hot-path touch; the edit follows the maintainer notes in that file's header comment (root §18).
 - Row maintenance: a project that adds a canonical component, or changes an extension point, updates the row in the same PR. `doc-drift-audit` already runs at project transitions; it gets the index added to its scan list.
 
 ### 3.4 Why hand-curated
@@ -112,20 +113,29 @@ A generated manifest was rejected earlier and stays rejected (§10.4): the BFF a
 | Concern | Rung | Mechanism |
 |---|---|---|
 | Rows point at paths that no longer exist | **ArchTest / source-scan guard** | New `tests/Spaarke.ArchTests/CapabilityIndexTests.cs`: parse the table; every canonical-component path exists on disk; every ADR cited exists in `.claude/adr/`. Must-fire control: a seeded row with a missing path fails. Must-not-fire control: the real file passes. Runs in the `Stop` hook and CI with the other ArchTests. |
-| `<existing>` ignores the index | **Lint** (script) | `scripts/Validate-TaskPoml.ps1`: when a task has a `role="new"` file, `<existing>` must contain `CAPABILITY-INDEX row` or `CAPABILITY-INDEX: no row`. Warning first (shadow window), then error — see OQ-3. |
+| `<existing>` ignores the index | **Lint** (script) | `scripts/Validate-TaskPoml.ps1`: when a task has a `role="new"` file, `<existing>` must contain `CAPABILITY-INDEX row` or `CAPABILITY-INDEX: no row`. **Warning only** (OQ-3). A later change can promote it to an error once warnings show it is followed. |
 | Whether the row chosen is the *right* one | **Prose** | Judgment; reason it cannot be mechanised: choosing the canonical component for a concept is semantic. Checked by `code-review` 6.6. |
 
-## 4. Item 2 — Reuse scan in `project-pipeline` Step 2 (B2, B4)
+## 4. Item 2 — Reuse scan, first in `/design-to-spec`, confirmed in `project-pipeline` Step 2 (B2, B4)
+
+### 4.0 Where it runs — decided (OQ-6)
+
+The scan runs **once, in `/design-to-spec` Step 3**. There it replaces the "quick Grep/Glob for an existing component" exception that step already makes for the spec's §11 table. That is the cheapest point to catch a duplicating design, before the spec is written around it.
+- **Two or more candidates** become a question in design-to-spec's review step (Step 5), recorded under the spec's "Owner Clarifications".
+- **`project-pipeline` Step 2 item 5** then *confirms* the scan instead of repeating it. It checks that `notes/reuse-scan.md` exists, and it scans only capabilities that the spec added or renamed after the scan ran.
+- **A project that arrives with a hand-written `spec.md`** and no scan gets the full scan in Step 2.
+
+The cost stays at one scan per project.
 
 ### 4.1 What
 
-A new sub-step in `project-pipeline` Step 2 Part 1, after item 5 (canonical implementations):
+The scan's steps (run by `/design-to-spec` Step 3, or in full by `project-pipeline` Step 2 when no scan exists):
 
 1. The orchestrator extracts from `spec.md`/`design.md` the list of **capabilities the project introduces** (not file names): each new service, endpoint, package, Dataverse column and UI surface, expressed as a concept with its likely synonyms and the interface it would expose.
 2. It launches **one `code-mapper` agent** (model `sonnet`; see OQ-2 on effort) with that list, the capability index, and instructions to search **by concept, synonym and interface shape**, not by the name the spec uses: e.g. for "matter-number generator" also search `INumberGenerator`, `sequence`, `autonumber`, `alternate key`, and for an interface, methods with the same signature.
 3. The agent returns facts in a fixed schema (below). Per its definition it does not judge and does not write files.
 4. The orchestrator (planning tier) judges the facts and writes **`projects/{name}/notes/reuse-scan.md`**, including a **plan-level duplication check**: does any capability in the design duplicate an existing one, or does the design add a package/service where the index row says "extend X"?
-5. **Two or more viable candidates for one capability → ask the human** (interactive: a question; autonomous: STOP at this gate with the options, like the other safety gates). One candidate → record it as the `extend` target. Zero → record "none found" with the searches run.
+5. **Two or more viable candidates for one capability → ask the human** (in design-to-spec: a Step 5 review question; in project-pipeline, interactive: a question; autonomous: STOP at this gate with the options, like the other safety gates). One candidate → record it as the `extend` target. Zero → record "none found" with the searches run.
 6. `task-create` Step 3.5.6 `<existing>` **cites `notes/reuse-scan.md`** (the row for that capability) when the file exists.
 
 Return schema (passed as `schema` in a workflow `agent()` call, or required in the prompt):
@@ -139,15 +149,17 @@ Return schema (passed as `schema` in a workflow `agent()` call, or required in t
 
 ### 4.2 A deviation from the brief, and why
 
-The brief says the `code-mapper` agent *writes* `notes/reuse-scan.md` and *checks the plan for duplication*. `.claude/agents/code-mapper.md` forbids both: it is read-only ("Don't edit or create files in any checkout") and it reports facts, leaving judgment to the caller. The design keeps the agent definition intact and splits the work: **the agent finds, the orchestrator judges and writes**. This also keeps the judgment on the planning tier, as root `CLAUDE.md` §8.5 and `project-pipeline` "Model and effort" require, and costs one Sonnet agent plus a short orchestrator pass. (Writing under `projects/` is not blocked by the §3 sub-agent boundary; the reason is the agent's own contract.) If the owner prefers the agent to write the file, that needs a new agent definition, not a change to `code-mapper` (OQ-1).
+The brief says the `code-mapper` agent *writes* `notes/reuse-scan.md` and *checks the plan for duplication*. `.claude/agents/code-mapper.md` forbids both: it is read-only ("Don't edit or create files in any checkout") and it reports facts, leaving judgment to the caller. The design keeps the agent definition intact and splits the work: **the agent finds, the orchestrator judges and writes**. This also keeps the judgment on the planning tier, as root `CLAUDE.md` §8.5 and `project-pipeline` "Model and effort" require, and costs one Sonnet agent plus a short orchestrator pass. (Writing under `projects/` is not blocked by the §3 sub-agent boundary; the reason is the agent's own contract.) **Decided (OQ-1): keep the split.**
 
-A second consequence: Step 2 Part 1 runs in Plan Mode (read-only). The scan runs in Part 1; `reuse-scan.md` is written at the start of Part 2, with the other artifacts.
+A second consequence: both skills run their discovery in Plan Mode (read-only). The scan runs during discovery, and `reuse-scan.md` is written when the skill starts writing files: design-to-spec Step 4, or project-pipeline Step 2 Part 2.
+
+**Effort — decided (OQ-2): `low`, the definition's default.** The dry-run (§9) records the scan's token use and whether it missed a known duplicate. If it misses one, the change to `medium` is proposed to the owner *with* the measured token cost per scan and the projected monthly cost at the current project rate, before anything is changed. It is one Sonnet call per project, so the delta is expected to be small, but the owner sees the number first.
 
 ### 4.3 Enforcement-ladder choice
 
 | Concern | Rung | Mechanism |
 |---|---|---|
-| The scan is skipped | **Script lint** at the pipeline's existing Completeness Lint gate | Step 3 does not start if `notes/reuse-scan.md` is absent for a project whose spec introduces new surface (the §11 table in the spec is non-empty). Checked by the same lint pass that already gates Step 3. |
+| The scan is skipped | **Script lint** at the pipeline's existing Completeness Lint gate | `project-pipeline` Step 3 does not start if `notes/reuse-scan.md` is absent for a project whose spec introduces new surface (the §11 table in the spec is non-empty). Checked by the same lint pass that already gates Step 3, so a scan skipped in design-to-spec is still caught before tasks exist. |
 | `<existing>` does not cite the scan | **Lint** | `Validate-TaskPoml.ps1` accepts `reuse-scan.md` as a valid `<existing>` citation (alongside the index row). |
 | The ≥ 2-candidate human decision | **Prose + gate** | A judgment call by definition; the gate is that the pipeline stops, not that a tool decides. |
 
@@ -160,10 +172,10 @@ A second consequence: Step 2 Part 1 runs in Plan Mode (read-only). The scan runs
 1. **Syntactic sweep**: `jscpd` (exact version pinned, run via `npx`, no `package.json` change) over `src/**` for TS/TSX and C#, `--exitCode 0`. It writes a JSON + Markdown report as a workflow artifact.
 2. **Exclusions**: `**/node_modules/**`, build output, generated code, `**/*.test.*`, `tests/**`, and **`.claude/worktrees/agent-*/**`**. Agent worktrees hold full source-tree copies and would report every file as duplicated. In CI that folder is absent (`.claude/worktrees/` is gitignored), but the exclusion lives in the shared `.jscpd.json` so that a local run gives the same answer as CI.
 3. **Baseline**: a committed `scripts/quality/duplication-baseline.json` lists the known clone clusters (fingerprinted by file pair + hash, not by line number). This is a ratchet baseline in the §16 sense, but **observing, not gating**.
-4. **One alert**: the sweep calls `.github/actions/quality-alert` with check `weekly/duplication-sweep`. Status `failing` when the run finds clone clusters **not in the baseline** above a size floor (e.g. ≥ 50 tokens, ≥ 2 files in different top-level areas); status `ok` otherwise, which closes the alert. A permanently open alert would be noise in the `SessionStart` quality banner, so "new since baseline" — not "any duplication" — is the trigger. The summary names each new cluster with its two paths and the capability-index row it most likely belongs to, if any.
+4. **One alert**: the sweep calls `.github/actions/quality-alert` with check `weekly/duplication-sweep`. Status `failing` when the run finds clone clusters **not in the baseline** above a size floor (≥ 100 tokens **and** ≥ 10 lines, in ≥ 2 files in different top-level areas — see OQ-8); status `ok` otherwise, which closes the alert. A permanently open alert would be noise in the `SessionStart` quality banner, so "new since baseline" — not "any duplication" — is the trigger. The summary names each new cluster with its two paths and the capability-index row it most likely belongs to, if any.
 5. **Reviewer item**: `.claude/agents/adversarial-reviewer.md` gains one check: *"New surface that duplicates a capability in `.claude/patterns/CAPABILITY-INDEX.md` (same concept under another name, or a new package/service where the row says extend). Class F4 when it adds a second implementation of an indexed capability; K-class when it is a judgment call."* This is the capability-level half that jscpd cannot see.
 
-Where it runs: **extend `nightly-health.yml`** with a weekly-cadence job rather than adding a workflow (root §11 "extension"), reusing its quality-alert matrix plumbing — see OQ-4 for the alternative.
+Where it runs: **extend `nightly-health.yml`** with a weekly-cadence job rather than adding a workflow (root §11 "extension"), reusing its quality-alert matrix plumbing. **Decided (OQ-4).**
 
 ### 5.2 Enforcement-ladder choice
 
@@ -184,6 +196,11 @@ For each package between the `shared-package-census` markers in `.claude/adr/ADR
 - **Retire** → no remaining reason to exist (1 consumer, or a pure re-export); fold into its consumer.
 
 The owner decides each one. Evidence gathering is `code-mapper` work (sonnet, low); the recommendation is planning-tier judgment.
+
+**Scope rule — decided (OQ-5), with a guard against burying issues.** r1 decides all 9 packages and carries out consolidations only for packages with three or fewer consumers; the rest are filed. That threshold limits **effort only, never significance**:
+- Each decision record has a **Findings** section, graded by severity. Examples: two packages implement the same capability with different behaviour (a user could see different results on two surfaces), a duplicate that has already drifted, or a shared package that breaks an ADR-012 MUST.
+- Any finding that is a defect on a real path is **fixed in this project or reported to the owner by name** in the project report and the PR, per root CLAUDE.md §8.5 ("every defect found is fixed in scope, or filed and reported"). Filing it is not enough; the owner sees it.
+- A filed consolidation's GitHub issue carries the decision record's findings and severity, so the backlog says *why* it matters, not just "consolidate X".
 
 ### 6.2 Starting hypotheses (from the census reasons; the review may overturn any of them)
 
@@ -337,7 +354,7 @@ If cost fails but usefulness passes, the fallback is opt-in per session (enabled
 |---|---|---|---|
 | `.claude/patterns/CAPABILITY-INDEX.md` | `.claude/patterns/INDEX.md` and its 94 pointer files (verified 2026-11-10) map *task type → pattern*, not *concept/synonym → canonical component*. | No: the pattern files are capped at 25 lines each and organised by domain, so no file can hold a cross-domain concept lookup; a 30-row table added to `INDEX.md` would double its length and mix two lookups. | `<existing>` keeps depending on the author guessing the right name: `task-create` 3.5.6 passes with "none found" for a capability that exists under another name (G1). |
 | `tests/Spaarke.ArchTests/CapabilityIndexTests.cs` | `SharedPackageCensusTests.cs` parses an ADR table between markers. | Partly: copy its table-parsing approach; it cannot be the same class, because it asserts a different invariant over a different file. | The index rots silently: a row points at a moved or deleted component and sends agents to a dead path, which is worse than no index. |
-| Reuse-scan sub-step in `project-pipeline` Step 2 + `notes/reuse-scan.md` | Step 2 item 5 already asks for the §11 "Existing" answer per new surface. | Yes — this **extends item 5** rather than adding a step: it changes *how* the answer is found (concept/synonym/interface search by one agent) and *where it is recorded* (a file later steps cite). | A design that re-implements an existing capability passes every per-task gate (G2), because each task's `<existing>` is answered locally after the plan is fixed. |
+| Reuse scan in `/design-to-spec` Step 3 (confirmed in `project-pipeline` Step 2) + `notes/reuse-scan.md` | design-to-spec Step 3 already makes a "quick Grep/Glob" exception for the spec's §11 table; pipeline Step 2 item 5 already asks for the §11 "Existing" answer per new surface. | Yes — this **extends both existing steps** rather than adding one: it changes *how* the answer is found (concept/synonym/interface search by one agent) and *where it is recorded* (a file later steps cite). | A design that re-implements an existing capability passes every per-task gate (G2), because each task's `<existing>` is answered locally after the plan is fixed. |
 | Weekly sweep job | `nightly-health.yml` (8 quality-alert checks), `scripts/report-large-server-files.ps1` (observation-only size report). | Yes — a job inside `nightly-health.yml` on a weekly cron, reusing its quality-alert step. | Parallel worktrees can land the same code twice and nothing reports it until someone trips over it (G3). |
 | `.jscpd.json` + `scripts/quality/duplication-baseline.json` | None found (a repo-wide `jscpd` Grep timed out at 20 s; to re-check in task 1 with a scoped search). | No: configuration and baseline for a tool the repo does not use yet. | Without the baseline every week's run alerts on known clusters and the alert is ignored; without the shared config local and CI runs disagree (agent-worktree phantoms). |
 | One check in `adversarial-reviewer.md` | The definition's checklist. | Yes — a line added to the existing list (modification of existing surface). | Capability-level duplication in a change set is invisible to every syntactic tool. |
@@ -375,15 +392,15 @@ Do not re-adopt these without new evidence.
 
 | # | Question | Recommendation |
 |---|---|---|
-| OQ-1 | The brief has the `code-mapper` agent *write* `reuse-scan.md` and *judge* plan duplication; its definition forbids both. Keep the split (agent finds, orchestrator judges and writes), or create a new agent definition that writes? | Keep the split (§4.2). |
-| OQ-2 | `code-mapper` runs at effort `low`. Concept/synonym/interface search is harder than "where is X used". Accept `low`, or run this one call at `medium` via a workflow `agent()` (the definition fixes effort for the Agent tool)? | Try `low` in the dry-run (§9); raise only if it misses a known duplicate. |
-| OQ-3 | Should `Validate-TaskPoml.ps1` require the `CAPABILITY-INDEX row` / `no row` citation as an error immediately, or warn for a shadow window first? | Warn for two projects, then error. |
-| OQ-4 | Sweep placement: a weekly job inside `nightly-health.yml` (extension, recommended by root §11) or a separate `weekly-duplication-sweep.yml` (simpler cron, isolates a new tool)? | Inside `nightly-health.yml`. |
-| OQ-5 | Item 4 scope: does r1 only *decide* the 9 packages (records + ADR amendments for sanctions), or also *execute* the cheap consolidations (`document-operations`, `ai-context`, `legal-workspace` look cheapest)? | Decide all 9; execute only those with ≤ 3 consumers; file the rest. |
-| OQ-6 | Should the reuse scan also run earlier, in `design-to-spec`, where re-scoping a duplicate is cheapest? The brief places it in `project-pipeline` Step 2. | Step 2 for r1 (it has the spec's §11 table to work from); revisit after the first two real runs. |
-| OQ-7 | Root `CLAUDE.md` §11 names the three questions but not the index. Add a one-line pointer there ("`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`")? It would make root CLAUDE.md a hot-path touch. | Yes, one line; `task-create` alone is read only at task-authoring time. |
-| OQ-8 | jscpd new-cluster floor (tokens, cross-area rule) for the alert. | Start at 50 tokens / different top-level areas; tune after four weeks of reports. |
-| OQ-9 | Epic and portfolio registration: which Epic does this project sit under (the code-quality program, Epic #427, is the obvious parent)? | Epic #427. |
+| OQ-1 | The brief has the `code-mapper` agent *write* `reuse-scan.md` and *judge* plan duplication; its definition forbids both. Keep the split (agent finds, orchestrator judges and writes), or create a new agent definition that writes? | **Decided 2026-11-10**: keep the split (§4.2). |
+| OQ-2 | `code-mapper` runs at effort `low`. Concept/synonym/interface search is harder than "where is X used". Accept `low`, or run this one call at `medium` via a workflow `agent()` (the definition fixes effort for the Agent tool)? | **Decided 2026-11-10**: `low`. If the dry-run shows a raise is needed, the measured token and cost impact goes to the owner before any change (§4.2). |
+| OQ-3 | Should `Validate-TaskPoml.ps1` require the `CAPABILITY-INDEX row` / `no row` citation as an error immediately, or warn for a shadow window first? | **Decided 2026-11-10**: warning. |
+| OQ-4 | Sweep placement: a weekly job inside `nightly-health.yml` (extension, recommended by root §11) or a separate `weekly-duplication-sweep.yml` (simpler cron, isolates a new tool)? | **Decided 2026-11-10**: extension, inside `nightly-health.yml`. |
+| OQ-5 | Item 4 scope: does r1 only *decide* the 9 packages (records + ADR amendments for sanctions), or also *execute* the cheap consolidations? | **Decided 2026-11-10**: decide all 9; execute those with ≤ 3 consumers; file the rest. The threshold limits effort, never significance: defects found are fixed or reported to the owner by name (§6.1). |
+| OQ-6 | Should the reuse scan also run earlier, in `design-to-spec`, where re-scoping a duplicate is cheapest? | **Decided 2026-11-10**: yes. It runs in design-to-spec Step 3; pipeline Step 2 confirms it and re-scans only what changed (§4.0). |
+| OQ-7 | Root `CLAUDE.md` §11 names the three questions but not the index. Add a one-line pointer there? | **Decided 2026-11-10**: yes, one line (§3.3). |
+| OQ-8 | jscpd new-cluster floor (tokens, lines, cross-area rule) for the alert. | **Proposed, awaiting the owner's nod**: ≥ 100 tokens **and** ≥ 10 lines, across different top-level areas. The full report keeps jscpd's default (50 tokens / 5 lines) for browsing. 50 is jscpd's out-of-the-box default, not an alerting recommendation; PMD CPD, the other common detector, defaults to 100 tokens. Tune after four weekly reports. |
+| OQ-9 | Epic and portfolio registration. | **Decided 2026-11-10**: Epic #427, the code-quality program. |
 | OQ-10 | 5(b): which shared packages move to `strict` in r1? | **Decided 2026-11-10**: all shared packages whose strict build shows fewer than ~100 errors; the rest are split off and filed. |
 | OQ-11 | 5(b): extend type-aware ESLint beyond the packages made strict in r1? | **Decided 2026-11-10**: not in this project (§12). |
 | OQ-12 | 5(c): cloud routine or GitHub Action? | **Decided 2026-11-10**: Claude Code scheduled cloud routine, opening a draft PR only; plus the CI watchdog (§7.3). |
@@ -401,8 +418,8 @@ Do not re-adopt these without new evidence.
 ## 13. Success criteria
 
 1. `.claude/patterns/CAPABILITY-INDEX.md` exists with ~30 rows; `CapabilityIndexTests` passes and its must-fire control fails on a seeded dead path.
-2. `task-create` 3.5.6 and `code-review` 6.6 cite the index; `Validate-TaskPoml.ps1` checks the citation (at the strength OQ-3 sets).
-3. `project-pipeline` Step 2 runs the reuse scan, writes `notes/reuse-scan.md`, stops on ≥ 2 candidates, and the dry-run against two closed projects is recorded with what it caught and missed.
+2. `task-create` 3.5.6 and `code-review` 6.6 cite the index; `Validate-TaskPoml.ps1` warns when the citation is missing; root CLAUDE.md §11 carries the one-line pointer.
+3. `/design-to-spec` Step 3 runs the reuse scan, writes `notes/reuse-scan.md`, and raises ≥ 2 candidates as owner questions; `project-pipeline` Step 2 confirms the scan, re-scans only changed capabilities, and runs the full scan when none exists; the dry-run against two closed projects records what it caught, what it missed and its token use.
 4. The weekly sweep runs, exits 0, excludes `.claude/worktrees/agent-*`, and opens/closes exactly one `quality-alert` issue (`weekly/duplication-sweep`) based on clusters not in the baseline.
 5. `adversarial-reviewer.md` carries the capability-duplication check pointing at the index.
 6. Each of the 9 grandfathered packages has an owner-approved decision record; every *sanction* has landed as an ADR-012 amendment with the census table and `SharedPackageCensusTests` updated in the same PR; consolidations are executed or filed per OQ-5.
