@@ -304,10 +304,16 @@ internal sealed class GateSharingWorld
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
             Task.FromResult(Read(entityLogicalName, recordId));
 
-        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
-            FailReadFor.Contains(entityLogicalName)
+        /// <summary>uac-r2 task 198 pass 2 (F3): runs before a strict share read (a concurrent writer landing between two reads).</summary>
+        public Action<string, Guid>? BeforeStrictRead { get; set; }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            BeforeStrictRead?.Invoke(entityLogicalName, recordId);
+            return FailReadFor.Contains(entityLogicalName)
                 ? Task.FromException<IReadOnlyList<DataversePrincipalAccess>>(new InvalidOperationException("Test: the share read failed."))
                 : Task.FromResult(Read(entityLogicalName, recordId));
+        }
 
         public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
             string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default) =>

@@ -182,6 +182,101 @@ public sealed class GateDecisionRecordSharingDirectTests
         world.RecordSharees(RecordId).Should().BeEmpty("the read-back accepts exactly the Direct team; any other team revokes the pass");
     }
 
+    // ── 198 pass 2 F3: a rejected read-back revokes only THIS call's grants ─────────────────────────────────────
+
+    [Fact(DisplayName = "198 pass 2 F3 (a): shared at write with the pair, then a join-grant mirror whose owner read-back faults; the participants keep their Read")]
+    public async Task F3_SharedAtWrite_ThenAMirrorWhoseOwnerReadBackFaults_TheParticipantsKeepTheirRead()
+    {
+        var world = UnfiledDirectMessage();
+        await Run(world, Via.AtWrite);
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Recipient }.OrderBy(g => g));
+        world.OwnerReadFault = new InvalidOperationException("Test: the owner read-back faulted.");
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Recipient }.OrderBy(g => g),
+            "the Read they held before this call is not this call's to revoke");
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "198 pass 2 F3 (b): a filing keeps the pair; a concurrent mirror's read-back then sees the matter team; the mirror does not revoke the pair")]
+    public async Task F3_AFilingKeepsThePair_ThenAConcurrentMirrorSeesTheMatterTeam_ThePairIsNotRevoked()
+    {
+        var world = UnfiledDirectMessage();
+        var filed = false;
+        // The mirror has read the message (unfiled, Direct) and its record (Direct-owned); then the filing's ReownAsync(keepAudience: true)
+        // lands: the record is re-owned to the matter's team with the pair's Read kept.
+        world.Shares.BeforeStrictRead = (table, id) =>
+        {
+            if (table == GateSharingWorld.Communication && !filed)
+            {
+                filed = true;
+                world.OwnByTeam(RecordId, MatterTeam);
+                world.Share(GateSharingWorld.Record, RecordId, Sender).Share(GateSharingWorld.Record, RecordId, Recipient);
+            }
+        };
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        filed.Should().BeTrue();
+        OwnerTeamOf(world).Should().Be(MatterTeam);
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Recipient }.OrderBy(g => g), "D-215 rule 4: the filing kept them");
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "198 pass 2 F3: a pre-existing participant share is kept and the new grant is rolled back when the read-back names another team")]
+    public async Task F3_Mirror_APriorShareIsKept_AndOnlyTheNewGrantIsRevoked_WhenReownedBetweenGrantAndReadBack()
+    {
+        // The sibling of Mirror_ARecordReownedToAnOrdinaryTeamBetweenItsGrantsAndTheReadBack_HasTheGrantsRevoked, with Sender's share seeded.
+        var world = UnfiledDirectMessage().Share(GateSharingWorld.Record, RecordId, Sender);
+        var moved = false;
+        world.Shares.BeforeGrant = (table, id, _) =>
+        {
+            if (table == GateSharingWorld.Record && !moved)
+            {
+                moved = true;
+                world.OwnByTeam(id, MatterTeam);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        moved.Should().BeTrue();
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender }, "the share Sender held before is kept; Recipient's new grant is rolled back");
+        world.Calls.Should().Contain(Revoke(Recipient)).And.NotContain(Revoke(Sender)).And.NotContain(Grant(Sender));
+    }
+
+    [Fact(DisplayName = "198 pass 2 F3 (D-169 mirror): a user-owned record's prior sharee keeps Read when a filing re-owns it between the grants and the read-back")]
+    public async Task F3_D169_APriorSharee_IsKept_WhenTheRecordIsReownedBetweenTheGrantAndTheReadBack()
+    {
+        var world = new GateSharingWorld()
+            .WithCommunication(CommunicationId, Sender)
+            .WithUser(Sender).WithUser(Recipient).WithUser(Third)
+            .Share(GateSharingWorld.Communication, CommunicationId, Recipient)
+            .Share(GateSharingWorld.Communication, CommunicationId, Third)
+            .WithGateRecord(RecordId, CommunicationId, Sender)
+            .Share(GateSharingWorld.Record, RecordId, Recipient);
+        var moved = false;
+        world.Shares.BeforeGrant = (table, id, _) =>
+        {
+            if (table == GateSharingWorld.Record && !moved)
+            {
+                moved = true;
+                world.OwnByTeam(id, MatterTeam);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        moved.Should().BeTrue();
+        world.RecordSharees(RecordId).Should().Equal(new[] { Recipient }, "only this call's grant (Third) is rolled back");
+        world.Calls.Should().Contain(Revoke(Third)).And.NotContain(Revoke(Recipient));
+    }
+
     // ── Must fire: rule 4 (filing keeps the recomputed participants) ───────────────────────────────────────────
 
     [Fact]
