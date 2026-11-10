@@ -603,7 +603,7 @@ public partial class ChildAccessPermissionReconcileTests
         private readonly SecureChildReconciliationJob _job;
         private readonly ServiceProvider _provider;
 
-        public Harness(int? maxRowsPerRun = null, int? maxWritesPerRun = null)
+        public Harness(int? maxRowsPerRun = null, int? maxWritesPerRun = null, int? maxCarriedRows = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => World).Object);
@@ -623,7 +623,11 @@ public partial class ChildAccessPermissionReconcileTests
             }).Build();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), _time, configuration,
-                NullLogger<SecureChildReconciliationJob>.Instance);
+                NullLogger<SecureChildReconciliationJob>.Instance)
+            {
+                // uac-r2 198 pass 2 (F2): a small carry cap reaches the cap with a few rows (production: MaxCarriedRows).
+                AccessPermissionCarryCap = maxCarriedRows ?? SecureChildReconciliationJob.MaxCarriedRows,
+            };
         }
 
         public SecureChildShareWorld World { get; } = SecureChildShareWorld.Standard();

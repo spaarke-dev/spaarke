@@ -166,4 +166,87 @@ public partial class ChildAccessPermissionReconcileTests
         messages.Should().OnlyContain(m => !Holds(job, "sprk_communication", m, ExternalUser), "every one is barred in the end");
         job.World.AccessPermissionWrites.Should().BeEmpty("every value was already right; the bar is bounded on its own");
     }
+
+    // ── Pass 2, F2: the carry cap. Every path into the carry respects it; a row neither handled nor carried is counted, and the
+    // sweep cursor stays before it (or the sweep starts again), so no row is lost ────────────────────────────────────────────
+
+    private static async Task<List<System.Text.Json.JsonElement>> RunsAsync(Harness job, int count)
+    {
+        var reports = new List<System.Text.Json.JsonElement>();
+        for (var i = 0; i < count; i++)
+            reports.Add((await job.RunAsync()).GetProperty("accessPermission"));
+        return reports;
+    }
+
+    [Fact(DisplayName = "198 pass 2 F2 must-fire: sweep rows the capped bar cannot carry are counted left, the cursor stays before them, and every one is barred in the end")]
+    public async Task F2_BarRowsPastTheCarryCap_AreCounted_TheSweepCursorHolds_AndNoneIsLost()
+    {
+        var job = new Harness(maxWritesPerRun: 1, maxCarriedRows: 2);
+        job.LinkColumns.Users[ExternalUser] = true;
+        var messages = Enumerable.Range(0, 5).Select(_ => job.Child("sprk_communication", Restricted)).ToArray(); // parentless: only the sweep finds them
+        foreach (var message in messages)
+            job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(ExternalUser), 1);
+
+        var reports = await RunsAsync(job, 6);
+
+        var first = reports[0];
+        first.GetProperty("restrictedBar").GetProperty("ran").GetInt32().Should().Be(1);
+        first.GetProperty("restrictedBar").GetProperty("capped").GetInt32().Should().Be(4);
+        first.GetProperty("restrictedBar").GetProperty("left").GetInt32().Should().Be(2, "two capped rows did not fit the carry: counted");
+        first.GetProperty("carriedRows").GetInt32().Should().Be(2);
+        first.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeFalse(
+            "the sweep cursor does not pass a row that was neither barred nor carried");
+        reports.Should().OnlyContain(r => r.GetProperty("carriedRows").GetInt32() <= 2, "the carry never exceeds its cap");
+        messages.Should().OnlyContain(m => !Holds(job, "sprk_communication", m, ExternalUser), "no row is lost: every one is barred");
+        reports[^1].GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue("the sweep finishes once nothing is left");
+    }
+
+    [Fact(DisplayName = "198 pass 2 F2 must-fire: undecidable sweep rows past the carry cap are not dropped: the cursor stays before them, and they are written once their parent reads")]
+    public async Task F2_UndecidableRowsPastTheCarryCap_AreNotDropped_AndAreWrittenLater()
+    {
+        var job = new Harness(maxCarriedRows: 2);
+        var matter = job.Root("sprk_matter", Restricted);
+        var todos = Enumerable.Range(0, 3)
+            .Select(_ => job.Child("sprk_todo", Standard, ("sprk_regardingmatter", "sprk_matter", matter)))
+            .ToArray(); // never modified: only the sweep finds them
+        job.World.FailingIdListReadsOf("sprk_matter", matter);
+
+        var first = (await job.RunAsync()).GetProperty("accessPermission");
+        job.World.ClearQueryFaults();
+        var later = await RunsAsync(job, 3);
+
+        first.GetProperty("undetermined").GetInt32().Should().Be(3);
+        first.GetProperty("carriedRows").GetInt32().Should().Be(2, "the carry never exceeds its cap");
+        job.World.AccessPermissionWrites.Select(w => w.Id).Should().BeEquivalentTo(todos, "no row is lost");
+        first.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeFalse(
+            "the sweep cursor does not pass a row that was neither decided nor carried");
+        later[^1].GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
+        first.GetProperty("carryOverflow").GetInt32().Should().Be(1, "the row past the cap is counted, never silently dropped");
+    }
+
+    [Fact(DisplayName = "198 pass 2 F2 must-fire: rows the capped bar leaves (listed only under a change) are found again by a restarted sweep, without holding the watermark")]
+    public async Task F2_RowsTheCappedBarLeaves_AreFoundAgainByARestartedSweep()
+    {
+        var job = new Harness(maxWritesPerRun: 1);
+        job.LinkColumns.Users[ExternalUser] = true;
+        var matter = job.Root("sprk_matter", Restricted);
+        var messages = Enumerable.Range(0, 3)
+            .Select(_ => job.Child("sprk_communication", Restricted, ("sprk_regardingmatter", "sprk_matter", matter)))
+            .ToArray();
+        var settle = await RunsAsync(job, 4); // the sweep finishes and its carried rows drain (nothing to remove yet)
+        settle[^1].GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
+        settle[^1].GetProperty("carriedRows").GetInt32().Should().Be(0);
+
+        foreach (var message in messages)
+            job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(ExternalUser), 1);
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime); // its messages are listed only under this change
+        var changed = (await job.RunAsync()).GetProperty("accessPermission");
+        var after = await RunsAsync(job, 5);
+
+        changed.GetProperty("restrictedBar").GetProperty("ran").GetInt32().Should().Be(1);
+        changed.GetProperty("restrictedBar").GetProperty("left").GetInt32().Should().Be(2, "rows listed only under a change are not carried");
+        after[0].GetProperty("rowsChanged").GetInt32().Should().Be(0, "the watermark moved past the change: it is not held for left rows");
+        messages.Should().OnlyContain(m => !Holds(job, "sprk_communication", m, ExternalUser),
+            "the sweep starts again and finds the rows the bar left, so none is lost");
+    }
 }

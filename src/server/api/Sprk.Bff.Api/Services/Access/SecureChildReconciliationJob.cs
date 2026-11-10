@@ -1454,12 +1454,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         {
             // The window moves only past a pass that listed completely, wrote, and did not stop at the write cap (F3): a
             // capped run's unwritten rows are listed again from the same watermark next run.
-            var overflow = run.Carry.Count > MaxCarriedRows;
+            var overflow = run.Carry.Count > AccessPermissionCarryCap;
             if (run.Failure is null && writes && !overflow && !run.WriteCapReached)
                 _accessPermissionWatermark = startedAt - RecentChangesOverlap;
 
             _accessPermissionPending.Clear();
-            _accessPermissionPending.UnionWith(run.Carry.Take(MaxCarriedRows));
+            _accessPermissionPending.UnionWith(run.Carry.Take(AccessPermissionCarryCap));
 
             // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing).
             if (sweepAfter is not null && run.Failure is null && writes && !run.WriteCapReached)
@@ -2487,6 +2487,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private readonly HashSet<(string Table, Guid Id)> _accessPermissionPending = new();
     private bool _accessPermissionSweepComplete;
     private (string Table, Guid Id)? _accessPermissionSweepCursor;
+
+    /// <summary>
+    /// uac-r2 task 198 pass 2 (F2): the most rows the inherited Access Permission pass carries between runs. Production:
+    /// <see cref="MaxCarriedRows"/>; settable only so tests can reach the cap with a few rows.
+    /// </summary>
+    internal int AccessPermissionCarryCap { get; init; } = MaxCarriedRows;
 
     // Owner round 122 fix round 1 (K1): both document link columns were found field-secured. Cached for the process once
     // true (this job is a singleton); a "not secured" answer or a failed read is asked again on the next run that needs it,
