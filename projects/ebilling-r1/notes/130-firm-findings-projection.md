@@ -521,11 +521,11 @@ Ten codes across six types, matching uac-r2's count: ApprovedRate: `approved_rat
 | `core_record_window.after_close` | A billed date falls after the matter or project was closed. |
 | `core_record_window.core_record_closed` | The matter or project this invoice is billed against is closed. |
 | `core_record_window.closed_to_billing` | The matter or project this invoice is billed against is closed to new billing. |
-| `duplicate.invoice_number` | This invoice number matches one that has already been received. |
+| `duplicate.invoice_number` | This invoice number has already been used with this client. Please check it or contact the client. |
 | `required_data.missing_field` | A required invoice field is missing. |
 | (no entry, fail closed) | This invoice did not meet a billing rule. |
 
-Every entry is static: no value, name, amount, date, clause text, rule set name or section reference, and no format placeholder. The Duplicate text says only that the number was received before; it names no earlier invoice (D-112, D-176).
+Every entry is static: no value, name, amount, date, clause text, rule set name or section reference, and no format placeholder. The Duplicate text is one uniform sentence pair for every Duplicate rejection, whether or not the detail was withheld (uac-r2 ruling, 130d fix round 1, K3); it names no earlier invoice (D-112, D-176) and never varies by "withheld".
 
 ### The guard
 
@@ -564,7 +564,7 @@ For a rejection finding the writer is no longer needed to give the firm a reason
 
 ### Option 3 in detail (what the writer would store, where, schema, files, tests)
 
-- **Text stored:** the rule version's firm-facing description, as written by the rule author, trimmed, at most 2,000 characters (the column limit) and, to match what the projection shows, written authors' text of at most 200 characters (the projection cuts at 200; the editor should enforce the same). Plain text only. For a merged Signal (several reasons on one policy and subject) the text is the primary reason's, the same choice the Signal's sentence already makes. It must not be generated from the finding's values: the Signal's sentence and evidence carry client values and are internal.
+- **Text stored:** the rule version's firm-facing description, as written by the rule author, trimmed, at most 2,000 characters (the column limit) and, to match what the projection shows, written authors' text of at most 200 characters (the projection cuts a rejection finding's text at 200 plus "...", so up to 203 characters; the editor should enforce the same). Plain text only. For a merged Signal (several reasons on one policy and subject) the text is the primary reason's, the same choice the Signal's sentence already makes. It must not be generated from the finding's values: the Signal's sentence and evidence carry client values and are internal.
 - **Where it is written:** `SignalWriter.BuildEntity` (`Services/Signals/SignalWriter.cs`): `if (!string.IsNullOrWhiteSpace(request.FirmReason)) entity["sprk_firmreason"] = request.FirmReason;`, with a new optional `SignalWriteRequest.FirmReason` init property (a nullable, defaulted member like `Episode` and `RequestedBy`, so no existing caller changes). It is set in `BillingFindingSignalMapper.RequestOf` from the rule candidate. This file is owned by ontology-r1 (the Signal writer), so the change needs their review; the billing-side files are ours.
 - **Schema change (needed for option 3, not for options 1 and 2):** one new column on **`sprk_policyversion`**: `sprk_firmdescription`, Memo, MaxLength 2000, nullable, not field-secured (it is rule content, published by the rule editor, not a per-signal record the BFF identity reads; it is firm-facing by definition and holds no client data). On the version rather than the policy, so it is immutable with the version the Signal cites and a published version's text cannot change under an existing Signal (the same reason `sprk_messagetemplate` and `sprk_shortheadline` live there). `sprk_signal.sprk_firmreason` already exists (Memo 2000, field-secured, task 026): no change. Deployment follows the existing ebilling schema pattern (`scripts/ebilling/Deploy-Ebilling*Schema.ps1` on `EbillingSchema.psm1`, plus the SpaarkeMaster source), and is the owner's call (schema change).
 - **Live dev write:** yes, two, both needing the owner's approval: (1) the schema deployment of `sprk_policyversion.sprk_firmdescription` on dev; (2) one smoke-test Signal created on dev through the real writer to prove `sprk_firmreason` is stored by the ontology writer identity and read back by the BFF identity (task 026's `Set-EbillingFirmReasonFieldSecurity.ps1 -Verify` already proves the profile; the smoke proves the end-to-end write). Options 1 and 2 need no live write beyond the usual smoke of the BFF deploy.
@@ -589,3 +589,23 @@ For a rejection finding the writer is no longer needed to give the firm a reason
 ### Recommendation
 
 Do option 1 now (it also gives decided lines a reason without any schema or peer change), and only build option 3 if the owner wants per-rule wording; then it needs the owner's approval of the `sprk_policyversion.sprk_firmdescription` column and its dev deployment, and ontology-r1's review of the one-line `SignalWriter` change. Do not build option 2.
+
+### 130d fix round 1
+
+Branch `task/ebilling-130d`, fast-forward. Tests and doc comments, plus notes; no behaviour change.
+
+- **K4, the top-level code check is back.** `StoredDocument`'s top-level `reasonCode` is now `CurrencyNotUsd` (a code that cannot reject), and `Rejected_NothingInternalInTheStoredFindingsIsProjected` adds a `rejects:false` ApprovedRate entry with its own distinct code (`approved_rate.unresolved`). It asserts that neither code appears in the partner response and that the rejecting findings' own `reasonCode`s (in order) do.
+- **K6, doc comment.** The `FirmReasons` parameter's "empty when none (never substituted)" now applies to decided lines and adjustments only; the 130d default for a rejection finding is described beside it.
+- **K2, the cut.** The override cut returns at most 200 characters plus "...", so up to 203; stated on `FirmReasons` and on `FirmRejectionFindings.Truncate`, and in the DEF-060 design above. The 200 in the design note's "Content guard" is the writer's cap; the projection shows up to 203 for a cut rejection text.
+
+- **K3, one uniform Duplicate text (uac-r2 ruling).** `duplicate.invoice_number` now reads "This invoice number has already been used with this client. Please check it or contact the client." for every Duplicate rejection; it never varies by "withheld". `Rejected_ADuplicate_HasOneUniformReason_WithheldOrNot` projects a withheld Duplicate (values stored without text) and an in-scope one (values stored with text) and asserts `reasonCode` and the description are identical. **What differs between the two responses: nothing.** The whole serialized outcome is byte-identical: the projection shows no value for a Duplicate in either case (130c: a Duplicate quotes an earlier invoice), and `notShownCount`, the item count, `citations`, `lineNumber`, `valuesRead` (an empty list in both) and `degraded` are the same. The in-scope case adds no detail field in this projection, so there is no separate "withheld" marker a partner could read. Nothing else was changed. (The `reasonCode` rule-type prefix, `duplicate.`, stays, as ruled.)
+
+Results (130d fix round 1): `FirmFindingsProjectionTests`, `FirmRejectionReasonTextGuardTests`, `FirmOutcomeScopeTests` and `StoredFindingValueBoundaryTests`: 229 passed, 0 failed. Full `Spaarke.ArchTests`: 2183 passed, 0 failed.
+
+### Known limits (130d)
+
+- **Invoice items show the Signal text uncut.** On a decided line (`FirmFindingsProjection` invoice items) the Signal's `sprk_firmreason` is shown as stored (trimmed only); only a rejection finding's text is cut. Until DEF-060's writer exists no Signal carries text, so nothing is exposed today. The DEF-060 writer must therefore enforce, at write time, the 200-character cap, the no-placeholder rule (`{`, `}`), and a control-character and bidirectional-control-character filter (for example U+202A to U+202E, U+2066 to U+2069, U+200E/U+200F); the projection is not the only line of defence for invoice items.
+
+### DEF-060 design addition (K1): match the override on the reason code
+
+The override is matched today on rule version and line (and the writer-created gate), not on the reason code. A rule can reject on several reasons for one line (ExpenseRule: code and cap; CoreRecordWindow: four), and the writer's Signal is merged per (policy, subject), so one stored text can be shown against a finding it does not describe. Requirement for the writer: store the reason code the text is for together with the firm reason (a stable code beside `sprk_firmreason`, for example in the Signal's evidence under a reviewed kind, or a column if the owner accepts a schema change; the choice belongs with the option 3 schema decision), and a merged Signal stores one (code, text) pair per merged reason. The projection must then match an override on (version, line, reason code) and fall back to the table for a finding whose code has no stored text. Not built here.
