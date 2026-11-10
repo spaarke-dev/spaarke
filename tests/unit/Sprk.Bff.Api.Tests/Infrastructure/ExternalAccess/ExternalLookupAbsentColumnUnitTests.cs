@@ -110,17 +110,32 @@ public sealed class ExternalLookupAbsentColumnUnitTests
         control.Parents.Should().BeEmpty();
         control.InvoiceLinks.Should().NotBeNull().And.BeEmpty();
 
+        // F3b fix round 1: the read also selects every filing edge column the invoice ancestor walk follows; GetDeleteTargetAsync puts
+        // the row to that walk (InvoiceLinks.FirstParentsOf), where an absent one is an unreadable parent. Control: explicit nulls walk
+        // nothing.
+        var table = TableOf(kind);
+        InvoiceLinks.FirstParentsOf(table, Guid.NewGuid(), allNull).Should().BeEmpty("control: explicit nulls are not filed");
+
         var creatorStamps = new[] { "_sprk_createdbyperson_value", "_sprk_createdbycontact_value" };
         foreach (var column in select.Except(creatorStamps))
         {
             var row = allNull.Where(kv => kv.Key != column).ToDictionary(kv => kv.Key, kv => kv.Value);
 
             var target = ExternalDataService.ParseDeleteTarget(kind, row);
+            var walked = InvoiceLinks.FirstParentsOf(table, Guid.NewGuid(), row);
 
-            (target.HasUnreadableParentLink || target.InvoiceLinks is null || target.InvoiceLinks.Contains(ExternalDocumentNarrowing.UnreadableLink))
+            (target.HasUnreadableParentLink || target.InvoiceLinks is null || target.InvoiceLinks.Contains(ExternalDocumentNarrowing.UnreadableLink)
+             || walked.Any(p => p.Parent == ExternalDocumentNarrowing.UnreadableLink))
                 .Should().BeTrue($"{column} was not returned");
         }
     }
+
+    private static string TableOf(ExternalDataService.DeletableKind kind) => kind switch
+    {
+        ExternalDataService.DeletableKind.Todo => "sprk_todo",
+        ExternalDataService.DeletableKind.Event => "sprk_event",
+        _ => "sprk_document",
+    };
 
     [Theory(DisplayName = "130-0 fix3d ParseDeleteTarget (must not fire): a GUID parent is a parent; a blank or null one is none; a non-GUID is still unreadable")]
     [MemberData(nameof(DeletableKinds))]

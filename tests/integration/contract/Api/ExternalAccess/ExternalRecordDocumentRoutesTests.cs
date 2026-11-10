@@ -1939,6 +1939,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          // Task 188: the document's own Access Permission, which the document narrowing reads (its two
                          // lookups, the related communication and the parent document, are already selected above).
                          + ",sprk_accesspermission"
+                         // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is
+                         // not selected above (InvoiceLinks.ParentValueColumnsOf).
+                         + ",_sprk_relatedservicerequest_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 
@@ -2651,6 +2654,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                 .Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
                 // Fix round 3f: and the document narrowing's columns (the own Access Permission too), each an explicit null.
                 .Concat(ExternalDocumentNarrowing.SelectColumns)
+                // F3b fix round 1: and every filing edge column the invoice ancestor walk follows, each an explicit null (not filed).
+                .Concat(InvoiceLinks.ParentValueColumnsOf("sprk_document"))
                 .Distinct()
                 .ToDictionary(c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
         };

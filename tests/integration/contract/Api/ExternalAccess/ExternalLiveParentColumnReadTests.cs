@@ -269,7 +269,10 @@ public sealed class ExternalLiveParentColumnReadTests : IClassFixture<ExternalRo
     [Fact(DisplayName = "130-0 fix3c message filter (must fire / must not fire): a row without a live-parent column is withheld; explicit nulls are listed")]
     public async Task MessageFilter_ColumnNotReturned_IsWithheld_ExplicitNullsAreListed()
     {
-        var allNull = ExpectedColumns("sprk_communication").ToDictionary(c => c, _ => NullElement());
+        // F3b fix round 1: the thread read also selects every filing edge column of a communication (the invoice ancestor walk's);
+        // explicit nulls there are not filed, so the row needs no ancestor read.
+        var allNull = ExpectedColumns("sprk_communication").Concat(InvoiceLinks.ParentValueColumnsOf("sprk_communication")).Distinct()
+            .ToDictionary(c => c, _ => NullElement());
         var absent = allNull.Where(kv => kv.Key != ExpectedColumns("sprk_communication")[0]).ToDictionary(kv => kv.Key, kv => kv.Value);
         var filter = ExternalMessageEndpoints.SecureRootsFilter(
             Holding(), (_, _) => Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType, Guid)>())),

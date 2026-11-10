@@ -337,6 +337,9 @@ public class ExternalMessageSendTests
         // The thread lookup is left to AppOnlySelectProjection.WithOpenThread, which gives a row without one the Open thread.
         foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_communication").Where(c => c != "_sprk_communicationthread_value"))
             result.TryAdd(column, El<object?>(null));
+        // ebilling-r1 task 130-0b F3b fix round 1: and every filing edge column the invoice ancestor walk follows (the read selects them).
+        foreach (var column in InvoiceLinks.ParentValueColumnsOf("sprk_communication").Where(c => c != "_sprk_communicationthread_value"))
+            result.TryAdd(column, El<object?>(null));
         // Fix round 3d: and the three root stamp columns (the post sets one; the read answers the others as explicit nulls).
         foreach (var column in new[] { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" })
             result.TryAdd(column, El<object?>(null));
@@ -369,10 +372,14 @@ public class ExternalMessageSendTests
         // reader the route passes, over a filing world that holds the shared Open thread (filed under nothing).
         var roots = new ExternalRootEventReadTests.FakeDataverse();
         roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        // ebilling-r1 task 130-0b F3b fix round 1: the same thread on the Web API side, where the invoice ancestor walk reads it by
+        // key (no invoice, filed under nothing), and the walk the route passes.
+        roots.AddThread(AppOnlySelectProjection.OpenThreadId, 100000000);
         var data = roots.NewService();
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, ProductionRegistry(), ReadRecord, read,
-            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            readInvoiceAncestors: data.ReadAncestorLinksOfRowsAsync);
     }
 
     private static IReadOnlyList<ExternalMessageDto> Messages(IResult result) =>

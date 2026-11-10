@@ -81,6 +81,9 @@ public class ExternalNotificationFeedTests
         // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
         // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
         _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        // ebilling-r1 task 130-0b F3b fix round 1: the same thread on the Web API side, where the invoice ancestor walk reads it by
+        // key (it links to no invoice and is filed under nothing).
+        _roots.AddThread(AppOnlySelectProjection.OpenThreadId, 100000000);
     }
 
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
@@ -1247,7 +1250,9 @@ public class ExternalNotificationFeedTests
             "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_communicationthread_value," +
             "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
             "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
-            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value");
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value," +
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected above.
+            "_sprk_regardingservicerequest_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
         // Task 062 rework: createdby is expanded to its applicationid + accessmode so the sender-name fallback can tell a
         // person from the BFF's application user (nothing else of the user is read).
@@ -1303,7 +1308,10 @@ public class ExternalNotificationFeedTests
                 NullLogger<ExternalDataService>.Instance,
                 dataverse.FilingReader)
         {
+            _dataverse = dataverse;
         }
+
+        private readonly ExternalRootEventReadTests.FakeDataverse _dataverse;
 
         public List<(Guid Contact, DateOnly Since, DateOnly Today)> GrantReads { get; } = new();
         public List<DateTimeOffset?> ModifiedSinceReads { get; } = new();
@@ -1329,7 +1337,12 @@ public class ExternalNotificationFeedTests
         public Guid AddServiceRequest(Guid requestedBy, string name)
         {
             var id = Guid.NewGuid();
-            _requests.Add(new RequestedServiceRequest(id, name, requestedBy));
+            // F3b fix round 1 (F2): as the real read parses the row, a request with no invoice link carries an empty list (never null,
+            // which means "not read").
+            _requests.Add(new RequestedServiceRequest(id, name, requestedBy, Array.Empty<Guid>()));
+            // F3b fix round 1: the same request on the Web API side, where the invoice ancestor walk of a message filed under it reads
+            // it by key.
+            _dataverse.AddServiceRequest(id, requestedBy);
             return id;
         }
 

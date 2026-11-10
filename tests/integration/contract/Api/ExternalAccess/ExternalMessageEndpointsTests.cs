@@ -132,6 +132,9 @@ public class ExternalMessageEndpointsTests
         // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
         // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
         _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        // ebilling-r1 task 130-0b F3b fix round 1: the same thread on the Web API side, where the invoice ancestor walk reads it by
+        // key (it links to no invoice and is filed under nothing).
+        _roots.AddThread(AppOnlySelectProjection.OpenThreadId, 100000000);
     }
 
     private CommunicationThreadReadService ReadService() => new(
@@ -179,7 +182,9 @@ public class ExternalMessageEndpointsTests
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
             data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
-            _invoiceHiding.Seam);
+            _invoiceHiding.Seam,
+            // F3b fix round 1: the filing-chain reader the route passes, the real walk over _roots.
+            data.ReadAncestorLinksOfRowsAsync);
     }
 
     /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
@@ -278,7 +283,9 @@ public class ExternalMessageEndpointsTests
             "_sprk_createdbycontact_value,_createdby_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
             "_sprk_communicationthread_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
             "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
-            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&" +
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value," +
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected above.
+            "_sprk_regardingservicerequest_value&" +
             "$expand=createdby($select=applicationid,accessmode)&");
         _impersonated.VerifyNoOtherCalls();
     }
@@ -1287,6 +1294,11 @@ public class ExternalMessageEndpointsTests
         if (invoice is { } linked)
             record["sprk_regardinginvoice"] = Lookup(linked, "sprk_invoice");
         _records[("sprk_servicerequest", request)] = record;
+        // ebilling-r1 task 130-0b F3b fix round 1: the same request on the Web API side, where the invoice ancestor walk of a message
+        // filed under it reads it by key.
+        _roots.AddServiceRequest(request, requester);
+        if (invoice is { } webApiLink)
+            _roots.SetColumn("sprk_servicerequests", "sprk_servicerequestid", request.ToString(), "_sprk_regardinginvoice_value", webApiLink.ToString());
         return request;
     }
 

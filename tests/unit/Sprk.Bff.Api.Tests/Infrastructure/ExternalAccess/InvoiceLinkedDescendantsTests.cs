@@ -45,8 +45,109 @@ public sealed class InvoiceLinkedDescendantsTests
         InvoiceLinks.Descendants["sprk_analysisoutput"].Parents.Should().Equal(new InvoiceLinks.ParentEdge("sprk_analysisid", "sprk_analysis"));
         InvoiceLinks.Descendants["sprk_eventlog"].Parents.Should().Equal(new InvoiceLinks.ParentEdge("sprk_event", "sprk_event"));
         InvoiceLinks.Descendants["sprk_fileversion"].Parents.Should().Equal(new InvoiceLinks.ParentEdge("sprk_document", "sprk_document"));
-        InvoiceLinks.Descendants["sprk_document"].Parents.Should().Equal(new InvoiceLinks.ParentEdge("sprk_parentdocument", "sprk_document"));
+        InvoiceLinks.Descendants["sprk_document"].Parents.Should().Equal(LinkedTableEdges["sprk_document"]);
         InvoiceLinks.Descendants.Values.Should().OnlyContain(d => d.EntitySet != null, "every descendant can be read (a table with no read shape throws)");
+    }
+
+    /// <summary>
+    /// F3b fix round 1, the conscious pin: the tables WITH invoice links of their own whose rows also follow their filing edges (the walk
+    /// is per row), and every edge each one follows. A registry change that adds, drops or moves one fails here until this list (and the
+    /// notes' table) says so.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, InvoiceLinks.ParentEdge[]> LinkedTableEdges = new Dictionary<string, InvoiceLinks.ParentEdge[]>
+    {
+        ["sprk_analysis"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_documentid", "sprk_document"), new("sprk_regardingcommunication", "sprk_communication"),
+            new("sprk_regardingdocument", "sprk_document"), new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+        ["sprk_communication"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_communicationthread", "sprk_communicationthread"), new("sprk_regardinganalysis", "sprk_analysis"),
+            new("sprk_regardingevent", "sprk_event"), new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+        ["sprk_communicationthread"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_regardinganalysis", "sprk_analysis"), new("sprk_regardingevent", "sprk_event"),
+            new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+        ["sprk_document"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_parentdocument", "sprk_document"), new("sprk_relatedagreement", "sprk_agreement"),
+            new("sprk_relatedcommunication", "sprk_communication"), new("sprk_relatedevent", "sprk_event"),
+            new("sprk_relatedservicerequest", "sprk_servicerequest"), new("sprk_relatedtodo", "sprk_todo"),
+        },
+        ["sprk_event"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_regardingagreement", "sprk_agreement"), new("sprk_regardinganalysis", "sprk_analysis"),
+            new("sprk_regardingcommunication", "sprk_communication"), new("sprk_regardingevent", "sprk_event"),
+            new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+        ["sprk_memo"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_regardingagreement", "sprk_agreement"), new("sprk_regardinganalysis", "sprk_analysis"),
+            new("sprk_regardingcommunication", "sprk_communication"), new("sprk_regardingdocument", "sprk_document"),
+            new("sprk_regardingevent", "sprk_event"), new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+        ["sprk_todo"] = new InvoiceLinks.ParentEdge[]
+        {
+            new("sprk_regardingagreement", "sprk_agreement"), new("sprk_regardinganalysis", "sprk_analysis"),
+            new("sprk_regardingcommunication", "sprk_communication"), new("sprk_regardingdocument", "sprk_document"),
+            new("sprk_regardingevent", "sprk_event"), new("sprk_regardingservicerequest", "sprk_servicerequest"),
+        },
+    };
+
+    [Fact(DisplayName = "F3b fix round 1 pin: the tables with their own invoice link that follow their filing edges, and every edge each follows")]
+    public void TheLinkedTables_FollowTheirFilingEdges()
+    {
+        InvoiceLinks.Descendants.Keys.Where(t => !InvoiceLinks.IsDescendantOnly(t)).Order(StringComparer.Ordinal)
+            .Should().Equal(LinkedTableEdges.Keys.Order(StringComparer.Ordinal));
+        foreach (var (table, edges) in LinkedTableEdges)
+        {
+            InvoiceLinks.Descendants[table].Parents.Should().BeEquivalentTo(edges, table);
+            InvoiceLinks.HasInvoiceLink(table).Should().BeTrue($"{table} keeps its own link: its rows decide by the union");
+            InvoiceLinks.ParentValueColumnsOf(table).Should().BeEquivalentTo(edges.Select(e => e.ValueColumn), table);
+        }
+
+        InvoiceLinks.ParentEdgesOf("sprk_servicerequest").Should().BeEmpty("a service request is filed under nothing the walk follows");
+        InvoiceLinks.ParentEdgesOf(null).Should().BeEmpty();
+    }
+
+    /// <summary>F3b fix round 1: every (table, edge) of <see cref="LinkedTableEdges"/>.</summary>
+    public static TheoryData<string, string, string> LinkedTableEdgeCases()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var (table, edges) in LinkedTableEdges.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            foreach (var edge in edges)
+                data.Add(table, edge.Column, edge.ParentTable);
+        }
+
+        return data;
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 FirstParentsOf: one entry per set edge; an explicit null is not filed; an absent column, a non-GUID and an unread row are unreadable")]
+    [MemberData(nameof(LinkedTableEdgeCases))]
+    public void FirstParentsOf_ReadsEveryEdge(string table, string column, string parentTable)
+    {
+        _ = parentTable;
+        var edge = InvoiceLinks.ParentEdgesOf(table).Single(e => e.Column == column);
+        var (rowId, parent) = (Guid.NewGuid(), Guid.NewGuid());
+        var allNull = InvoiceLinks.ParentValueColumnsOf(table).ToDictionary(c => c, _ => JsonSerializer.SerializeToElement<string?>(null));
+
+        // Must not fire: explicit nulls are not filed.
+        InvoiceLinks.FirstParentsOf(table, rowId, allNull).Should().BeEmpty();
+
+        var set = new Dictionary<string, JsonElement>(allNull) { [edge.ValueColumn] = JsonSerializer.SerializeToElement(parent.ToString()) };
+        InvoiceLinks.FirstParentsOf(table, rowId, set).Should().Equal((rowId, column, parent));
+
+        // Must fire: a column that was not read, a value that is not a GUID, a row that was not read.
+        var absent = allNull.Where(kv => kv.Key != edge.ValueColumn).ToDictionary(kv => kv.Key, kv => kv.Value);
+        InvoiceLinks.FirstParentsOf(table, rowId, absent).Should().Equal((rowId, column, ExternalDocumentNarrowing.UnreadableLink));
+        var garbled = new Dictionary<string, JsonElement>(allNull) { [edge.ValueColumn] = JsonSerializer.SerializeToElement("not-a-guid") };
+        InvoiceLinks.FirstParentsOf(table, rowId, garbled).Should().Equal((rowId, column, ExternalDocumentNarrowing.UnreadableLink));
+        InvoiceLinks.FirstParentsOf(table, rowId, null).Should().HaveCount(InvoiceLinks.ParentEdgesOf(table).Count)
+            .And.OnlyContain(p => p.Parent == ExternalDocumentNarrowing.UnreadableLink);
     }
 
     [Fact(DisplayName = "F3b the descendants are decided as child tables; a table with its own link, a root and an invoice-family table are not descendant-only")]
@@ -275,7 +376,8 @@ public sealed class InvoiceLinkedDescendantsTests
     [InlineData("sprk_analysisoutput", "$select=sprk_analysisoutputid,_sprk_analysisid_value&$filter=")]
     [InlineData("sprk_eventlog", "$select=sprk_eventlogid,_sprk_event_value&$filter=")]
     [InlineData("sprk_fileversion", "$select=sprk_fileversionid,_sprk_document_value&$filter=")]
-    [InlineData("sprk_document", "$select=sprk_documentid,_sprk_invoice_value,_sprk_relatedinvoice_value,_sprk_parentdocument_value&$filter=")]
+    // F3b fix round 1: a document also selects every other row it is filed under.
+    [InlineData("sprk_document", "$select=sprk_documentid,_sprk_invoice_value,_sprk_relatedinvoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value,_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedservicerequest_value,_sprk_relatedtodo_value&$filter=")]
     public async Task TheNamedDescendants_PinTheirSelect(string table, string expectedStart)
     {
         var store = new Store();
@@ -352,7 +454,188 @@ public sealed class InvoiceLinkedDescendantsTests
         result[rowD].ChainUndecidable.Should().BeTrue("the parent does not come back");
     }
 
+    /// <summary>F3b fix round 1: a row of <paramref name="parentTable"/> that leads to <paramref name="invoice"/>: its own link when it has
+    /// one, else (an agreement) through the first of its edges whose parent has a link. Null: a row that leads to no invoice.</summary>
+    private static Guid StoreParent(Store store, string parentTable, Guid? invoice)
+    {
+        if (InvoiceLinks.HasInvoiceLink(parentTable))
+        {
+            return invoice is { } i
+                ? store.Row(parentTable, ($"_{InvoiceLinks.LinkColumnsOf(parentTable)[0]}_value", i))
+                : store.Row(parentTable);
+        }
+
+        var edge = InvoiceLinks.ParentEdgesOf(parentTable).First(e => InvoiceLinks.HasInvoiceLink(e.ParentTable));
+        return invoice is null ? store.Row(parentTable) : store.Row(parentTable, (edge.ValueColumn, StoreParent(store, edge.ParentTable, invoice)));
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 walk: a row with its own link ALSO takes the invoices of the row each filing edge names (the union); an unlinked parent adds none; a parent that does not come back is undecidable")]
+    [MemberData(nameof(LinkedTableEdgeCases))]
+    public async Task ALinkedRow_TakesItsOwnAndItsParentsInvoices(string table, string column, string parentTable)
+    {
+        var edge = InvoiceLinks.ParentEdgesOf(table).Single(e => e.Column == column);
+        var ownColumn = $"_{InvoiceLinks.LinkColumnsOf(table)[0]}_value";
+        var (own, above) = (Guid.NewGuid(), Guid.NewGuid());
+        var store = new Store();
+        var linkedParent = StoreParent(store, parentTable, above);
+        var unlinkedParent = StoreParent(store, parentTable, null);
+        var both = store.Row(table, (ownColumn, own), (edge.ValueColumn, linkedParent));
+        var onlyAbove = store.Row(table, (edge.ValueColumn, linkedParent));
+        var onUnlinked = store.Row(table, (edge.ValueColumn, unlinkedParent));
+        var plain = store.Row(table);
+        var orphan = store.Row(table, (edge.ValueColumn, Guid.NewGuid()));
+
+        var result = await WalkAsync(store, table, both, onlyAbove, onUnlinked, plain, orphan);
+
+        // Must fire: a row whose own link is null takes its parent's (or grandparent's) invoice.
+        Decided(result[both], own, above);
+        Decided(result[onlyAbove], above);
+        result[orphan].ChainUndecidable.Should().BeTrue("the parent does not come back");
+        // Must not fire: no invoice anywhere.
+        Decided(result[onUnlinked]);
+        Decided(result[plain]);
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 walk: the REST helper follows each edge of a row already read; a column that is not an edge of the table is refused")]
+    [MemberData(nameof(LinkedTableEdgeCases))]
+    public async Task TheAncestorWalk_FollowsEveryEdge(string table, string column, string parentTable)
+    {
+        var invoice = Guid.NewGuid();
+        var store = new Store();
+        var parent = StoreParent(store, parentTable, invoice);
+        var (row, unlinked) = (Guid.NewGuid(), Guid.NewGuid());
+
+        var result = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+            table, new[] { (row, column, parent), (unlinked, column, StoreParent(store, parentTable, null)) }, store.Query, CancellationToken.None);
+
+        Decided(result[row], invoice);
+        Decided(result[unlinked]);
+        var wrong = () => InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+            table, new[] { (row, "sprk_notanedge", parent) }, store.Query, CancellationToken.None);
+        await wrong.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 walk: a row's answer is the union over ALL its edges; one undecidable edge makes the row undecidable")]
+    public async Task TheAncestorWalk_UnionsEdges_AndOneUndecidableEdgeDecides()
+    {
+        var (a, b) = (Guid.NewGuid(), Guid.NewGuid());
+        var store = new Store();
+        var ev = store.Row("sprk_event", ("_sprk_regardinginvoice_value", a));
+        var doc = store.Row("sprk_document", ("_sprk_invoice_value", b));
+        var (row, mixed) = (Guid.NewGuid(), Guid.NewGuid());
+
+        var result = await InvoiceLinks.ReadAncestorInvoiceLinksAsync("sprk_todo", new[]
+        {
+            (row, "sprk_regardingevent", ev), (row, "sprk_regardingdocument", doc),
+            (mixed, "sprk_regardingevent", ev), (mixed, "sprk_regardingdocument", ExternalDocumentNarrowing.UnreadableLink),
+        }, store.Query, CancellationToken.None);
+
+        Decided(result[row], a, b);
+        result[mixed].ChainUndecidable.Should().BeTrue();
+        result[mixed].Invoices.Should().Contain(ExternalDocumentNarrowing.UnreadableLink);
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 walk: the bound counts from the row: a to-do three hops under a linked event is decided, four is undecidable; a self-edge cycle is undecidable")]
+    public async Task TheBound_CountsFromTheRow_AndASelfEdgeCycleIsUndecidable()
+    {
+        var invoice = Guid.NewGuid();
+        var store = new Store();
+        var top = store.Row("sprk_event", ("_sprk_regardinginvoice_value", invoice));
+        Guid Under(Guid parent) => store.Row("sprk_event", ("_sprk_regardingevent_value", parent));
+        var e2 = Under(top);
+        var e1 = Under(e2);
+        var e0 = Under(e1);
+        var three = store.Row("sprk_todo", ("_sprk_regardingevent_value", e1)); // todo -> e1 -> e2 -> top
+        var four = store.Row("sprk_todo", ("_sprk_regardingevent_value", e0)); // todo -> e0 -> e1 -> e2 -> top
+        var (cycleA, cycleB) = (store.Row("sprk_event"), store.Row("sprk_event"));
+        store.Set("sprk_event", cycleA, "_sprk_regardingevent_value", cycleB);
+        store.Set("sprk_event", cycleB, "_sprk_regardingevent_value", cycleA);
+
+        var result = await WalkAsync(store, "sprk_todo", three, four);
+        var cycle = await WalkAsync(store, "sprk_event", cycleA);
+
+        Decided(result[three], invoice);
+        result[four].ChainUndecidable.Should().BeTrue("a fourth hop is past the bound");
+        cycle[cycleA].ChainUndecidable.Should().BeTrue("an event regarding an event regarding the first is a cycle");
+    }
+
     // ── Part 3: the assistant tools' seam ────────────────────────────────────────────────────────────────────
+
+    /// <summary>F3b fix round 1: a seam row of <paramref name="parentTable"/> that leads to <paramref name="invoice"/> (its own link, or an
+    /// agreement's document), or to none.</summary>
+    private static Guid SeamParent(InvoiceWorld world, string parentTable, Guid? invoice)
+    {
+        if (InvoiceLinks.Tables.ContainsKey(parentTable))
+        {
+            return invoice is { } i
+                ? world.LinkedChildRow(parentTable, (InvoiceLinks.LinkColumnsOf(parentTable)[0], i))
+                : world.LinkedChildRow(parentTable);
+        }
+
+        var edge = InvoiceLinks.ParentEdgesOf(parentTable).First(e => InvoiceLinks.Tables.ContainsKey(e.ParentTable));
+        return world.DescendantRow(parentTable, (edge.Column, SeamParent(world, edge.ParentTable, invoice)));
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 seam: a row with a null own link filed under a row (or a grandparent) of another firm's invoice is hidden; its own firm's, an unlinked parent's and a plain row are shown; one firm read")]
+    [MemberData(nameof(LinkedTableEdgeCases))]
+    public async Task ALinkedRow_FollowsTheInvoiceOfEveryRowItIsFiledUnder(string table, string column, string parentTable)
+    {
+        var world = new InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, InvoiceFamilyFirmWorld.OtherFirm);
+        var ofOther = world.LinkedChildRow(table, (column, SeamParent(world, parentTable, other)));
+        var ofOwn = world.LinkedChildRow(table, (column, SeamParent(world, parentTable, own)));
+        var ofUnlinked = world.LinkedChildRow(table, (column, SeamParent(world, parentTable, null)));
+        var plain = world.LinkedChildRow(table);
+        var asked = new List<Guid> { ofOther, ofOwn, ofUnlinked, plain };
+        var expected = new List<Guid> { ofOther };
+
+        // Must fire within the bound: the parent has no link of its own; the GRANDPARENT is another firm's.
+        var grandEdge = InvoiceLinks.ParentEdgesOf(parentTable).FirstOrDefault(e => InvoiceLinks.Tables.ContainsKey(e.ParentTable));
+        if (InvoiceLinks.Tables.ContainsKey(parentTable) && grandEdge is not null)
+        {
+            var parent = world.LinkedChildRow(parentTable, (grandEdge.Column, SeamParent(world, grandEdge.ParentTable, other)));
+            var viaGrandparent = world.LinkedChildRow(table, (column, parent));
+            asked.Add(viaGrandparent);
+            expected.Add(viaGrandparent);
+        }
+
+        var hidden = await HideAsync(world, world.NewFamilyCaller(), table, asked.ToArray());
+
+        hidden.Should().BeEquivalentTo(expected);
+        world.CallerFirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 seam: a self-edge cycle (an event regarding an event regarding the first) hides only the cyclic row")]
+    public async Task ASelfEdgeCycle_IsHiddenAlone()
+    {
+        var world = new InvoiceWorld();
+        var first = world.LinkedChildRow("sprk_event");
+        var second = world.LinkedChildRow("sprk_event", ("sprk_regardingevent", first));
+        world.SetRow("sprk_events", "sprk_eventid", first, "_sprk_regardingevent_value", second.ToString());
+        var fine = world.LinkedChildRow("sprk_event");
+
+        var hidden = await HideAsync(world, world.NewFamilyCaller(), "sprk_event", first, fine);
+
+        hidden.Should().BeEquivalentTo(new[] { first });
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 seam firms: a to-do whose only invoice is its event's is hidden from a caller in no firm, and fails the call when firms cannot be read")]
+    public async Task ALinkedRowsInheritedInvoice_FollowsTheFirmRulings()
+    {
+        var world = new InvoiceWorld();
+        var invoice = world.OwnedInvoice();
+        var todo = world.LinkedChildRow("sprk_todo", ("sprk_regardingevent", SeamParent(world, "sprk_event", invoice)));
+
+        (await HideAsync(world, new InvoiceFamilyCaller(null), "sprk_todo", todo)).Should().BeEquivalentTo(new[] { todo });
+
+        var faulted = new InvoiceWorld { CallerFirmsFault = new TimeoutException("firms (test)") };
+        var faultedInvoice = faulted.OwnedInvoice();
+        var faultedTodo = faulted.LinkedChildRow("sprk_todo", ("sprk_regardingevent", SeamParent(faulted, "sprk_event", faultedInvoice)));
+        var act = () => HideAsync(faulted, faulted.NewFamilyCaller(), "sprk_todo", faultedTodo);
+        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+    }
 
     private static Task<IReadOnlySet<Guid>> HideAsync(InvoiceWorld world, InvoiceFamilyCaller caller, string table, params Guid[] rows) =>
         InvoiceFamilyHidingStubs.Real(world)(caller, table, rows, CancellationToken.None);
