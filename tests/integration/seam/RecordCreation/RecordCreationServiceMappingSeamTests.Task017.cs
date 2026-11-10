@@ -299,7 +299,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             }, mapping: true),
             AsCaller(), CancellationToken.None);
 
-                outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
         fields.Should().NotContainKey("sprk_RegardingProject@odata.bind", "a second core lookup is never mapped (must fire)");
         StringOf(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})");

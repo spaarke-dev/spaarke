@@ -1298,8 +1298,11 @@ internal static class OwnedChildWrite
         }
         else if (!pair.SetsId || !pair.SetsType)
         {
-            return new RefileOutcome { ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
-                "The record could not be read, so what it is filed under cannot be checked.") };
+            return new RefileOutcome
+            {
+                ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
+                "The record could not be read, so what it is filed under cannot be checked.")
+            };
         }
 
         var target = await PairTargetAsync(user, table, idText, typeId, typeSet, item.Lookups, ct, kept).ConfigureAwait(false);

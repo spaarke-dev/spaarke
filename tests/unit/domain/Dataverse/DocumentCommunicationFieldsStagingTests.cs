@@ -132,8 +132,12 @@ public class DocumentCommunicationFieldsStagingTests
         var document = new Entity("sprk_document");
         var request = new CreateDocumentRequest
         {
-            Name = "Invoice email.eml", ContainerId = "b!c", RelatedCommunicationId = CommunicationId,
-            AccessPermission = permission, AccessInheritanceRecord = record, RestrictedBySubmission = true,
+            Name = "Invoice email.eml",
+            ContainerId = "b!c",
+            RelatedCommunicationId = CommunicationId,
+            AccessPermission = permission,
+            AccessInheritanceRecord = record,
+            RestrictedBySubmission = true,
         };
 
         var act = () => DataverseServiceClientImpl.StageDocumentCommunicationFields(document, request);

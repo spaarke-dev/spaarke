@@ -84,7 +84,9 @@ public class EventEndpointsMembershipPublishingTests
         var payload = DataverseWebApiService.BuildCreateEventPayload(
             new DataverseCreateEventRequest
             {
-                Name = "Hearing", AssignedToContactId = ActingUsersContactId, OwningTeamId = OwnerEventTestKit.TeamId,
+                Name = "Hearing",
+                AssignedToContactId = ActingUsersContactId,
+                OwningTeamId = OwnerEventTestKit.TeamId,
             });
 
         payload.Should().ContainKey("sprk_AssignedTo@odata.bind")
@@ -99,7 +101,9 @@ public class EventEndpointsMembershipPublishingTests
         var payload = DataverseWebApiService.BuildCreateEventPayload(
             new DataverseCreateEventRequest
             {
-                Name = "Hearing", AssignedToContactId = emptyGuid ? Guid.Empty : null, OwningTeamId = OwnerEventTestKit.TeamId,
+                Name = "Hearing",
+                AssignedToContactId = emptyGuid ? Guid.Empty : null,
+                OwningTeamId = OwnerEventTestKit.TeamId,
             });
 
         payload.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.OrdinalIgnoreCase));
@@ -136,7 +140,9 @@ public class EventEndpointsMembershipPublishingTests
         var payload = DataverseWebApiService.BuildCreateEventPayload(
             new DataverseCreateEventRequest
             {
-                Name = "Hearing", OwningTeamId = OwnerEventTestKit.TeamId, CreatedByPersonId = hasPerson ? person : null,
+                Name = "Hearing",
+                OwningTeamId = OwnerEventTestKit.TeamId,
+                CreatedByPersonId = hasPerson ? person : null,
             });
 
         if (hasPerson)

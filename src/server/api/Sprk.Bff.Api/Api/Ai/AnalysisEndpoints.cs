@@ -1318,7 +1318,8 @@ public static class AnalysisEndpoints
         // and the session is untouched; a Dataverse fault propagates as the request's 5xx.
         var owner = await ownership.ResolveOwnerAsync(
             OwnershipOfPromotedAnalysis(documentId, regarding?.EntityLogicalName, regarding?.RecordId)
-                with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+                with
+            { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
             cancellationToken);
         if (!owner.IsOwned)
         {

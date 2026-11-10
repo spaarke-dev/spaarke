@@ -108,7 +108,9 @@ public class EffectiveAccessFollowsParentTests
         };
         grants.AddRange(more.Select(id => new ExternalRootGrant
         {
-            RecordId = id, AccessLevel = ExternalAccessLevel.ViewOnly, DirectAccessLevel = ExternalAccessLevel.ViewOnly,
+            RecordId = id,
+            AccessLevel = ExternalAccessLevel.ViewOnly,
+            DirectAccessLevel = ExternalAccessLevel.ViewOnly,
         }));
         _participations.GrantSets[Contact] = new ExternalGrantSet
         {

@@ -281,7 +281,8 @@ internal sealed partial class RecordCreationService
         // The mapping step's warnings first (step 3 ran before the create), then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
             [.. decision.MappingWarnings.Select(w => w.Detail), .. warnings], decision.MappingWarnings,
-            writtenColumns) with { IsolatedCompletion = isolatedCompletion };
+            writtenColumns) with
+        { IsolatedCompletion = isolatedCompletion };
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -328,36 +329,36 @@ internal sealed partial class RecordCreationService
         switch (principal)
         {
             case RecordCreationPrincipal.CallerPrincipal caller:
-            {
-                user = caller.Client;
-                var who = await CallerWriteAuthorization.WhoAmIAsync(caller.Client, ct).ConfigureAwait(false);
-                if (who.Failure is { } whoFailure)
                 {
-                    if (Sprk.Bff.Api.Api.ChildRecordEndpoints.IsUnresolvedCaller(whoFailure))
+                    user = caller.Client;
+                    var who = await CallerWriteAuthorization.WhoAmIAsync(caller.Client, ct).ConfigureAwait(false);
+                    if (who.Failure is { } whoFailure)
                     {
-                        _logger.LogWarning(
-                            "[RECORD-CREATE] create of {Table} refused: the caller has no Dataverse identity ({ErrorCode})",
-                            table, whoFailure.ErrorCode);
-                        return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
-                            Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
-                            $"You could not be identified in Dataverse, so the {noun} was not created.")
+                        if (Sprk.Bff.Api.Api.ChildRecordEndpoints.IsUnresolvedCaller(whoFailure))
                         {
-                            // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
-                            ClientFailure = whoFailure,
-                        });
+                            _logger.LogWarning(
+                                "[RECORD-CREATE] create of {Table} refused: the caller has no Dataverse identity ({ErrorCode})",
+                                table, whoFailure.ErrorCode);
+                            return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
+                                Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
+                                $"You could not be identified in Dataverse, so the {noun} was not created.")
+                            {
+                                // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
+                                ClientFailure = whoFailure,
+                            });
+                        }
+
+                        return Decision.Refuse(Upstream(whoFailure, noun));
                     }
 
-                    return Decision.Refuse(Upstream(whoFailure, noun));
+                    callerSystemUserId = who.SystemUserId;
+                    ownerContextObjectId = caller.ObjectId;
+                    // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them.
+                    requestedBy = RecordRequester.Of(who.SystemUserId);
+                    grantorOid = caller.ObjectId?.ToString("D");
+                    trace.Record(RecordCreationStep.Principal, RecordCreationStepState.Ran, "caller (WhoAmI under their own token)");
+                    break;
                 }
-
-                callerSystemUserId = who.SystemUserId;
-                ownerContextObjectId = caller.ObjectId;
-                // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them.
-                requestedBy = RecordRequester.Of(who.SystemUserId);
-                grantorOid = caller.ObjectId?.ToString("D");
-                trace.Record(RecordCreationStep.Principal, RecordCreationStepState.Ran, "caller (WhoAmI under their own token)");
-                break;
-            }
 
             case RecordCreationPrincipal.SystemPrincipal system:
                 requestedBy = system.RequestedBy;
@@ -1252,7 +1253,8 @@ internal sealed partial class RecordCreationService
             var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
                 $"what it is filed under could not be told ({undetermined})");
             return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                refused.Reason!) { OwnerDecision = refused });
+                refused.Reason!)
+            { OwnerDecision = refused });
         }
 
         // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
@@ -1264,7 +1266,8 @@ internal sealed partial class RecordCreationService
             var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
                 $"what it is filed under could not be told ({unread})");
             return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                refused.Reason!) { OwnerDecision = refused });
+                refused.Reason!)
+            { OwnerDecision = refused });
         }
 
         var owner = await _ownership.ResolveOwnerAsync(
@@ -1900,7 +1903,8 @@ internal sealed partial class RecordCreationService
         { ClientFailure: { } failure } => Upstream(failure, noun),
         { Invalid: { } invalid } => new(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, invalid),
         { ParentUnavailable: true } => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            check.Denied ?? NotAvailableToFileUnder) { RefusedColumn = check.RefusedColumn },
+            check.Denied ?? NotAvailableToFileUnder)
+        { RefusedColumn = check.RefusedColumn },
         { Denied: { } denied } => new(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.DeniedCode, denied),
         _ => new(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created."),
     };
@@ -1951,16 +1955,20 @@ internal sealed partial class RecordCreationService
     private static RecordCreationRefusal PlanRefused(RecordOwnerResolution plan, string noun) => plan.RefusalCode switch
     {
         DataverseUserClientErrorCodes.AccessDenied => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            plan.Reason ?? NotAvailableToFileUnder) { OwnerDecision = plan },
+            plan.Reason ?? NotAvailableToFileUnder)
+        { OwnerDecision = plan },
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
             or AccessFollowsParent.SecureFlagReasonCode
             or AccessInheritance.ServerOnlyReasonCode => new(RecordCreationRefusalKind.Forbidden, plan.RefusalCode!,
-            $"The {noun} was not created: {plan.Reason ?? "it may not be filed there"}.") { OwnerDecision = plan },
+            $"The {noun} was not created: {plan.Reason ?? "it may not be filed there"}.")
+            { OwnerDecision = plan },
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable
             or RecordOwnerRefusal.SecureOwnerTeamUnresolved => new(RecordCreationRefusalKind.Undecided, plan.RefusalCode!,
-            $"The {noun} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}.") { OwnerDecision = plan },
+            $"The {noun} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}.")
+            { OwnerDecision = plan },
         _ => new(RecordCreationRefusalKind.OwnerUnresolved, plan.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource,
-            plan.Reason ?? "no owner could be resolved") { OwnerDecision = plan },
+            plan.Reason ?? "no owner could be resolved")
+        { OwnerDecision = plan },
     };
 
     /// <summary>
@@ -1991,7 +1999,8 @@ internal sealed partial class RecordCreationService
             return refusal switch
             {
                 { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
-                    RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder) { PreWrite = refusal },
+                    RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder)
+                { PreWrite = refusal },
                 { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
                 // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
                 // uniform not-found, which only NotFound() reaches (the arm above).
@@ -2417,16 +2426,16 @@ internal sealed partial class RecordCreationService
         public RecordCreationOutcome Created(
             Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings,
             IReadOnlyList<RecordCreationWarning> mappingWarnings, IReadOnlyCollection<string> writtenColumns) => new()
-        {
-            CreatedId = id,
-            WrittenColumns = writtenColumns,
-            OwningTeamId = owningTeamId,
-            Isolated = isolated,
-            Warnings = warnings,
-            MappingWarnings = mappingWarnings,
-            Steps = _steps.ToArray(),
-            CorrelationId = correlationId,
-        };
+            {
+                CreatedId = id,
+                WrittenColumns = writtenColumns,
+                OwningTeamId = owningTeamId,
+                Isolated = isolated,
+                Warnings = warnings,
+                MappingWarnings = mappingWarnings,
+                Steps = _steps.ToArray(),
+                CorrelationId = correlationId,
+            };
     }
 }
 

@@ -17,7 +17,13 @@ public class PushRuleSelectionTests
 
     private static FieldMappingRuleEntity Rule(string target, int mappingType = CreateTimeFieldMapping.MappingTypeCopy, int syncMode = SyncMode.ManualRefresh) => new()
     {
-        Id = Guid.NewGuid(), Name = target, SourceField = "sprk_source", TargetField = target, MappingType = mappingType, SyncMode = syncMode, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = target,
+        SourceField = "sprk_source",
+        TargetField = target,
+        MappingType = mappingType,
+        SyncMode = syncMode,
+        IsActive = true,
     };
 
     private static readonly Func<string, string, bool> AssignedTo =

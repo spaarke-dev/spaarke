@@ -924,19 +924,26 @@ public class FieldMappingPushAuthorizationContractTests
 
         internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
         {
-            Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
-            TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = $"{sourceField}->{targetField}",
+            SourceField = sourceField,
+            SourceFieldType = sourceType,
+            TargetField = targetField,
+            TargetFieldType = targetType,
+            MappingType = 0,
+            ExecutionOrder = 1,
+            IsActive = true,
             // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh; a rule left at One Time is not pushed.
             SyncMode = Spaarke.Dataverse.SyncMode.ManualRefresh,
         };
 
         private static Dictionary<string, JsonElement> Relationship(
             string referencingAttribute, string referencedEntity, string? navigationProperty = null) => new()
-        {
-            ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
-            ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
-            ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
-        };
+            {
+                ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
+                ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
+                ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
+            };
 
         private static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true) => new()
         {

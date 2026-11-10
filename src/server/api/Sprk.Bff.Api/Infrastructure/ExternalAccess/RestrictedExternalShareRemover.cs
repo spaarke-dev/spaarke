@@ -361,7 +361,8 @@ public sealed class RestrictedExternalShareRemover
             .ToList();
         if (external.Count == 0)
             return Evaluated(logical, recordId, Array.Empty<Guid>(), ownerFailures)
-                with { OwnerIsExternal = externalOwner };
+                with
+            { OwnerIsExternal = externalOwner };
 
         // ── Restricted wins over the last-reader rule (owner round 67 item 3): whether anyone internal remains is REPORTED ──
         // An enabled internal (not external-flagged) user with a readable direct share. Only a SECURE record depends on its

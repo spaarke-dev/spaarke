@@ -310,7 +310,8 @@ public sealed class StoredFileService
     private static RecordOwnershipContext OwnerQuestionOf(StoredFileRowSpec spec, RecordRequester? requester, Guid? creatorPersonId) =>
         RecordOwnershipContext.ForRow(
             StoredFileSchema.Entity, RowLookupsOf(spec),
-            callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with { RequestedBy = requester };
+            callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with
+        { RequestedBy = requester };
 
     /// <summary>
     /// The lookups <see cref="BuildRow"/> writes on a row for <paramref name="spec"/> (column → record): the parent lookup and, when set,

@@ -389,7 +389,12 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
         // The body also names an outcome, a role and a reviewer: none is read.
         var response = await host.SendAsync(Request("POST", LineRoute(), new
         {
-            field, value, outcome = "Confirmed", role = "billing-admin", reviewer = Guid.NewGuid(), isLabel = false,
+            field,
+            value,
+            outcome = "Confirmed",
+            role = "billing-admin",
+            reviewer = Guid.NewGuid(),
+            isLabel = false,
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -473,7 +478,9 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
         host.World.AddRow(new Entity("sprk_invoicecorrection", Guid.NewGuid())
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()), // another invoice
-            ["sprk_fieldname"] = "Hours", ["sprk_outcometype"] = new OptionSetValue(100000000), ["sprk_sourcecode"] = "sprk_invoice_v1",
+            ["sprk_fieldname"] = "Hours",
+            ["sprk_outcometype"] = new OptionSetValue(100000000),
+            ["sprk_sourcecode"] = "sprk_invoice_v1",
             ["sprk_reviewedon"] = W.T0.AddMinutes(30),
         });
 

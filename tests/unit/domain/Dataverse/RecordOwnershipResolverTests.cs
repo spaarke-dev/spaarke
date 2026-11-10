@@ -3484,16 +3484,16 @@ public class RecordOwnershipResolverTests
     /// <summary>Out of the secure project, onto the ordinary matter.</summary>
     private static RecordReparent MoveToOrdinaryMatter(
         Guid documentId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? caller) => new()
-    {
-        EntityLogicalName = "sprk_document",
-        RecordId = documentId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_project"] = null,
-            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = null,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_ByAFullAccessHolderOnThatRoot_IsApplied_AndReassigned()
@@ -3566,7 +3566,8 @@ public class RecordOwnershipResolverTests
     }
 
     private static RecordReparent MoveUnstampedChildToOrdinaryMatter(Guid rowId) => MoveToOrdinaryMatter(rowId, CallerHolding(Collaborate))
-        with { EntityLogicalName = UnstampedChildTable };
+        with
+    { EntityLogicalName = UnstampedChildTable };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_OnATableTheBffDoesNotStamp_AForgedCreatorPerson_IsNotAdmitted()
@@ -4093,15 +4094,15 @@ public class RecordOwnershipResolverTests
 
     private static RecordReparent MoveMessageTo(
         Guid messageId, Guid matterId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller caller) => new()
-    {
-        EntityLogicalName = "sprk_communication",
-        RecordId = messageId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OfASecureBuRowWhoseSecureRootCannotBeNamed_ByAFullAccessNonCreator_IsRefusedUnverifiable()
@@ -4233,7 +4234,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(SomeoneElse) },
+                with
+            { RequestedBy = RecordRequester.Of(SomeoneElse) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4248,7 +4250,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.CreatedByPerson.Should().Be(CallerUserId);
@@ -4266,7 +4269,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4287,7 +4291,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "an unknown person is not a reason to refuse the row");
@@ -4301,7 +4306,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.IsRefused.Should().BeTrue();
@@ -4516,11 +4522,13 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_matter", secureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
             .WithRecord(tableA, a, GeneralBu, owningTeam: null, extra: new()
             {
-                [aToB] = new EntityReference(tableB, b), [aMatter] = new EntityReference("sprk_matter", secureMatter),
+                [aToB] = new EntityReference(tableB, b),
+                [aMatter] = new EntityReference("sprk_matter", secureMatter),
             })
             .WithRecord(tableB, b, GeneralBu, owningTeam: null, extra: new()
             {
-                [bToA] = new EntityReference(tableA, a), [bMatter] = new EntityReference("sprk_matter", secureMatter),
+                [bToA] = new EntityReference(tableA, a),
+                [bMatter] = new EntityReference("sprk_matter", secureMatter),
             });
 
         foreach (var primary in new[] { new RecordOwnershipParent(tableA, a), new RecordOwnershipParent(tableB, b) })
@@ -4591,7 +4599,8 @@ public class RecordOwnershipResolverTests
     private static Task<RecordOwnerResolution> AskAboutTheProject(FakeDirectory directory, Guid projectId, bool asContent) =>
         Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_project", projectId) })
-                with { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
             CancellationToken.None);
 
     [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project filed by its pair answers with the unit of the matter the pair names — as a plain parent and on the content path")]
@@ -4725,7 +4734,8 @@ public class RecordOwnershipResolverTests
     private static Task<RecordOwnerResolution> AskAboutTheWorkAssignment(FakeDirectory directory, bool asContent) =>
         Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_workassignment", WorkAssignmentId) })
-                with { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
             CancellationToken.None);
 
     [Theory(DisplayName = "Owner decision 2026-10-29 must fire: a filed person-owned work assignment answers with its matter's unit — as a plain parent and on the content (gate) path")]
@@ -4977,7 +4987,7 @@ public class RecordOwnershipResolverTests
                 var request = FileTheEventUnderTheWorkAssignment(eventId);
                 return Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
             }
-            : () => AskAboutTheWorkAssignment(directory, asContent: false);
+        : () => AskAboutTheWorkAssignment(directory, asContent: false);
 
         await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
     }

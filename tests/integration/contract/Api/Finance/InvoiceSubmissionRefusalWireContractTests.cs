@@ -408,7 +408,11 @@ public sealed class InvoiceSubmissionRefusalWireContractTests : IAsyncLifetime
         public Task<RateLimitResult> CheckAndIncrementAsync(string tenantId, string userId, OfficeRateLimitCategory category) =>
             Task.FromResult(new RateLimitResult
             {
-                IsAllowed = true, Limit = 10, Remaining = 9, ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30), RetryAfterSeconds = 30,
+                IsAllowed = true,
+                Limit = 10,
+                Remaining = 9,
+                ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30),
+                RetryAfterSeconds = 30,
             });
     }
 }

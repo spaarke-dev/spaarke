@@ -74,7 +74,8 @@ internal sealed class ApprovalWorld
     public readonly ApprovalListLogger<EligibleApproverResolver> ResolverLog = new();
     public readonly ApprovalListLogger<InvoiceApprovalService> Log = new();
     public readonly Mock<CallerRecordAccessProbe> Probe = new(
-        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!) { CallBase = false };
+        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
+    { CallBase = false };
 
     public EbillingSettings SettingsValue { get; set; } = new();
 
