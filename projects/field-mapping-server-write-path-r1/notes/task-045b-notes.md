@@ -261,3 +261,41 @@ time, escaped hint strings, and client TypeScript (the browser-to-BFF body is ca
 there is not a defect). `DecisionActionExecutors.cs` belongs to the ontology work; the change there is the one line.
 
 rework: fix-round-1 task 045b
+
+## 045b fix round (F-045b-1)
+
+Rule: a regarding pair's display columns (`sprk_regardingrecordname` / `number` / `url`) that the update planner derives for a pair
+the update itself moves (rule 3) are read as the person the write runs for. With no person they are cleared, never derived app-only.
+
+Shape: `RegardingPairReaders.MovedRecord` (optional) is consulted by rule 3 only; rules 2 and 4 keep the app-only `Record` reader, since
+they fill or follow a lookup the row holds. `OwnedChildWrite.MovedDisplayReader(query, entities, person)` builds it: the person's read
+(`CallerDisplayReader`) with a person, an always-403 reader without one. `KeepRegardingPairWholeAppOnlyAsync` takes it as
+`movedDisplayRecord` and defaults to the no-person reader; a path that passes `displayRecord` (the push) reads every rule through that
+and is unchanged. Both app-only callers pass it: `DataverseUpdateHandler` ("OUTPUT-MAPPING", its `_readAsPerson` and
+`impersonateSystemUserId`) and `UpdateRecordActionCore` ("UpdateRecord", `IImpersonatedCommunicationQuery` from the pair scope, already
+registered by `CommunicationModule`; `input.ImpersonateSystemUserId`). No new registration.
+
+Rule 3 outcome by reader status:
+
+| Reader answer | Result |
+|---|---|
+| person may read | display derived from the person's read |
+| 403 (forbidden) | display columns cleared, the move stands |
+| 404 or no row | display columns cleared, the move stands |
+| any other fault | the write is refused (`ParentUndetermined`), nothing written |
+| person, no query available | the write is refused, nothing written |
+| no person (null or empty) | display columns cleared, the record is never read |
+
+Display columns the update sends itself are never overwritten. The catalog row (type) is still read app-only, as before.
+
+Tests (`RegardingPairMovedDisplayReaderTests`, 29 cases; the app-only entity service is strict with no setup for the regarded record):
+must-fire: 403 / 404 / no row clear and never read app-only; no person (null, empty, no reader passed) clears; same through
+`DataverseUpdateHandler` and `UpdateRecordActionCore`. Must-not-fire: a person who may read gets their own values; rule 4 and rule 2 still
+derive app-only with no person; the push's `displayRecord` still serves rule 3. Fault and missing-query cases refuse. The existing
+"moves display read timing out" case now faults on the person's read.
+
+Mutation: with rule 3 pointed back at `reads.Record`, 20 of 85 tests in the two planner classes fail. Restored.
+
+Gates: build 0 warnings, 0 errors; filtered BFF tests 985 passed, 0 failed; ArchTests (`RegardingPair`, `GenericUpdatePathsPreparePair`,
+`OntologyEventIdUniquenessGuard`) 14 passed. `RegardingPairKeptWholeEvent` id is written `45201` (the event-id guard cannot read a digit
+separator).
