@@ -70,7 +70,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bash scripts/quality/task-quality-gate.sh"
+            "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bash scripts/quality/task-quality-gate.sh",
+            "timeout": 420
           }
         ]
       }
