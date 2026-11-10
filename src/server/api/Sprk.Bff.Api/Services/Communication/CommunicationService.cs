@@ -47,6 +47,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -112,8 +114,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
-        TrackingFooterGate? trackingFooterGate = null)
+        TrackingFooterGate? trackingFooterGate = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -1569,20 +1573,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
             // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned). #2091: then
             // the step after a re-file (its mirror, what is filed under it, its gate Decision Records), never thrown.
+            // Task 054: a message joining a Direct thread gets its two participants in this same update.
             var assignment = await ThreadResolver.JoinThreadAsync(
                 _genericEntityService,
                 _ownership,
                 _scopeFactory,
                 _logger,
+                _recordShares,
                 communicationId,
                 threadId,
-                token => _genericEntityService.UpdateAsync(
+                (alongside, token) => _genericEntityService.UpdateAsync(
                     "sprk_communication",
                     communicationId,
-                    new Dictionary<string, object>
-                    {
-                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-                    },
+                    ThreadResolver.ThreadFilingFields(threadId, alongside),
                     token),
                 ct);
 

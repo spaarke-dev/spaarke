@@ -377,4 +377,11 @@ public sealed record ThreadResolutionRequest
     /// internal caller.
     /// </summary>
     public bool RequireOpenDefaultThread { get; init; }
+
+    /// <summary>
+    /// Task 054: the provider identity of an INBOUND message's sender (the ACS raw id of a chat message). When the message
+    /// joins a Direct thread and its row has no <c>sprk_sentby</c>, it is mapped to a systemuser through the existing identity
+    /// map and stamped with the recipient. Null on the send paths (their row carries <c>sprk_sentby</c>) and for email.
+    /// </summary>
+    public string? SenderChatIdentity { get; init; }
 }
