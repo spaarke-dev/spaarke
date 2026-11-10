@@ -807,6 +807,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
                 ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
                 ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
+                // A matter's standalone regarding type (sprk_RecordType_Ref.xml; no sprk_regardingrecordid on the matter).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_project"] = new[]
             {

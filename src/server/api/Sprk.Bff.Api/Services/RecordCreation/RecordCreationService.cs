@@ -675,7 +675,7 @@ internal sealed partial class RecordCreationService
         {
             // Step 4½ for the system principal (task 045a fix round 1, K2): there is no caller to read the catalog as, so a
             // type-only pair is never filled — it is cleared, with the same warning, and never written half.
-            if (IsTypeOnlyRegardingPair(item))
+            if (IsTypeOnlyRegardingPair(table, item))
             {
                 item = WithoutRegardingPair(item);
                 mappingWarnings.Add(new RecordCreationWarning(
@@ -1722,7 +1722,7 @@ internal sealed partial class RecordCreationService
         List<RecordCreationWarning> warnings, CancellationToken ct)
     {
         var pair = OwnedChildWrite.PairOf(item);
-        if (!IsTypeOnlyRegardingPair(item) || pair.TypeId is not { } type
+        if (!IsTypeOnlyRegardingPair(table, item) || pair.TypeId is not { } type
             || mappedValues.Keys.Contains(SecureRootInheritance.PairTypeColumn, StringComparer.OrdinalIgnoreCase))
         {
             return new TypeOnlyPairStep(callerItem, item, null);
@@ -1847,9 +1847,15 @@ internal sealed partial class RecordCreationService
         };
     }
 
-    /// <summary>Whether <paramref name="item"/>'s regarding pair names a type and no id (absent, null, empty or whitespace).</summary>
-    private static bool IsTypeOnlyRegardingPair(DataverseWriteItemMapper.MappedItem item)
+    /// <summary>
+    /// Whether <paramref name="item"/>'s regarding pair names a type and no id (absent, null, empty or whitespace). Only a table
+    /// that holds the whole pair (<see cref="OwnedChildWrite.RegardingPairTables"/>, as the update planner) has a pair to keep
+    /// whole: a table whose regarding type stands alone, with no id column (a matter), keeps its type and number as sent.
+    /// </summary>
+    private static bool IsTypeOnlyRegardingPair(string table, DataverseWriteItemMapper.MappedItem item)
     {
+        if (!OwnedChildWrite.RegardingPairTables.Contains(table.Trim()))
+            return false;
         var pair = OwnedChildWrite.PairOf(item);
         return pair.TypeId is not null && !pair.InvalidId && string.IsNullOrWhiteSpace(pair.IdText);
     }
