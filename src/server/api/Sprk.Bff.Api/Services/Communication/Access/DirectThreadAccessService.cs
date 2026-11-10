@@ -421,24 +421,39 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                     MaxDirectContentRowsPerTable, communicationId, threadId, table);
             }
 
-            var entitySet = SecureChildLineage.Children[table].EntitySet;
             foreach (var rowId in rowIds)
             {
-                foreach (var principalId in participants)
+                // 198 pass 2 F1: the row's shares first (a participant who already reads it is not granted again, so a mismatch
+                // below never revokes a share this call did not make), then grant-then-confirm by the row's owner id. A read
+                // fault, a grant fault, or an owner that is no longer exactly the Direct team grants nothing that stays here;
+                // the share job (SecureChildShareReconciliationJob's Direct pass) retries the message.
+                IReadOnlyList<Guid> missing;
+                try
                 {
-                    try
-                    {
-                        await _accessGrant.GrantAccessAsync(
-                            entitySet, rowId, DataversePrincipalRef.User(principalId), ReadAccessRights, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(
-                            ex,
-                            "Direct message content-row grant failed (non-fatal) | CommunicationId={CommunicationId}, " +
-                            "ThreadId={ThreadId}, Table={Table}, RowId={RowId}, Principal={Principal}",
-                            communicationId, threadId, table, rowId, principalId);
-                    }
+                    var readers = (await _accessGrant.GetPrincipalAccessOrThrowAsync(table, rowId, ct))
+                        .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & 1) != 0)
+                        .Select(s => s.Principal.Id)
+                        .ToHashSet();
+                    missing = participants.Where(p => !readers.Contains(p)).ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Direct message content-row shares could not be read; not granted here, the share reconciliation retries it " +
+                        "| CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
+                        communicationId, threadId, table, rowId);
+                    continue;
+                }
+
+                var (_, complete) = await DirectMessageParticipantShares.GrantContentRowAndConfirmAsync(
+                    _entityService, _accessGrant, table, rowId, directTeam, missing, communicationId, _logger, ct);
+                if (!complete)
+                {
+                    _logger.LogWarning(
+                        "Direct message content row not settled (a grant failed, or its owner is no longer the Direct team); the share " +
+                        "reconciliation retries it | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Table={Table}, RowId={RowId}",
+                        communicationId, threadId, table, rowId);
                 }
             }
         }

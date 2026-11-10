@@ -392,6 +392,18 @@ internal sealed class DirectMessageParticipantShares
                 .Select(s => s.Principal.Id)
                 .ToHashSet();
 
+            // 198 pass 2 F1: a content row is granted, then its owner is read back by id; a row no longer owned by exactly this
+            // Direct team (a filing into a Secure or Restricted record in between), or one whose owner cannot be read, has THIS
+            // call's grants revoked and is retried.
+            if (table != CommunicationTable)
+            {
+                var (rowGranted, rowComplete) = await GrantContentRowAndConfirmAsync(_dataverse, _shares, table, id, owner,
+                    eligible.Where(u => !readers.Contains(u)).ToList(), communicationId, _logger, ct).ConfigureAwait(false);
+                granted.AddRange(rowGranted.Select(user => (table, id, user)));
+                complete &= rowComplete;
+                continue;
+            }
+
             // Grant the missing ones: never anyone but an eligible participant.
             foreach (var user in eligible.Where(u => !readers.Contains(u)))
             {
@@ -409,9 +421,6 @@ internal sealed class DirectMessageParticipantShares
             }
 
             // On the message: no direct user share for anyone who is not a participant (an unfile's anchor grantees).
-            if (table != CommunicationTable)
-                continue;
-
             var others = DirectUsers(access).Where(u => !participants.Contains(u)).ToList();
             if (others.Count > 0 && !await OwnerUnchangedAsync(communicationId, owner, "revoke", ct).ConfigureAwait(false))
                 return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before its revokes");
@@ -531,28 +540,91 @@ internal sealed class DirectMessageParticipantShares
     /// Fix round 1 R5: <c>true</c> when the message is still owned by <paramref name="owner"/>; <c>false</c> (logged) when it is
     /// not, is gone, or cannot be read. Never throws (cancellation aside).
     /// </summary>
-    internal static async Task<bool> OwnerUnchangedAsync(
-        IGenericEntityService dataverse, Guid communicationId, Guid owner, string step, ILogger logger, CancellationToken ct)
+    internal static Task<bool> OwnerUnchangedAsync(
+        IGenericEntityService dataverse, Guid communicationId, Guid owner, string step, ILogger logger, CancellationToken ct) =>
+        RowOwnedByAsync(dataverse, CommunicationTable, communicationId, owner, step, logger, ct);
+
+    /// <summary>
+    /// <c>true</c> when the row of <paramref name="table"/> is owned by exactly the team <paramref name="owner"/>, compared by id;
+    /// <c>false</c> (logged) when it is not, is gone, or cannot be read. Never throws (cancellation aside).
+    /// </summary>
+    private static async Task<bool> RowOwnedByAsync(
+        IGenericEntityService dataverse, string table, Guid id, Guid owner, string step, ILogger logger, CancellationToken ct)
     {
         try
         {
-            var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
-            query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, communicationId);
+            var query = new QueryExpression(table) { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
             var now = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault()
                 ?.GetAttributeValue<EntityReference>("owningteam")?.Id;
             if (now is { } current && current != Guid.Empty && current == owner)
                 return true;
 
             logger.LogWarning("{Prefix} {Table} {Id}: its owner changed before its {Step} (was team {Owner}, now {Now}); nothing more is " +
-                "written, and it is retried.", LogPrefix, CommunicationTable, communicationId, step, owner, now);
+                "written, and it is retried.", LogPrefix, table, id, step, owner, now);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "{Prefix} {Table} {Id}: its owner could not be read again before its {Step}; nothing more is written, " +
-                "and it is retried.", LogPrefix, CommunicationTable, communicationId, step);
+                "and it is retried.", LogPrefix, table, id, step);
             return false;
         }
+    }
+
+    /// <summary>
+    /// 198 pass 2 F1: grants Read on one content row of a Direct message to <paramref name="users"/> (the ones that do not hold it;
+    /// the caller read the row's shares), then reads the row's owner back by id. When it is no longer exactly
+    /// <paramref name="directTeam"/> (a filing into a Secure or Restricted record re-owned it between the listing and the grant), or
+    /// cannot be read, every grant made HERE is revoked (a share held before the call is never touched) and the answer is
+    /// incomplete, so the caller retries the message. Grant-then-confirm, not check-then-grant: a re-own that lands after the
+    /// read-back lands after the grant too, so the re-owning path (the Secure synchronizer, the Restricted bar) sees the grant.
+    /// Never throws (cancellation aside).
+    /// </summary>
+    /// <returns>The users granted and kept, and whether the row is settled.</returns>
+    internal static async Task<(IReadOnlyList<Guid> Granted, bool Complete)> GrantContentRowAndConfirmAsync(
+        IGenericEntityService dataverse, IDataverseRecordShareService shares, string table, Guid rowId, Guid directTeam,
+        IReadOnlyList<Guid> users, Guid communicationId, ILogger logger, CancellationToken ct)
+    {
+        var entitySet = SecureChildLineage.Children[table].EntitySet;
+        var granted = new List<Guid>();
+        var complete = true;
+        foreach (var user in users)
+        {
+            try
+            {
+                await shares.GrantAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), ReadAccessRights, ct).ConfigureAwait(false);
+                granted.Add(user);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                complete = false;
+                logger.LogWarning(ex, "{Prefix} Granting {UserId} Read on {Table} {RowId} (of {Communication} {Id}) failed; it is " +
+                    "retried.", LogPrefix, user, table, rowId, CommunicationTable, communicationId);
+            }
+        }
+
+        if (granted.Count == 0
+            || await RowOwnedByAsync(dataverse, table, rowId, directTeam, "grant read-back", logger, ct).ConfigureAwait(false))
+        {
+            return (granted, complete);
+        }
+
+        foreach (var user in granted)
+        {
+            try
+            {
+                await shares.RevokeAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "{Prefix} {Table} {RowId} (of {Communication} {Id}) is no longer the Direct team's, and removing the " +
+                    "Read just granted to {UserId} failed; the owning path's own reconcile removes it.", LogPrefix, table, rowId,
+                    CommunicationTable, communicationId, user);
+            }
+        }
+
+        return ([], false);
     }
 
     private Task<bool> OwnerUnchangedAsync(Guid communicationId, Guid owner, string step, CancellationToken ct) =>
