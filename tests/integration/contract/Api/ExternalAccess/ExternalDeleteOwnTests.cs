@@ -239,7 +239,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
               "_sprk_relatedproject_value": ""
             }
             """);
-        var row = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        var row = WithEveryColumn(doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()));
 
         var target = ParseDeleteTarget(DeletableKind.Document, row);
 
@@ -249,9 +249,32 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         foreach (var garbled in new[] { "\"not-a-guid\"", "42", "true" })
         {
             using var bad = JsonDocument.Parse($$"""{ "_sprk_relatedmatter_value": {{garbled}}, "_sprk_project_value": "{{RecordA}}" }""");
-            ParseDeleteTarget(DeletableKind.Document, bad.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()))
+            ParseDeleteTarget(DeletableKind.Document, WithEveryColumn(bad.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone())))
                 .HasUnreadableParentLink.Should().BeTrue($"{garbled} is present but not a GUID");
         }
+    }
+
+    /// <summary>
+    /// Fix round 3d: the Web API returns every selected lookup, an unset one as an explicit null, and a column the row does not
+    /// carry reads as unreadable. This adds an explicit null for every column the document delete-target read selects that
+    /// <paramref name="row"/> does not name.
+    /// </summary>
+    private static Dictionary<string, JsonElement> WithEveryColumn(Dictionary<string, JsonElement> row)
+    {
+        var url = Uri.UnescapeDataString(BuildDeleteTargetUrl("https://org.test/api/data/v9.2", DeletableKind.Document, Guid.NewGuid()));
+        foreach (var column in url.Split("$select=")[1].Split('&')[0].Split(','))
+            row.TryAdd(column, JsonDocument.Parse("null").RootElement.Clone());
+        return row;
+    }
+
+    [Fact(DisplayName = "130-0 fix3d ParseDeleteTarget (must fire): a parent lookup the document delete-target read did not return refuses the delete")]
+    public void ParseDeleteTarget_AParentColumnNotReturned_IsUnreadable()
+    {
+        using var doc = JsonDocument.Parse($$"""{ "_sprk_createdbycontact_value": "{{CallerContact}}", "_sprk_project_value": "{{RecordA}}" }""");
+        var partial = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+
+        ParseDeleteTarget(DeletableKind.Document, partial).HasUnreadableParentLink.Should().BeTrue("the other parent lookups were not returned");
+        ParseDeleteTarget(DeletableKind.Document, WithEveryColumn(partial)).HasUnreadableParentLink.Should().BeFalse("control: explicit nulls");
     }
 
     [Fact]
@@ -971,11 +994,12 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [InlineData(DeletableKind.Document, "sprk_documents",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value,_sprk_relatedinvoice_value")]
     [InlineData(DeletableKind.Todo, "sprk_todos",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
     [InlineData(DeletableKind.Event, "sprk_events",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
+    // ebilling-r1 task 130-0 fix round 2 (F1): and every invoice link column the table has (InvoiceLinks), not already selected.
     public void DeleteTargetUrl_SelectsBothStampsAndEveryParentLookup(DeletableKind kind, string entitySet, string select)
     {
         BuildDeleteTargetUrl("https://org.test/api/data/v9.2", kind, RecordA)
@@ -1731,7 +1755,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             params DeleteTargetParent[] parents)
         {
             var id = Guid.NewGuid();
-            Data.Targets[(kind, id)] = new DeleteTarget(person, contact, parents);
+            // Task 130-0 fix round 2 (F1): no invoice link (links that were not read refuse the delete).
+            Data.Targets[(kind, id)] = new DeleteTarget(person, contact, parents, InvoiceLinks: Array.Empty<Guid>());
             if (kind == DeletableKind.Document)
                 AddDocument(id, DriveOf(id));
             return id;
@@ -1741,7 +1766,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         public Guid Seed(DeletableKind kind, Guid? contact, DeleteTargetParent parents, string driveId)
         {
             var id = Guid.NewGuid();
-            Data.Targets[(kind, id)] = new DeleteTarget(null, contact, new[] { parents });
+            Data.Targets[(kind, id)] = new DeleteTarget(null, contact, new[] { parents }, InvoiceLinks: Array.Empty<Guid>());
             AddDocument(id, driveId);
             return id;
         }

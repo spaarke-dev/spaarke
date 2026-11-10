@@ -159,6 +159,82 @@ public class RevokeGrantOverlapAndOwnContainerTests
         world.Deactivated.Should().Equal(target);
     }
 
+    /// <summary>
+    /// Fix round 3e, must fire: the overlap check reads the member list of an organization still granted the root. A membership row
+    /// that did not carry the contact column makes that list unknown, so the check fails closed exactly as a list past the bound
+    /// does: nothing is kept on the strength of another grant (the contact's permission is removed).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_AContactGrant_WhenTheOtherOrganizationsMembershipHasAnUnreadRow_KeepsNothing_FailClosed()
+    {
+        var world = new GrantWorld(ExternalGrantRootType.Project, ProjectId);
+        var target = world.ContactGrant(ContactA, NextMonth);
+        world.OrganizationGrant(OrganizationId, NextMonth);
+        world.Members[OrganizationId] = [ContactA];
+        world.OrganizationsWithAnUnreadMembershipRow.Add(OrganizationId);
+        var spe = new SpeCalls();
+
+        var result = await Revoke(world, spe, target, ContactA);
+
+        Body(result).SpeContainerOutcome.Should().NotBe(SpeContainerRevokeOutcome.NotAttempted,
+            "the member list is not known, so the permission is not kept on the strength of that organization's grant");
+        spe.Emails.Should().NotBeEmpty();
+    }
+
+    /// <summary>
+    /// Fix round 3g, must fire: another conferring row on the root came back WITHOUT its contact column. Whom it entitles is not known,
+    /// so nothing is kept on the strength of it (this method's own null): the contact's permission is removed, not kept.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_AContactGrant_WhenAnotherRowOfTheRootDidNotCarryItsContactColumn_KeepsNothing_FailClosed()
+    {
+        var world = new GrantWorld(ExternalGrantRootType.Project, ProjectId);
+        var target = world.ContactGrant(ContactA, NextMonth);
+        world.OrganizationGrantReadWithout(OrganizationId, omit: "_sprk_contact_value", expires: NextMonth);
+        world.Members[OrganizationId] = [ContactA];
+        var spe = new SpeCalls();
+
+        var result = await Revoke(world, spe, target, ContactA);
+
+        Body(result).SpeContainerOutcome.Should().NotBe(SpeContainerRevokeOutcome.NotAttempted,
+            "whom the row entitles is not known, so the permission is not kept on its strength");
+        spe.Emails.Should().NotBeEmpty();
+    }
+
+    /// <summary>Fix round 3g, must not fire: the same row with an explicit null contact is an organization grant, and keeps the member's permission.</summary>
+    [Fact]
+    public async Task Revoke_AContactGrant_WhenTheOtherRowsContactColumnIsAnExplicitNull_KeepsThePermission()
+    {
+        var world = new GrantWorld(ExternalGrantRootType.Project, ProjectId);
+        var target = world.ContactGrant(ContactA, NextMonth);
+        world.OrganizationGrantReadWithout(OrganizationId, omit: null, expires: NextMonth);
+        world.Members[OrganizationId] = [ContactA];
+        var spe = new SpeCalls();
+
+        var result = await Revoke(world, spe, target, ContactA);
+
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted);
+        spe.Emails.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Fix round 3g, must fire: the row being revoked did not carry a root column, so its grant key cannot be derived. It is the existing
+    /// NoGrantKey refusal (nothing is revoked), not "no other rows to sweep".
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfARowThatDidNotCarryARootColumn_IsRefusedForWantOfAGrantKey_AndNothingIsDeactivated()
+    {
+        var world = new GrantWorld(ExternalGrantRootType.Project, ProjectId);
+        var target = world.OrganizationGrantReadWithout(OrganizationId, omit: "_sprk_matter_value");
+        var spe = new SpeCalls();
+
+        var result = await Revoke(world, spe, target, Guid.Empty);
+
+        world.Deactivated.Should().BeEmpty("a row whose root lookups were not all returned has no derivable key: nothing is revoked");
+        spe.Emails.Should().BeEmpty();
+        result.Should().NotBeOfType<Ok<RevokeAccessResponse>>("the refusal is not a success");
+    }
+
     [Fact]
     public async Task Revoke_AnOrganizationGrant_KeepsTheMemberWithTheirOwnLiveGrant_AndRemovesTheRest()
     {
@@ -295,12 +371,41 @@ public class RevokeGrantOverlapAndOwnContainerTests
         public ExternalGrantRootType RootType { get; } = rootType;
         public Guid RootId { get; } = rootId;
         public Dictionary<Guid, Guid[]> Members { get; } = new();
+
+        /// <summary>Fix round 3e: organizations whose membership read also returns one row WITHOUT the contact column (not read).</summary>
+        public HashSet<Guid> OrganizationsWithAnUnreadMembershipRow { get; } = new();
         public List<Guid> Deactivated { get; } = new();
         public bool RootQueryFails { get; init; }
 
         public Guid ContactGrant(Guid contactId, DateOnly expires) => Add(contactId, organizationId: null, expires);
 
         public Guid OrganizationGrant(Guid organizationId, DateOnly expires) => Add(contactId: null, organizationId, expires);
+
+        /// <summary>
+        /// Fix round 3g: an active organization grant on the root as the Web API returns it, from JSON. Every lookup is an explicit null except
+        /// the organization and the project root; <paramref name="omit"/> names the one column the read did NOT return.
+        /// </summary>
+        public Guid OrganizationGrantReadWithout(Guid organizationId, string? omit, DateOnly? expires = null)
+        {
+            var columns = new Dictionary<string, string>
+            {
+                ["_sprk_contact_value"] = "null",
+                ["_sprk_organization_value"] = $"\"{organizationId}\"",
+                ["_sprk_project_value"] = $"\"{RootId}\"",
+                ["_sprk_matter_value"] = "null",
+                ["_sprk_workassignment_value"] = "null",
+                ["_sprk_grantedby_value"] = "null",
+                ["_sprk_grantedbycontact_value"] = "null",
+            };
+            if (omit is not null) columns.Remove(omit);
+            var id = Guid.NewGuid();
+            var json = "{\"sprk_externalrecordaccessid\":\"" + id + "\",\"statecode\":0," +
+                       (expires is { } e ? $"\"sprk_expiresdate\":\"{e:yyyy-MM-dd}\"," : string.Empty) +
+                       string.Join(",", columns.Select(kv => $"\"{kv.Key}\":{kv.Value}")) + "}";
+            _rows.Add(System.Text.Json.JsonSerializer.Deserialize<ExternalGrantRow>(
+                json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!);
+            return id;
+        }
 
         private Guid Add(Guid? contactId, Guid? organizationId, DateOnly expires)
         {
@@ -312,7 +417,10 @@ public class RevokeGrantOverlapAndOwnContainerTests
                 ContactId = contactId,
                 OrganizationId = organizationId,
                 ProjectId = RootType == ExternalGrantRootType.Project ? RootId : null,
+                MatterId = RootType == ExternalGrantRootType.Matter ? RootId : null,
                 WorkAssignmentId = RootType == ExternalGrantRootType.WorkAssignment ? RootId : null,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
             };
             _rows.Add(row);
             return row.Id;
@@ -348,9 +456,13 @@ public class RevokeGrantOverlapAndOwnContainerTests
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
                 {
                     var org = Guid.Parse(Regex.Match(filter!, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
-                    return (Members.TryGetValue(org, out var ids) ? ids : [])
+                    var rows = (Members.TryGetValue(org, out var ids) ? ids : [])
                         .Select(id => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = id })
                         .ToList();
+                    if (OrganizationsWithAnUnreadMembershipRow.Contains(org))
+                        rows.Add(System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+                            "{}", new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!);
+                    return rows;
                 });
 
             mock.Setup(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(

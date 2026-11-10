@@ -80,7 +80,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     };
 
     private Task<InvoiceVisibilityResult> Decide(string caller, params Guid[] invoices) =>
-        _world.NewService(_identity.Object).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags);
+        _world.NewService(_identity.Object).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags, _world.CallerFirms);
 
     private async Task ShouldBeHidden(string caller, Guid invoice, InvoiceHiddenReason reason)
     {
@@ -202,6 +202,33 @@ public sealed partial class ExternalInvoiceVisibilityTests
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Unreadable_AnAccessPermissionColumnTheSourceReadDidNotReturn_HidesTheInvoice(string caller)
+    {
+        // Fix round 3f: an absent column was not read, so the source is unreadable (never "not narrowed"); an explicit null is.
+        var plain = _world.OwnedInvoice();
+        var plainSource = _world.Source(plain, permission: null);
+        var marked = _world.OwnedInvoice();
+        var markedSource = _world.Source(marked, permission: Restricted, eml: true, marker: true);
+        var markedAbsent = _world.OwnedInvoice();
+        var markedAbsentSource = _world.Source(markedAbsent, permission: Restricted, eml: true, marker: true);
+        await ShouldBeVisible(caller, plain);
+        await ShouldBeVisible(caller, marked); // control: an explicit Restricted .eml with the marker keeps the own-leg lift
+
+        _world.OmitDocumentColumn(plainSource, "sprk_accesspermission");
+        _world.OmitDocumentColumn(markedAbsentSource, "sprk_accesspermission");
+
+        await ShouldBeHidden(caller, plain, InvoiceHiddenReason.SourceHidden);
+        await ShouldBeHidden(caller, markedAbsent, InvoiceHiddenReason.SourceHidden); // the marker never lifts an unreadable value
+        _ = markedSource;
+    }
+
+    [Fact]
+    public void TheSourceRead_SelectsTheAccessPermission()
+    {
+        ExternalInvoiceVisibility.SourceSelectColumns.Should().Contain(ExternalDocumentNarrowing.AccessPermissionField);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
     public async Task Unreadable_AnOwnValueThatIsNotAKnownLevel_HidesTheInvoice(string caller)
     {
         var invoice = _world.OwnedInvoice();
@@ -246,6 +273,28 @@ public sealed partial class ExternalInvoiceVisibilityTests
 
         await ShouldBeHidden(caller, malformed, InvoiceHiddenReason.RootUnresolved);
         await ShouldBeHidden(caller, liveParent, InvoiceHiddenReason.RootUnresolved);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Unreadable_ALiveParentColumnTheSourceReadDidNotReturn_HidesTheInvoice(string caller)
+    {
+        // Task 130-0 fix round 3c: a source whose read did not return a live-parent lookup column is unreadable; an explicit null is no parent.
+        var control = _world.OwnedInvoice();
+        _world.Source(control);
+        await ShouldBeVisible(caller, control);
+
+        foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+        {
+            var invoice = _world.OwnedInvoice();
+            var source = _world.Source(invoice);
+            _world.DropDocumentColumn(source, column);
+
+            // Fix round 3d: a narrowing link column (the parent document, the related communication) is read by the source's own
+            // narrowing first, which now hides the source when the column was not returned; any other live-parent column is the root rule's.
+            await ShouldBeHidden(caller, invoice, ExternalDocumentNarrowing.SelectColumns.Contains(column)
+                ? InvoiceHiddenReason.SourceHidden
+                : InvoiceHiddenReason.RootUnresolved);
+        }
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
@@ -666,15 +715,15 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var unreadable = _world.FamilyRow("sprk_invoicesubmission", invoice: null);
         var service = _world.NewService(_identity.Object);
 
-        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags))
+        (await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms))
             .Should().BeEmpty("the from-email invoice is visible to its firm");
 
         _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", unreadable, "_sprk_invoice_value", "not-a-guid");
-        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission, unreadable }, _world.RootFlags))
+        (await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission, unreadable }, _world.RootFlags, _world.SystemUserFirms))
             .Should().BeEquivalentTo(new[] { unreadable });
 
         _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
-        var act = () => service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+        var act = () => service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
         await act.Should().ThrowAsync<Exception>("a failed invoice read gives the caller no data");
         (await Decide("contact", invoice)).IsVisible(invoice).Should().BeFalse("the predicate's own submission read failed");
     }
@@ -795,7 +844,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Source(invoice, permission: Restricted);
 
         var decision = await _world.NewService(identity: null)
-            .HideInvoicesForAsync(Caller("internal-systemuser"), new[] { invoice }, _world.RootFlags);
+            .HideInvoicesForAsync(Caller("internal-systemuser"), new[] { invoice }, _world.RootFlags, _world.CallerFirms);
 
         decision.IsVisible(invoice).Should().BeFalse();
     }
@@ -873,7 +922,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Source(invoice, permission: Restricted);
 
         var decision = await _world.NewService(resolver)
-            .HideInvoicesForAsync(SystemUser(user), new[] { invoice }, _world.RootFlags);
+            .HideInvoicesForAsync(SystemUser(user), new[] { invoice }, _world.RootFlags, _world.CallerFirms);
 
         decision.IsVisible(invoice).Should().BeTrue($"an internal systemuser (flag {flag?.ToString() ?? "blank"}) is never hidden");
         flagReads.Should().ContainSingle(q => q.EntityName == "systemuser" && q.ColumnSet.Columns.Contains("sprk_isexternal"),
@@ -1228,7 +1277,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var withFirm = _world.PendingSubmission(document, channel);
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { blank, withFirm }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { blank, withFirm }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Contains(blank).Should().BeTrue("a submission with no firm is hidden whatever its source");
         // Control: the row with a firm is decided by its source exactly as before (the empty Internal link stays withheld; the others are visible).
@@ -1347,11 +1396,13 @@ public sealed partial class ExternalInvoiceVisibilityTests
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
         services.AddHttpContextAccessor();
         // Production registers the filing reader elsewhere; a parentless source makes no filing read (strict: any other call fails).
-        // 095d-2b-1: the one read it makes is the invoice firm hold, app-only through this reader (no invoice holds here).
+        // 095d-2b-1: the one read it makes is the invoice firm hold, app-only through this reader (no invoice holds here); since task
+        // 130-0 the same read also selects the invoice's firm.
         var filing = new Mock<IGenericEntityService>(MockBehavior.Strict);
         var firmHoldReads = 0;
         filing.Setup(d => d.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.SequenceEqual(new[] { "sprk_firmhold" })),
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice"
+                    && q.ColumnSet.Columns.SequenceEqual(new[] { "sprk_firmhold", "sprk_vendororg" })),
                 It.IsAny<CancellationToken>()))
             .Callback(() => firmHoldReads++)
             .ReturnsAsync(new EntityCollection());
@@ -1386,6 +1437,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var id = Guid.NewGuid();
         var row = ExternalDocumentNarrowing.FromWebApi(id, Row(
             ("sprk_documentid", id.ToString()), ("sprk_accesspermission", Restricted),
+            ("_sprk_relatedcommunication_value", null), ("_sprk_parentdocument_value", null), // fix round 3d: explicit nulls (an absent link is unreadable)
             ("sprk_isemailarchive", true), ("sprk_restrictedbysubmission", true)), readSubmissionMarker: true);
         CommunicationOpenThreadGate.RowQuery noReads = (_, _, _) => throw new InvalidOperationException("no read expected");
 
@@ -1438,7 +1490,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var missing = Guid.NewGuid();
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync(table, new[] { ofHidden, ofVisible, ofNone, missing }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), table, new[] { ofHidden, ofVisible, ofNone, missing }, _world.RootFlags, _world.SystemUserFirms);
 
         if (table == "sprk_invoicesubmission")
         {
@@ -1489,7 +1541,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var submission = _world.PendingSubmission(document, channel);
 
         var tool = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
         var route = await DecideSubmissions("contact", SubmissionView(submission, channel, document));
 
         tool.Contains(submission).Should().Be(hiddenExpected, route.HiddenSummary());
@@ -1503,7 +1555,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", submission, "_sprk_document_value", "not-a-guid");
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().Contain(submission);
     }
@@ -1518,7 +1570,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var withInvoice = _world.SpaUpload(invoice);
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { spa, isolated, withInvoice }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { spa, isolated, withInvoice }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { isolated });
         var byId = _world.Reads("sprk_invoicesubmissions").Where(u => u.Contains("sprk_invoicesubmissionid eq", StringComparison.Ordinal)).ToList();
@@ -1534,7 +1586,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
 
         var act = () => _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
         await act.Should().ThrowAsync<Exception>();
     }
@@ -1556,7 +1608,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var ofMissingLine = _world.FamilyRow(table, invoice: null, line: Guid.NewGuid());
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync(table, new[] { ofHiddenLine, ofVisibleLine, ofMissingLine }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), table, new[] { ofHiddenLine, ofVisibleLine, ofMissingLine }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { ofHiddenLine, ofMissingLine });
     }
@@ -1569,7 +1621,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var visibleInvoice = _world.OwnedInvoice();
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { hiddenInvoice, visibleInvoice }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoice", new[] { hiddenInvoice, visibleInvoice }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { hiddenInvoice });
     }
@@ -1581,7 +1633,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Faults["sprk_billingevents"] = HttpStatusCode.ServiceUnavailable;
 
         var act = () => _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_billingevent", new[] { row }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_billingevent", new[] { row }, _world.RootFlags, _world.SystemUserFirms);
 
         await act.Should().ThrowAsync<Exception>();
     }
@@ -1645,6 +1697,17 @@ internal sealed class InvoiceWorld : HttpMessageHandler
                     .ToHashSet();
                 lock (_filing)
                 {
+                    if (string.Equals(query.EntityName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+                        && query.ColumnSet.Columns.Contains(Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn))
+                    {
+                        // Task 130-0: the firm-hold read (the only one that selects the hold): every asked invoice exists, with its firm
+                        // (sprk_vendororg): InvoiceWorld.Firm unless the test set another one, or none (InvoiceFirm). Projected through the
+                        // query's ColumnSet, so a read that does not select the firm reads "no firm". Other invoice reads (the live-parent
+                        // walk) answer from the filing as before.
+                        InvoiceReads.Enqueue(query);
+                        return new EntityCollection(ids.Select(id => Projected(InvoiceRow(id), query.ColumnSet)).ToList());
+                    }
+
                     return new EntityCollection(_filing
                         .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
                         .Select(kv => Projected(kv.Value, query.ColumnSet))
@@ -1652,6 +1715,70 @@ internal sealed class InvoiceWorld : HttpMessageHandler
                 }
             });
     }
+
+    // ── Task 130-0: the invoice's firm and the caller's firms ──────────────────────────────────────────────────────────
+
+    private readonly Dictionary<Guid, Guid?> _invoiceFirm = new();
+
+    /// <summary>Every app-only read of <c>sprk_invoice</c> (the firm hold and firm read), in order.</summary>
+    public ConcurrentQueue<QueryExpression> InvoiceReads { get; } = new();
+
+    /// <summary>Sets <paramref name="invoice"/>'s firm (<c>sprk_vendororg</c>); <see langword="null"/>: the invoice has no firm.</summary>
+    public void InvoiceFirm(Guid invoice, Guid? firm)
+    {
+        lock (_filing) _invoiceFirm[invoice] = firm;
+    }
+
+    private Entity InvoiceRow(Guid id)
+    {
+        var row = new Entity("sprk_invoice", id);
+        if (_filing.TryGetValue(("sprk_invoice", id), out var stored))
+        {
+            foreach (var attribute in stored.Attributes)
+                row[attribute.Key] = attribute.Value;
+        }
+
+        var firm = _invoiceFirm.TryGetValue(id, out var set) ? set : Firm;
+        if (firm is { } f)
+            row[ExternalInvoiceVisibility.InvoiceFirmColumn] = new EntityReference("sprk_organization", f);
+        return row;
+    }
+
+    /// <summary>The caller's firms the seam reads (<see cref="CallerFirms"/>); <see cref="Firm"/> by default.</summary>
+    public Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms CallerFirmsAnswer { get; set; } =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms.From(new[] { Firm }, unreadable: false);
+
+    /// <summary>When set, the caller-firm read throws it.</summary>
+    public Exception? CallerFirmsFault { get; set; }
+
+    /// <summary>When true, the caller-firm read answers <see langword="null"/>.</summary>
+    public bool CallerFirmsNull { get; set; }
+
+    private int _callerFirmReads;
+
+    /// <summary>How many times the caller's firms were read.</summary>
+    public int CallerFirmReads => Volatile.Read(ref _callerFirmReads);
+
+    /// <summary>The caller-firm reader the caller-aware seam takes (as <c>AddExternalAccess</c> binds it, over this world's answer).</summary>
+    public CallerFirmReader CallerFirms => (_, _) =>
+    {
+        Interlocked.Increment(ref _callerFirmReads);
+        if (CallerFirmsFault is { } fault)
+            throw fault;
+        return Task.FromResult(CallerFirmsNull ? null! : CallerFirmsAnswer);
+    };
+
+    /// <summary>The REAL caller-aware seam (<see cref="ExternalDataService.HideInvoicesForAsync"/>) over this world, every caller external.</summary>
+    public ExternalInvoiceHiding Seam => (caller, invoiceIds, ct) =>
+        NewService(identity: null).HideInvoicesForAsync(caller, invoiceIds, RootFlags, CallerFirms, ct);
+
+    /// <summary>Task 130-0b: the caller of a new assistant tool call (its firms are read on its first call of the family seam).</summary>
+    public InvoiceFamilyCaller NewFamilyCaller() => new(Guid.NewGuid());
+
+    /// <summary>Task 130-0b: the family seam's firm reader over this world's answer (<see cref="CallerFirmsAnswer"/>), counted in
+    /// <see cref="CallerFirmReads"/>.</summary>
+    public Func<Guid, CancellationToken, Task<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms>> SystemUserFirms =>
+        (_, ct) => CallerFirms(null!, ct);
 
     private static Entity Projected(Entity stored, ColumnSet? columns)
     {
@@ -1730,6 +1857,13 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["_sprk_matter_value"] = rawMatter ?? matter?.ToString(),
             ["_sprk_project_value"] = project?.ToString(),
         };
+        // Task 130-0 fix round 3b: the Web API answers a selected lookup that is not set as an explicit null, and a root link column that
+        // is absent from a row reads as unreadable, so every root link column is seeded (null unless set above).
+        foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns)
+            row.TryAdd(column, null);
+        // Task 130-0 fix round 3c: the same for every live-parent lookup column (an absent one reads as unreadable).
+        foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+            row.TryAdd(column, null);
         if (extra is { } e) row[e.Column] = e.Value;
         Seed("sprk_documents", row);
         Filed("sprk_document", id, parent is { } p ? new[] { ("sprk_parentdocument", "sprk_document", p) } : Array.Empty<(string, string, Guid)>());
@@ -1952,11 +2086,36 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public void SetStoredFile(Guid id, string column, object? value) =>
         SetRow("sprk_storedfiles", "sprk_storedfileid", id, column, value);
 
+    /// <summary>
+    /// Task 130-0b step 2: a row of a CHILD table with an invoice link (<see cref="InvoiceLinks.Tables"/>), read by the seam app-only,
+    /// with each named link column (logical name, written as <c>_col_value</c>) set to its value as text (a GUID, or any raw text);
+    /// every other link column is unset. Returns its id.
+    /// </summary>
+    public Guid LinkedChildRow(string table, params (string Column, object? Value)[] links)
+    {
+        var linked = InvoiceLinks.Tables[table];
+        var id = Guid.NewGuid();
+        var row = new Dictionary<string, object?> { [linked.IdColumn] = id.ToString() };
+        foreach (var column in linked.LinkColumns)
+            row[$"_{column}_value"] = null;
+        foreach (var (column, value) in links)
+            row[$"_{column}_value"] = value?.ToString();
+        Seed(linked.EntitySet!, row);
+        return id;
+    }
+
     /// <summary>Sets <paramref name="column"/> on the row <paramref name="id"/> of <paramref name="set"/>.</summary>
     public void SetRow(string set, string idColumn, Guid id, string column, object? value)
     {
         lock (_sets)
             _sets[set].Single(r => (string?)r[idColumn] == id.ToString())[column] = value;
+    }
+
+    /// <summary>Task 130-0 fix round 3c: the document <paramref name="id"/> as a read that did not return <paramref name="column"/> answers it.</summary>
+    public void DropDocumentColumn(Guid id, string column)
+    {
+        lock (_sets)
+            _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString()).Remove(column);
     }
 
     /// <summary>The Stored File <paramref name="id"/> as a reader without the field-security profile reads it: every secured
@@ -2028,7 +2187,14 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
         // A Stored File always carries its purpose (the writer requires it): here a sourceless supporting file, not a source.
         if (table == "sprk_storedfile")
+        {
             row["sprk_purpose"] = InvoiceSupportingFile;
+            // Fix round 3d: the Web API answers a selected source column that is not set as an explicit null; an absent one was not read.
+            row["_sprk_sourcedocument_value"] = null;
+            row["_sprk_sourcecommunication_value"] = null;
+            row["sprk_sourceattachmentidentity"] = null;
+        }
+
         Seed(family.EntitySet, row);
         return id;
     }
@@ -2065,6 +2231,16 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     {
         lock (_sets)
             _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString())[column] = value;
+    }
+
+    /// <summary>
+    /// Fix round 3f: removes <paramref name="column"/> from the stored document, so a read that selects it does not get it back (the
+    /// Web API omits a column it did not return; an explicit null is a stored key holding null).
+    /// </summary>
+    public void OmitDocumentColumn(Guid id, string column)
+    {
+        lock (_sets)
+            _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id.ToString()).Remove(column);
     }
 
     private void Seed(string set, Dictionary<string, object?> row)

@@ -438,6 +438,80 @@ public class NoAccessShareEnforcerTests
         report.NotEnforceable.Should().BeEmpty();
     }
 
+    // ── Fix round 3e: a column the read did not return leaves the entry or the owner UNDETERMINED ─────────────────────
+    // Existing counting and retry path: EnforceEntryAsync records an unreadable entry as Failed ("entry-unreadable"), which
+    // NoAccessShareReconciliationJob counts as an incomplete entry (run status error) and runs again on its next tick;
+    // an owner that could not be read is the "residual-access-unverifiable" failure below.
+
+    [Theory]
+    [InlineData("sprk_noaccessentryid")]
+    [InlineData("_sprk_subjectcontact_value")]
+    [InlineData("_sprk_subjectorganization_value")]
+    [InlineData("_sprk_subjectsystemuser_value")]
+    [InlineData("_sprk_objectorganization_value")]
+    [InlineData("_sprk_objectrecordtype_value")]
+    [InlineData("sprk_objectrecordid")]
+    [InlineData("statecode")]
+    [InlineData("_modifiedby_value")]
+    public async Task Enforce_WhenTheEntryRowDidNotCarryAColumn_TheEntryIsUndetermined_FailedAndNothingIsRemoved(string missing)
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        _h.Store.EntryRowJson[entry] = _h.Store.EntryJson(entry, missing);
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Failed, "an undetermined entry is neither 'not found' nor 'malformed'");
+        report.Complete.Should().BeFalse("the run is counted as incomplete and retried");
+        report.Failures.Should().ContainSingle(f => f.Kind == "entry-unreadable");
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask,
+            "nothing is removed on an entry that cannot be determined; the next run decides it");
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheEntryRowCarriesEveryColumn_AsExplicitNulls_IsEnforcedAsToday()
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        _h.Store.EntryRowJson[entry] = _h.Store.EntryJson(entry);
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Evaluated);
+        report.Failures.Should().BeEmpty();
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+    }
+
+    [Theory]
+    [InlineData("""{"_owninguser_value":null}""")]
+    [InlineData("""{"_owningteam_value":null}""")]
+    [InlineData("{}")]
+    public async Task Enforce_WhenTheOwnerRowDidNotCarryAnOwnerColumn_TheOwnerIsUndetermined_AndTheRunIsNotComplete(string ownerRow)
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Store.OwnerRowJson = ownerRow;
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse();
+        report.Failures.Should().ContainSingle(f => f.Kind == "residual-access-unverifiable" && f.SystemUserId == Walled);
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheOwnerRowCarriesBothOwnerColumns_AsExplicitNulls_OneOfThemSet_IsComplete()
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Store.OwnerRowJson = $$"""{"_owningteam_value":null,"_owninguser_value":"{{Guid.NewGuid()}}"}""";
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().BeEmpty();
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+    }
+
     [Fact]
     public async Task Enforce_WhileAnotherEnforcementHoldsTheRecordsRemovalLock_RemovesNothing_AndSaysTryAgain()
     {

@@ -260,10 +260,19 @@ public static class ExternalMessageEndpoints
 
         try
         {
-            var rights = await GetRecordRightsAsync(
-                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
-                    hideInvoices)
-                .ConfigureAwait(false);
+            Spaarke.Dataverse.AccessRights rights;
+            try
+            {
+                rights = await GetRecordRightsAsync(
+                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
+                        hideInvoices)
+                    .ConfigureAwait(false);
+            }
+            catch (ExternalDataService.DataverseUnavailableException)
+            {
+                // Task 130-0 fix round 1 (K1): the invoice decision faulted after the record check; nothing is posted.
+                return ExternalProjectDataEndpoints.InvoiceUnreadableProblem();
+            }
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             {
@@ -414,10 +423,21 @@ public static class ExternalMessageEndpoints
             // The gate is INSIDE the try: a Dataverse fault on its app-only record read (invoices / service requests) is
             // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
             // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
-            if (!await IsRootRecordReadableAsync(
+            bool readable;
+            try
+            {
+                readable = await IsRootRecordReadableAsync(
                         messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
                         hideInvoices)
-                    .ConfigureAwait(false))
+                    .ConfigureAwait(false);
+            }
+            catch (ExternalDataService.DataverseUnavailableException)
+            {
+                // Task 130-0 fix round 1 (K1): the invoice decision faulted after the record check.
+                return ExternalProjectDataEndpoints.InvoiceUnreadableProblem();
+            }
+
+            if (!readable)
             {
                 logger.LogWarning(
                     "[EXT-MESSAGES] DENY {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in the " +
@@ -428,16 +448,19 @@ public static class ExternalMessageEndpoints
 
             // Internal-only reaches a SYSTEMUSER principal only (the read service also asks IsExternalAsync). A contact —
             // CIAM or workforce — passes null, so the shared filter hides every internal-only row from it.
+            // Task 130-0 fix round 2 (F2): a message withheld because its invoice could not be decided makes the read Truncated.
+            var invoiceFault = new System.Runtime.CompilerServices.StrongBox<bool>();
             var read = await threadReadService
                 .ReadRegardingAppOnlyAsync(
                     messageRoot.EntityLogicalName, id, principal.SystemUserId,
-                    RootsReadableFor(messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents, hideInvoices), ct)
+                    RootsReadableFor(
+                        messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents, hideInvoices, invoiceFault), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
             {
                 Value = read.Messages.Select(m => ToExternalDto(m, principal)).ToList(),
-                Truncated = read.Truncated,
+                Truncated = read.Truncated || invoiceFault.Value,
             });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -474,13 +497,14 @@ public static class ExternalMessageEndpoints
     /// </remarks>
     internal static MessageRootsFilter RootsReadableFor(
         MessageRoot root, Guid id, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
-        LiveParentRootReader? readLiveParents = null, ExternalInvoiceHiding? hideInvoices = null) =>
+        LiveParentRootReader? readLiveParents = null, ExternalInvoiceHiding? hideInvoices = null,
+        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null) =>
         SecureRootsFilter(
             principal, readNonSecureRoots, logger, readLiveParents,
             string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
                 ? (root.EntityLogicalName, id)
                 : null,
-            hideInvoices);
+            hideInvoices, invoiceFault);
 
     /// <summary>
     /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
@@ -497,7 +521,7 @@ public static class ExternalMessageEndpoints
     internal static MessageRootsFilter SecureRootsFilter(
         CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
         LiveParentRootReader? readLiveParents = null, (string Table, Guid Id)? authorizedParent = null,
-        ExternalInvoiceHiding? hideInvoices = null) =>
+        ExternalInvoiceHiding? hideInvoices = null, System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null) =>
         async (candidates, ct) =>
         {
             var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
@@ -511,17 +535,18 @@ public static class ExternalMessageEndpoints
                 logger, ct).ConfigureAwait(false);
             // ebilling-r1 task 098 (uac-r2 2026-10-21): a message about an invoice reaches an external caller only when that
             // invoice passes (a') too (the 065 gate is the read service's). The route's own invoice is the gate's decision.
-            var invoices = await RegardingInvoicesVisibleAsync(principal, candidates, authorizedParent, hideInvoices, logger, ct)
+            var invoices = await RegardingInvoicesVisibleAsync(
+                    principal, candidates, authorizedParent, hideInvoices, logger, ct, invoiceFault)
                 .ConfigureAwait(false);
             return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live, authorizedParent))
                 && invoices(r);
         };
 
-    /// <summary>The invoice a message regards (raw lookup values; at most one in practice).</summary>
-    private static IEnumerable<string?> RegardingInvoicesOf(MessageRootLookups row) =>
-        ExternalMultiRootRule.LiveParentsOf(CommunicationTable, row.Row)
-            .Where(p => string.Equals(p.Table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
-            .Select(p => p.LookupValue);
+    /// <summary>The invoices a message regards, through every invoice link column of a communication
+    /// (<see cref="InvoiceLinks.LinkColumnsOf"/>; task 130-0 fix round 2, K2). A link that is not a GUID reads as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, which is never visible.</summary>
+    private static IReadOnlyList<Guid> RegardingInvoicesOf(MessageRootLookups row) =>
+        ExternalDataService.InvoiceLinksOf(CommunicationTable, row.Row);
 
     /// <summary>
     /// Task 098: the per-message (a') term of <see cref="SecureRootsFilter"/>. Reads the predicate ONCE for every invoice the
@@ -531,18 +556,17 @@ public static class ExternalMessageEndpoints
     /// </summary>
     private static async Task<Func<MessageRootLookups, bool>> RegardingInvoicesVisibleAsync(
         CallerPrincipal principal, IReadOnlyCollection<MessageRootLookups> candidates, (string Table, Guid Id)? authorizedParent,
-        ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
+        ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct,
+        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null)
     {
-        bool IsAuthorized(string? value) =>
+        bool IsAuthorized(Guid id) =>
             authorizedParent is { } parent
             && string.Equals(parent.Table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase)
-            && Guid.TryParse(value, out var id) && id == parent.Id;
+            && id == parent.Id;
 
         var asked = candidates
             .SelectMany(RegardingInvoicesOf)
-            .Where(v => !IsAuthorized(v))
-            .Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty)
-            .Where(id => id != Guid.Empty)
+            .Where(id => !IsAuthorized(id) && id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
             .Distinct()
             .ToList();
         InvoiceVisibilityResult? decision = null;
@@ -563,9 +587,15 @@ public static class ExternalMessageEndpoints
                 asked.Count);
         }
 
-        return row => RegardingInvoicesOf(row).All(value =>
-            IsAuthorized(value)
-            || (Guid.TryParse(value, out var id) && id != Guid.Empty && decision is not null && decision.IsVisible(id)));
+        // Task 130-0 fix round 2 (F2): a decision that could not be made (faulted, or no predicate) withholds every message regarding
+        // an asked invoice; the read reports it as Truncated, so a fault never reads as "there are no more messages".
+        if (invoiceFault is not null && asked.Count > 0 && (decision is null || decision.AnyFaulted))
+            invoiceFault.Value = true; // task 130-0 fix round 3b: a whole-read fault or one invoice's own failed decision
+
+        return row => RegardingInvoicesOf(row).All(id =>
+            IsAuthorized(id)
+            || (id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink && decision is not null && !decision.Faulted
+                && decision.IsVisible(id)));
     }
 
     /// <summary>The table every message row is read from.</summary>
@@ -691,8 +721,12 @@ public static class ExternalMessageEndpoints
         }, false);
     }
 
-    /// <summary>The caller's rights on an invoice: the union over its parent roots (<c>sprk_matter</c>,
-    /// <c>sprk_project</c>) as the gate read them; <see cref="Spaarke.Dataverse.AccessRights.None"/> with none.</summary>
+    /// <summary>An invoice's work-assignment core record (D-28; <c>InvoiceContextService.InvoiceWorkAssignment</c>).</summary>
+    internal const string InvoiceWorkAssignmentColumn = "sprk_regardingworkassignment";
+
+    /// <summary>The caller's rights on an invoice: the union over its core-record parents (<c>sprk_matter</c>,
+    /// <c>sprk_project</c>, <c>sprk_regardingworkassignment</c>; D-28) as the gate read them;
+    /// <see cref="Spaarke.Dataverse.AccessRights.None"/> with none.</summary>
     private static Spaarke.Dataverse.AccessRights RightsThroughParents(
         CallerPrincipal principal, IReadOnlyDictionary<string, object?>? scopeRow)
     {
@@ -710,6 +744,12 @@ public static class ExternalMessageEndpoints
         if (scopeRow.TryGetValue("sprk_project", out var project) && project is Guid projectId)
         {
             rights |= principal.RightsOn(ExternalGrantRootType.Project, projectId);
+        }
+
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): the invoice's core record may be its work assignment.
+        if (scopeRow.TryGetValue(InvoiceWorkAssignmentColumn, out var workAssignment) && workAssignment is Guid workAssignmentId)
+        {
+            rights |= principal.RightsOn(ExternalGrantRootType.WorkAssignment, workAssignmentId);
         }
 
         return rights;
@@ -806,8 +846,10 @@ public static class ExternalMessageEndpoints
             return (false, row, live.Faulted || !flags.IsComplete);
 
         // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is refused like a missing
-        // one, for a caller who is not an internal systemuser. No predicate, a hidden invoice and a failed read all refuse with
-        // the SAME answer as a missing record (Undecided false: a fault must not be distinguishable from "hidden").
+        // one, for a caller who is not an internal systemuser. No predicate and a hidden invoice refuse with the SAME answer as a
+        // missing record. Task 130-0 fix round 1 (K1): a FAILED read throws DataverseUnavailableException instead, answered as
+        // the InvoiceUnreadableReasonCode 503. It is reached only here, after the record check (the record exists and the caller
+        // reaches it), so it is no existence oracle.
         if (string.Equals(root.EntityLogicalName, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
         {
             if (hideInvoices is null)
@@ -817,6 +859,13 @@ public static class ExternalMessageEndpoints
             }
 
             var decision = await hideInvoices(principal, new[] { id }, ct).ConfigureAwait(false);
+            if (!decision.IsVisible(id) && decision.IsFaultedFor(id)) // fix round 3 (Q2): this invoice's own failed decision too
+            {
+                logger.LogWarning(
+                    "[EXT-MESSAGES] Invoice {RecordId}: the (a') read failed for a caller who reaches it; answered as unavailable.", id);
+                throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+            }
+
             if (!decision.IsVisible(id))
             {
                 logger.LogInformation(

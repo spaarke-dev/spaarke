@@ -435,6 +435,18 @@ internal sealed class ExternalPersonRemovalService
                 continue;
             }
 
+            if (!row.KeyLookupsRead)
+            {
+                // Fix round 3g: a row that did not carry a root, contact or organization column is not "a row naming no record":
+                // which record it names is unknown, so its container permission cannot be cleaned up and it must not be
+                // deactivated by id as if there were nothing to clean. Not completed, so the removal is retried.
+                _logger.LogError(
+                    "[EXT-REMOVE-PERSON] Access record {AccessRecordId} of contact {ContactId} did not carry every root, contact " +
+                    "and organization column; its grant cannot be derived and it is left for the retry.", row.Id, contactId);
+                notCompleted.Add(row.Id);
+                continue;
+            }
+
             if (ExternalGrantLifecycle.DeriveKey(row) is not { } key)
             {
                 // A row naming no record confers nothing and has no logical grant to revoke, so the person-wide removal

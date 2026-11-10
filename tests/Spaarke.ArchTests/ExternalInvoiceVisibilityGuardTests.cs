@@ -95,12 +95,14 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::IsInvoiceCreate"] =
             "Whether a chat create names sprk_invoice, so the create is refused (ebilling-r1 task 096b); reads no row.",
         // ── parts of the predicate's application (inputs and the decision's consequence) ──
-        [$"{typeof(ExternalMessageEndpoints).FullName}::RegardingInvoicesOf"] =
-            "Extracts a message page's regarding invoice ids FOR the predicate (SecureRootsFilter → RegardingInvoicesVisibleAsync).",
         [$"{typeof(ExternalMessageEndpoints).FullName}::RightsFromGate"] =
             "Turns the record gate's answer into rights; the gate (EvaluateRecordGateAsync) applied the predicate first.",
         [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceFamilyKeyAttributes"] =
             "Projects sprk_invoiceid so the predicate can key each row (ExecuteScopedFetchCoreAsync applies it).",
+        [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceLinkedChildAttributes"] =
+            "Projects a child module's invoice link columns so the predicate can decide each row by its invoice (ebilling-r1 task 130-0 fix round 1; ExecuteScopedFetchCoreAsync applies it). Names the invoice family only to leave it to the predicate's own family step; reads no row.",
+        [$"{typeof(InvoiceLinks).FullName}::IsInvoice"] =
+            "Picks the registry edges whose parent is sprk_invoice (ebilling-r1 task 130-0b), so the invoice ids a row links to can be decided BY the predicate; reads no row.",
         [$"{typeof(ExternalInvoiceReviewDetail).FullName}::Applies"] =
             "Decides whether a module is the invoice module for the review-detail projection (082c-2 fix round 3, U1); reads no row. The projection runs on rows the route already hid.",
         // ── reads that return no invoice-family row ──
@@ -797,14 +799,15 @@ internal sealed class InvoiceGuardControlNamesStepZero
 /// <summary>MUST FIRE (family seam): takes the seam.</summary>
 internal sealed class FamilySeamControlTakesTheSeam(AppOnlyInvoiceFamilyHiding hide)
 {
-    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide("sprk_invoice", new[] { id }, ct);
+    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide(new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, ct);
 }
 
 /// <summary>MUST FIRE (family seam): calls the app-only reader's entry directly.</summary>
 internal sealed class FamilySeamControlCallsTheReaderDirectly(ExternalDataService data)
 {
     internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, EffectiveRootFlagReader flags, CancellationToken ct) =>
-        data.HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { id }, flags, ct);
+        data.HideInvoiceFamilyRowsAsync(
+            new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, flags, (_, _) => Task.FromResult(CallerFirms.NoFirm), ct);
 }
 
 /// <summary>MUST FIRE (family seam): resolves the seam by name.</summary>
@@ -878,7 +881,7 @@ internal sealed class ToolDecisionControlToolDecidesWithTheInvoiceSeam(ExternalI
 internal sealed class ToolDecisionControlToolUsesTheFamilySeam(AppOnlyInvoiceFamilyHiding hide)
 {
     internal async Task<bool> ExecuteChatAsync(Guid row, CancellationToken ct) =>
-        !(await hide("sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
+        !(await hide(new InvoiceFamilyCaller(null), "sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
 }
 
 /// <summary>Control (one function): the shared decision; it invokes the seam.</summary>

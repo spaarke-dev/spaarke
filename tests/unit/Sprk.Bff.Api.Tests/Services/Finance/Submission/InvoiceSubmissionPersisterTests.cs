@@ -2440,7 +2440,7 @@ public partial class InvoiceSubmissionPersisterTests
         ProjectForTheFirm(store, world, withStoredFiles: true);
 
         var decision = await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
 
         decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
         decision.Faulted.Should().BeFalse();
@@ -2457,7 +2457,7 @@ public partial class InvoiceSubmissionPersisterTests
         ProjectForTheFirm(store, world, withStoredFiles: false);
 
         var decision = await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
 
         decision.IsVisible(InvoiceId).Should().BeFalse();
     }
@@ -3185,7 +3185,7 @@ public partial class InvoiceSubmissionPersisterTests
             marker: emlMarked, communication: world.Communication(internalOnly: false, world.Thread(openThread)), matter: Matter);
 
         return await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
     }
 
     private sealed class Store

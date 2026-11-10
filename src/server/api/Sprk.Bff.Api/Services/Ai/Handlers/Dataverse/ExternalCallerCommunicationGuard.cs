@@ -237,14 +237,16 @@ internal static class ExternalCallerCommunicationGuard
 
     private static bool IsUsableId(Guid id) => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink;
 
-    /// <summary>A lookup value of one OData row: <c>null</c> when absent or null (not set); the sentinel when present but not a
-    /// usable GUID.</summary>
+    /// <summary>A lookup value of one OData row: <c>null</c> for an explicit JSON null (not set); the sentinel when the column is
+    /// ABSENT (it was not read; fix round 3d) or present but not a usable GUID.</summary>
     private static Guid? LinkOf(Dictionary<string, JsonElement> row, string column) =>
-        !row.TryGetValue(column, out var v) || v.ValueKind == JsonValueKind.Null
-            ? null
-            : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
-                ? id
-                : ExternalDocumentNarrowing.UnreadableLink;
+        !row.TryGetValue(column, out var v)
+            ? ExternalDocumentNarrowing.UnreadableLink
+            : v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                ? null
+                : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+                    ? id
+                    : ExternalDocumentNarrowing.UnreadableLink;
 
     /// <summary>
     /// The log reason of the derived rows a handler hid (ADR-015: codes and counts only): <c>source_document_hidden</c> for a

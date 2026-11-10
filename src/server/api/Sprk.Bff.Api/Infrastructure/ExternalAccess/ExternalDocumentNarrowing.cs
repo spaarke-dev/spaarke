@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <para><b>The legs</b> (each hides the document):</para>
 /// <list type="number">
 /// <item><b>Own Restricted.</b> The document's own <c>sprk_accesspermission</c> reads Restricted (100000002), or a value
-/// that is not a known level (unreadable). Null or absent counts as Standard, as everywhere else
+/// that is not a known level (unreadable). An explicit null counts as Standard, as everywhere else
 /// (<see cref="InheritedAccessPermission.MostRestrictive"/>). Because visibility is "root AND own", an own value wider than
 /// the root changes nothing: the root still decides.</item>
 /// <item><b>An internal-only or non-Open communication.</b> The document's communication is its own
@@ -95,8 +95,9 @@ internal static class ExternalDocumentNarrowing
     internal static readonly Guid UnreadableLink = CommunicationOpenThreadGate.UnreadableLink;
 
     /// <summary>
-    /// The Web API <c>$select</c> columns every surface that decides a document must read (pinned by test: a dropped column
-    /// reads as "not set" and would open the leg it feeds).
+    /// The Web API <c>$select</c> columns every surface that decides a document must read (pinned by test). A dropped link column
+    /// reads as unreadable since fix round 3d (the document is hidden); the permission choice column reads as unreadable too
+    /// since fix round 3f (only an explicit null is "not set"). Every caller selects it; the pins hold that.
     /// </summary>
     internal static IReadOnlyList<string> SelectColumns { get; } =
         new[] { AccessPermissionField, RelatedCommunicationValue, ParentDocumentValue };
@@ -115,7 +116,12 @@ internal static class ExternalDocumentNarrowing
 
     // ── Row parsing ─────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>One OData document row (its <c>$select</c> must carry <see cref="SelectColumns"/>), keyed by column.</summary>
+    /// <summary>
+    /// One OData document row (its <c>$select</c> must carry <see cref="SelectColumns"/>), keyed by column. Absent is not null,
+    /// for a lookup and for the <c>sprk_accesspermission</c> choice column alike: a column the row did not carry is
+    /// <c>Unreadable</c> (the row is not trusted to be unrestricted), while an explicit JSON null is a filed "none" and reads
+    /// <c>NotNarrowed</c>.
+    /// </summary>
     internal static DocumentNarrowingRow FromWebApi(Guid documentId, IReadOnlyDictionary<string, JsonElement>? row) =>
         FromJson(documentId, column => row is not null && row.TryGetValue(column, out var v) ? v : null);
 
@@ -194,6 +200,12 @@ internal static class ExternalDocumentNarrowing
         return ExternalModuleDescriptor.TryGetAttributeId(row, attribute, out var id) ? id : UnreadableLink;
     }
 
+    /// <summary>
+    /// A Web API row lists a column it was asked for, an unset choice as an explicit JSON <c>null</c> (not narrowed, as
+    /// everywhere else: <see cref="InheritedAccessPermission.MostRestrictive"/>). A column the row does not carry was not
+    /// read, which says nothing about its value, so it is treated as unreadable (fix round 3f); <c>SkipsOwnLeg</c>
+    /// never lifts an unreadable own value.
+    /// </summary>
     private static DocumentNarrowingRow FromJson(Guid documentId, Func<string, JsonElement?> valueOf)
     {
         var own = valueOf(AccessPermissionField) is { } permission
@@ -203,14 +215,15 @@ internal static class ExternalDocumentNarrowing
                 JsonValueKind.Number when permission.TryGetInt32(out var value) => PermissionOf(value),
                 _ => DocumentPermission.Unreadable,
             }
-            : DocumentPermission.NotNarrowed;
+            : DocumentPermission.Unreadable;
         return new DocumentNarrowingRow(
             documentId, own, JsonLink(valueOf(RelatedCommunicationValue)), JsonLink(valueOf(ParentDocumentValue)));
     }
 
-    /// <summary>Absent or null: <see cref="Guid.Empty"/> (not set); a non-empty GUID string: that id; anything else unreadable.</summary>
+    /// <summary>An explicit JSON null: <see cref="Guid.Empty"/> (not set); a non-empty GUID string: that id; anything else, and a
+    /// column that is ABSENT from the row (it was not read; fix round 3d), unreadable.</summary>
     private static Guid JsonLink(JsonElement? value) => value is not { } v
-        ? Guid.Empty
+        ? UnreadableLink
         : v.ValueKind switch
         {
             JsonValueKind.Null or JsonValueKind.Undefined => Guid.Empty,

@@ -351,6 +351,9 @@ public static class ExternalNotificationFeedEndpoints
             // A ceiling without Read on sprk_communication reads no message at all.
             if (canReadTable(WorkforceRoleCeilingGate.CommunicationTable))
             {
+                // ebilling-r1 task 130-0 fix round 2 (F2): a message withheld because its invoice could not be decided makes the
+                // feed Truncated (unreadCount stays a count of the items returned).
+                var invoiceFault = new System.Runtime.CompilerServices.StrongBox<bool>();
                 var recent = await threadReadService
                     .ReadRecentForRecordsAppOnlyAsync(
                         records, cutoff, principal.SystemUserId, MaxItems,
@@ -360,10 +363,10 @@ public static class ExternalNotificationFeedEndpoints
                             principal, dataService.GetNonSecureRootsAsync, logger, dataService.GetLiveParentRootsAsync,
                             authorizedParent: null,
                             // ebilling-r1 task 098: a message regarding an invoice (a') hides is not reported (fail closed).
-                            hideInvoices: hideInvoices),
+                            hideInvoices: hideInvoices, invoiceFault: invoiceFault),
                         ct)
                     .ConfigureAwait(false);
-                truncated |= recent.Truncated;
+                truncated |= recent.Truncated || invoiceFault.Value;
                 foreach (var m in recent.Messages)
                 {
                     if (ExternalMessageEndpoints.IsAuthoredBy(m.Message, principal) || m.Message.CreatedOn is not { } createdOn)

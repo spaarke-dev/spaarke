@@ -418,6 +418,25 @@ public class PersonAccessAdministrationTests
         _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Fix round 3g, must fire: a grant row the read returned WITHOUT a root column is not "a row naming no record" (that is an
+    /// explicit null, ended by its id above). Which record it names is unknown, so it is not ended: the step is not completed
+    /// and the removal is retried.
+    /// </summary>
+    [Fact]
+    public async Task Remove_AGrantRowThatDidNotCarryARootColumn_IsNotEnded_AndIsReportedNotCompleted()
+    {
+        var (contact, _) = BoundPerson();
+        var grant = GrantOnMatter(contact);
+        _h.Grants.OmittedGrantColumns.Add("_sprk_matter_value");
+
+        var result = await Remove(contact);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        ((IReadOnlyList<Guid>)Problem(result).ProblemDetails.Extensions["grantsNotCompleted"]!).Should().Equal(grant.Id);
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue("a row whose record is unknown is not ended on a guess");
+    }
+
     // ── Slice C2b: the grant read is bounded; a read above the bound is never reported complete ──────────────────
 
     private void GrantRowsOnMatter(Guid contactId, int count)

@@ -497,6 +497,9 @@ public class ExternalNotificationFeedTests
         feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
         feed.UnreadCount.Should().Be(1);
         _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(invoice);
+        // ebilling-r1 task 130-0 fix round 2 (F2): a hidden invoice is an answer; a fault says truncated (unreadCount stays the
+        // count of the items returned).
+        feed.Truncated.Should().Be(kind == "fault", "a fault must not read as 'there is nothing more to report'");
     }
 
     [Fact]
@@ -512,6 +515,32 @@ public class ExternalNotificationFeedTests
         _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
 
         Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(aboutInvoice));
+    }
+
+    // ── ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms, through the REAL seam ──
+
+    [Fact(DisplayName = "130-0 notification feed (must fire): a message regarding another firm's invoice on a shared project never appears nor counts; one regarding the caller's own firm's invoice appears")]
+    public async Task Task130_OwnFirms_AMessageRegardingAnotherFirmsInvoice_NeverAppears_NorCounts()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var project = Guid.NewGuid();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, Guid.Parse("13000000-0000-4000-8000-0000000000b2"));
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", own, ("sprk_project", "sprk_project", project));
+        _roots.AddFilingRow("sprk_invoice", other, ("sprk_project", "sprk_project", project));
+        var aboutOwn = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        aboutOwn["_sprk_regardinginvoice_value"] = El(own.ToString("D"));
+        var aboutOther = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutOther["_sprk_regardinginvoice_value"] = El(other.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(aboutOwn));
+        feed.UnreadCount.Should().Be(1);
     }
 
     [Theory]

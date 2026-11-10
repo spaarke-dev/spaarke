@@ -206,6 +206,14 @@ internal static class WorkforceRoleCeilingGate
         (InvoiceSubmissionTable, AccessRights.Read));
 
     /// <summary>
+    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c> since ebilling-r1 task 130-0 fix round 1: Read on
+    /// <c>sprk_invoicesubmission</c> and on <c>sprk_invoice</c>. Both routes read the submission's invoice: its status drives the
+    /// view's warning and replaced-by note, and a submission is shown only when its invoice is visible to the caller.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissionsWithInvoice = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read));
+
+    /// <summary>
     /// <c>GET /invoice-submissions/firm-records</c>: Read on the three core tables whose ids it returns, and Create on
     /// <c>sprk_invoicesubmission</c>. The handler offers only the records the caller can submit on, so this mirrors
     /// <c>/me/entitlements</c> offering a service-request type only when the role holds Create on it.

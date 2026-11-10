@@ -20,7 +20,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.NewService(_identity.Object, _events).HideSubmissionsForAsync(Caller(caller), submissions, _world.RootFlags);
 
     private Task<InvoiceVisibilityResult> DecideLogged(string caller, params Guid[] invoices) =>
-        _world.NewService(_identity.Object, _events).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags);
+        _world.NewService(_identity.Object, _events).HideInvoicesForAsync(Caller(caller), invoices, _world.RootFlags, _world.CallerFirms);
 
     private static string NotOwnCode => $"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.InvoiceLinkNotOwn)}=1";
 
@@ -54,7 +54,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var other = _world.Submission(linked, document: null, channel: InvoiceWorld.SpaChannel, id: Guid.NewGuid());
 
         var hidden = await _world.NewService(_identity.Object, _events)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { own, other }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { own, other }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { other }, "control: the invoice's own submission takes its visible invoice's verdict");
         _events.NotOwn.Should().Contain((other, linked)).And.NotContain(e => e.Submission == own);

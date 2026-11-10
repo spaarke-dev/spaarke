@@ -572,6 +572,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             FlagFault = null;
             FlagReadThrows = false;
             KeyReadFaults.Clear();
+            MaskedColumns.Clear();
             FilingReadThrows = false;
             FilingFaultEntity = null;
         }
@@ -898,17 +899,20 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads), and the same
         /// record in the filing world (task 187 D4: an invoice route walks its own invoice, so both reads see one record).
         /// </summary>
-        public void AddInvoice(Guid id, Guid? matter, Guid? project)
+        public void AddInvoice(Guid id, Guid? matter, Guid? project, Guid? workAssignment = null)
         {
             Seed("sprk_invoices", new Dictionary<string, object?>
             {
                 ["sprk_invoiceid"] = id.ToString(),
                 ["_sprk_matter_value"] = matter?.ToString(),
                 ["_sprk_project_value"] = project?.ToString(),
+                // Task 130-0 fix round 2 (K3, D-28): the work-assignment core record.
+                ["_sprk_regardingworkassignment_value"] = workAssignment?.ToString(),
             });
             var lookups = new List<(string Column, string Target, Guid Id)>();
             if (matter is { } m) lookups.Add(("sprk_matter", "sprk_matter", m));
             if (project is { } p) lookups.Add(("sprk_project", "sprk_project", p));
+            if (workAssignment is { } w) lookups.Add(("sprk_regardingworkassignment", "sprk_workassignment", w));
             AddFilingRow("sprk_invoice", id, lookups.ToArray());
         }
 
@@ -931,6 +935,31 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             }
 
             return id;
+        }
+
+        /// <summary>
+        /// ebilling-r1 task 130-0 fix round 3: columns a read never returns even when selected (a field-security-masked or otherwise
+        /// unread column). Dataverse omits such a column, so a reader that takes "absent" for "no value" is caught by a test that
+        /// masks the column.
+        /// </summary>
+        public HashSet<string> MaskedColumns { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// A stored row as the Web API answers a <c>$select</c>: every SELECTED column, an unset one as an explicit JSON null (the
+        /// Web API returns a selected lookup that is not set as null), except a <see cref="MaskedColumns"/> one, which is omitted. With
+        /// no <c>$select</c> the whole row, less the masked columns.
+        /// </summary>
+        private Dictionary<string, object?> Project(Dictionary<string, object?> row, HashSet<string>? columns)
+        {
+            var projected = new Dictionary<string, object?>();
+            foreach (var column in columns ?? row.Keys.ToHashSet(StringComparer.Ordinal))
+            {
+                if (MaskedColumns.Contains(column))
+                    continue;
+                projected[column] = row.TryGetValue(column, out var value) ? value : null;
+            }
+
+            return projected;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -992,8 +1021,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
                 var selected = Regex.Match(url, @"\$select=([^&]*)");
                 var wantedColumns = selected.Success ? selected.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
-                var projectedRow = hit.Where(kv => wantedColumns is null || wantedColumns.Contains(kv.Key))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                var projectedRow = Project(hit, wantedColumns);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(JsonSerializer.Serialize(projectedRow), System.Text.Encoding.UTF8, "application/json"),
@@ -1019,7 +1047,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 {
                     keyed = (_sets.TryGetValue(set, out var seededKeyed) ? seededKeyed : new())
                         .Where(r => r.TryGetValue(keyColumn, out var k) && k is string key && keys.Contains(key))
-                        .Select(r => r.Where(kv => keyColumns is null || keyColumns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .Select(r => Project(r, keyColumns))
                         .ToList();
                 }
 
@@ -1044,9 +1072,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             }
 
             // $select projection: only the requested columns come back.
-            var projected = match
-                .Select(r => columns is null ? r : r.Where(kv => columns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
-                .ToList();
+            var projected = match.Select(r => Project(r, columns)).ToList();
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
