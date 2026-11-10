@@ -577,6 +577,31 @@ public sealed class BillingRuleDraftJobHandlerTests
         refused.Status.Should().Be(JobStatus.Poisoned);
     }
 
+    [Fact(DisplayName = "116 fix 2 (item 5) must-fire: the run hands the source file it read to the redraft clean-up and to the store, which records it with the list")]
+    public async Task Process_HandsTheSourceFileId_ToTheCleanUpAndToTheStore()
+    {
+        var rig = new Rig();
+
+        var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.RuleSets.Verify(r => r.RemoveUntouchedDraftsAsync(VersionId, FileId, It.IsAny<CancellationToken>()), Times.Once);
+        rig.RuleSets.Verify(r => r.AddDraftsAsync(
+            VersionId, FileId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (item 5) must-fire: a store answer of 503 ruleset.source_changed is retried (Failed), not Poisoned, before the final delivery")]
+    public async Task Process_ASourceChangedRefusal_IsRetried_NotPoisoned()
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(VersionId, It.IsAny<Guid>(), It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftsAdded>.Refused(503, RuleSetService.CodeSourceChanged, "changed"));
+
+        var outcome = await rig.Handler().ProcessAsync(Job(attempt: 1), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed, "the retry reads the new file and drafts it");
+    }
+
     [Fact]
     public async Task Process_AnUnexpectedException_IsRetried_NotSwallowed()
     {
