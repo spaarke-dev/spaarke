@@ -9,7 +9,7 @@
 > - 116 verify + code-review + adr-check (Sonnet high, report only);
 > - 116 adversarial pass (Opus, read-only).
 >
-> **Waiting on uac-r2:** F3b's 3-hop walk now hides any record whose parent chain is longer than 3 links, even with no invoice in it (fail closed). The owner said "Ask uac-r2 first" (2026-11-10). uac-r2 replied: accept failing closed at 3 hops, on four conditions. The decision is still the owner's.
+> **RULED (EB-D-215): the walk's bound is 5 hops, with uac-r2's conditions C1, C4, the batched read per hop and the page read count. That work goes into the F3b step after step 2.** History: F3b's 3-hop walk now hides any record whose parent chain is longer than 3 links, even with no invoice in it (fail closed). The owner said "Ask uac-r2 first" (2026-11-10). uac-r2 replied: accept failing closed at 3 hops, on four conditions. The decision is still the owner's.
 > - **C1:** a walk that hits the bound logs a warning (table, row id, hop count, plane), and the metric counts it if there is one. On a list, `truncated` stays set. A single record gets the same answer as a denied id.
 > - **C2:** only child-to-child hops count. Reaching a core record means "no invoice". By my reading of `InvoiceLinks.cs:199-229`, the code already does this: parent edges are added only to a decided child or a descendant, so a core record is never walked. Confirm this in the diff 3 notes. Answer for uac-r2: a service request follows the child rule (`Supplemental`, `:84-90`, their earlier ruling).
 > - **C3:** a read-only dev query finds the deepest child-to-child chain across the 16 tables, and diff 3 notes the count of rows past 3 hops. If any row a firm can see goes past 3, raise the bound to that depth plus 1.
@@ -37,7 +37,15 @@
 2. **116 (in review).** Head `68aea7af88` on `task/ebilling-116`, pushed: part 2 (`936699a4b0`) plus part 3 merged in (only the notes conflicted).
    - Part 2 results: ArchTests 2200/2200; filtered unit tests 7914 passed, 0 failed; publish size +0.31 MB. It found and fixed a defect: the `/file` route stored the client's claimed Content-Type, and now derives it from the file name. The rate-card workbook now goes through `ReplaceForCallerAsync`, and a refused write deletes the card's rows.
    - Part 3 results: RuleReview Jest 60 passed; Pester 25/25 and 5/5.
-   - **Running:** a Sonnet verify of the combined tip plus code-review and adr-check (report only). Change set `698fd222cc..68aea7af88`.
+   - **Verify plus code-review and adr-check (Sonnet): all green at `68aea7af88`.**
+     - BFF build 0/0; ArchTests 2200/2200; filtered unit tests 7914/0; RuleReview Jest 60/60 and its build; Pester 5/5, 25/25 and 95/95 (the first two need Pester 5.7.1; the schema file needs Pester 3.4 under pwsh).
+     - No ADR violations.
+     - **Findings beyond the adversarial ones:**
+       - F4: `PutVersionFile` has no `RequestSizeLimit` (the `InvoiceSubmission*` routes have one), so a configured cap above ~28 MB fails at Kestrel's limit;
+       - K4: a drafted version with no single Servable file answers 422 before 409;
+       - K4: there is no file-extension allowlist on the PUT (an unsupported file fails only in the job);
+       - §11: "which Servable source files does this version have" is implemented three times (`StoredFileService.ReadRowsForProcedureVersionAsync`, `ProcedureService.CountServableSourceFilesAsync` ~:1151, `RuleSetService.LoadServableSourceFilesAsync` :643). Consolidate them, or add the §11 remark.
+     - Access observations went to uac-r2 privately, with the route review.
    - **Adversarial pass (Opus): NOT APPROVED, 6 F-class findings.**
      - **A1 (F1):** a PUT can replace the file on a version published mid-upload (the Draft check sits at `ProcedureEndpoints.cs:331`; `ReplaceForCallerAsync` never re-checks). The rate-card import has the same gap (`:193` vs `:338`). Fix: after the new row is Servable and before the withdraw, re-read the status; if it is no longer Draft, withdraw the new row and return 409 `procedure_version.not_draft`.
      - **A2 (F1, OWNER DECISION):** a replace after drafting leaves the proposals and the list stale, and the draft route then returns 409 `ruleset.already_drafted` forever. A PUT during a running job causes the same. Option (a): the PUT refuses a drafted version (recommended). Option (b): the replace clears the marker and the list.
@@ -47,7 +55,11 @@
      - **A6 (F1):** `Deploy-EbillingFormsViews.ps1:122` still binds the stale `sprk_ruleset.sprk_notconverted` section. Fix: drop it from the spec.
      - **Known limits:** K1, a chunked upload over 30 MB gets 400 instead of 413 (cheap to map, so fix it); K2, a publish during the job's write phase (not traced); K3, a second rate-card import removes the first card's workbook (record in the notes).
      - **Clean:** authorization order and the 404s on both routes, job keys, the clean-up scopes, the ledgers, the removal script, the absence of retired-route callers, and DI.
-     - **Next:** one Opus fix agent for A1–A6, K1 and the verify findings, then a scoped re-check.
+     - **Fix round 1 RUNNING** (Opus, from `68aea7af88`) covers:
+       - A1–A6, F4/K1, the 422-vs-409 order (K4) and §11;
+       - A2 per EB-D-214: clear the drafted state first, then stage the file; the job re-checks its source; no duplicate drafts on a redraft;
+       - uac-r2's NFR-01 route order on BOTH routes: 404 for missing, foreign or unreadable, then 403 without Write on the version, then 409, then 413. The draft route adds the caller's Write on the version, and the POML acceptance criteria are refined to match.
+     - **Then:** a scoped Opus re-check (the auth order changed), then uac-r2 reviews the routes plus the fix diff together.
    - **Then:**
      - one fix agent for any F-class findings from both;
      - uac-r2 reviews the two routes (`POST .../procedures/{p}/versions/{v}/draft`, `PUT .../versions/{v}/file`);
