@@ -68,18 +68,31 @@ FINDINGS=""
 # Run "$@" (after cd to $2) under a hard cap of $1 seconds; print its output. On timeout the whole
 # Windows process tree is killed: plain `timeout` kills only the direct child, which is how
 # `dotnet format` left 97 BuildHost processes running for days (found 2026-11-09).
+# POSIX fallback that does not rely on job control: kill descendants, then the process.
+# (pgrep is absent in Git Bash; there taskkill /T covers it.)
+kill_tree() {
+  local p="$1" c
+  for c in $(pgrep -P "$p" 2>/dev/null || true); do kill_tree "$c"; done
+  kill -KILL "$p" 2>/dev/null || true
+}
 capped_in_dir() {
   local secs="$1" dir="$2"; shift 2
   local tmp="${TMPDIR:-/tmp}/post-edit-lint.$$.out" pid wp end=$((SECONDS + secs))
+  # Job control on: the background job becomes its own process group, so a timeout can kill
+  # everything it started on POSIX hosts (Windows uses taskkill /T below).
+  set -m
   ( cd "$dir" && exec "$@" ) >"$tmp" 2>&1 </dev/null &
   pid=$!
+  set +m
   # Wall-clock deadline: counting sleep iterations drifts badly on a loaded machine (measured 65 s
   # for a "4 s" cap).
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$SECONDS" -ge "$end" ]; then
       wp=$(cat "/proc/$pid/winpid" 2>/dev/null || true)
       if [ -n "$wp" ] && command -v taskkill >/dev/null 2>&1; then taskkill //T //F //PID "$wp" >/dev/null 2>&1 || true; fi
-      kill -9 "$pid" 2>/dev/null || true
+      kill -TERM -- "-$pid" 2>/dev/null || true
+      kill_tree "$pid"
+      kill -KILL -- "-$pid" 2>/dev/null || true
       break
     fi
     sleep 0.2
