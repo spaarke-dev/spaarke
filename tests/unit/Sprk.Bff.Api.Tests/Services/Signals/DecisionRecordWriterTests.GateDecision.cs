@@ -837,6 +837,13 @@ public sealed partial class DecisionRecordWriterTests
 
         /// <summary>The message is unfiled but Secure-team-owned (the Direct check refuses it: not the Direct-message owner team).</summary>
         SecureOwnedUnfiled,
+
+        /// <summary>198 fix round (ontology): the message stays an unfiled Direct one, but the gate RECORD is already owned by the Secure
+        /// team when the share step starts (a Secure mirror re-owned it after the create).</summary>
+        RecordSecureOwned,
+
+        /// <summary>198 fix round (ontology): the message stays an unfiled Direct one, and the gate record's owner cannot be read.</summary>
+        RecordOwnerUnreadable,
     }
 
     /// <summary>
@@ -878,6 +885,12 @@ public sealed partial class DecisionRecordWriterTests
                         world.WithCommunication(CommunicationId, CommunicationOwner, owningTeam: secureTeam)
                             .WithPair(CommunicationId, CommunicationOwner, CommunicationSharee);
                         break;
+                    case SecureTurn.RecordSecureOwned:
+                        world.OwnByTeam(h.NewId, secureTeam);
+                        break;
+                    case SecureTurn.RecordOwnerUnreadable:
+                        world.OwnerReadFault = new InvalidOperationException("Test: the gate record's owner could not be read.");
+                        break;
                 }
 
                 return Task.FromResult(h.NewId);
@@ -917,6 +930,39 @@ public sealed partial class DecisionRecordWriterTests
         world.Rows[(GateSharingWorld.Record, h.NewId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(
             GateSharingWorld.DirectTeam, "left exactly as the writer created it");
         world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a Secure target is a defined outcome, not a failure");
+    }
+
+    private static int CountOf(GateSharingWorld world, string prefix) => world.Calls.Count(c => c.StartsWith(prefix, StringComparison.Ordinal));
+
+    [Fact(DisplayName = "198 fix round (ontology): a gate record already Secure-owned when the at-write share starts gets no grant and no revoke")]
+    public async Task Gate_ADirectDecisionsRecordAlreadySecureOwnedWhenTheShareStarts_IsNeverGranted_D215()
+    {
+        var (h, world, secureTeam) = DirectDecisionThenTurn(SecureTurn.RecordSecureOwned);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        result.RecordId.Should().Be(h.NewId);
+        world.Calls.Should().Contain($"read-owner:{h.NewId:D}", "the record's live owner is read by id before any grant");
+        CountOf(world, "grant:").Should().Be(0,
+            "counted, not only the end state: a grant-then-revoke on a Secure record also ends with no share");
+        CountOf(world, "revoke:").Should().Be(0);
+        CountOf(world, "assign:").Should().Be(0, "a Secure-owned record is the Secure mirror's");
+        world.Rows[(GateSharingWorld.Record, h.NewId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(secureTeam);
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a Secure owner is a defined outcome, not a failure");
+    }
+
+    [Fact(DisplayName = "198 fix round (ontology): a gate record whose owner cannot be read when the at-write share starts gets no grant, and one Warning")]
+    public async Task Gate_ADirectDecisionsRecordWhoseOwnerCannotBeRead_IsNeverGranted_AndWarnsOnce_D215()
+    {
+        var (h, world, _) = DirectDecisionThenTurn(SecureTurn.RecordOwnerUnreadable);
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        CountOf(world, "grant:").Should().Be(0, "an owner that cannot be read is never assumed to be the Direct team");
+        CountOf(world, "revoke:").Should().Be(0);
+        CountOf(world, "assign:").Should().Be(0);
+        world.Log.Entries.Count(e => e.Level == LogLevel.Warning).Should().Be(1, "one ParticipantShareFailed warning");
+        world.Log.Entries.Should().NotContain(e => e.Level > LogLevel.Warning);
     }
 
     // ── Owner decision 2026-10-29: a communication filed under a person-owned work assignment ──────────────────────────
