@@ -344,9 +344,10 @@ public partial class RouteAuthorizationGuardTests
             + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
             + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/RuleSetEndpoints.cs", Scope.RouteLevelGate,
-            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- create a rule set from a source document, list / read it with its rules, "
-            + "edit / accept / reject a rule, publish, assign, visibility, and (task 075, FR-27) POST .../{ruleSetId}/draft which queues the rule "
-            + "drafting job (the count of endpoint files is unchanged at 137: a route in an existing file). Each route declares the billing-admin Dataverse table privileges the "
+            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- list / read a rule set with its rules, "
+            + "edit / accept / reject a rule, publish, assign, visibility. Task 116 RETIRED POST / (create from a source document) and POST "
+            + ".../{ruleSetId}/draft (drafting moved per Procedure Version to ProcedureEndpoints.cs); the count of endpoint files is unchanged. "
+            + "Each route declares the billing-admin Dataverse table privileges the "
             + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
             + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
             + "The eBilling kill switch runs after it. Task 089e: every route that takes a rule set id then carries RequireAccessToTheRuleSet "
@@ -360,7 +361,11 @@ public partial class RouteAuthorizationGuardTests
             + "Procedure (Record path, sprk_procedures); PATCH /{procedureId}, PATCH .../versions/{versionId}, POST .../versions/{versionId}/retire "
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
-            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. Task 116 adds two routes in this file (the count of endpoint "
+            + "files is unchanged): POST .../versions/{versionId}/draft -- BillingAdminAuthorization.DraftProcedureVersion: Write on the Procedure "
+            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion); PUT .../versions/{versionId}/file "
+            + "-- WriteProcedure, then the file store's own step 0 and the caller's Write on the version (UploadForCallerAsync). On both, a version of "
+            + "another Procedure is the unknown-id 404. The eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude (ebilling-r1 "
             + "task 089b, EB-D-148) -- assign, pin or exclude a Procedure, and exclude a rule, for one core record; the core table is fixed per "

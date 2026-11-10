@@ -19,8 +19,9 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// refused, goes to the version's not-converted list.
 /// </summary>
 /// <remarks>
-/// <para><b>Idempotency (ADR-004; delivery is at least once).</b> The Procedure Version's not-converted list is written LAST and is the
-/// completion marker: a redelivery after it finds <see cref="DraftSource.AlreadyDrafted"/> and completes without calling the model. A
+/// <para><b>Idempotency (ADR-004; delivery is at least once).</b> The Procedure Version's Yes/No <c>sprk_notconverted</c> ("drafted",
+/// EB-D-211) is written Yes LAST, after the rules and the not-converted list (<c>sprk_notconvertedlist</c>), and is the completion marker: a
+/// redelivery after it finds <see cref="DraftSource.AlreadyDrafted"/> and completes without calling the model. A
 /// redelivery after a crash BEFORE the marker first removes the earlier run's untouched drafts of THIS version
 /// (<see cref="RuleSetService.RemoveUntouchedDraftsAsync"/>: created by this identity, Proposed, Off, never modified, never published, every
 /// version a Draft under this Procedure Version), because the model is asked again and its output is not deterministic, so a second set would

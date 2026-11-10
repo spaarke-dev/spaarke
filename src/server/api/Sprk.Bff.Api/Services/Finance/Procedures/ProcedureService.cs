@@ -1127,6 +1127,27 @@ public class ProcedureService
         return (procedure, versions, version, null);
     }
 
+    /// <summary>
+    /// Task 116: the target of the version-file route. The version must be one of <paramref name="procedureId"/>'s (else the unknown-id 404
+    /// <c>procedure.version_not_found</c>), the Procedure not Retired (409 <c>procedure.retired</c>), and the version a Draft (409
+    /// <c>procedure_version.not_draft</c>; a missing status is not a Draft, fail closed). Reads only.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<ProcedureVersionView>> GetDraftVersionForFileAsync(Guid procedureId, Guid versionId, CancellationToken ct)
+    {
+        var (_, _, version, refusal) = await LoadForVersionAsync<ProcedureVersionView>(procedureId, versionId, ct);
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        if (version!.Row.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return Refused<ProcedureVersionView>(StatusCodes.Status409Conflict, RuleSetService.CodeVersionNotDraft, "A file can be stored only on a Draft version.");
+        }
+
+        return RuleSetOutcome<ProcedureVersionView>.Done(version.View);
+    }
+
     private async Task<int> CountServableSourceFilesAsync(Guid versionId, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.StoredFileEntity) { ColumnSet = new ColumnSet(ProcedureEntity.StoredFileProcedureVersionColumn), TopCount = 2 };

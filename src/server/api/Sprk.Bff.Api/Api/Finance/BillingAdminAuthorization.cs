@@ -53,7 +53,7 @@ public static class BillingAdminAuthorization
     public static FinanceAuthorizationTargets Admin() =>
         FinanceAuthorizationTargets.Authorize(Check(WriteRuleSetPrivilege, "sprk_rulesets"));
 
-    /// <summary>Create a rule set (and its source document).</summary>
+    /// <summary>Create a rule set (089's record-scoped sets; task 116 retired the upload route that also declared it).</summary>
     public static FinanceAuthorizationTargets CreateRuleSet() =>
         FinanceAuthorizationTargets.Authorize(
             Check(CreateRuleSetPrivilege, "sprk_rulesets"),
@@ -73,8 +73,8 @@ public static class BillingAdminAuthorization
             Check(WritePolicyVersionPrivilege, "sprk_policyversions"));
 
     /// <summary>
-    /// Start the rule drafting job (task 075): the job creates policies and versions (as the application) and writes the rule set's
-    /// not-converted list, so the caller must hold Create on both policy tables and Write on the rule set marker.
+    /// Start the rule drafting job (task 075; per Procedure Version since task 116, through <see cref="DraftProcedureVersion"/>): the job
+    /// creates policies and versions (as the application), so the caller must hold Create on both policy tables and Write on the rule set marker.
     /// </summary>
     public static FinanceAuthorizationTargets DraftRules() =>
         FinanceAuthorizationTargets.Authorize(
@@ -218,6 +218,18 @@ public static class BillingAdminAuthorization
     /// it checked. The version-create handler hands it to the service, which refuses 409 if the Procedure reads as a Rate card by then.
     /// </summary>
     internal const string CheckedProcedureTypeItem = "procedure.checkedType";
+
+    /// <summary>
+    /// Start drafting a Procedure Version's rules (task 116, model 5.3): <see cref="DraftRules"/> (the billing-admin marker plus Create on both
+    /// policy tables) AND the caller's own Write on the route's Procedure. An unreadable route id yields no check, which the filter denies.
+    /// </summary>
+    public static FinanceAuthorizationTargets DraftProcedureVersion(EndpointFilterInvocationContext context)
+    {
+        var record = FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "write");
+        return record.Checks.Count == 0
+            ? record // no id, no check: the filter denies
+            : FinanceAuthorizationTargets.Authorize(record.Checks.Concat(DraftRules().Checks).ToArray());
+    }
 
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
     public static FinanceAuthorizationTargets PublishProcedureVersion(EndpointFilterInvocationContext context) =>

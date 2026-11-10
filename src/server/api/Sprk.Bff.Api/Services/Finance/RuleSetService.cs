@@ -101,7 +101,7 @@ public sealed record RuleSetPublished(
 /// What the rule drafting job reads (ebilling-r1 task 075, re-keyed per Procedure Version by task 116; model 7.2): a Draft version of a Billing
 /// Procedure, the Procedure's rule set the drafts go into, and the version's ONE Servable Procedure-source Stored File, found server-side
 /// (<see cref="FileId"/>; its bytes are read through the file store, never here). <see cref="AlreadyDrafted"/> is the idempotency marker: the
-/// VERSION's <c>sprk_notconverted</c> list, written last, even when empty.
+/// VERSION's Yes/No <c>sprk_notconverted</c> ("drafted", EB-D-211), written Yes last, after the not-converted list.
 /// </summary>
 public sealed record DraftSource(
     Guid ProcedureVersionId, Guid ProcedureId, Guid RuleSetId, Guid FileId, string FileName, bool AlreadyDrafted);
@@ -110,7 +110,7 @@ public sealed record DraftSource(
 public sealed record DraftedRule(
     string RuleType, string RuleBody, string MessageTemplate, string ShortHeadline, string Consequence, string ClauseQuote, string? ClauseLocation);
 
-/// <summary>Text of the source that did not become a rule, and why. Stored in the rule set's <c>sprk_notconverted</c> list.</summary>
+/// <summary>Text of the source that did not become a rule, and why. Stored in the Procedure Version's <c>sprk_notconvertedlist</c> (EB-D-211).</summary>
 public sealed record NotConvertedClause(string Text, string? Location, string Reason);
 
 /// <summary>The result of adding drafted rules: how many were stored, how many were already there, and the full not-converted list.</summary>
@@ -274,9 +274,14 @@ public class RuleSetService
     /// <summary>Task 116 (O-24): drafting runs only for a Procedure whose Area is Billing; Ontology Procedures are document-only in R1 (400).</summary>
     internal const string CodeNotBilling = "procedure.not_billing";
 
-    /// <summary><c>sprk_procedureversion.sprk_notconverted</c> (080): the drafting run's not-converted list, written LAST; its presence is the
-    /// per-version completion marker (task 116).</summary>
-    internal const string VersionNotConvertedColumn = "sprk_notconverted";
+    /// <summary><c>sprk_procedureversion.sprk_notconverted</c> (080, Two Options): the per-version "drafted" marker (task 116, EB-D-211). The
+    /// drafting run writes Yes LAST, after its rules and <see cref="VersionNotConvertedListColumn"/>; No or empty means not drafted yet.</summary>
+    internal const string VersionDraftedColumn = "sprk_notconverted";
+
+    /// <summary><c>sprk_procedureversion.sprk_notconvertedlist</c> (080, field-secured memo, EB-D-211): the JSON list of what the version's
+    /// drafting run could not convert, written BEFORE <see cref="VersionDraftedColumn"/>. The rule set detail shows the list of the
+    /// highest-numbered version.</summary>
+    internal const string VersionNotConvertedListColumn = "sprk_notconvertedlist";
 
     internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
     internal const string CodeSystemRule = "ruleset.system_rule";
@@ -326,7 +331,7 @@ public class RuleSetService
     /// <summary>The most rules one drafting run stores; the rest are listed as not converted.</summary>
     internal const int MaxDraftedRules = 500;
 
-    // sprk_notconverted holds 100,000 characters; leave room for the overflow entry.
+    // sprk_notconvertedlist holds 100,000 characters; leave room for the overflow entry.
     private const int MaxNotConvertedJsonChars = 95_000;
     private const int MaxClauseQuoteChars = 4000;
     private const int MaxClauseLocationChars = 200;
@@ -492,14 +497,14 @@ public class RuleSetService
     {
         var query = new QueryExpression(ProcedureEntity.VersionEntity)
         {
-            ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, VersionNotConvertedColumn),
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, VersionNotConvertedListColumn),
             TopCount = 1,
         };
         query.Criteria.AddCondition(ProcedureEntity.VersionProcedureColumn, ConditionOperator.Equal, procedureId);
         query.Orders.Add(new OrderExpression(ProcedureEntity.VersionNumberColumn, OrderType.Descending));
         var latest = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
             .FirstOrDefault(v => v.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id == procedureId);
-        return latest?.GetAttributeValue<string>(VersionNotConvertedColumn);
+        return latest?.GetAttributeValue<string>(VersionNotConvertedListColumn);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -515,9 +520,17 @@ public class RuleSetService
     /// <see cref="DraftSource.AlreadyDrafted"/> is the version's marker. The file's bytes are not read here: the job reads them through
     /// <c>StoredFileService.OpenForProcessingAsync</c>, which re-checks the row (Servable, own path, hash, scan verdict).
     /// </summary>
-    public virtual async Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid procedureVersionId, CancellationToken ct)
+    public virtual Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid procedureVersionId, CancellationToken ct) =>
+        GetDraftSourceAsync(null, procedureVersionId, ct);
+
+    /// <summary>
+    /// The trigger route's read (task 116): as <see cref="GetDraftSourceAsync(Guid, CancellationToken)"/>, and the version must be one of
+    /// <paramref name="procedureId"/>'s; a version of another Procedure answers the unknown-id 404 <c>procedure.version_not_found</c> before any
+    /// other check, so the route never says anything about another Procedure's version.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid? procedureId, Guid procedureVersionId, CancellationToken ct)
     {
-        var target = await LoadDraftTargetAsync<DraftSource>(procedureVersionId, ct);
+        var target = await LoadDraftTargetAsync<DraftSource>(procedureVersionId, ct, procedureId);
         if (target.Refusal is { } refusal)
         {
             return refusal;
@@ -549,7 +562,7 @@ public class RuleSetService
     /// </summary>
     internal static readonly string[] DraftVersionColumns =
     {
-        ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionStatusColumn, VersionNotConvertedColumn,
+        ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionStatusColumn, VersionDraftedColumn,
     };
 
     /// <summary>The columns of a Procedure a drafting read takes (task 116): its Area and its Status.</summary>
@@ -560,7 +573,7 @@ public class RuleSetService
     /// in this order: the version exists (404), its Procedure exists (404) and is Billing (400) and not Retired (409), the version is a Draft
     /// (409), the Procedure has a rule set (409) that is not Retired (409). Every read is app-only and re-checks the ids on the rows.
     /// </summary>
-    private async Task<DraftTarget<T>> LoadDraftTargetAsync<T>(Guid procedureVersionId, CancellationToken ct) where T : class
+    private async Task<DraftTarget<T>> LoadDraftTargetAsync<T>(Guid procedureVersionId, CancellationToken ct, Guid? expectedProcedureId = null) where T : class
     {
         Entity? version = null;
         if (procedureVersionId != Guid.Empty)
@@ -570,7 +583,8 @@ public class RuleSetService
             version = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(v => v.Id == procedureVersionId);
         }
 
-        if (version?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id is not { } procedureId || procedureId == Guid.Empty)
+        if (version?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id is not { } procedureId || procedureId == Guid.Empty
+            || (expectedProcedureId is { } expected && expected != procedureId))
         {
             return new DraftTarget<T>(Guid.Empty, null, false, RuleSetOutcome<T>.Refused(
                 StatusCodes.Status404NotFound, ProcedureService.CodeVersionNotFound, "The Procedure Version was not found."));
@@ -617,7 +631,8 @@ public class RuleSetService
                 StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed."));
         }
 
-        var drafted = !string.IsNullOrWhiteSpace(version.GetAttributeValue<string>(VersionNotConvertedColumn));
+        // EB-D-211: only an explicit Yes is "drafted"; No or empty (never written) is not.
+        var drafted = version.GetAttributeValue<bool?>(VersionDraftedColumn) == true;
         return new DraftTarget<T>(procedureId, set, drafted, null);
     }
 
@@ -818,8 +833,9 @@ public class RuleSetService
 
     /// <summary>
     /// Stores the drafted rules of a Procedure Version (task 116) in its Procedure's rule set as Proposed rules (a Billing-domain policy,
-    /// Off, with no current version, and its version 1 under <paramref name="procedureVersionId"/> with <c>sprk_publishstate</c> Draft) and
-    /// writes the VERSION's not-converted list LAST, which marks the run complete. Model output is a proposal: every rule passes the one
+    /// Off, with no current version, and its version 1 under <paramref name="procedureVersionId"/> with <c>sprk_publishstate</c> Draft), then
+    /// writes the VERSION's not-converted list (<c>sprk_notconvertedlist</c>) and, LAST, its drafted marker <c>sprk_notconverted</c> = Yes, which
+    /// marks the run complete (EB-D-211). Model output is a proposal: every rule passes the one
     /// validation of this service (<see cref="PolicyVersionValidator.ValidateForSave"/> with <see cref="RuleDomain.Billing"/>, plus the
     /// required columns) before anything is written, and a rule that fails it is not dropped: it is added to the not-converted list with
     /// the reason. Re-running is safe: a rule whose type, body and clause equal one already under this version is skipped, and a run after
@@ -914,11 +930,14 @@ public class RuleSetService
                 }
             }
 
-            // 2. The marker, last, on the VERSION (task 116). After it, the job is a no-op and the trigger answers 409; another version of
-            //    the same Procedure has its own marker, so it can still be drafted.
+            // 2. The not-converted list, then the marker LAST, on the VERSION (task 116, EB-D-211): two writes, so a run that dies between them
+            //    has its list but no marker and is compensated and drafted again (the list is overwritten). After the marker the job is a no-op
+            //    and the trigger answers 409; another version of the same Procedure has its own marker, so it can still be drafted.
             var json = BuildNotConvertedJson(listed);
             await _entities.UpdateAsync(
-                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedColumn] = json }, ct);
+                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = json }, ct);
+            await _entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = true }, ct);
 
             _logger.LogInformation(
                 "Procedure Version {ProcedureVersionId} (rule set {RuleSetId}): drafting stored {Stored} rule(s), skipped {Present} already present, listed {NotConverted} as not converted",
