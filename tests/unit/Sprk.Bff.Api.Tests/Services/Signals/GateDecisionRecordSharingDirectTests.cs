@@ -277,6 +277,103 @@ public sealed class GateDecisionRecordSharingDirectTests
         world.Calls.Should().Contain(Revoke(Third)).And.NotContain(Revoke(Recipient));
     }
 
+    // ── 198 pass 2 N1/N4: at write, a message filed while its record was being written ──────────────────────────
+
+    /// <summary>The race: the writer decided the owner (the Direct team) while the message was unfiled; the message was filed (owned by the
+    /// matter's team) before the record landed, and that filing's gate step found no record yet. The record has no share.</summary>
+    private static GateSharingWorld FiledWhileTheRecordWasWritten()
+    {
+        var world = FiledDirectMessage();
+        world.SharesOf(GateSharingWorld.Record, RecordId).Clear();
+        return world;
+    }
+
+    [Fact(DisplayName = "198 pass 2 N1 must-fire: at write, a Direct-owned record of a message filed meanwhile is re-owned as a filing would (keepAudience)")]
+    public async Task N1_AtWrite_ADirectRecordOfAMessageFiledMeanwhile_IsReownedAsAFilingWould()
+    {
+        var world = FiledWhileTheRecordWasWritten();
+
+        await world.Sharing.ShareTeamOwnedAtWriteAsync(RecordId, CommunicationId, DirectTeam);
+
+        OwnerTeamOf(world).Should().Be(MatterTeam, "never left with the memberless Direct team, readable by nobody");
+        world.Calls.Should().Contain($"assign:{RecordId:D}:{MatterTeam:D}");
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "198 pass 2 N1 must-not-fire: at write, a filed message's record owned by another team is left as it is")]
+    public async Task N1_AtWrite_AFiledMessagesRecordOwnedByAnotherTeam_WritesNothing()
+    {
+        var world = FiledWhileTheRecordWasWritten();
+        world.OwnByTeam(RecordId, MatterTeam);
+
+        await world.Sharing.ShareTeamOwnedAtWriteAsync(RecordId, CommunicationId, MatterTeam);
+
+        Writes(world).Should().BeEmpty();
+        OwnerTeamOf(world).Should().Be(MatterTeam);
+    }
+
+    [Fact(DisplayName = "198 pass 2 N1 fail closed: at write, a filed message's record whose owner cannot be identified as Direct writes nothing, logged")]
+    public async Task N1_AtWrite_AFiledMessagesRecord_WhenTheDirectCheckIsUnknown_WritesNothing_AndIsLogged()
+    {
+        var world = FiledWhileTheRecordWasWritten();
+        world.Directory.Faults = true;
+
+        await world.Sharing.ShareTeamOwnedAtWriteAsync(RecordId, CommunicationId, DirectTeam);
+
+        Writes(world).Should().BeEmpty();
+        OwnerTeamOf(world).Should().Be(DirectTeam);
+        world.Log.Entries.Should().Contain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "198 pass 2 N4: at write, a communication that is not found is logged as a share failure, not a silent return")]
+    public async Task N4_AtWrite_ACommunicationNotFound_IsLogged()
+    {
+        var world = UnfiledDirectMessage();
+        world.Rows.Remove((GateSharingWorld.Communication, CommunicationId));
+
+        await world.Sharing.ShareTeamOwnedAtWriteAsync(RecordId, CommunicationId, DirectTeam);
+
+        Writes(world).Should().BeEmpty();
+        world.Log.Entries.Should().Contain(e => e.Level >= LogLevel.Warning && e.Message.Contains("could not be read", StringComparison.Ordinal));
+    }
+
+    // ── 198 pass 2 N3: the mirror also removes a leftover share on a Direct-owned record ─────────────────────────
+
+    [Fact(DisplayName = "198 pass 2 N3 must-fire: the mirror revokes a leftover non-participant share on a Direct-owned record")]
+    public async Task N3_Mirror_ADirectOwnedRecord_LosesALeftoverNonParticipantShare()
+    {
+        var world = UnfiledDirectMessage().Share(GateSharingWorld.Record, RecordId, Third); // a revoke that failed earlier
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Recipient }.OrderBy(g => g));
+        world.Calls.Should().Contain(Revoke(Third));
+    }
+
+    [Fact(DisplayName = "198 pass 2 N3 must-not-fire: an invalid pair revokes no leftover share")]
+    public async Task N3_Mirror_AnInvalidPair_RevokesNoLeftover()
+    {
+        var world = UnfiledDirectMessage().Share(GateSharingWorld.Record, RecordId, Third);
+        world.Rows[(GateSharingWorld.Communication, CommunicationId)].Attributes.Remove("sprk_directrecipient");
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().Equal(new[] { Third });
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "198 pass 2 N3 must-not-fire: a fault recomputing the audience revokes no leftover share")]
+    public async Task N3_Mirror_AnAudienceFault_RevokesNoLeftover()
+    {
+        var world = UnfiledDirectMessage().Share(GateSharingWorld.Record, RecordId, Third);
+        world.UserReadFault = new InvalidOperationException("Test: the users could not be read.");
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().Equal(new[] { Third });
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+    }
+
     // ── Must fire: rule 4 (filing keeps the recomputed participants) ───────────────────────────────────────────
 
     [Fact]
