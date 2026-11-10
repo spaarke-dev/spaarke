@@ -9,7 +9,11 @@
 > - 116 verify + code-review + adr-check (Sonnet high, report only);
 > - 116 adversarial pass (Opus, read-only).
 >
-> **Open owner question:** F3b's 3-hop walk now hides any record whose parent chain is longer than 3 links, even with no invoice in it (fail closed). Recommendation: accept. Otherwise ask uac-r2 with diff 3.
+> **Waiting on uac-r2:** F3b's 3-hop walk now hides any record whose parent chain is longer than 3 links, even with no invoice in it (fail closed). The owner said "Ask uac-r2 first" (2026-11-10). uac-r2 replied: accept failing closed at 3 hops, on four conditions. The decision is still the owner's.
+> - **C1:** a walk that hits the bound logs a warning (table, row id, hop count, plane), and the metric counts it if there is one. On a list, `truncated` stays set. A single record gets the same answer as a denied id.
+> - **C2:** only child-to-child hops count. Reaching a core record means "no invoice". By my reading of `InvoiceLinks.cs:199-229`, the code already does this: parent edges are added only to a decided child or a descendant, so a core record is never walked. Confirm this in the diff 3 notes. Answer for uac-r2: a service request follows the child rule (`Supplemental`, `:84-90`, their earlier ruling).
+> - **C3:** a read-only dev query finds the deepest child-to-child chain across the 16 tables, and diff 3 notes the count of rows past 3 hops. If any row a firm can see goes past 3, raise the bound to that depth plus 1.
+> - **C4:** record it as a known limit, including the over-hiding on multi-edge tables. File an issue with the C3 number, worded neutrally: "rows whose child chain exceeds N hops are withheld from external callers". No examples.
 
 ## Quick Recovery (READ THIS FIRST)
 
