@@ -746,6 +746,38 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.Uploads.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "F3b fix round 1 service request parity, REST plane: a request linked to another firm's invoice is the uniform refusal (as one that does not exist); one linked to the caller's own firm's invoice, or to none, is served (the assistant plane: DataverseReadQueryHandlerTests / DataverseSearchDataHandlerTests ...ServiceRequestParity)")]
+    [MemberData(nameof(ServiceRequestParityCase.Kinds), MemberType = typeof(ServiceRequestParityCase))]
+    public async Task ServiceRequestParity_RestPlane(string kind)
+    {
+        var document = SeedLinkedServiceRequest();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        if (ServiceRequestParityCase.InvoiceFor(world, kind) is { } invoice)
+            _fixture.Data.ServiceRequestInvoices[RecordA] = new[] { invoice };
+        else
+            _fixture.Data.ServiceRequestInvoices.TryRemove(RecordA, out _);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        foreach (var route in new[] { "list", "content" })
+        {
+            using var response = await ServiceRequestRouteAsync(client, route, RecordA, document);
+            if (ServiceRequestParityCase.Hidden(kind))
+            {
+                using var missing = await ServiceRequestRouteAsync(client, route, OutsideRecord, document);
+                response.StatusCode.Should().Be(HttpStatusCode.Forbidden, route);
+                (await response.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(), route);
+            }
+            else
+            {
+                response.StatusCode.Should().Be(HttpStatusCode.OK, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            }
+        }
+
+        if (ServiceRequestParityCase.Hidden(kind))
+            _fixture.Downloads.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "130-0 F3b service request (must not fire): a request with no invoice link asks no invoice decision and is served")]
     public async Task ServiceRequest_WithNoInvoiceLink_AsksNothing()
     {

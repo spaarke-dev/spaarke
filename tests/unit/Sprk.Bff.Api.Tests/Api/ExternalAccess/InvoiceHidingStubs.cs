@@ -280,6 +280,39 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
 }
 
 /// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2: ONE service request case, run on both planes (the REST routes under a request and
+/// the assistant tools read_query / search_data), so each plane is held to the same answer for the same request: linked to another
+/// firm's invoice is hidden; linked to the caller's own firm's invoice, or to none, is shown. The invoice is made in the world the plane's
+/// real seam reads (<see cref="InvoiceWorld"/>), with the same firms.
+/// </summary>
+internal static class ServiceRequestParityCase
+{
+    /// <summary>The kinds of request: "other-firm", "own-firm", "unlinked".</summary>
+    public static TheoryData<string> Kinds => new() { "other-firm", "own-firm", "unlinked" };
+
+    /// <summary>Whether a request of <paramref name="kind"/> is hidden (the same on every plane).</summary>
+    public static bool Hidden(string kind) => kind == "other-firm";
+
+    /// <summary>The invoice a request of <paramref name="kind"/> links to, made in <paramref name="world"/>; null for "unlinked".</summary>
+    public static Guid? InvoiceFor(InvoiceWorld world, string kind)
+    {
+        switch (kind)
+        {
+            case "other-firm":
+                var other = world.OwnedInvoice();
+                world.InvoiceFirm(other, InvoiceFamilyFirmWorld.OtherFirm);
+                return other;
+            case "own-firm":
+                return world.OwnedInvoice();
+            case "unlinked":
+                return null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind (test).");
+        }
+    }
+}
+
+/// <summary>
 /// Task 130-0b step 2: one class of CHILD row with an invoice link, as the handler tests name it: its table and the one link column
 /// the test sets (a document twice: through <c>sprk_invoice</c> and through <c>sprk_relatedinvoice</c>). The read shape comes from
 /// <see cref="InvoiceLinks.Tables"/>, never from the test.
@@ -321,6 +354,12 @@ internal sealed record InvoiceLinkedCase(string Key, string Table, string LinkCo
 
     /// <summary><see cref="SearchableKeys"/> crossed with each fault.</summary>
     public static TheoryData<string, string> SearchableKeysAndFaults => Faults(All.Where(c => c.Table != "sprk_communication"));
+
+    /// <summary>
+    /// F3b fix round 1, step 2: the service request (<see cref="InvoiceLinks.Supplemental"/>), for the REST / assistant parity tests. Not in
+    /// <see cref="All"/>: the step 2 theories predate its rule.
+    /// </summary>
+    public static InvoiceLinkedCase ServiceRequest { get; } = new("servicerequest", "sprk_servicerequest", "sprk_regardinginvoice");
 
     public string EntitySet => InvoiceLinks.Tables[Table].EntitySet!;
 

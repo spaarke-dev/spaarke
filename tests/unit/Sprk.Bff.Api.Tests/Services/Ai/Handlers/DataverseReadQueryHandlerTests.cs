@@ -1188,6 +1188,27 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             : Array.Empty<string>(), "a link read that fails cannot tell an unlinked row from a linked one (fail closed)");
     }
 
+    [Theory(DisplayName = "F3b fix round 1 service request parity, read_query: a request linked to another firm's invoice is hidden; one linked to the caller's own firm's invoice, or to none, is shown (the REST plane: ExternalRecordDocumentRoutesTests.ServiceRequestParity_RestPlane)")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Kinds), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase))]
+    public async Task ExecuteChatAsync_F3b_ServiceRequestParity(string kind)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.ServiceRequest;
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.InvoiceFor(firms.World, kind) is { } invoice
+            ? firms.LinkedRow(linked, invoice)
+            : firms.UnlinkedRow(linked);
+        ArrangeLinkedTable(linked, (row, "Request"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Hidden(kind)
+            ? Array.Empty<string>()
+            : new[] { "Request" });
+    }
+
     [Theory(DisplayName = "130-0b step 2 read_query must fire: a link that cannot be decided (not a GUID, or a row the app-only read does not return) hides the row")]
     [InlineData("not-a-guid")]
     [InlineData("not-returned")]

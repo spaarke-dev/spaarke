@@ -636,6 +636,27 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         firms.FirmReads.Should().Be(1);
     }
 
+    [Theory(DisplayName = "F3b fix round 1 service request parity, search_data: a request hit linked to another firm's invoice is hidden; one linked to the caller's own firm's invoice, or to none, is shown (the REST plane: ExternalRecordDocumentRoutesTests.ServiceRequestParity_RestPlane)")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Kinds), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase))]
+    public async Task ExecuteChatAsync_F3b_ServiceRequestParity(string kind)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.ServiceRequest;
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.InvoiceFor(firms.World, kind) is { } invoice
+            ? firms.LinkedRow(linked, invoice)
+            : firms.UnlinkedRow(linked);
+        ArrangeLinkedHits((linked, row));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Hidden(kind)
+            ? new[] { MatterHit.ToString("D") }
+            : new[] { MatterHit.ToString("D"), row.ToString("D") });
+    }
+
     [Theory(DisplayName = "130-0b step 2 search_data must not fire: a child hit linked to the caller's own firm's invoice is shown")]
     [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
     public async Task ExecuteChatAsync_Task130_0b_S2_AChildHitOfTheCallersOwnInvoice_IsShown(string key)
