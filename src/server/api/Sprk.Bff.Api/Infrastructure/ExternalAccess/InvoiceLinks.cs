@@ -109,8 +109,36 @@ internal static class InvoiceLinks
     internal sealed record DescendantTable(string LogicalName, string? EntitySet, string IdColumn, IReadOnlyList<ParentEdge> Parents);
 
     /// <summary>What a row's invoice decision runs on: the invoices it links to (its own and its ancestors') and whether the chain it
-    /// hangs from could be decided. When undecidable the list also carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.</summary>
-    internal sealed record RowInvoiceLinks(IReadOnlyList<Guid> Invoices, bool ChainUndecidable);
+    /// hangs from could be decided. When undecidable the list also carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, and
+    /// <paramref name="Reasons"/> says why (set by the walk; a caller's own fail-closed answer may leave it
+    /// <see cref="UndecidableReason.None"/>).</summary>
+    internal sealed record RowInvoiceLinks(
+        IReadOnlyList<Guid> Invoices, bool ChainUndecidable, UndecidableReason Reasons = UndecidableReason.None);
+
+    /// <summary>EB-D-215 (C1): why the walk could not decide a row's chain, kept apart so a chain past the bound is reported on its
+    /// own (<see cref="WalkPastTheBoundEvent"/>) and never confused with a cycle or an unreadable link.</summary>
+    [Flags]
+    internal enum UndecidableReason
+    {
+        /// <summary>Decided.</summary>
+        None = 0,
+
+        /// <summary>A link or parent column that was not read or is not a GUID, or a parent that did not come back.</summary>
+        Unreadable = 1,
+
+        /// <summary>A parent already on the row's own path (a row that is its own parent included).</summary>
+        Cycle = 2,
+
+        /// <summary>The chain needs a hop past <see cref="MaxWalkHops"/>.</summary>
+        PastTheBound = 4,
+    }
+
+    /// <summary>
+    /// EB-D-215 (C1): the stable code of the one warning logged per row the walk leaves undecidable because its chain needs a hop past
+    /// <see cref="MaxWalkHops"/>. Fields: the table logical name, the row id, the hops walked and the plane. No firm, invoice, caller or
+    /// identity value.
+    /// </summary>
+    internal const string WalkPastTheBoundEvent = "EXT-INVOICE-WALK-PAST-BOUND";
 
     /// <summary>Every table with at least one invoice link, keyed by logical name.</summary>
     internal static readonly IReadOnlyDictionary<string, LinkedTable> Tables =
@@ -256,19 +284,23 @@ internal static class InvoiceLinks
     /// with no invoice link or no known read shape.
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> ReadLinkedInvoicesAsync(
-        string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct) =>
-        (await ReadRowInvoiceLinksAsync(table, rowIds, query, ct).ConfigureAwait(false))
+        string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct,
+        ILogger? logger = null, string? plane = null) =>
+        (await ReadRowInvoiceLinksAsync(table, rowIds, query, ct, logger, plane).ConfigureAwait(false))
             .ToDictionary(kv => kv.Key, kv => kv.Value.Invoices);
 
     /// <summary>
     /// <see cref="ReadLinkedInvoicesAsync"/> with the chain verdict kept apart (F3b): per row, the invoices it decides on and whether
     /// the chain it hangs from was undecidable. The walk: hop 0 is the row (its own links and its parent edges); each following hop is one
-    /// batched read per parent table over the distinct parents not yet in hand, up to <see cref="MaxWalkHops"/> hops. A parent column absent from a row, a parent link that is not a GUID, a parent that
-    /// does not come back, a parent already on THIS row's path (a cycle) and a parent needed past the bound each make the row
-    /// undecidable. Two edges to the same parent (a diamond) are not a cycle. A failed read THROWS.
+    /// batched read per parent table over the distinct parents not yet in hand, up to <see cref="MaxWalkHops"/> hops. A parent column
+    /// absent from a row, a parent link that is not a GUID, a parent that does not come back, a parent already on THIS row's path (a
+    /// cycle) and a parent needed past the bound each make the row undecidable (<see cref="RowInvoiceLinks.Reasons"/> says which). Two
+    /// edges to the same parent (a diamond) are not a cycle. A failed read THROWS. EB-D-215 (C1): each row left undecidable by the
+    /// bound is logged once to <paramref name="logger"/> (<see cref="WalkPastTheBoundEvent"/>, labelled with <paramref name="plane"/>).
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, RowInvoiceLinks>> ReadRowInvoiceLinksAsync(
-        string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+        string table, IReadOnlyCollection<Guid> rowIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct,
+        ILogger? logger = null, string? plane = null)
     {
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(query);
@@ -285,6 +317,7 @@ internal static class InvoiceLinks
         for (var hop = 0; level.Count > 0; hop++)
             level = await StepAsync(level, hop, walks, known, query, ct).ConfigureAwait(false);
 
+        LogPastTheBound(table, walks, logger, plane);
         return walks.ToDictionary(kv => kv.Key, kv => kv.Value.Result());
     }
 
@@ -324,11 +357,12 @@ internal static class InvoiceLinks
     /// round 1: a table with several parent edges (a document's parent document and its related communication, event, to-do,
     /// agreement and service request; a to-do's or an event's regarding rows ...) gives one entry per edge that is set, and the row's
     /// answer is the union over all of them; any one edge that is undecidable makes the row undecidable. An entry whose column is not
-    /// a parent edge of <paramref name="table"/> is refused (it would be followed as the wrong table). A failed read THROWS.
+    /// a parent edge of <paramref name="table"/> is refused (it would be followed as the wrong table). A failed read THROWS. A row left
+    /// undecidable by the bound is logged once, as on <see cref="ReadRowInvoiceLinksAsync"/>.
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, RowInvoiceLinks>> ReadAncestorInvoiceLinksAsync(
         string table, IReadOnlyCollection<(Guid Row, string Column, Guid Parent)> parents, CommunicationOpenThreadGate.RowQuery query,
-        CancellationToken ct)
+        CancellationToken ct, ILogger? logger = null, string? plane = null)
     {
         ArgumentNullException.ThrowIfNull(parents);
         ArgumentNullException.ThrowIfNull(query);
@@ -344,10 +378,15 @@ internal static class InvoiceLinks
                 ?? throw new ArgumentOutOfRangeException(nameof(parents), column, $"Not a parent edge of {table}.");
             var walk = walks.TryGetValue(row, out var existing) ? existing : walks[row] = new RowWalk();
             // An unreadable parent link, or a row that is its own parent, cannot be decided.
-            if (parent == ExternalDocumentNarrowing.UnreadableLink || parent == Guid.Empty
-                || (parent == row && string.Equals(edge.ParentTable, table, StringComparison.OrdinalIgnoreCase)))
+            if (parent == ExternalDocumentNarrowing.UnreadableLink || parent == Guid.Empty)
             {
-                walk.Undecidable = true;
+                walk.MarkUndecidable(UndecidableReason.Unreadable);
+                continue;
+            }
+
+            if (parent == row && string.Equals(edge.ParentTable, table, StringComparison.OrdinalIgnoreCase))
+            {
+                walk.MarkUndecidable(UndecidableReason.Cycle);
                 continue;
             }
 
@@ -357,7 +396,22 @@ internal static class InvoiceLinks
         for (var hop = 1; level.Count > 0; hop++)
             level = await StepAsync(level, hop, walks, known, query, ct).ConfigureAwait(false);
 
+        LogPastTheBound(table, walks, logger, plane);
         return walks.ToDictionary(kv => kv.Key, kv => kv.Value.Result());
+    }
+
+    /// <summary>EB-D-215 (C1): one warning per row the bound left undecidable, so a walk that hits the bound is never silent. The row id
+    /// and the hops walked only: no firm, invoice, caller or identity value. A cycle and an unreadable link are not logged here.</summary>
+    private static void LogPastTheBound(string table, Dictionary<Guid, RowWalk> walks, ILogger? logger, string? plane)
+    {
+        if (logger is null)
+            return;
+        foreach (var (rowId, walk) in walks.Where(kv => kv.Value.Reasons.HasFlag(UndecidableReason.PastTheBound)))
+        {
+            logger.LogWarning(
+                "[{EventCode}] {Table} row {RowId}: the invoice walk stopped at the bound after {Hops} hop(s) (plane={Plane}); the row is undecidable and withheld (fail closed).",
+                WalkPastTheBoundEvent, table, rowId, walk.HopsAtTheBound, plane ?? "unknown");
+        }
     }
 
     private sealed record Pending(Guid Origin, string Table, Guid Id, IReadOnlyList<(string Table, Guid Id)> Path);
@@ -366,14 +420,26 @@ internal static class InvoiceLinks
     {
         private readonly List<Guid> _invoices = new();
 
-        internal bool Undecidable { get; set; }
+        /// <summary>Why the row is undecidable (<see cref="UndecidableReason.None"/>: decided so far).</summary>
+        internal UndecidableReason Reasons { get; private set; }
+
+        /// <summary>The hops walked when the bound stopped the walk (set with <see cref="UndecidableReason.PastTheBound"/>).</summary>
+        internal int HopsAtTheBound { get; private set; }
+
+        internal void MarkUndecidable(UndecidableReason reason) => Reasons |= reason;
+
+        internal void MarkPastTheBound(int hops)
+        {
+            Reasons |= UndecidableReason.PastTheBound;
+            HopsAtTheBound = Math.Max(HopsAtTheBound, hops);
+        }
 
         internal void AddLink(Guid? link)
         {
             // A link column that was not read, or is not a GUID, cannot be decided: the row is undecidable (never "no link").
             if (link == ExternalDocumentNarrowing.UnreadableLink)
             {
-                Undecidable = true;
+                MarkUndecidable(UndecidableReason.Unreadable);
                 return;
             }
 
@@ -383,10 +449,11 @@ internal static class InvoiceLinks
 
         internal RowInvoiceLinks Result()
         {
+            var undecidable = Reasons != UndecidableReason.None;
             var invoices = _invoices.ToList();
-            if (Undecidable && !invoices.Contains(ExternalDocumentNarrowing.UnreadableLink))
+            if (undecidable && !invoices.Contains(ExternalDocumentNarrowing.UnreadableLink))
                 invoices.Add(ExternalDocumentNarrowing.UnreadableLink);
-            return new RowInvoiceLinks(invoices, Undecidable);
+            return new RowInvoiceLinks(invoices, undecidable, Reasons);
         }
     }
 
@@ -431,7 +498,7 @@ internal static class InvoiceLinks
             var walk = walks[pending.Origin];
             if (known[(pending.Table, pending.Id)] is not { } row)
             {
-                walk.Undecidable = true; // a row that did not come back
+                walk.MarkUndecidable(UndecidableReason.Unreadable); // a row that did not come back
                 continue;
             }
 
@@ -444,11 +511,21 @@ internal static class InvoiceLinks
                 var parent = ExternalInvoiceVisibility.LinkOf(row, edge.ValueColumn);
                 if (parent is null)
                     continue;
-                if (parent == ExternalDocumentNarrowing.UnreadableLink
-                    || pending.Path.Contains((edge.ParentTable, parent.Value), TableIdComparer.Instance)
-                    || hop >= MaxWalkHops)
+                if (parent == ExternalDocumentNarrowing.UnreadableLink)
                 {
-                    walk.Undecidable = true; // an unreadable column or link, a cycle, or a chain past the bound
+                    walk.MarkUndecidable(UndecidableReason.Unreadable); // an unreadable column or link
+                    continue;
+                }
+
+                if (pending.Path.Contains((edge.ParentTable, parent.Value), TableIdComparer.Instance))
+                {
+                    walk.MarkUndecidable(UndecidableReason.Cycle);
+                    continue;
+                }
+
+                if (hop >= MaxWalkHops)
+                {
+                    walk.MarkPastTheBound(hop); // a chain that needs a hop past the bound
                     continue;
                 }
 

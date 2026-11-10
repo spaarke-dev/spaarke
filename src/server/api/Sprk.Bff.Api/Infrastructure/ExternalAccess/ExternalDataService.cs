@@ -602,7 +602,8 @@ public class ExternalDataService
         {
             // A row id that is not a GUID (Guid.Empty) is never walked: it reads as undecidable below.
             chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
-                table, firsts.SelectMany(f => f).Where(f => f.Row != Guid.Empty).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+                table, firsts.SelectMany(f => f).Where(f => f.Row != Guid.Empty).ToList(), QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -654,7 +655,8 @@ public class ExternalDataService
         IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains;
         try
         {
-            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(table, firsts, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(table, firsts, QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -705,7 +707,8 @@ public class ExternalDataService
         try
         {
             var read = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
-                table, asked.Select(a => (a.Row, a.Column, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+                table, asked.Select(a => (a.Row, a.Column, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
             foreach (var (index, row, _, _) in asked)
                 chains[index] = read.TryGetValue(row, out var chain) ? chain : undecidable;
             return (chains, false);
@@ -2171,6 +2174,10 @@ public class ExternalDataService
     /// <summary>The cost line's plane for <see cref="InternalRouteDocumentNarrowing"/> (task 188 round 3 slice B).</summary>
     internal const string InternalRoutesPlane = "internal-routes";
 
+    /// <summary>EB-D-215 (C1): the plane label of the external REST routes (the lists, single records, module fetch, messages and the
+    /// feed) on the invoice walk's past-the-bound warning (<see cref="InvoiceLinks.WalkPastTheBoundEvent"/>).</summary>
+    internal const string RestPlane = "rest";
+
     /// <summary>Reads above which a request's narrowing cost line is logged at Information (Debug otherwise).</summary>
     internal const int NarrowingCostInformationThreshold = 20;
 
@@ -2650,7 +2657,8 @@ public class ExternalDataService
         IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> linksOf;
         try
         {
-            linksOf = await InvoiceLinks.ReadLinkedInvoicesAsync(table, asked, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+            linksOf = await InvoiceLinks.ReadLinkedInvoicesAsync(table, asked, QueryRowsOrThrowAsync, ct, _logger, AssistantPlane)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -241,6 +241,13 @@ public sealed class InvoiceLinkedDescendantsTests
             _rows[(set, id)][column] = value.ToString();
         }
 
+        /// <summary>The GUID in <paramref name="column"/> (written <c>_col_value</c>) of the row <paramref name="id"/> of <paramref name="table"/>.</summary>
+        public Guid FirstParent(string table, Guid id, string column)
+        {
+            var set = InvoiceLinks.Tables.TryGetValue(table, out var linked) ? linked.EntitySet! : InvoiceLinks.Descendants[table].EntitySet!;
+            return Guid.Parse((string)_rows[(set, id)][column]!);
+        }
+
         public CommunicationOpenThreadGate.RowQuery Query => (set, odata, _) =>
         {
             lock (Reads) Reads.Add((set, odata));
@@ -592,6 +599,108 @@ public sealed class InvoiceLinkedDescendantsTests
         Decided(result[atTheBound], invoice);
         result[pastTheBound].ChainUndecidable.Should().BeTrue("one hop more is past the bound");
         cycle[cycleA].ChainUndecidable.Should().BeTrue("an event regarding an event regarding the first is a cycle");
+    }
+
+    // ── EB-D-215 C1: a walk that hits the bound is never silent ──────────────────────────────────────────────────
+
+    /// <summary>Records every log entry with its structured fields.</summary>
+    private sealed class FieldLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public readonly List<(Microsoft.Extensions.Logging.LogLevel Level, IReadOnlyDictionary<string, object?> Fields)> Entries = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            var fields = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? pairs.ToDictionary(p => p.Key, p => p.Value)
+                : new Dictionary<string, object?>();
+            lock (Entries) Entries.Add((logLevel, fields));
+        }
+
+        /// <summary>The past-the-bound warnings.</summary>
+        public IReadOnlyList<IReadOnlyDictionary<string, object?>> PastTheBound => Entries
+            .Where(e => e.Fields.TryGetValue("EventCode", out var code) && Equals(code, InvoiceLinks.WalkPastTheBoundEvent))
+            .Select(e => e.Fields)
+            .ToList();
+    }
+
+    /// <summary>A to-do under a chain of <paramref name="events"/> events (each regarding the next), the top one linked to
+    /// <paramref name="invoice"/>.</summary>
+    private static Guid TodoUnderEvents(Store store, int events, Guid invoice)
+    {
+        var above = store.Row("sprk_event", ("_sprk_regardinginvoice_value", invoice));
+        for (var i = 1; i < events; i++)
+            above = store.Row("sprk_event", ("_sprk_regardingevent_value", above));
+        return store.Row("sprk_todo", ("_sprk_regardingevent_value", above));
+    }
+
+    [Fact(DisplayName = "EB-D-215 C1 must fire: a row past the bound logs exactly one warning with the event code, table, row id, hops and plane, and no invoice value; on both walk entry points")]
+    public async Task PastTheBound_LogsOnce_WithItsFields()
+    {
+        var invoice = Guid.NewGuid();
+        var store = new Store();
+        var past = TodoUnderEvents(store, InvoiceLinks.MaxWalkHops + 1, invoice);
+        // A second edge of the same row also past the bound: still one warning for the row.
+        var documents = store.Row("sprk_document", ("_sprk_invoice_value", invoice));
+        for (var i = 0; i < InvoiceLinks.MaxWalkHops; i++)
+            documents = store.Row("sprk_document", ("_sprk_parentdocument_value", documents));
+        store.Set("sprk_todo", past, "_sprk_regardingdocument_value", documents);
+
+        var assistant = new FieldLogger();
+        var walked = await InvoiceLinks.ReadRowInvoiceLinksAsync("sprk_todo", new[] { past }, store.Query, CancellationToken.None, assistant, "assistant");
+
+        walked[past].ChainUndecidable.Should().BeTrue();
+        walked[past].Reasons.Should().Be(InvoiceLinks.UndecidableReason.PastTheBound);
+        var entry = assistant.PastTheBound.Should().ContainSingle().Subject;
+        assistant.Entries.Single(e => ReferenceEquals(e.Fields, entry)).Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        entry["Table"].Should().Be("sprk_todo");
+        entry["RowId"].Should().Be(past);
+        entry["Hops"].Should().Be(InvoiceLinks.MaxWalkHops);
+        entry["Plane"].Should().Be("assistant");
+        entry.Values.Select(v => v?.ToString()).Should().NotContain(invoice.ToString(), "no invoice value is logged");
+
+        // The REST entry point (the row already read: its first parents).
+        var rest = new FieldLogger();
+        var firstEvent = store.FirstParent("sprk_todo", past, "_sprk_regardingevent_value");
+        var ancestors = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+            "sprk_todo", new[] { (past, "sprk_regardingevent", firstEvent), (past, "sprk_regardingdocument", documents) },
+            store.Query, CancellationToken.None, rest, "rest");
+
+        ancestors[past].Reasons.Should().Be(InvoiceLinks.UndecidableReason.PastTheBound);
+        var restEntry = rest.PastTheBound.Should().ContainSingle().Subject;
+        restEntry["Plane"].Should().Be("rest");
+        restEntry["RowId"].Should().Be(past);
+        restEntry["Hops"].Should().Be(InvoiceLinks.MaxWalkHops);
+    }
+
+    [Fact(DisplayName = "EB-D-215 C1 must not fire: a row decided within the bound logs nothing; a cycle and an unreadable link are undecidable for their own reason and are not logged as the bound")]
+    public async Task WithinTheBound_LogsNothing_ACycleAndAnUnreadableLinkAreTheirOwnReason()
+    {
+        var invoice = Guid.NewGuid();
+        var store = new Store();
+        var atTheBound = TodoUnderEvents(store, InvoiceLinks.MaxWalkHops, invoice);
+        var (cycleA, cycleB) = (store.Row("sprk_event"), store.Row("sprk_event"));
+        store.Set("sprk_event", cycleA, "_sprk_regardingevent_value", cycleB);
+        store.Set("sprk_event", cycleB, "_sprk_regardingevent_value", cycleA);
+        var cyclic = store.Row("sprk_todo", ("_sprk_regardingevent_value", cycleA));
+        var garbled = store.Row("sprk_todo", ("_sprk_regardingevent_value", "not-a-guid"));
+        var orphan = store.Row("sprk_todo", ("_sprk_regardingevent_value", Guid.NewGuid()));
+
+        var logger = new FieldLogger();
+        var result = await InvoiceLinks.ReadRowInvoiceLinksAsync(
+            "sprk_todo", new[] { atTheBound, cyclic, garbled, orphan }, store.Query, CancellationToken.None, logger, "assistant");
+
+        Decided(result[atTheBound], invoice);
+        result[atTheBound].Reasons.Should().Be(InvoiceLinks.UndecidableReason.None);
+        result[cyclic].Reasons.Should().Be(InvoiceLinks.UndecidableReason.Cycle);
+        result[garbled].Reasons.Should().Be(InvoiceLinks.UndecidableReason.Unreadable);
+        result[orphan].Reasons.Should().Be(InvoiceLinks.UndecidableReason.Unreadable, "a parent that does not come back");
+        logger.PastTheBound.Should().BeEmpty();
+        logger.Entries.Should().BeEmpty("the walk logs only the bound");
     }
 
     // ── Part 3: the assistant tools' seam ────────────────────────────────────────────────────────────────────
