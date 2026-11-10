@@ -35,7 +35,7 @@
 //                                           (owner round 2 item 9). Omitted → the default AI-scoping surface,
 //                                           unchanged. Any other value is a validation error.
 //                                           A record selected through a targeting-only column
-//                                           (MembershipOptionsDefaults.TargetingOnlyColumns, e.g. an invoice's
+//                                           (the targeting-only list in MembershipOptions.cs, e.g. an invoice's
 //                                           Assigned To) may be UNREADABLE by its target: any notification or
 //                                           briefing content about it is read as the recipient, or carries only
 //                                           the id or link (UAC-r2 032b-1b C1).

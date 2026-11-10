@@ -1,6 +1,7 @@
 # Spaarke Field Mapping Framework Architecture
 
-> **Last Updated**: 2026-10-20
+> **Last Updated**: 2026-11-09 (field-mapping-server-write-path-r1 tasks 032b-1 and 032b-1b: display copies, the push's skipped-rule line, targeting-only Assigned To)
+> **Last Reviewed**: 2026-11-09 (the sections those tasks changed, against the BFF code in their review rounds; not a full-document review)
 > **Purpose**: Describes the shipped mechanism that auto-populates fields on a wizard-created child record (Event, Invoice, Report Card, Matter, Project, To Do, Work Assignment) from its host record (Matter/Project/etc.) at creation time, driven entirely by admin-authored Dataverse configuration.
 
 ---
