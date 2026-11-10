@@ -870,7 +870,62 @@ public sealed class GateDecisionRecordSharing
             }
 
             await GrantAndConfirmAsync(communicationId, record, users, acceptedTeam: directTeam).ConfigureAwait(false);
+            await RevokeOutsideAudienceAsync(communicationId, record, users, directTeam).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// 198 pass 2 N3: on a record the Direct team owns, with a valid audience, every user share outside that audience (a revoke that failed
+    /// earlier) is revoked, the same revoke <see cref="ReownToDirectAsync"/> sends. Only after the owner is read back as exactly the Direct
+    /// team (a record a filing or the Secure reconciler re-owned meanwhile is theirs). A share read or owner read that faults revokes nothing.
+    /// </summary>
+    private async Task RevokeOutsideAudienceAsync(Guid communicationId, GateRecord record, IReadOnlyList<Guid> audience, Guid directTeam)
+    {
+        IReadOnlyList<DataversePrincipalAccess> shares;
+        try
+        {
+            shares = await _shares.GetPrincipalAccessOrThrowAsync(Table, record.Id, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ShareFailed(ex, "its shares could not be read; no leftover share is revoked (D-215)", record.Id, communicationId);
+            return;
+        }
+
+        var keep = audience.ToHashSet();
+        var leftovers = shares
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && !keep.Contains(s.Principal.Id))
+            .Select(s => s.Principal)
+            .Distinct()
+            .ToList();
+        if (leftovers.Count == 0)
+            return;
+
+        var (owner, ownerReadFault) = await ReadOwnerOrNullAsync(record.Id).ConfigureAwait(false);
+        if (owner != DataversePrincipalRef.Team(directTeam))
+        {
+            if (owner is null)
+                ShareFailed(ownerReadFault, "the owner could not be read; no leftover share is revoked (D-215)", record.Id, communicationId);
+            return;
+        }
+
+        foreach (var principal in leftovers)
+        {
+            try
+            {
+                await _shares.RevokeAccessAsync(EntitySet, record.Id, principal, DataversePrincipalRef.Team(directTeam), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ReownFailed(ex, "owned by the Direct-message owner team, but a share that is not a participant's could not be revoked (D-215)",
+                    record.Id, communicationId);
+            }
+        }
+
+        _logger.LogInformation(
+            "Gate Decision Record {RecordId} of Direct message {CommunicationId}: {Count} leftover non-participant share(s) revoked (D-215).",
+            record.Id, communicationId, leftovers.Count);
     }
 
     /// <summary>
