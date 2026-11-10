@@ -368,22 +368,16 @@ public class SecureChildLineageTests
         };
         RecordOwnershipContext.ParentsOf(procedureSet).Should().BeEmpty("a Procedure rule set is not a secure child (model 5.2)");
 
-        // 089a review K7: a LEGACY uploaded set carries the document it was read from (RuleSetService). sprk_document is an
-        // ownership parent, so without the citation the set would be filed under the document.
-        var legacySourceDocument = Guid.NewGuid();
-        var legacySet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
-        {
-            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
-        };
-        RecordOwnershipResolver.IsCitation("sprk_ruleset", "sprk_sourcedocument").Should().BeTrue();
-        RecordOwnershipContext.ParentsOf(legacySet).Should().BeEmpty("a legacy set's source document is provenance, not parentage");
-
-        var legacyRecordSet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        var recordSet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
         {
             ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
-            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
         };
-        RecordOwnershipContext.ParentsOf(legacyRecordSet).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipContext.ParentsOf(recordSet).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        // ebilling-r1 task 116 fix round 2: a rule set cites nothing (its source is its Procedure Version's Stored File), so the citation
+        // set has no rule set entry.
+        var citations = (IEnumerable<(string Table, string Column)>)typeof(RecordOwnershipResolver)
+            .GetField("CitationLookups", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+        citations.Should().NotContain(c => c.Table == "sprk_ruleset");
 
         var recordRule = new Microsoft.Xrm.Sdk.Entity("sprk_policy", Guid.NewGuid())
         {
