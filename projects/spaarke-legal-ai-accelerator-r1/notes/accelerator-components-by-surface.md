@@ -29,6 +29,13 @@ The zip is laid out like `Documents/`, so "extract into Documents" puts everythi
 | `Documents/Legal Knowledge/Review method/` | `Spaarke Review Method.docx` (the method for non-contract reviews in Word) | The custom instruction names it |
 | `Documents/Legal Knowledge/Start here/` | Quick cards, the custom-instruction text, the agent recipes (advanced) | — |
 
+**Microsoft's own folders (checked 2026-11-10; detail in `poc-e2e/onedrive-layout.md`).** `Documents/Cowork/` is
+Cowork's workspace. Microsoft documents only one thing it reads automatically: `Cowork/skills/<name>/SKILL.md`, at
+the start of every conversation. Cowork writes `Tasks/`, `Projects/` and an `AGENTS.md` (it calls the folder its
+durable user folder) itself. `Documents/Copilot/` is Copilot's own area: `Created/` holds files Copilot makes, and
+`Memory/v2/` is an undocumented memory store. Neither is documented as a place Copilot reads instructions from, so
+we put nothing there. Our files go in `Cowork/Skills/` (the one auto-loaded location) and `Legal Knowledge/`.
+
 **Word doesn't load files from a folder.** Copilot in Word uses:
 - the open document;
 - files the user attaches or references with `/`;
@@ -88,6 +95,9 @@ contracts still go through *Review contract* for an in-place redline.
 - The readable (table-free) playbook rendered by the build, not the scratchpad converter.
 - The zip laid out like `Documents/`.
 - Agent recipes from the v0.2 instruction files.
+
+Built 2026-11-10 by `src/accelerators/build/Build-Package.ps1` (see the commit). Owner script for the individual
+tiers: `poc-e2e/tier-test-script.md`.
 
 ## Tests still needed (mechanics only)
 

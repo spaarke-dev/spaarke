@@ -448,8 +448,93 @@ class SummaryTests(Base):
         self.assertEqual(summary_table.main([self.write_plan(PLAN), internal]), 2)
 
 
+RATINGS = [
+    {"topic": "nda.term", "title": "Term and survival", "rating": "Does not meet", "action": "Extend to five years"},
+    {"topic": "nda.remedies", "title": "Remedies", "rating": "Meets", "action": "Accept"},
+    {"topic": "nda.assignment", "title": "Assignment", "rating": "Needs review", "action": "Confirm the assignee"},
+    {"topic": "nda.residuals", "title": "Residuals", "rating": "Acceptable fallback", "action": "Accept"},
+    {"topic": "nda.non-solicit", "title": "Non-solicitation", "rating": "Escalate", "action": "Send to a senior attorney"},
+    {"topic": "nda.housekeeping", "title": "Housekeeping", "rating": "Not applicable", "action": "None"},
+]
+
+
+class RatingsSummaryTests(Base):
+    """Non-contract reviews: plan "ratings" -> page-1 Review summary with shaded Rating cells."""
+
+    def plan(self, **over):
+        plan = json.loads(json.dumps(PLAN))
+        for e in plan["edits"]:
+            e.pop("summary", None)  # ratings only: no revisions table
+        plan["ratings"] = json.loads(json.dumps(RATINGS))
+        plan.update(over)
+        return plan
+
+    def build(self, plan):
+        red, cln, internal = self.path("redline.docx"), self.path("clean.docx"), self.path("internal.docx")
+        ooxml_redline.run(plan, self.orig, red, clean=cln)
+        self.assertEqual(summary_table.main([self.write_plan(plan), red, "--out", internal]), 0)
+        return internal, cln
+
+    def run_checks(self, plan, internal, cln):
+        return {r["name"]: r for r in check_outputs.check(plan, internal, cln, self.orig)}
+
+    def test_review_summary_has_shaded_rating_cells_and_passes_checks(self):
+        plan = self.plan()
+        internal, cln = self.build(plan)
+        root = fx.document_root(internal)
+        first = root.find(fx.q("body"))[0]
+        self.assertEqual("".join(t.text or "" for t in first.iter(fx.q("t"))), "Review summary")
+        tbl = root.find(".//" + fx.q("tbl"))
+        rows = tbl.findall(fx.q("tr"))
+        self.assertEqual(len(rows) - 1, 6)
+        fills = []
+        for r in rows[1:]:
+            shd = r.findall(fx.q("tc"))[2].find("%s/%s" % (fx.q("tcPr"), fx.q("shd")))
+            fills.append(shd.get(fx.q("fill")) if shd is not None else None)
+        self.assertEqual(fills, ["FFC7CE", "C6EFCE", "FFEB9C", "FFEB9C", "FFC7CE", None])
+        self.assertEqual(len(root.findall(".//" + fx.q("tbl"))), 1)  # no revisions table without summary rows
+        failed = {k: v["detail"] for k, v in self.run_checks(plan, internal, cln).items() if not v["ok"]}
+        self.assertEqual(failed, {})
+
+    def test_wrong_shading_is_caught(self):
+        plan = self.plan()
+        internal, cln = self.build(plan)
+        fx.edit_part(internal, "word/document.xml",  # a red rating painted green
+                     lambda b: b.replace(b'w:fill="FFC7CE"', b'w:fill="C6EFCE"'))
+        res = self.run_checks(plan, internal, cln)
+        self.assertFalse(res["summary"]["ok"])
+        self.assertIn("shaded C6EFCE, expected FFC7CE", res["summary"]["detail"])
+
+    def test_ratings_and_revisions_tables_can_share_the_page(self):
+        plan = self.plan()
+        plan["edits"] = json.loads(json.dumps(PLAN["edits"]))
+        internal, cln = self.build(plan)
+        self.assertEqual(len(fx.document_root(internal).findall(".//" + fx.q("tbl"))), 2)
+        failed = {k: v["detail"] for k, v in self.run_checks(plan, internal, cln).items() if not v["ok"]}
+        self.assertEqual(failed, {})
+
+    def test_missing_review_table_is_caught_when_the_plan_has_ratings(self):
+        plan = self.plan()
+        plain = self.plan()
+        del plain["ratings"]
+        internal, cln = self.build(plain)  # the package was built without the ratings table
+        res = self.run_checks(plan, internal, cln)
+        self.assertFalse(res["summary"]["ok"])
+        self.assertIn("no Review summary table", res["summary"]["detail"])
+
+    def test_plan_validation_refuses_bad_ratings(self):
+        for bad in ([], "x", [{"topic": "a.b", "title": "T", "rating": "Great", "action": "x"}],
+                    [{"topic": "a.b", "title": "T", "rating": "Meets"}],
+                    [{"topic": "a.b", "title": "T", "rating": "Meets", "action": "x", "extra": 1}],
+                    [{"topic": "a.b", "title": "T", "rating": "Meets", "action": "x"},
+                     {"topic": "a.b", "title": "T", "rating": "Meets", "action": "x"}]):
+            with self.subTest(bad=bad), self.assertRaises(ooxml_redline.PlanError):
+                ooxml_redline.validate_plan(self.plan(ratings=bad))
+        ooxml_redline.validate_plan(self.plan())
+
+
 class PlaybookTests(unittest.TestCase):
-    CAT = {"nda.term": {"mutual", "disclosing", "receiving"}, "nda.remedies": {"mutual"},
+    CAT ={"nda.term": {"mutual", "disclosing", "receiving"}, "nda.remedies": {"mutual"},
            "nda.reverse-engineering": {"disclosing"}}
     GOOD = ("# Playbook: NDA - Mutual\nVersion: 0.1 | Owner: Test | Side: mutual | Status: test\n\n"
             "Intro text is allowed.\n\n## topic: nda.term\nPreferred: Five years.\nFallback: Three years\n"
@@ -474,6 +559,16 @@ class PlaybookTests(unittest.TestCase):
         for name, text in cases.items():
             with self.assertRaises(playbook_parse.FormatError, msg=name):
                 playbook_parse.parse(text, self.CAT)
+
+    def test_cli_no_side_accepts_a_non_contract_playbook(self):
+        d = tempfile.mkdtemp()
+        pb, topics = os.path.join(d, "pb.md"), os.path.join(d, "topics.json")
+        with open(pb, "w", encoding="utf-8") as f:
+            f.write(self.GOOD.replace(" | Side: mutual", "").replace("nda.term", "lh.matter"))
+        with open(topics, "w", encoding="utf-8") as f:
+            json.dump({"topics": [{"id": "lh.matter", "title": "Matter"}, {"id": "lh.contact", "title": "Contact"}]}, f)
+        self.assertEqual(playbook_parse.main([pb, "--topics", topics]), 3)  # contract format: Side is required
+        self.assertEqual(playbook_parse.main([pb, "--topics", topics, "--no-side"]), 0)
 
 
 class SegmentAndProbeTests(Base):

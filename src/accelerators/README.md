@@ -24,16 +24,22 @@ core/
 practices/nda/
   accelerator.yaml    what the build assembles
   topics.yaml         topic catalogue: the join key
-  positions/          Spaarke baseline playbook(s)
+  positions/          Spaarke baseline playbook and the library playbook (Spaarke NDA – Mutual v1.2)
   samples/            sample customer playbook
   skills/nda-review/
+  agent/              Agent Builder instructions (the recipe's text)
   evals/              corpus generator, expected issues, behaviour cases, local e2e runner
   onboarding.md, sources.md
+practices/legal-hold/   non-contract type: no sides (playbook_parse --no-side)
+  accelerator.yaml, topics.yaml, positions/, agent/
+  skills/legal-hold-review/
 build/
-  Build-Accelerator.ps1  entry point
+  Build-Accelerator.ps1  entry point (one practice: plugin, skills, Word playbooks)
   build_accelerator.py   assemble, gate, test, package
-  gates.py               lint rules (tests in build/tests)
-  render_word_playbook.py
+  Build-Package.ps1      entry point for the individual-base package (runs the nda build first)
+  build_package.py       Documents/ tree + two zips; package_docs.py writes its Word documents
+  gates.py               lint rules for skills, plugins and packages (tests in build/tests)
+  render_word_playbook.py  four-column and readable (table-free) playbooks
   out/                   generated (git-ignored)
 ```
 
@@ -54,6 +60,18 @@ Outputs in `build/out/nda/`:
 | `t0/word-playbooks/*.docx` | Word copy (Microsoft's four columns, checked at build) for the Word legal plugin: Review contract › New playbook › Attach from Cloud. `* (headings).docx` is the transitional heading layout, dropped once the Word tests pass (backlog X3) |
 | `e2e/` | Local end-to-end outputs on the synthetic corpus |
 | `manifest.json` | Versions, gate results, SHA-256 of every output |
+
+### Individual-base package
+
+```powershell
+./build/Build-Package.ps1          # nda build, then the package; -SkipNdaBuild when out/nda is current
+```
+
+Outputs in `build/out/package/`: `Spaarke Legal Accelerator - Individual base v0.1.zip` (extract into
+OneDrive `Documents/`: `Cowork/Skills/...` and `Legal Knowledge/...`) and `Spaarke test documents v0.1.zip`.
+Gates: unique file names under `Legal Knowledge/`, paths of at most 200 characters, a custom
+instruction of at most 1,500 characters, no answer-key material. The test documents come from the
+POC kit (`--kit`, default `projects/spaarke-legal-ai-accelerator-r1/notes/poc-e2e`).
 
 ## Rules
 

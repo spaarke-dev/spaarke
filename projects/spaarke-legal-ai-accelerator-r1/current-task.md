@@ -1,8 +1,8 @@
-# Current Task State - spaarke-legal-ai-accelerator-r1 (E2E POC → declarative-agent spike DA-1)
+# Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-09 (by context-handoff, Claude Desktop session `acclerator-r1`)
+> **Last Updated**: 2026-11-10 (by context-handoff, Claude Desktop session `acclerator-r1`)
 > **Recovery**: Read "Quick Recovery" section first
-> **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged; master merged in 3cf9252e63)
+> **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
 > Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
 
 ---
@@ -11,45 +11,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Spike **DA-1**: specialist declarative agents in Word (agent mode) for **NDA Review** and **Legal Hold Review** (no POML tasks; pre-pipeline spike). Owner asked (2026-11-09): spike both; refresh DA research to 2026-11-09 (done); thoroughly review the existing Spaarke AI agent (done) |
-| **Step** | Setup round 1 failed (owner 2026-11-09: Agent Builder rejects `.md` knowledge, has no skills; agents built in Copilot Studio don't appear in Word; see `results.md` "Spike DA-1"). Round 2: S1 now = upload three DA **packages** (v1.9, agent skills, no knowledge) from OneDrive `Documents/Cowork/Test/POC-DA1/packages/`, built by `da-spike/Build-SpikePackages.ps1`; @-names end in " DA". Table-free playbook copies in `POC-DA1/knowledge/` |
-| **Status** | blocked on owner installing the packages and running the spike |
-| **Next Action** | When the owner reports results/screenshots (`OneDrive Documents/Cowork/Test/POC-DA1/screens/`): score N-1/N-3/B-1 against `answer-key/answer-key.md`, LH-1/LH-4/B-2 against `answer-key/legal-hold-answer-key.md`; record "Spike DA-1" in `results.md` |
-
-### Files modified this session (uncommitted unless noted)
-- `notes/poc-e2e/da-spike-script.md` — spike script draft (LH-1..6, N-1..7, FD-1, CM-1); §S1 placeholder. **Uncommitted**
-- `notes/poc-e2e/da-spike/legal-hold-review.instructions.md` (4,466 chars) and `nda-review.instructions.md` (5,390 chars) — agent instructions with full topic lists, completeness guard, verification codes LHR-1109-A / NDAR-1109-A, ratings GREEN/YELLOW/RED mapping. **Uncommitted**
-- `.claude/agent-memory/researcher/declarative-agents-in-word-2026-11-09.md` + `MEMORY.md` (index compacted 22→15.5 KB). **Uncommitted**
-- `notes/handoff-history/2026-11.md` (previous checkpoint appended). **Uncommitted**
-- Committed + pushed earlier today: results.md Act 7 results + owner mode follow-up, gap-log #33–#35 (`7e2e29d574`, `d9dcb414a3`)
+| **Task** | Build and test the **four-tier package** (individual base/advanced, team no-IT/IT) from `notes/accelerator-components-by-surface.md` (DRAFT v2). Pre-pipeline spike work; no POML tasks |
+| **Step** | (a) OneDrive clean-up DONE (cloud moves; `notes/poc-e2e/onedrive-layout.md`). (b) Five build items: package build `src/accelerators/build/Build-Package.ps1` (legal hold Cowork skill, readable playbook renderer, Spaarke Review Method SRM-1110-A, zip laid out like `Documents/`, agent recipes) — verify + commit. (c) Owner script `notes/poc-e2e/tier-test-script.md` (W-1, G-1..G-4, H-1, P-1, C-1..C-3, A-1..A-3) |
+| **Status** | waiting on owner to run the tier test script |
+| **Next Action** | Put the two zips where the owner can extract them; when results arrive, record a "Tier tests round 1" section in `results.md` |
 
 ### Critical context
-- **Act 7 Word results:** in *Allow editing* mode Word turns a non-contract review into editing suggestions (7/8 issues, no ratings). With the owner's review protocol (`OneDrive/Documents/Copilot/playbook-document-review.md` v1.0, PBR-1109-A) via custom instruction, totals matched the legal hold key exactly (5/2/6). **Chat mode** ignores custom instructions and can't `@` agents; **agent mode** does both (owner, Obs).
-- **Research 2026-11-09 (key facts):** a DA in Word reads the **whole document as plain text, tables dropped**; SharePoint knowledge can't parse tables (≤20 files → full-content search); a DA **cannot edit** (Word Agent can); **DA v1.9** adds `agent_skills` (≤8 per agent, GA MC1476977; SKILL.md ≤20,000 chars; Agent Builder takes skill zips ≤50 MB); instructions ≤8,000; ≤12 starters (render in Word); org prompts not in Word pane; no on-open hook; `worker_agents` preview, not in Word; SharePoint/embedded knowledge needs M365 Copilot licence or metering; a DA runs only in M365 Copilot (components portable: skills standard, MCP, MCP Apps). Open issue ATK #16869: duplicate answers in Word.
-- **Existing Spaarke AI agent** (`src/solutions/CopilotAgent/`): DA v1.8, app manifest 1.30, OpenAPI plugin v2.4 (28 BFF functions, OAuthPluginVault), instructions 4,111 chars, general legal-ops assistant, **no knowledge capability by design** (keeps it free for Copilot Chat users; the build gate in `scripts/copilot-agent/CopilotAgentPackage.psm1:272` refuses capabilities). Per-customer packaging: `Render-CopilotAgentPackage.ps1` + `publish-copilot-agent-template.yml` (T257: customer IT uploads in its own tenant). Specialist review agents need knowledge → a separate template/gate, not this one. No MCP server in the BFF on master; planned `/mcp/legal-operations` in `spaarkeai-mcp-bff-api-r1`.
-- **Standing directive "No declarative agents in the package" is under owner review** — the owner proposed specialist DAs on 2026-11-09; do not change design.md until the spike decides.
+- **Microsoft folders:** `Documents/Cowork/skills/<name>/SKILL.md` is the only documented auto-loaded location (Cowork FAQ). `Cowork/Tasks|Projects|AGENTS.md` are Cowork's. `Documents/Copilot/Created` = Copilot outputs; `Copilot/Memory/v2` = undocumented memory store. Nothing reads instructions from `Documents/Copilot`. Our files: `Cowork/Skills/` + `Legal Knowledge/` + `Spaarke Test Documents/`.
+- **OneDrive sync on the owner's PC is broken** since ~2026-11-07 (downloads fail: "cloud file provider exited unexpectedly"); all clean-up was done in the cloud via the M365 connector. Owner must restart OneDrive before installing.
+- **Archive:** OneDrive root `Spaarke test archive (not current)/` (still searchable → tests identify files by verification code). `Copilot/Created/_before-Act2/` still to move (423 locked).
+- Owner's original protocol (PBR-1109-A) copied to `src/accelerators/core/shared-references/review-method.owner-v1.0.md`.
 
 ---
 
 ## Next Actions (in order)
-1. Finish `da-spike-script.md` (Next Action above); commit + push the spike files and the researcher note.
-2. Report to the owner: research deltas, inventory findings, the two architectures (A: two specialist DAs; B: one DA + skills), the script.
-3. Owner runs the spike → Claude scores N-1/N-3 against `answer-key/answer-key.md` (Brightwater under v1.1 positions: 6 RED, 6 YELLOW incl. term GREEN, 12 GREEN; b01 Kestrel all GREEN) and LH against `answer-key/legal-hold-answer-key.md`; record in `results.md` (new "Spike DA-1").
-4. Then design: new ODs (specialist DA architecture; front door; revoke "no DAs"; one rating scale), design §2.4.6 / §5 / §8.1a / §12 / §18, quick card v2; coordinate DA ownership with `mcp-r1`.
-5. Still open from Act 7: OneDrive stray-file clean-up (gap #34), draft A version check (gap #35), owner's custom-instruction path (`Copilot/Skills/` vs `Copilot/`); W1c/W2/W4 folded into the spike.
-6. Backlog (unchanged): X9, X12, X13, X14 remainder, gaps #27/#29; carry "If missing" into `practices/nda/positions/baseline-mutual.md`.
+1. Verify the package build (tests, file list), commit + push; give the owner the zips.
+2. Owner runs `tier-test-script.md`; Claude records results in `results.md` ("Tier tests round 1") and updates the component doc statuses.
+3. Owner decisions pending: adopt the four tiers (revokes "no declarative agents" for the advanced tiers only).
+4. Team-tier script (T-1..T-4, needs a second non-owner user) and IT-tier script (I-1..I-3, needs admin).
+5. Still open: gap #35 (draft A version check); DA-1 package naming (" DA" suffix) — superseded by Agent Builder recipes unless I-2 runs; Cowork item 11 (owner's legal hold step in Word for the web) result never recorded; backlog X9, X12, X13, X14, gaps #27/#29.
 
 ## Open Owner Questions / Blockers
-- Spike results (above). Decision on specialist DAs vs the "no declarative agents" directive.
-- Design ODs open: OD-20 to OD-25 (naming, agreed with `mcp-r1`), OD-39 to OD-43, policy-as-input (backlog 3-2), saved Word playbooks for governed positions (gap #32).
-- Component protocol v0.2 review. Spaarke portal submission `5d88b948…` (Teams, pending since 2026-10-29).
+- Results of the tier script. Four-tier decision. Design ODs (OD-20..25 with `mcp-r1`, OD-39..43), policy-as-input, saved Word playbooks (gap #32).
 
 ## Related sessions and projects
-- **r2 Claude accelerator:** `spaarke-legal-ai-accelerator-claude-r2`, Desktop session `accelerator-claude-r2`; reuses `src/accelerators/`; keep engines Python 3.11-compatible; Claude plugin zips have no top-level `bin/`.
-- **MCP / Copilot surface:** `spaarkeai-mcp-bff-api-r1`, Desktop session **`mcp-r1`** (send OD-20 naming there). Don't edit its worktree from here.
-- **Ontology:** `spaarke-ontology-platform-r1`, Desktop session **`ontology-r1`**; terminology originates in its §3 (D-209).
-- **Provisioning:** `customer-provisioning-orchestration-r1`, Desktop session `provisioning-r1` (owns T257 Copilot agent packaging).
-- This session's memory folder is the main repo's; the worktree's own memory (`~/.claude/projects/c--code-files-spaarke-wt-spaarke-legal-ai-accelerator-r1/memory/`) is NOT auto-loaded — read it at start.
+- **r2 Claude accelerator:** `spaarke-legal-ai-accelerator-claude-r2`, Desktop session `accelerator-claude-r2`; reuses `src/accelerators/`; keep engines Python 3.11-compatible.
+- **MCP / Copilot surface:** `spaarkeai-mcp-bff-api-r1`, Desktop session `mcp-r1`. Don't edit its worktree from here.
+- **Ontology:** `spaarke-ontology-platform-r1`, session `ontology-r1`; terminology originates in its §3 (D-209).
+- **Provisioning:** `customer-provisioning-orchestration-r1`, session `provisioning-r1` (T257 Copilot agent packaging).
+- This worktree's own memory (`~/.claude/projects/c--code-files-spaarke-wt-spaarke-legal-ai-accelerator-r1/memory/`) is NOT auto-loaded — read it at start.
 
 ## Standing directives (owner) — keep until revoked
 - Never commit secrets. Keep the Corteva NDA and the real RPX/Helios NDA out of the repo. Never upload `answer-key/`.
@@ -58,14 +48,15 @@
 - Skills and scripts embed no secrets and make no LLM or network calls.
 - Claude never types passwords and never sends email; choose "No email" on Cowork cards.
 - Leave the owner's tabs alone. Prefer moving over deleting; no permanent deletes by Claude. Ask before T-04 (share).
-- No Copilot Tuning in design.md yet. No declarative agents in the package **(under review, spike DA-1)**.
+- No Copilot Tuning in design.md yet. No declarative agents in the package **(under review: four-tier draft puts Agent Builder agents in the advanced tiers)**.
 - The Office add-in for redlining is out of scope; don't raise it.
 - Two editions/components (Word vs Cowork) are wanted.
+- Mechanics first; scoring and quality later (owner, 2026-11-10).
+- Current test files live only where the package puts them; earlier files go to `Spaarke test archive (not current)/`, never mixed in (owner, 2026-11-10).
 - Terminology changes originate in ontology §3. "Playbook" = the standard procedure for any document type (D-209).
 - `--no-verify` only on master-merge commits.
 
 ## Tooling
-- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda`. Tests: `python -B -m unittest discover -s build/tests` and `-s core/engines/tests` from `src/accelerators`.
-- **SharePoint from Chrome** (team site `https://spaarke.sharepoint.com/sites/AcmeCompany`): REST via `javascript_tool` (`/_api/contextinfo` digest; `SP.MoveCopyUtil.*`; `folders/addUsingPath`; `Files/AddUsingPath(...,overwrite=true)` via a temporary `<input type=file>` + `file_upload`). `423 SPFileLockException` = owner has the file open.
-- **Owner screenshots** land in OneDrive `C:\Users\RalphSchroeder\OneDrive - Spaarke Inc\Documents\Cowork\Test\<folder>\screens\` (Act 7 ones went to `POC-Act2/screens/`).
-- **Repo:** root `.gitignore` ignores `build/`; `src/accelerators/.gitignore` re-includes it.
+- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda`; package: `./src/accelerators/build/Build-Package.ps1`. Tests: `python -B -m unittest discover -s build/tests` and `-s core/engines/tests` from `src/accelerators`.
+- **OneDrive/SharePoint in the cloud:** M365 connector tools (`sharepoint_move_item`, `sharepoint_create_folder`, `read_resource` with `file:///<driveId>/<path>`). OneDrive driveId `b!doU18j_zUUuipR60_RrF-fXvUOXGbW1OlwiIkv-_T8mVMlP029gNR48sqbO5iayh`; Acme team site driveId `b!67wowiTUC0uH8Yz4yzGcyzoNRS0j4_1MtT9naOptnCQ7B3LE8mwuTbI8aqzlzbpX`. 423 = file open somewhere.
+- **Repo:** root `.gitignore` ignores `build/`; `src/accelerators/.gitignore` re-includes it (but `build/out` stays untracked).

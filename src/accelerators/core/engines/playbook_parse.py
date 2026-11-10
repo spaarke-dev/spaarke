@@ -3,7 +3,7 @@
 Python 3 standard library only.
 
 Usage:
-  python playbook_parse.py PLAYBOOK.md --topics topics.json [--side mutual] > playbook.json
+  python playbook_parse.py PLAYBOOK.md --topics topics.json [--side mutual | --no-side] > playbook.json
 
 Format (see references/playbook-format.md):
   # Playbook: NDA - Mutual
@@ -157,6 +157,8 @@ def main(argv=None):
     ap.add_argument("playbook")
     ap.add_argument("--topics", required=True, help="topics.json catalogue shipped in the skill's references/")
     ap.add_argument("--side", choices=sorted(SIDES), help="report silent topics for this side")
+    ap.add_argument("--no-side", action="store_true",
+                    help="non-contract document type (for example a legal hold notice): the header needs no Side")
     a = ap.parse_args(argv)
     try:
         with open(a.playbook, encoding="utf-8-sig") as f:
@@ -166,7 +168,7 @@ def main(argv=None):
         print(json.dumps({"error": str(ex)}), file=sys.stderr)
         return 2
     try:
-        result = parse(text, cat, a.side)
+        result = parse(text, cat, a.side, require_side=not a.no_side)
     except FormatError as ex:
         print(json.dumps({"error": "playbook format", "details": ex.args[0]}, indent=1), file=sys.stderr)
         return 3

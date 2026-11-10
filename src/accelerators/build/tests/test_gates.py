@@ -190,5 +190,85 @@ class PluginGateTests(unittest.TestCase):
         self.assertTrue({"plugin-skill-count", "plugin-skill-folder", "plugin-manifest", "plugin-icons"} <= self.lint())
 
 
+class PackageGateTests(unittest.TestCase):
+    """lint_package: each rule fires on a seeded violation and stays silent on a valid package."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        for rel in ("Cowork/Skills/a/SKILL.md", "Cowork/Skills/b/SKILL.md", "Cowork/Skills/a/references/guardrails.md",
+                    "Cowork/Skills/b/references/guardrails.md",  # repeated inside skill folders by design
+                    "Legal Knowledge/NDA/Playbook one.docx", "Legal Knowledge/NDA/Playbook master/Playbook one.md",
+                    "Legal Knowledge/Review method/Method.docx"):
+            self.put(rel)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def put(self, rel, data=b"x"):
+        p = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data)
+
+    def rules(self, **kw):
+        return {r for r, _ in gates.lint_package(self.tmp, "Documents/", **kw)}
+
+    def test_valid_package_passes(self):
+        self.assertEqual(gates.lint_package(self.tmp, "Documents/", "x" * 1500), [])
+
+    def test_duplicate_file_name_in_the_knowledge_tree_fires(self):
+        self.put("Legal Knowledge/Legal Hold Notice/Method.docx")
+        self.assertEqual(self.rules(), {"unique-names"})
+
+    def test_duplicate_allowed_by_name_does_not_fire(self):
+        self.put("Legal Knowledge/Decoy/Method.docx")
+        self.assertEqual(self.rules(allowed_duplicates={"Method.docx"}), set())
+
+    def test_knowledge_file_name_reused_inside_cowork_fires(self):
+        self.put("Cowork/Skills/a/references/Playbook one.md")
+        self.assertEqual(self.rules(), {"unique-names"})
+
+    def test_skill_internals_may_repeat(self):
+        self.assertEqual(self.rules(), set())  # SKILL.md and guardrails.md appear twice in setUp
+
+    def test_long_path_fires_at_201_characters_and_not_at_200(self):
+        prefix = "Documents/"
+        name = "Legal Knowledge/NDA/" + "x" * (200 - len(prefix) - len("Legal Knowledge/NDA/") - 5) + ".docx"
+        self.assertEqual(len(prefix + name), 200)
+        self.put(name)
+        self.assertEqual(self.rules(), set())
+        self.put(name.replace(".docx", "y.docx"))
+        self.assertEqual(self.rules(), {"path-length"})
+
+    def test_custom_instruction_over_1500_fires(self):
+        self.assertEqual(self.rules(custom_instruction="x" * 1501), {"custom-instruction"})
+        self.assertEqual(self.rules(custom_instruction="x" * 1500), set())
+
+    def test_flat_package_without_a_knowledge_tree_is_checked_on_all_files(self):
+        flat = tempfile.mkdtemp()
+        try:
+            for rel in ("Spaarke Test Documents/a.docx", "Spaarke Test Documents/Decoy/a.docx",
+                        "Spaarke Test Documents/Screens/.keep"):
+                p = os.path.join(flat, rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                open(p, "wb").close()
+            self.assertEqual({r for r, _ in gates.lint_package(flat, "")}, {"unique-names"})
+            self.assertEqual(gates.lint_package(flat, "", allowed_duplicates={"a.docx"}), [])
+        finally:
+            shutil.rmtree(flat)
+
+    def test_forbidden_material_fires_by_name_and_by_text(self):
+        self.put("Legal Knowledge/NDA/answer-key.md")
+        self.put("Legal Knowledge/NDA/Corteva NDA.docx")
+        self.put("Legal Knowledge/NDA/RPX list.docx")
+        self.assertEqual(len([m for r, m in gates.lint_package(self.tmp, "Documents/") if r == "forbidden"]), 3)
+        import zipfile
+        p = os.path.join(self.tmp, "Legal Knowledge", "NDA", "Text.docx")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("word/document.xml", "<w:document><w:t>Helios IP</w:t></w:document>")
+        found = [m for r, m in gates.lint_package(self.tmp, "Documents/", scan_text=True) if "Text.docx" in m]
+        self.assertEqual(len(found), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

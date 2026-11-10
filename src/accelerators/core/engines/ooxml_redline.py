@@ -32,6 +32,8 @@ Rules:
   - "find": "*" = the paragraph text after a leading section number and heading.
   - A span may not cross an existing revision, hyperlink, content control, field or drawing.
   - List edits within one paragraph right to left (later text first).
+  - Optional "ratings": [{"topic", "title", "rating", "action"}] (one per playbook topic; rating is a key of
+    RATING_FILLS) is not applied here; summary_table.py renders it as the page-1 "Review summary".
 Exit codes: 0 ok, 2 bad input/plan, 3 plan does not fit the document.
 """
 import argparse
@@ -85,9 +87,14 @@ LEAD_RE = re.compile(r"^\s*(?:(?:section|article|clause)\s+)?(?:\d+(?:\.\d+)*\.?
                      r"(?:[A-Z][^.:]{0,60}[.:]\s+)?", re.I)
 
 PLAN_KEYS = {"author", "initials", "date", "strip_drawings_in_clean", "provenance", "agreement", "review_basis",
-             "bookmarks", "unchanged", "edits"}
+             "bookmarks", "unchanged", "ratings", "edits"}
 EDIT_KEYS = {"para", "find", "old", "replace", "after", "insert", "comment", "topic", "summary"}
 SUMMARY_KEYS = {"n", "section", "bookmark", "issue", "revision", "priority"}
+# Rating label -> cell shading for the page-1 "Review summary" (Spaarke Review Method, "Ratings shown as colours"):
+# FFC7CE (red), FFEB9C (yellow) and C6EFCE (green) are Office's Bad/Neutral/Good fills; None = no shading.
+RATING_FILLS = {"Meets": "C6EFCE", "Acceptable fallback": "FFEB9C", "Needs review": "FFEB9C",
+                "Does not meet": "FFC7CE", "Escalate": "FFC7CE", "Not applicable": None, "Unable to assess": None}
+RATINGS_KEYS = {"topic", "title", "rating", "action"}
 BOOKMARK_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,39}$")
 
 
@@ -112,6 +119,23 @@ def validate_plan(plan):
     names = list((plan.get("bookmarks") or {}).values())
     if len(names) != len(set(names)):
         errors.append("bookmark names repeat in the plan")
+    ratings = plan.get("ratings")
+    if ratings is not None:
+        if not isinstance(ratings, list) or not ratings:
+            errors.append("'ratings' must be a non-empty list")
+            ratings = []
+        seen = set()
+        for i, r in enumerate(ratings):
+            if not isinstance(r, dict) or set(r) != RATINGS_KEYS:
+                errors.append(f"ratings {i}: needs exactly {sorted(RATINGS_KEYS)}")
+                continue
+            if any(not isinstance(r[k], str) or not r[k].strip() for k in RATINGS_KEYS):
+                errors.append(f"ratings {i}: every value must be a non-empty string")
+            if r["rating"] not in RATING_FILLS:
+                errors.append(f"ratings {i}: rating {r['rating']!r} is not one of {sorted(RATING_FILLS)}")
+            if r["topic"] in seen:
+                errors.append(f"ratings {i}: topic {r['topic']!r} is rated twice")
+            seen.add(r["topic"])
     for i, e in enumerate(plan.get("edits") or []):
         if not isinstance(e, dict):
             errors.append(f"edit {i}: not an object")

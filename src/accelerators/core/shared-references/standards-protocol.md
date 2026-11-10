@@ -7,7 +7,7 @@ Look for standards **before** reading the agreement in detail, and say what you 
 1. **A playbook the user names or attaches in this conversation.**
 2. **The user's saved playbook** for this agreement type and side. Look in the user's OneDrive,
    in this order, and list what you find:
-   - `Documents/Cowork/Playbooks/<practice>/` (for example `Documents/Cowork/Playbooks/nda/`);
+   - `Documents/Legal Knowledge/<Type>/Playbook master/` (for example `Documents/Legal Knowledge/NDA/Playbook master/`; the Type folders are `NDA` and `Legal Hold Notice`);
    - the folder named in the attorney profile (`Documents/Cowork/Profile/legal-profile.md`,
      line `Playbook folder:`). It may be a SharePoint team-site library (the firm's governed
      playbooks) rather than OneDrive. If you cannot open it, say so in one line, name the path you

@@ -12,6 +12,11 @@ Reads from the plan:
   reviewed with no change).
 The intro file may use {{review_basis}}, {{side}}, {{posture}}, {{revision_count}} placeholders.
 
+Optional ratings[] {topic, title, rating, action} (non-contract reviews, e.g. a legal hold notice): the page
+is headed "Review summary" and holds # | Topic | Rating | Recommended action, with the Rating cell shaded by
+ooxml_redline.RATING_FILLS (red FFC7CE, yellow FFEB9C, green C6EFCE). The revisions table follows only when
+edits carry summary rows.
+
 Layout (POC Appendix E): Arial; title 14 pt bold navy 1F3864; italic subtitle; intro; table
 # | Section | Issue | Proposed Revision | Priority with grid 400/1900/2600/3100/880 twips,
 navy header row repeated on each page, 8.5 pt body, alternate rows F2F2F2, horizontal rules
@@ -32,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from lxml import etree
     import safe_docx
+    from ooxml_redline import RATING_FILLS
 except ImportError as _ex:
     print(json.dumps({"error": f"cannot load lxml/safe_docx: {_ex}"}), file=sys.stderr)
     sys.exit(2)
@@ -42,7 +48,12 @@ NAVY, RULE, ALT, LINK = "1F3864", "A6A6A6", "F2F2F2", "0563C1"
 PRIORITY_COLOURS = {"High": "C00000", "Medium": "7F6000", "Low": "375623"}
 GRID = [400, 1900, 2600, 3100, 880]
 HEADERS = ["#", "Section", "Issue", "Proposed Revision", "Priority"]
+RATINGS_GRID = [400, 2900, 1700, 3880]  # same total width as GRID
+RATINGS_HEADERS = ["#", "Topic", "Rating", "Recommended action"]
 SUMMARY_BOOKMARK = "Sprk_Summary"
+DEFAULT_RATINGS_INTRO = ("This page is an internal review aid. It rates each playbook topic against {{review_basis}}; "
+                         "the colour of the Rating cell follows the rating. Draft for attorney review; not legal "
+                         "advice. Remove this page and the margin comments before the document is used.")
 DEFAULT_INTRO = ("This page is an internal review aid. It lists each proposed revision, linked to the clause, "
                  "based on {{review_basis}}, for the {{side}} party with a {{posture}} posture. "
                  "Remove this page and the margin comments before sending the agreement to the other side.")
@@ -111,17 +122,7 @@ def nil(side):
 
 
 def build_table(rows):
-    # tblBorders children in schema order: top, left, bottom, right, insideH, insideV
-    borders = el("tblBorders", children=[border("top"), nil("left"), border("bottom"), nil("right"),
-                                         border("insideH"), nil("insideV")])
-    margins = el("tblCellMar", children=[el("top", {"w": 30, "type": "dxa"}), el("left", {"w": 70, "type": "dxa"}),
-                                         el("bottom", {"w": 30, "type": "dxa"}), el("right", {"w": 70, "type": "dxa"})])
-    tblpr = el("tblPr", children=[el("tblW", {"w": sum(GRID), "type": "dxa"}), borders,
-                                  el("tblLayout", {"type": "fixed"}), margins,
-                                  el("tblLook", {"val": "04A0", "firstRow": 1, "lastRow": 0, "firstColumn": 0,
-                                                 "lastColumn": 0, "noHBand": 0, "noVBand": 1})])
-    grid = el("tblGrid", children=[el("gridCol", {"w": w}) for w in GRID])
-    tbl = el("tbl", children=[tblpr, grid])
+    tbl = table_shell(GRID)
     head = el("tr", children=[el("trPr", children=[el("tblHeader"), el("cantSplit")])])
     for w, h in zip(GRID, HEADERS):
         head.append(cell(w, [run(h, bold=True, colour="FFFFFF")], fill=NAVY))
@@ -136,6 +137,35 @@ def build_table(rows):
         tr.append(cell(GRID[2], [run(r["issue"])], fill))
         tr.append(cell(GRID[3], [run(r["revision"])], fill))
         tr.append(cell(GRID[4], [run(r["priority"], bold=True, colour=PRIORITY_COLOURS[r["priority"]])], fill))
+        tbl.append(tr)
+    return tbl
+
+
+def table_shell(grid):
+    borders = el("tblBorders", children=[border("top"), nil("left"), border("bottom"), nil("right"),
+                                         border("insideH"), nil("insideV")])
+    margins = el("tblCellMar", children=[el("top", {"w": 30, "type": "dxa"}), el("left", {"w": 70, "type": "dxa"}),
+                                         el("bottom", {"w": 30, "type": "dxa"}), el("right", {"w": 70, "type": "dxa"})])
+    tblpr = el("tblPr", children=[el("tblW", {"w": sum(grid), "type": "dxa"}), borders,
+                                  el("tblLayout", {"type": "fixed"}), margins,
+                                  el("tblLook", {"val": "04A0", "firstRow": 1, "lastRow": 0, "firstColumn": 0,
+                                                 "lastColumn": 0, "noHBand": 0, "noVBand": 1})])
+    return el("tbl", children=[tblpr, el("tblGrid", children=[el("gridCol", {"w": w}) for w in grid])])
+
+
+def build_ratings_table(ratings):
+    """Review summary: # | Topic | Rating | Recommended action; the Rating cell is shaded (RATING_FILLS)."""
+    tbl = table_shell(RATINGS_GRID)
+    head = el("tr", children=[el("trPr", children=[el("tblHeader"), el("cantSplit")])])
+    for w, h in zip(RATINGS_GRID, RATINGS_HEADERS):
+        head.append(cell(w, [run(h, bold=True, colour="FFFFFF")], fill=NAVY))
+    tbl.append(head)
+    for i, r in enumerate(ratings, 1):
+        tr = el("tr", children=[el("trPr", children=[el("cantSplit")])])
+        tr.append(cell(RATINGS_GRID[0], [run(str(i))]))
+        tr.append(cell(RATINGS_GRID[1], [run(r["title"]), run(f" ({r['topic']})", colour="595959", size_half_pts=15)]))
+        tr.append(cell(RATINGS_GRID[2], [run(r["rating"], bold=True)], fill=RATING_FILLS[r["rating"]]))
+        tr.append(cell(RATINGS_GRID[3], [run(r["action"])]))
         tbl.append(tr)
     return tbl
 
@@ -181,7 +211,11 @@ def insert_summary(doc, plan, intro):
     if errors:
         raise PlanMismatch(errors)
     ag = plan.get("agreement", {})
-    block = [para([run("Summary of Proposed Revisions", size_half_pts=28, bold=True, colour=NAVY)], after=60)]
+    ratings = plan.get("ratings")
+    if ratings and intro is DEFAULT_INTRO:
+        intro = DEFAULT_RATINGS_INTRO
+    heading = "Review summary" if ratings else "Summary of Proposed Revisions"
+    block = [para([run(heading, size_half_pts=28, bold=True, colour=NAVY)], after=60)]
     sub = ag.get("title", "Agreement")
     if ag.get("parties"):
         sub += " – " + " and ".join(ag["parties"])
@@ -189,7 +223,13 @@ def insert_summary(doc, plan, intro):
     if plan.get("provenance"):
         block.append(para([run(plan["provenance"], size_half_pts=16, italic=True, colour="404040")], after=60))
     block.append(para([run(fill_intro(intro, plan, len(rows)), size_half_pts=17)], after=120))
-    block.append(build_table(rows))
+    if ratings:
+        block.append(build_ratings_table(ratings))
+        if rows:  # a paragraph must separate two tables, or Word merges them
+            block.append(para([run("Proposed revisions", size_half_pts=22, bold=True, colour=NAVY)], after=60,
+                              keep_next=True))
+    if rows or not ratings:
+        block.append(build_table(rows))
     unchanged = plan.get("unchanged") or []
     if unchanged:
         block.append(para([run("Reviewed with no change: " + "; ".join(unchanged) + ".", size_half_pts=16,

@@ -14,9 +14,13 @@ Two layouts:
   render()        Transitional heading layout (Heading 2 per topic, labelled lines). Kept until the
                   Word test set (runbook Act 2, R1-R7 and A/B) confirms the table (backlog X3).
 
+  render_readable()  Table-free copy for an agent's knowledge (Title, version line, introduction, then per topic a
+                  Heading 2 "<n>. <title> (<topic id>)" and labelled paragraphs). No tables.
+
 Practice-neutral: nothing here names a contract type.
 """
 import re
+from datetime import datetime, timezone
 
 import docx
 from docx.enum.section import WD_ORIENT
@@ -277,6 +281,90 @@ def render_table(playbook, catalogue, out_path, topic_ids="none"):
             _set_cell_width(cell, width)
     d.save(out_path)
     return out_path
+
+
+# ---------------------------------------------------------------- readable copy (table-free, agent knowledge)
+
+def readable_blocks(playbook, catalogue):
+    """The readable copy as data: a list of (heading, [(label, text), ...]) per topic, in playbook order, silent
+    topics last. Only the fields a topic has are listed. Shared by the renderer and its checker."""
+    titles = {t["id"]: t for t in catalogue["topics"]}
+    blocks = []
+    for n, t in enumerate(playbook["topics"], 1):
+        fields = [("Instructions", t["preferred"].strip())]
+        for label, key in (("If missing", "if_missing"), (FALLBACK_LABEL, "fallback"), ("Escalate if", "escalate")):
+            if t.get(key):
+                fields.append((label, t[key].strip()))
+        if example_text(t.get("model_language")):
+            fields.append(("Example text", example_text(t["model_language"])))
+        blocks.append((f"{n}. {titles.get(t['id'], {}).get('title', t['id'])} ({t['id']})", fields))
+    for n, tid in enumerate(playbook.get("silent_topics", []), len(playbook["topics"]) + 1):
+        blocks.append((f"{n}. {titles.get(tid, {}).get('title', tid)} ({tid})", [("Instructions", SILENT_INSTRUCTION)]))
+    return blocks
+
+
+def render_readable(playbook, catalogue, out_path, created=None):
+    """Table-free Word copy for an agent's knowledge (Copilot agents read plain headings and paragraphs more
+    reliably than a four-column table). Title, version/status line, introduction, then per topic a Heading 2
+    "<n>. <title> (<topic id>)" followed by labelled paragraphs. No tables. created = the document's created date
+    (default: now; python-docx's template would otherwise say 2013)."""
+    name = word_name(playbook)
+    meta = playbook["meta"]
+    d = docx.Document()
+    normal = d.styles["Normal"]
+    normal.font.name, normal.font.size = "Calibri", Pt(11)
+    when = created or datetime.now(timezone.utc)  # core properties are stored as UTC
+    props = d.core_properties
+    props.title, props.subject, props.author = name, "Playbook (readable copy)", "Spaarke accelerator build"
+    props.last_modified_by, props.created, props.modified = "Spaarke accelerator build", when, when
+    props.comments = ("Readable (table-free) copy of a legal playbook, for an agent's knowledge. Generated from the "
+                      "Markdown master; edit the master, not this file. Draft for attorney review; not legal advice.")
+    d.add_paragraph(name, style="Title")
+    line = [f"Version {meta['version']}"] if meta.get("version") else []
+    line += [f"{label}: {meta[key]}" for key, label in (("owner", "Owner"), ("effective", "Effective"),
+                                                         ("status", "Status")) if meta.get(key)]
+    if line:
+        d.add_paragraph(" · ".join(line))
+    if (playbook.get("intro") or "").strip():
+        d.add_paragraph(playbook["intro"].strip())
+    for heading, fields in readable_blocks(playbook, catalogue):
+        d.add_heading(heading, level=2)
+        for label, text in fields:
+            labelled(d, label, text)
+    d.save(out_path)
+    return out_path
+
+
+def check_readable(path, playbook, catalogue):
+    """Deterministic checker for the readable copy. Returns a list of problems."""
+    problems = []
+    d = docx.Document(path)
+    if d.tables:
+        problems.append(f"expected no tables, found {len(d.tables)}")
+    name = word_name(playbook)
+    if d.core_properties.title != name:
+        problems.append("document Title property differs from the playbook name")
+    if d.core_properties.created is None or d.core_properties.created.year < 2020:
+        problems.append(f"created date is {d.core_properties.created}, not a real build date")
+    titles = [p for p in d.paragraphs if p.style.name == "Title"]
+    if len(titles) != 1 or titles[0].text != name:
+        problems.append("expected one Title paragraph equal to the playbook name")
+    expected = readable_blocks(playbook, catalogue)
+    found, current = [], None
+    for p in d.paragraphs:
+        if p.style.name == "Heading 2":
+            current = (p.text, [])
+            found.append(current)
+        elif current is not None and p.text.strip():
+            label, _, text = p.text.partition(": ")
+            current[1].append((label, text))
+    if [h for h, _ in found] != [h for h, _ in expected]:
+        problems.append("topic headings differ from the playbook (count, order or text)")
+    else:
+        for (h, got), (_, want) in zip(found, expected):
+            if got != want:
+                problems.append(f"{h}: labelled paragraphs differ from the playbook")
+    return problems
 
 
 def check_table(path, playbook, catalogue, topic_ids="none"):

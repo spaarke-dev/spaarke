@@ -15,7 +15,8 @@ Checks (each reported as {"name", "ok", "detail"}):
   revision_text      our insertions and deletions carry exactly the text the plan asks for
   comments           our comments == the plan's comments (count and text); every reference resolves
   summary            summary present; rows == plan rows; bookmark names unique; every internal link
-                     resolves; priority colours >= 4.5:1
+                     resolves; priority colours >= 4.5:1; a plan with "ratings" has a Review summary
+                     table with those rows in order and the Rating cells shaded as defined
   clean              no revisions or comments in any story (body, headers, footers, notes); text ==
                      an independent "accept all" of the redline (with the same drawing strip);
                      tracking off; no summary
@@ -37,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from lxml import etree
     import safe_docx
-    from ooxml_redline import PlanError, STORY_PART, q, strip_drawings, validate_plan, W
+    from ooxml_redline import PlanError, RATING_FILLS, STORY_PART, q, strip_drawings, validate_plan, W
 except ImportError as ex:
     print(json.dumps({"error": f"cannot import dependencies: {ex}"}), file=sys.stderr)
     sys.exit(2)
@@ -209,6 +210,50 @@ def comment_integrity(pkg):
     return refs - ids, ids - refs
 
 
+def summary_tables(doc):
+    """(revisions table, ratings table) of the summary page; None where absent. A ratings table is the one whose
+    third header cell reads "Rating"; the revisions table is the other one (header "Section")."""
+    body = doc.find(q("body"))
+    start = next(b for b in doc.iter(q("bookmarkStart")) if b.get(q("name")) == SUMMARY_BOOKMARK)
+    end_id = start.get(q("id"))
+    while start.getparent() is not body:
+        start = start.getparent()
+    revisions_tbl = ratings_tbl = None
+    for e in start.itersiblings():
+        if e.tag == q("tbl"):
+            head = ["".join(t.text or "" for t in c.iter(q("t"))) for c in e.find(q("tr")).findall(q("tc"))]
+            if len(head) > 2 and head[2] == "Rating":
+                ratings_tbl = e
+            elif revisions_tbl is None:
+                revisions_tbl = e
+        if any(b.get(q("id")) == end_id for b in e.iter(q("bookmarkEnd"))):
+            break
+    return revisions_tbl, ratings_tbl
+
+
+def ratings_problems(want, tbl):
+    """The Review summary table must hold the plan's ratings, in order, with the Rating cell shaded as defined."""
+    if not want:
+        return ["summary has a Review summary table the plan does not ask for"] if tbl is not None else []
+    if tbl is None:
+        return ["the plan has ratings but the summary page has no Review summary table"]
+    rows = tbl.findall(q("tr"))[1:]
+    if len(rows) != len(want):
+        return [f"review summary rows {len(rows)}/{len(want)}"]
+    problems = []
+    for i, (r, w) in enumerate(zip(rows, want), 1):
+        cells = r.findall(q("tc"))
+        texts = ["".join(t.text or "" for t in c.iter(q("t"))) for c in cells]
+        fill = cells[2].find("%s/%s" % (q("tcPr"), q("shd")))
+        got = fill.get(q("fill")) if fill is not None else None
+        if texts[2] != w["rating"] or w["topic"] not in texts[1]:
+            problems.append(f"review summary row {i}: {texts[1]!r}/{texts[2]!r} is not {w['topic']}/{w['rating']}")
+        elif got != RATING_FILLS[w["rating"]]:
+            problems.append(f"review summary row {i} ({w['topic']}): {w['rating']} cell is shaded {got}, "
+                            f"expected {RATING_FILLS[w['rating']]}")
+    return problems
+
+
 def check(plan, internal, clean, original, external=None):
     results = []
 
@@ -290,15 +335,12 @@ def check(plan, internal, clean, original, external=None):
     if SUMMARY_BOOKMARK not in names:
         s_problems.append("internal redline has no summary page")
     else:
-        body = red.doc.find(q("body"))
-        start = next(b for b in red.doc.iter(q("bookmarkStart")) if b.get(q("name")) == SUMMARY_BOOKMARK)
-        while start.getparent() is not body:
-            start = start.getparent()
-        summary_tbl = next((e for e in start.itersiblings() if e.tag == q("tbl")), None)
+        summary_tbl, ratings_tbl = summary_tables(red.doc)
         body_rows = len(summary_tbl.findall(q("tr"))) - 1 if summary_tbl is not None else 0
         want_rows = sum(1 for e in plan.get("edits", []) if e.get("summary"))
         if body_rows != want_rows:
             s_problems.append(f"summary rows {body_rows}/{want_rows}")
+        s_problems += ratings_problems(plan.get("ratings"), ratings_tbl)
         if summary_tbl is not None:
             for r in summary_tbl.iter(q("r")):
                 c = r.find("%s/%s" % (q("rPr"), q("color")))
