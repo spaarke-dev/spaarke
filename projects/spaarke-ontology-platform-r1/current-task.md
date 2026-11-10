@@ -17,7 +17,7 @@
 
 ## Active task
 
-None. 176 completed 2026-11-10 (#2655). Remaining: the docs→master merge (#2660) and the dev deploy above.
+**177** — [`tasks/177-outgoing-email-archive-and-record-messages.poml`](tasks/177-outgoing-email-archive-and-record-messages.poml) (D-217, owner 2026-11-10). Status in-progress, FULL, opus/high, directional. Started 2026-11-10. Base: docs `2fd658127c` (master merged in, carries fm 054a). Conflict check: no open PR touches `CommunicationService.cs` / `CommunicationThreadReadService.cs` / `SendCommunicationRequest.cs` / `CommunicationEndpoints.cs`. Delegation: one Opus implementer in its own worktree (two coupled changes in the shared communication module; tests first). Step: implementer launched. Review: uac-r2 (read visibility) + one adversarial pass. Then merge to docs → master; dev deploy needs the owner's go (D-126). The 176 smoke is still owed (no budget-variance item open on dev; a test item needs the owner's OK).
 
 ## Open items
 
