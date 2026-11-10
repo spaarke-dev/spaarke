@@ -337,6 +337,9 @@ public sealed class CommunicationThreadReadService
     /// membership-union (retired 2026-07-16). A private thread the caller has no grant for is absent from the
     /// impersonated thread set; an internal-only message the caller may not see is dropped by the filter (NFR-03).
     /// A bad <paramref name="entityType"/> is a 400 ProblemDetails (ADR-019); an empty regarding yields an empty result.
+    /// <para>Ontology task 177 (D-217): after the anchored threads come the threads of messages filed to the record by their
+    /// OWN typed lookup, each with only those messages (<see cref="ReadThreadsOfFiledMessagesAsync"/>), through the same
+    /// impersonated pipeline and access filter.</para>
     /// </summary>
     public async Task<RegardingReadResult> ReadByRegardingAsync(
         string entityType,
@@ -374,38 +377,116 @@ public sealed class CommunicationThreadReadService
             .Where(t => t.Id != Guid.Empty)
             .ToList();
 
-        if (threads.Count == 0)
+        var threadResults = new List<ThreadReadResult>();
+        if (threads.Count > 0)
         {
-            _logger.LogDebug(
-                "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads=0 (no visible threads)",
-                entityType, recordId, callerSystemUserId);
-            return new RegardingReadResult(entityType, recordId, Array.Empty<ThreadReadResult>(), 0, 0);
-        }
+            // 2) Impersonated message query across those threads (or-filter on thread id) + shared access filter.
+            var orClause = string.Join(" or ", threads.Select(t => $"{ThreadLookupValue} eq {t.Id}"));
+            var visible = await QueryVisibleMessagesAsync($"({orClause})", MaxRegardingScan, callerSystemUserId, ct);
 
-        // 2) Impersonated message query across those threads (or-filter on thread id) + shared access filter.
-        var orClause = string.Join(" or ", threads.Select(t => $"{ThreadLookupValue} eq {t.Id}"));
-        var visible = await QueryVisibleMessagesAsync($"({orClause})", MaxRegardingScan, callerSystemUserId, ct);
+            // 3) Group the access-filtered messages by thread (query order = createdon asc is preserved).
+            var byThread = visible
+                .GroupBy(v => v.ThreadId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(v => v.Dto).ToList());
 
-        // 3) Group the access-filtered messages by thread (query order = createdon asc is preserved).
-        var byThread = visible
-            .GroupBy(v => v.ThreadId)
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(v => v.Dto).ToList());
-
-        var threadResults = threads
-            .Select(t =>
+            threadResults.AddRange(threads.Select(t =>
             {
                 var msgs = byThread.TryGetValue(t.Id, out var list) ? list : Array.Empty<ThreadMessageDto>();
                 return new ThreadReadResult(
                     ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count, IsPinned: t.IsPinned);
-            })
-            .ToList();
+            }));
+        }
+
+        // 4) Ontology task 177 (D-217): messages filed to the record by their OWN typed lookup, on threads anchored elsewhere,
+        // after the anchored threads.
+        var anchored = threads.Select(t => t.Id).ToHashSet();
+        threadResults.AddRange(await ReadThreadsOfFiledMessagesAsync(
+            regardingField, recordId, anchored, openOnly, MaxThreads - threads.Count, callerSystemUserId, ct));
 
         var messageCount = threadResults.Sum(t => t.Count);
         _logger.LogDebug(
-            "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads={Threads} messages={Messages}",
-            entityType, recordId, callerSystemUserId, threadResults.Count, messageCount);
+            "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads={Threads} (anchored={Anchored}) messages={Messages}",
+            entityType, recordId, callerSystemUserId, threadResults.Count, threads.Count, messageCount);
 
         return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
+    }
+
+    /// <summary>
+    /// Ontology task 177 (D-217, owner 2026-11-10): the threads of messages filed to <paramref name="recordId"/> by the message's
+    /// OWN typed regarding lookup (<paramref name="regardingField"/>, from the shared <see cref="RegardingFieldMap"/>) whose thread
+    /// is not anchored to the record, each carrying ONLY those messages. A thread carries one anchor, so without this an email
+    /// filed under two records (the budget inquiry: inquiry service request and matter) showed only under its anchor.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Same access as the anchored read.</b> The messages come from <see cref="QueryVisibleMessagesAsync"/>: the
+    /// impersonated read (Dataverse returns only rows the caller may read, so a No Access entry and Restricted for a flagged
+    /// external user apply here as on every thread), the shared <see cref="ICommunicationAccessFilter"/> (internal-only) and, for
+    /// an external caller, the D7 open-thread gate. Each thread's row (id, name, pinned) comes from one more impersonated read
+    /// with the same active clause and, for an external caller, the same <paramref name="openOnly"/> clause: a thread the caller
+    /// cannot read contributes nothing, so neither its name nor a count of its messages leaves Dataverse.</para>
+    /// <para><b>Once.</b> A message on an anchored thread is already in that thread's list (it is dropped here), and a message
+    /// with no thread has no group to show it under (not added; known limit).</para>
+    /// <para><b>Bounds.</b> The message read takes at most <see cref="MaxRegardingScan"/> rows. The thread rows are read in
+    /// batches of <see cref="CommunicationOpenThreadGate.ChunkSize"/> ids (one OR filter each), never one read per thread, and at
+    /// most <paramref name="threadBudget"/> threads are added (oldest first), so the whole result stays within
+    /// <see cref="MaxThreads"/>. A read fault propagates (the request fails; nothing is shown). The result shape has no
+    /// truncation flag, so a cut is only logged: when threads were left out for the budget, or when the visible filed messages
+    /// alone reach the scan cap.</para>
+    /// <para><b>Order.</b> Added threads follow the anchored ones, oldest thread first (<c>createdon</c> asc, like the anchored
+    /// threads); messages within a thread keep the read's <c>createdon</c> asc order.</para>
+    /// </remarks>
+    private async Task<IReadOnlyList<ThreadReadResult>> ReadThreadsOfFiledMessagesAsync(
+        string regardingField,
+        Guid recordId,
+        IReadOnlySet<Guid> anchoredThreadIds,
+        string openOnly,
+        int threadBudget,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        if (threadBudget <= 0)
+            return Array.Empty<ThreadReadResult>();
+
+        var filed = await QueryVisibleMessagesAsync(
+            $"_{regardingField}_value eq {recordId}", MaxRegardingScan, callerSystemUserId, ct);
+
+        var byThread = filed
+            .Where(m => m.ThreadId != Guid.Empty && !anchoredThreadIds.Contains(m.ThreadId))
+            .GroupBy(m => m.ThreadId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(m => m.Dto).ToList());
+        if (byThread.Count == 0)
+            return Array.Empty<ThreadReadResult>();
+
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField, CreatedOnField });
+        var rows = new List<(Guid Id, string? Name, bool IsPinned, DateTimeOffset CreatedOn)>();
+        foreach (var chunk in byThread.Keys.Chunk(CommunicationOpenThreadGate.ChunkSize))
+        {
+            var idClause = string.Join(" or ", chunk.Select(id => $"{ThreadPkField} eq {id}"));
+            var odata = $"$select={select}&$filter=({idClause}) and {ActiveOnlyClause}{openOnly}&$top={chunk.Length}";
+            foreach (var row in await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct))
+            {
+                if (TryGuid(row, ThreadPkField) is not { } id || !chunk.Contains(id))
+                    continue;
+                rows.Add((id, TryString(row, ThreadNameField), TryBool(row, PinnedField) ?? false,
+                    TryDateTimeOffset(row, CreatedOnField) ?? DateTimeOffset.MaxValue));
+            }
+        }
+
+        var added = rows
+            .OrderBy(t => t.CreatedOn)
+            .Take(threadBudget)
+            .Select(t => new ThreadReadResult(
+                ThreadId: t.Id, Name: t.Name, Messages: byThread[t.Id], Count: byThread[t.Id].Count, IsPinned: t.IsPinned))
+            .ToList();
+
+        if (rows.Count > added.Count || filed.Count >= MaxRegardingScan)
+        {
+            _logger.LogWarning(
+                "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
+                recordId, callerSystemUserId, rows.Count, added.Count, filed.Count, MaxRegardingScan);
+        }
+
+        return added;
     }
 
     // ── app-only by-regarding read for the EXTERNAL plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04) ──
