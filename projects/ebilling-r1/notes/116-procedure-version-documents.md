@@ -59,6 +59,7 @@ Code and script references still to clear (task 116's remaining work): ~~`RateCa
 - BFF build: 0 errors, 0 warnings.
 - Full ArchTests: 2200/2200.
 - Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling): 7914 passed, 4 skipped, 0 failed, on the first run.
+- Publish size, measured from fresh worktrees at short paths: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` (the project's framework-dependent linux-x64), then `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included. Master `26d135bc8f` is 39.27 MB; this branch `58a969074d` is 39.58 MB, a delta of +0.31 MB. The branch figure also carries work-branch tasks not yet on master. It is far under the +5 MB and 55 MB thresholds.
 
 **Known limits and open items.**
 - Two concurrent uploads to one version can leave two Servable files. Drafting and publish then refuse (422 / 400) until the next upload.
@@ -68,7 +69,6 @@ Code and script references still to clear (task 116's remaining work): ~~`RateCa
 
 ## Not done yet
 
-- Publish-size delta against a fresh master build.
 - code-review and adr-check on the 116 diff.
 - RuleReview and the two scripts (another agent).
 - TASK-INDEX.
