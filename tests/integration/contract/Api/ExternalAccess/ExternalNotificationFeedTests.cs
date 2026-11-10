@@ -749,6 +749,60 @@ public class ExternalNotificationFeedTests
             .Select(i => i.Id).Should().Equal(IdOf(onMine));
     }
 
+    // ── ebilling-r1 task 130-0b F3b fix round 1 (F2): the caller's own service requests follow the invoice rule on the feed ──
+    // Through the REAL caller-aware seam over an InvoiceWorld (the caller's firms are the world's).
+
+    private static readonly Guid AnotherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "F3b fix round 1 feed (must fire / must not fire): the caller's service request linked to another firm's invoice is absent and its messages are not read; an unlinked request and one linked to the caller's own firm's invoice appear")]
+    public async Task F3b_AServiceRequestLinkedToAnotherFirmsInvoice_IsAbsent_UnlinkedAndOwnFirmsAppear()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var ownInvoice = world.OwnedInvoice();
+        var otherInvoice = world.OwnedInvoice();
+        world.InvoiceFirm(otherInvoice, AnotherFirm);
+        var me = Guid.NewGuid();
+        var ofOther = _data.AddServiceRequest(requestedBy: me, "Other firm's", invoice: otherInvoice);
+        var ofOwn = _data.AddServiceRequest(requestedBy: me, "Own firm's", invoice: ownInvoice);
+        var unlinked = _data.AddServiceRequest(requestedBy: me, "Unlinked");
+        Message("sprk_regardingservicerequest", ofOther, Now.AddHours(-1), senderName: "Legal");
+        var onOwn = Message("sprk_regardingservicerequest", ofOwn, Now.AddHours(-2), senderName: "Legal");
+        var onUnlinked = Message("sprk_regardingservicerequest", unlinked, Now.AddHours(-3), senderName: "Legal");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(WorkforceContact(me)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(onOwn), IdOf(onUnlinked));
+        feed.Value.Should().NotContain(i => i.RecordId == ofOther.ToString("D"));
+        feed.Value.Select(i => i.RecordTitle).Should().Equal("Own firm's", "Unlinked");
+        feed.UnreadCount.Should().Be(2);
+        feed.Truncated.Should().BeFalse("a request withheld by the firm rule is an answer, not a read failure");
+        _queries.Single().Should().NotContain(ofOther.ToString(), "the messages of a withheld request are not read");
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 feed (firm read fails, must fire): the caller's invoice-linked service requests are withheld and the feed says truncated; an unlinked request still appears")]
+    public async Task F3b_WhenTheCallersFirmsCannotBeRead_LinkedServiceRequestsAreWithheld_AndTheFeedSaysTruncated()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld
+        {
+            CallerFirmsFault = new TimeoutException("The caller-firm read failed (test)."),
+        };
+        var ownInvoice = world.OwnedInvoice();
+        var me = Guid.NewGuid();
+        var linked = _data.AddServiceRequest(requestedBy: me, "Linked", invoice: ownInvoice);
+        var unlinked = _data.AddServiceRequest(requestedBy: me, "Unlinked");
+        Message("sprk_regardingservicerequest", linked, Now.AddHours(-1), senderName: "Legal");
+        var onUnlinked = Message("sprk_regardingservicerequest", unlinked, Now.AddHours(-2), senderName: "Legal");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(WorkforceContact(me)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(onUnlinked));
+        feed.UnreadCount.Should().Be(1);
+        feed.Truncated.Should().BeTrue("a decision that could not be made must not read as 'there is nothing more to report'");
+        _queries.Single().Should().NotContain(linked.ToString());
+    }
+
     // ── deleted records (task 032) never break the feed ─────────────────────────────────────────────
 
     [Fact]
@@ -1334,15 +1388,18 @@ public class ExternalNotificationFeedTests
             return id;
         }
 
-        public Guid AddServiceRequest(Guid requestedBy, string name)
+        public Guid AddServiceRequest(Guid requestedBy, string name, Guid? invoice = null)
         {
             var id = Guid.NewGuid();
             // F3b fix round 1 (F2): as the real read parses the row, a request with no invoice link carries an empty list (never null,
             // which means "not read").
-            _requests.Add(new RequestedServiceRequest(id, name, requestedBy, Array.Empty<Guid>()));
+            _requests.Add(new RequestedServiceRequest(
+                id, name, requestedBy, invoice is { } link ? new[] { link } : Array.Empty<Guid>()));
             // F3b fix round 1: the same request on the Web API side, where the invoice ancestor walk of a message filed under it reads
-            // it by key.
+            // it by key (with the same invoice link).
             _dataverse.AddServiceRequest(id, requestedBy);
+            if (invoice is { } linked)
+                _dataverse.SetColumn("sprk_servicerequests", "sprk_servicerequestid", id.ToString(), "_sprk_regardinginvoice_value", linked.ToString());
             return id;
         }
 
