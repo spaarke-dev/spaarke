@@ -364,11 +364,13 @@ internal static class FirmRejectionFindings
     }
 
     /// <summary>
-    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix rounds 2 and 3): every character whose Unicode
-    /// category is Control, Format, LineSeparator or ParagraphSeparator removed (<see cref="IsInvisibleControl"/>: the C0 and C1 controls, the
-    /// directional marks and overrides, U+061C, the zero-width characters, U+2060 to U+2064, U+FEFF, U+00AD, U+2028 and U+2029), then trimmed, then
-    /// cut with <see cref="Truncate"/>; null when nothing printable is left (the caller then shows no reason, or for a rejection the table
-    /// text). Applied on the read side to every firm reason; the writer (DEF-060) must use the same predicate at write time.
+    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix rounds 2 to 4): every Unicode scalar (a rune, so a
+    /// character outside the Basic Multilingual Plane such as the TAG characters U+E0000 to U+E007F is judged whole) whose category is Control, Format,
+    /// LineSeparator or ParagraphSeparator removed (<see cref="IsInvisibleControl"/>: the C0 and C1 controls, the directional marks and overrides,
+    /// U+061C, the zero-width characters, U+2060 to U+2064, U+FEFF, U+00AD, U+2028 and U+2029), then trimmed, then cut with <see cref="Truncate"/>;
+    /// null when nothing printable is left (the caller then shows no reason, or for a rejection the table text). A malformed lone surrogate is
+    /// read as U+FFFD by <c>EnumerateRunes</c> and kept as that replacement character. Applied on the read side to every firm reason; the writer
+    /// (DEF-060) must walk runes with the same predicate at write time.
     /// </summary>
     internal static string? ShownFirmReason(string? raw)
     {
@@ -378,11 +380,11 @@ internal static class FirmRejectionFindings
         }
 
         var kept = new System.Text.StringBuilder(raw.Length);
-        foreach (var c in raw)
+        foreach (var rune in raw.EnumerateRunes())
         {
-            if (!IsInvisibleControl(c))
+            if (!IsInvisibleControl(rune))
             {
-                kept.Append(c);
+                kept.Append(rune.ToString());
             }
         }
 
@@ -390,9 +392,9 @@ internal static class FirmRejectionFindings
         return text.Length == 0 ? null : Truncate(text);
     }
 
-    /// <summary>The one rule for a character a firm reason may not hold: Unicode category Control, Format, LineSeparator or ParagraphSeparator.</summary>
-    internal static bool IsInvisibleControl(char c) =>
-        char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format
+    /// <summary>The one rule for a scalar (rune) a firm reason may not hold: Unicode category Control, Format, LineSeparator or ParagraphSeparator.</summary>
+    internal static bool IsInvisibleControl(System.Text.Rune rune) =>
+        System.Text.Rune.GetUnicodeCategory(rune) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format
             or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
 
     /// <summary>A member that is a string, or absent / JSON null (then <paramref name="text"/> is null). False for any other type.</summary>

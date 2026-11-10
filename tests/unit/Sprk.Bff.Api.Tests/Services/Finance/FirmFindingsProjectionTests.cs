@@ -2667,10 +2667,21 @@ public sealed class FirmFindingsProjectionTests
     [InlineData("\u2029")]   // paragraph separator
     [InlineData("\u202E")]   // right-to-left override (Format)
     [InlineData("\u0085")]   // next line (Control)
+    [InlineData("\U000E0041")] // TAG LATIN CAPITAL LETTER A (Format, outside the BMP: a surrogate pair in UTF-16)
+    [InlineData("\U000E007F")] // CANCEL TAG (Format, outside the BMP)
     public void TheFirmReasonFilter_DropsEveryInvisibleCategory(string invisible)
     {
         FirmRejectionFindings.ShownFirmReason($"Your{invisible} rate{invisible} is high.{invisible}").Should().Be("Your rate is high.");
         FirmRejectionFindings.ShownFirmReason($"{invisible}{invisible} ").Should().BeNull("nothing printable is left");
         FirmRejectionFindings.ShownFirmReason("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.").Should().Be("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.");
+    }
+
+    [Fact(DisplayName = "130d fix 4: a non-BMP emoji survives whole, a lone surrogate becomes U+FFFD, and a tag sequence hiding in text is removed")]
+    public void TheFirmReasonFilter_WalksRunes()
+    {
+        FirmRejectionFindings.ShownFirmReason("Ok \U0001F600 and \U0001F44D\U0001F3FD").Should().Be("Ok \U0001F600 and \U0001F44D\U0001F3FD");
+        FirmRejectionFindings.ShownFirmReason("a\uD800b").Should().Be("a\uFFFDb", "EnumerateRunes reads a malformed lone surrogate as U+FFFD, which is kept");
+        FirmRejectionFindings.ShownFirmReason("Rate\U000E0001\U000E0068\U000E0069 high.").Should().Be("Rate high.", "a hidden tag-character payload is removed whole");
+        FirmRejectionFindings.ShownFirmReason("\U000E0041\U000E007F").Should().BeNull();
     }
 }
