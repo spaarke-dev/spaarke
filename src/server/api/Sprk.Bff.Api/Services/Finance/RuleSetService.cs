@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -25,19 +26,6 @@ public enum RuleSetScope
 {
     ClientDefault = 100000000,
     Firm = 100000001,
-}
-
-/// <summary>What the uploaded source document is. Sets the initial "visible to firms" flag (D-66); not stored.</summary>
-public enum RuleSetSourceKind
-{
-    /// <summary>An outside counsel guideline: firms see its clause quotes (flag on).</summary>
-    Guideline,
-
-    /// <summary>A rate letter or rate card: firms see its clause quotes (flag on).</summary>
-    RateCard,
-
-    /// <summary>An internal procedure: firms never see it (flag off).</summary>
-    InternalProcedure,
 }
 
 /// <summary>The review state of a drafted rule version (<c>sprk_policyversion.sprk_proposalstatus</c>, task 019).</summary>
@@ -56,10 +44,6 @@ public enum BillingConsequence
     SuggestAdjustment = 100000002,
 }
 
-/// <summary>What the caller asked to create. The caller's object id is server-derived, never from the body.</summary>
-public sealed record RuleSetCreateRequest(
-    string Name, RuleSetSourceKind SourceKind, RuleSetScope Scope, Guid? FirmId, string FileName, Guid? CallerObjectId);
-
 /// <summary>A rule set row as the admin sees it.</summary>
 public sealed record RuleSetSummary(
     Guid Id, string Name, string Status, string Scope, Guid? FirmId, bool VisibleToFirms,
@@ -69,10 +53,6 @@ public sealed record RuleSetSummary(
     /// serialized: the list route reads it to leave out the Procedure sets the caller cannot Read (uac-r2 re-check round 2, I-P5).</summary>
     internal Guid? ProcedureId { get; init; }
 }
-
-/// <summary>A created rule set: Draft, with its source document stored in the Procedure Library.</summary>
-public sealed record RuleSetCreated(
-    Guid RuleSetId, Guid SourceDocumentId, string Status, string Scope, Guid? FirmId, string SourceKind, bool VisibleToFirms);
 
 /// <summary>One drafted or published rule (a billing policy) as its WORKING version shows it.</summary>
 /// <param name="InForce">The working version is the policy's current version.</param>
@@ -93,9 +73,13 @@ public sealed record ProposalView(
     string? ClauseQuote, string? ClauseLocation, IReadOnlyList<string> ValidationErrors,
     string? RowVersion = null, string? RejectionReason = null);
 
-/// <summary>A rule set with its rules (the Rule Review page's read).</summary>
+/// <summary>
+/// A rule set with its rules (the Rule Review page's read). <see cref="NotConverted"/> is the not-converted list of the drafting run of the
+/// set's Procedure's HIGHEST-numbered version (task 116: the marker lives on the Procedure Version), or null when that version has not been
+/// drafted, or the set has no Procedure.
+/// </summary>
 public sealed record RuleSetDetail(
-    RuleSetSummary RuleSet, Guid? SourceDocumentId, JsonNode? NotConverted, IReadOnlyList<ProposalView> Proposals);
+    RuleSetSummary RuleSet, JsonNode? NotConverted, IReadOnlyList<ProposalView> Proposals);
 
 /// <summary>An edit to a rule's working version. A <c>null</c> member is left as it is.</summary>
 public sealed record ProposalEdit(
@@ -114,10 +98,13 @@ public sealed record RuleSetPublished(
     int NotPublishedProposed, int NotPublishedRejected, bool ClauseQuotesVisibleToFirms, string ClauseVisibilityNotice);
 
 /// <summary>
-/// What the rule drafting job reads (ebilling-r1 task 075): the rule set's source document in the Procedure Library, found server-side.
-/// <see cref="AlreadyDrafted"/> is the idempotency marker (the rule set's <c>sprk_notconverted</c> list is written last, even when empty).
+/// What the rule drafting job reads (ebilling-r1 task 075, re-keyed per Procedure Version by task 116; model 7.2): a Draft version of a Billing
+/// Procedure, the Procedure's rule set the drafts go into, and the version's ONE Servable Procedure-source Stored File, found server-side
+/// (<see cref="FileId"/>; its bytes are read through the file store, never here). <see cref="AlreadyDrafted"/> is the idempotency marker: the
+/// VERSION's <c>sprk_notconverted</c> list, written last, even when empty.
 /// </summary>
-public sealed record DraftSource(Guid RuleSetId, string RuleSetName, Guid DocumentId, string DriveId, string ItemId, string FileName, bool AlreadyDrafted);
+public sealed record DraftSource(
+    Guid ProcedureVersionId, Guid ProcedureId, Guid RuleSetId, Guid FileId, string FileName, bool AlreadyDrafted);
 
 /// <summary>One rule the drafting job proposes: a flat rule body (type plus parameters) and the columns a version needs (task 075).</summary>
 public sealed record DraftedRule(
@@ -258,7 +245,6 @@ public class RuleSetService
     internal const string RuleSetEntity = "sprk_ruleset";
     internal const string PolicyEntity = "sprk_policy";
     internal const string VersionEntity = "sprk_policyversion";
-    internal const string DocumentEntity = "sprk_document";
     internal const string FirmEntity = "sprk_organization";
 
     internal const int RuleSetDraft = 1;
@@ -273,7 +259,6 @@ public class RuleSetService
     internal const string CodeNothingToPublish = "ruleset.nothing_to_publish";
     internal const string CodeRetired = "ruleset.retired";
     internal const string CodeInForce = "ruleset.proposal_in_force";
-    internal const string CodeContainerNotConfigured = "ruleset.container_not_configured";
     internal const string CodeResultTruncated = "ruleset.result_truncated";
 
     /// <summary>The detail of <see cref="CodeResultTruncated"/> when the list holds more rule sets than one pass reads (also the list route's, task 089e K2).</summary>
@@ -282,6 +267,17 @@ public class RuleSetService
     internal const string CodeWriteFailed = "ruleset.write_failed";
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
+
+    /// <summary>Task 116 (model 7.2, O-24): drafting runs only for a Draft Procedure Version (409).</summary>
+    internal const string CodeVersionNotDraft = "procedure_version.not_draft";
+
+    /// <summary>Task 116 (O-24): drafting runs only for a Procedure whose Area is Billing; Ontology Procedures are document-only in R1 (400).</summary>
+    internal const string CodeNotBilling = "procedure.not_billing";
+
+    /// <summary><c>sprk_procedureversion.sprk_notconverted</c> (080): the drafting run's not-converted list, written LAST; its presence is the
+    /// per-version completion marker (task 116).</summary>
+    internal const string VersionNotConvertedColumn = "sprk_notconverted";
+
     internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
     internal const string CodeSystemRule = "ruleset.system_rule";
     internal const string CodePublishInProgress = "ruleset.publish_in_progress";
@@ -375,206 +371,35 @@ public class RuleSetService
 
     // Task 089c (089a K1): the core-record lookups are read too, so every read here can refuse a record-scoped set
     // (RecordRuleSet.IsRecordScoped: a record scope OR a core lookup).
+    // Task 116: no sprk_sourcedocument (retired: a Procedure Version's file is its Stored File) and no set-level sprk_notconverted (the
+    // drafting marker is the Procedure Version's).
     private static readonly string[] RuleSetColumns = new[]
     {
-        "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto", "sprk_sourcedocument",
-        "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
+        "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto",
+        "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
     }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
 
     private readonly IGenericEntityService _entities;
-    private readonly IDocumentDataverseService _documents;
-    private readonly SpeFileStore _spe;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly PolicyVersionValidator _validator;
     private readonly RuleBodyDescriber _describer;
-    private readonly IOptionsMonitor<FinanceOptions> _finance;
     private readonly IScheduledJobLease _lease;
     private readonly ILogger<RuleSetService> _logger;
 
     public RuleSetService(
         IGenericEntityService entities,
-        IDocumentDataverseService documents,
-        SpeFileStore spe,
         IRecordOwnershipResolver ownership,
         PolicyVersionValidator validator,
         RuleBodyDescriber describer,
-        IOptionsMonitor<FinanceOptions> finance,
         IScheduledJobLease lease,
         ILogger<RuleSetService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
-        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
-        _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _describer = describer ?? throw new ArgumentNullException(nameof(describer));
-        _finance = finance ?? throw new ArgumentNullException(nameof(finance));
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    // ───────────────────────────────────────────────────────────────────────────────────────────────
-    // Create
-    // ───────────────────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>The initial "visible to firms" flag for a source kind (D-66): on for guidelines and rate cards, off for internal procedures.</summary>
-    internal static bool InitialVisibleToFirms(RuleSetSourceKind kind) => kind != RuleSetSourceKind.InternalProcedure;
-
-    /// <summary>
-    /// Stores <paramref name="file"/> in the Procedure Library (through <see cref="SpeFileStore"/>, internal only, D-63), links it as an
-    /// unlinked document, and creates the Draft rule set. Writes nothing when the input is invalid.
-    /// </summary>
-    public virtual async Task<RuleSetOutcome<RuleSetCreated>> CreateAsync(RuleSetCreateRequest request, byte[] file, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(file);
-
-        var driveId = _finance.CurrentValue.ProcedureLibraryContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            return RuleSetOutcome<RuleSetCreated>.Refused(
-                StatusCodes.Status503ServiceUnavailable, CodeContainerNotConfigured,
-                "The Procedure Library container is not configured in this environment, so a rule set cannot be created.");
-        }
-
-        var errors = new List<RuleSetError>();
-        var name = request.Name?.Trim() ?? string.Empty;
-        if (name.Length == 0 || name.Length > 200)
-        {
-            errors.Add(new RuleSetError(null, null, "name", "name is required and may be at most 200 characters.", null));
-        }
-
-        if (request.Scope == RuleSetScope.Firm && (request.FirmId is null || request.FirmId == Guid.Empty))
-        {
-            errors.Add(new RuleSetError(null, null, "firmId", "A rule set for a firm needs firmId.", null));
-        }
-        else if (request.Scope == RuleSetScope.ClientDefault && request.FirmId is not null)
-        {
-            errors.Add(new RuleSetError(null, null, "firmId", "A client default rule set takes no firmId.", null));
-        }
-        else if (request.FirmId is { } firm && !await ExistsAsync(FirmEntity, "sprk_organizationid", firm, ct))
-        {
-            errors.Add(new RuleSetError(null, null, "firmId", "The firm was not found.", null));
-        }
-
-        if (errors.Count > 0)
-        {
-            return RuleSetOutcome<RuleSetCreated>.Invalid(CodeInvalid, errors);
-        }
-
-        // Two questions, both before anything is written: the source document is the caller's business-unit team's; the rule set is a
-        // hard-deny row (EB-D-168a: the restricted-content owner team, or a refusal).
-        var owner = await _ownership.ResolveOwnerAsync(CallerOwnerContext(request.CallerObjectId), ct);
-        if (!owner.IsOwned)
-        {
-            return RuleSetOutcome<RuleSetCreated>.OwnerRefused(owner);
-        }
-
-        var ruleSetOwner = await _ownership.ResolveOwnerAsync(ContentOwnerContext(RuleSetEntity, request.CallerObjectId), ct);
-        if (!ruleSetOwner.IsOwned)
-        {
-            return RuleSetOutcome<RuleSetCreated>.OwnerRefused(ruleSetOwner);
-        }
-
-        var created = new List<(string Entity, Guid Id)>();
-        string? uploadedItemId = null;
-        try
-        {
-            var uploadPath = SpeUploadPath.SanitizeFileName(SourceFileName(request.FileName, name));
-            var uploaded = await _spe.UploadSmallAsync(driveId, uploadPath, new MemoryStream(file, writable: false), ConflictBehavior.Rename, ct)
-                ?? throw new InvalidOperationException("The Procedure Library upload returned no file.");
-            uploadedItemId = uploaded.Id;
-
-            var documentId = Guid.Parse(await _documents.CreateDocumentAsync(
-                new CreateDocumentRequest
-                {
-                    Name = uploaded.Name,
-                    ContainerId = driveId,
-                    OwningTeamId = owner.OwningTeamId,
-                    CreatedByPersonId = owner.CreatedByPerson,
-                },
-                ct));
-            created.Add((DocumentEntity, documentId));
-
-            await _documents.UpdateDocumentAsync(
-                documentId.ToString(),
-                new UpdateDocumentRequest
-                {
-                    GraphDriveId = driveId,
-                    GraphItemId = uploaded.Id,
-                    FileName = uploaded.Name,
-                    FileSize = uploaded.Size ?? file.LongLength,
-                    MimeType = MimeTypeOf(uploaded.Name),
-                    HasFile = true,
-                    FilePath = uploaded.WebUrl,
-                },
-                ct);
-
-            var visible = InitialVisibleToFirms(request.SourceKind);
-            var row = new Entity(RuleSetEntity)
-            {
-                ["sprk_name"] = name,
-                [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
-                ["sprk_scope"] = new OptionSetValue((int)request.Scope),
-                ["sprk_sourcedocument"] = new EntityReference(DocumentEntity, documentId),
-                ["sprk_visibletofirms"] = visible,
-                ["statecode"] = new OptionSetValue(0),
-                ["statuscode"] = new OptionSetValue(RuleSetDraft),
-            };
-            if (request.FirmId is { } firmId)
-            {
-                row["sprk_firm"] = new EntityReference(FirmEntity, firmId);
-            }
-
-            RecordRuleSet.RequireOneHome(row); // task 089c (089a K1): a legacy set has no record and no Procedure
-            ruleSetOwner.ApplyTo(row);
-            var ruleSetId = await _entities.CreateAsync(row, ct);
-            created.Add((RuleSetEntity, ruleSetId));
-
-            _logger.LogInformation("Rule set {RuleSetId} created as Draft ({SourceKind}, visibleToFirms={Visible})", ruleSetId, request.SourceKind, visible);
-            return RuleSetOutcome<RuleSetCreated>.Done(new RuleSetCreated(
-                ruleSetId, documentId, "Draft", request.Scope.ToString(), request.FirmId, request.SourceKind.ToString(), visible));
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            await CompensateAsync(created, driveId, uploadedItemId);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Rule set create failed after {Written} writes; removing what it created", created.Count);
-            await CompensateAsync(created, driveId, uploadedItemId);
-            return RuleSetOutcome<RuleSetCreated>.Refused(
-                StatusCodes.Status500InternalServerError, CodeWriteFailed,
-                "The rule set could not be created and nothing was saved. Try again; if it keeps failing, contact support.");
-        }
-    }
-
-    private async Task CompensateAsync(List<(string Entity, Guid Id)> created, string driveId, string? itemId)
-    {
-        for (var i = created.Count - 1; i >= 0; i--)
-        {
-            try
-            {
-                await _entities.DeleteAsync(created[i].Entity, created[i].Id, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Rule set cleanup could not delete {Entity} {Id}; it is a Draft row and in force nowhere", created[i].Entity, created[i].Id);
-            }
-        }
-
-        if (itemId is not null)
-        {
-            try
-            {
-                await _spe.DeleteFileAsync(driveId, itemId, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Rule set cleanup could not delete the uploaded source document {ItemId}", itemId);
-            }
-        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -642,7 +467,8 @@ public class RuleSetService
         }
 
         JsonNode? notConverted = null;
-        if (set.GetAttributeValue<string>("sprk_notconverted") is { Length: > 0 } text)
+        if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId
+            && await LatestVersionNotConvertedAsync(procedureId, ct) is { Length: > 0 } text)
         {
             try
             {
@@ -654,8 +480,26 @@ public class RuleSetService
             }
         }
 
-        return RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(
-            Summarize(set, loaded.Rules.Count), set.GetAttributeValue<EntityReference>("sprk_sourcedocument")?.Id, notConverted, views));
+        return RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summarize(set, loaded.Rules.Count), notConverted, views));
+    }
+
+    /// <summary>
+    /// Task 116: the not-converted list of the Procedure's HIGHEST-numbered version (the version under review), or null when it has none. The
+    /// columns are pinned (the version's Procedure is re-checked on the row, so a query that lost its filter cannot answer for another
+    /// Procedure).
+    /// </summary>
+    private async Task<string?> LatestVersionNotConvertedAsync(Guid procedureId, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.VersionEntity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, VersionNotConvertedColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(ProcedureEntity.VersionProcedureColumn, ConditionOperator.Equal, procedureId);
+        query.Orders.Add(new OrderExpression(ProcedureEntity.VersionNumberColumn, OrderType.Descending));
+        var latest = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
+            .FirstOrDefault(v => v.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id == procedureId);
+        return latest?.GetAttributeValue<string>(VersionNotConvertedColumn);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -663,51 +507,140 @@ public class RuleSetService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Finds the source document of a rule set for the drafting job and trigger. The document must be in the Procedure Library
-    /// container this environment is configured with (D-63): a row that points elsewhere is refused, so the job's application-identity
-    /// download never follows a pointer into another container. <see cref="DraftSource.AlreadyDrafted"/> is true once a drafting run has
-    /// finished for this rule set.
+    /// Finds what the drafting job and its trigger route work on (task 116, model 7.2 "Drafting", O-24): the Procedure Version
+    /// <paramref name="procedureVersionId"/>, which must be a Draft (409 <c>procedure_version.not_draft</c>) of a live (409
+    /// <c>procedure.retired</c>) Procedure whose Area is Billing (400 <c>procedure.not_billing</c>), that Procedure's rule set (409
+    /// <c>procedure.ruleset_missing</c>; a retired set 409 <c>ruleset.retired</c>), and the version's ONE Servable Procedure-source Stored File
+    /// (none, or more than one, 422 <c>ruleset.source_missing</c>). An unknown version is 404 <c>procedure.version_not_found</c>.
+    /// <see cref="DraftSource.AlreadyDrafted"/> is the version's marker. The file's bytes are not read here: the job reads them through
+    /// <c>StoredFileService.OpenForProcessingAsync</c>, which re-checks the row (Servable, own path, hash, scan verdict).
     /// </summary>
-    public virtual async Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid ruleSetId, CancellationToken ct)
+    public virtual async Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid procedureVersionId, CancellationToken ct)
     {
-        var set = await LoadRuleSetAsync(ruleSetId, ct);
+        var target = await LoadDraftTargetAsync<DraftSource>(procedureVersionId, ct);
+        if (target.Refusal is { } refusal)
+        {
+            return refusal;
+        }
+
+        var files = await LoadServableSourceFilesAsync(procedureVersionId, ct);
+        if (files.Count != 1)
+        {
+            return RuleSetOutcome<DraftSource>.Refused(
+                StatusCodes.Status422UnprocessableEntity, CodeSourceMissing,
+                files.Count == 0
+                    ? "The Procedure Version has no servable source file to draft rules from. Upload its file first."
+                    : "The Procedure Version has more than one servable source file. Upload the file again to replace them.");
+        }
+
+        var file = files[0];
+        return RuleSetOutcome<DraftSource>.Done(new DraftSource(
+            procedureVersionId, target.ProcedureId, target.RuleSet!.Id, file.Id,
+            file.GetAttributeValue<string>(StoredFileSchema.Name) is { Length: > 0 } name ? name : "source",
+            target.AlreadyDrafted));
+    }
+
+    /// <summary>A drafting target (task 116): the version's Procedure, the Procedure's rule set, the version's marker, or the refusal.</summary>
+    private sealed record DraftTarget<T>(Guid ProcedureId, Entity? RuleSet, bool AlreadyDrafted, RuleSetOutcome<T>? Refusal) where T : class;
+
+    /// <summary>
+    /// The columns of a Procedure Version a drafting read takes (task 116). Pinned: an absent marker reads as "not drafted", so the select must
+    /// name it (a column that is not selected is absent too).
+    /// </summary>
+    internal static readonly string[] DraftVersionColumns =
+    {
+        ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionStatusColumn, VersionNotConvertedColumn,
+    };
+
+    /// <summary>The columns of a Procedure a drafting read takes (task 116): its Area and its Status.</summary>
+    internal static readonly string[] DraftProcedureColumns = { ProcedureEntity.AreaColumn, ProcedureEntity.StatusColumn };
+
+    /// <summary>
+    /// The shared checks of <see cref="GetDraftSourceAsync"/>, <see cref="RemoveUntouchedDraftsAsync"/> and <see cref="AddDraftsAsync"/> (task 116),
+    /// in this order: the version exists (404), its Procedure exists (404) and is Billing (400) and not Retired (409), the version is a Draft
+    /// (409), the Procedure has a rule set (409) that is not Retired (409). Every read is app-only and re-checks the ids on the rows.
+    /// </summary>
+    private async Task<DraftTarget<T>> LoadDraftTargetAsync<T>(Guid procedureVersionId, CancellationToken ct) where T : class
+    {
+        Entity? version = null;
+        if (procedureVersionId != Guid.Empty)
+        {
+            var query = new QueryExpression(ProcedureEntity.VersionEntity) { ColumnSet = new ColumnSet(DraftVersionColumns), TopCount = 1 };
+            query.Criteria.AddCondition("sprk_procedureversionid", ConditionOperator.Equal, procedureVersionId);
+            version = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(v => v.Id == procedureVersionId);
+        }
+
+        if (version?.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id is not { } procedureId || procedureId == Guid.Empty)
+        {
+            return new DraftTarget<T>(Guid.Empty, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status404NotFound, ProcedureService.CodeVersionNotFound, "The Procedure Version was not found."));
+        }
+
+        var procedureQuery = new QueryExpression(ProcedureEntity.Entity) { ColumnSet = new ColumnSet(DraftProcedureColumns), TopCount = 1 };
+        procedureQuery.Criteria.AddCondition("sprk_procedureid", ConditionOperator.Equal, procedureId);
+        var procedure = (await _entities.RetrieveMultipleAsync(procedureQuery, ct)).Entities.FirstOrDefault(p => p.Id == procedureId);
+        if (procedure is null)
+        {
+            return new DraftTarget<T>(procedureId, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status404NotFound, ProcedureService.CodeNotFound, "The Procedure was not found."));
+        }
+
+        // O-24: Ontology-area Procedures are document-only in R1. A missing Area is not Billing (fail closed).
+        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling)
+        {
+            return new DraftTarget<T>(procedureId, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status400BadRequest, CodeNotBilling, "Rules are drafted only for a Procedure whose Area is Billing."));
+        }
+
+        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired)
+        {
+            return new DraftTarget<T>(procedureId, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status409Conflict, ProcedureService.CodeRetired, "A retired Procedure cannot be changed."));
+        }
+
+        if (version.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return new DraftTarget<T>(procedureId, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status409Conflict, CodeVersionNotDraft, "Rules are drafted only for a Draft version."));
+        }
+
+        var set = await LoadProcedureRuleSetAsync(procedureId, ct);
         if (set is null)
         {
-            return RuleSetOutcome<DraftSource>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+            return new DraftTarget<T>(procedureId, null, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status409Conflict, ProcedureService.CodeRuleSetMissing, "The Procedure has no rule set to draft rules into."));
         }
 
         if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
         {
-            return RuleSetOutcome<DraftSource>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
+            return new DraftTarget<T>(procedureId, set, false, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed."));
         }
 
-        if (set.GetAttributeValue<EntityReference>("sprk_sourcedocument")?.Id is not { } documentId || documentId == Guid.Empty)
+        var drafted = !string.IsNullOrWhiteSpace(version.GetAttributeValue<string>(VersionNotConvertedColumn));
+        return new DraftTarget<T>(procedureId, set, drafted, null);
+    }
+
+    /// <summary>
+    /// The Servable Procedure-source Stored Files of a version (task 116), at most 2 (two already means "not one"). The same question as 081's
+    /// publish check; the version, purpose and status are re-checked on each row, so a query that lost a filter cannot pass a wrong file.
+    /// </summary>
+    private async Task<IReadOnlyList<Entity>> LoadServableSourceFilesAsync(Guid procedureVersionId, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity)
         {
-            return RuleSetOutcome<DraftSource>.Refused(
-                StatusCodes.Status422UnprocessableEntity, CodeSourceMissing, "The rule set has no source document to draft rules from.");
-        }
-
-        var document = await _documents.GetDocumentAsync(documentId.ToString(), ct);
-        var container = _finance.CurrentValue.ProcedureLibraryContainerId;
-        if (document is null
-            || string.IsNullOrWhiteSpace(document.GraphDriveId)
-            || string.IsNullOrWhiteSpace(document.GraphItemId)
-            || string.IsNullOrWhiteSpace(container)
-            || !string.Equals(document.GraphDriveId, container, StringComparison.OrdinalIgnoreCase))
-        {
-            return RuleSetOutcome<DraftSource>.Refused(
-                StatusCodes.Status422UnprocessableEntity, CodeSourceMissing,
-                "The source document of the rule set is missing or is not in the Procedure Library.");
-        }
-
-        return RuleSetOutcome<DraftSource>.Done(new DraftSource(
-            ruleSetId,
-            set.GetAttributeValue<string>("sprk_name") ?? string.Empty,
-            documentId,
-            document.GraphDriveId!,
-            document.GraphItemId!,
-            document.FileName ?? "source",
-            AlreadyDrafted: !string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted"))));
+            ColumnSet = new ColumnSet(StoredFileSchema.Name, StoredFileSchema.ProcedureVersionTable, StoredFileSchema.Purpose, StoredFileSchema.Status),
+            TopCount = 2,
+        };
+        query.Criteria.AddCondition(StoredFileSchema.ProcedureVersionTable, ConditionOperator.Equal, procedureVersionId);
+        query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)StoredFilePurpose.ProcedureSource);
+        query.Criteria.AddCondition(StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable);
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities
+            .Where(f => f.GetAttributeValue<EntityReference>(StoredFileSchema.ProcedureVersionTable)?.Id == procedureVersionId
+                && f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose)?.Value == (int)StoredFilePurpose.ProcedureSource
+                && f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value == (int)StoredFileStatus.Servable)
+            .ToList();
     }
 
     /// <summary>
@@ -722,33 +655,34 @@ public class RuleSetService
     /// <item>the policy is Off, every version is Proposed, and no version has been in force (no <c>sprk_inforceto</c>);</item>
     /// <item>the policy and each version have <c>modifiedon</c> equal to <c>createdon</c>: nobody has edited, accepted, rejected or
     /// published them (an administrator's edit of a draft is in place, so it moves <c>modifiedon</c>);</item>
-    /// <item>the policy has no current version: it was never published.</item>
+    /// <item>the policy has no current version: it was never published (so 081's copy-forward drafts, whose policies have a current
+    /// version, are never removed);</item>
+    /// <item>task 116: EVERY version of the policy is a Draft (<c>sprk_publishstate</c>) under THIS Procedure Version
+    /// (<c>sprk_procedureversion</c>): a draft of another version is never removed by this version's retry.</item>
     /// </list>
     /// A policy with no version at all (a run that died between the two creates and could not remove it) is untouched when the policy
-    /// itself is. Versions are deleted before their policy, so a death between the two deletes leaves a version-less policy that the next
-    /// pass removes. A row that is already gone counts as deleted (idempotent). Any other fault returns 500 <c>ruleset.write_failed</c>:
-    /// the job fails without drafting, and its next delivery compensates again. A rule set with the completion marker is refused (409
-    /// <c>ruleset.already_drafted</c>) and nothing is deleted: a finished run is never compensated.
+    /// itself is: it is invisible, Off and in force nowhere, and a Procedure has at most one Draft version (081), so no other version's run
+    /// can be creating it now. Versions are deleted before their policy, so a death between the two deletes leaves a version-less policy that
+    /// the next pass removes. A row that is already gone counts as deleted (idempotent). Any other fault returns 500 <c>ruleset.write_failed</c>:
+    /// the job fails without drafting, and its next delivery compensates again. A version with the completion marker is refused (409
+    /// <c>ruleset.already_drafted</c>) and nothing is deleted: a finished run is never compensated. The version, Procedure and set checks are
+    /// <see cref="GetDraftSourceAsync"/>'s.
     /// </summary>
-    public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid ruleSetId, CancellationToken ct)
+    public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid procedureVersionId, CancellationToken ct)
     {
-        var set = await LoadRuleSetAsync(ruleSetId, ct);
-        if (set is null)
+        var target = await LoadDraftTargetAsync<DraftsCompensated>(procedureVersionId, ct);
+        if (target.Refusal is { } refusal)
         {
-            return RuleSetOutcome<DraftsCompensated>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+            return refusal;
         }
 
-        if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
-        {
-            return RuleSetOutcome<DraftsCompensated>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted")))
+        if (target.AlreadyDrafted)
         {
             return RuleSetOutcome<DraftsCompensated>.Refused(
-                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this rule set.");
+                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this Procedure Version.");
         }
 
+        var ruleSetId = target.RuleSet!.Id;
         try
         {
             var identity = await _entities.GetCurrentIdentityIdAsync(ct);
@@ -799,7 +733,7 @@ public class RuleSetService
 
             var codePrefix = $"{DraftCodePrefix}{ruleSetId:N}-";
             var removable = rows
-                .Where(p => IsUntouchedDraft(p, versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>(), identity, codePrefix))
+                .Where(p => IsUntouchedDraft(p, versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>(), identity, codePrefix, procedureVersionId))
                 .ToList();
 
             var removed = 0;
@@ -816,8 +750,8 @@ public class RuleSetService
             }
 
             _logger.LogInformation(
-                "Rule set {RuleSetId}: retry compensation removed {Removed} untouched draft(s) of an earlier run and kept {Kept} other rule(s)",
-                ruleSetId, removed, rows.Count - removed);
+                "Rule set {RuleSetId}, Procedure Version {ProcedureVersionId}: retry compensation removed {Removed} untouched draft(s) of an earlier run and kept {Kept} other rule(s)",
+                ruleSetId, procedureVersionId, removed, rows.Count - removed);
             return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(removed, rows.Count - removed));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -836,7 +770,7 @@ public class RuleSetService
     // Who created a row and when it was last changed: what "untouched" is decided on. Read only by the compensation.
     private static readonly string[] AuditColumns = { "createdby", "createdon", "modifiedon" };
 
-    private static bool IsUntouchedDraft(Entity policy, IReadOnlyList<Entity> versions, Guid identity, string codePrefix) =>
+    private static bool IsUntouchedDraft(Entity policy, IReadOnlyList<Entity> versions, Guid identity, string codePrefix, Guid procedureVersionId) =>
         policy.GetAttributeValue<string>("sprk_policycode") is { } code
         && code.StartsWith(codePrefix, StringComparison.Ordinal)
         && policy.GetAttributeValue<bool?>("sprk_enabled") == false
@@ -845,7 +779,10 @@ public class RuleSetService
         && versions.All(v =>
             CreatedByAndNeverModified(v, identity)
             && v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value == (int)ProposalState.Proposed
-            && v.GetAttributeValue<DateTime?>("sprk_inforceto") is null);
+            && v.GetAttributeValue<DateTime?>("sprk_inforceto") is null
+            // Task 116: only this Procedure Version's drafts (a version under another one, or none, keeps the rule).
+            && v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id == procedureVersionId
+            && v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value == PublishStateDraft);
 
     private static bool CreatedByAndNeverModified(Entity row, Guid identity) =>
         row.GetAttributeValue<EntityReference>("createdby")?.Id == identity
@@ -880,35 +817,33 @@ public class RuleSetService
     }
 
     /// <summary>
-    /// Stores the drafted rules of a rule set as Proposed rules (a Billing-domain policy, Off, with no current version, and its version 1)
-    /// and writes the not-converted list LAST, which marks the run complete. Model output is a proposal: every rule passes the one
+    /// Stores the drafted rules of a Procedure Version (task 116) in its Procedure's rule set as Proposed rules (a Billing-domain policy,
+    /// Off, with no current version, and its version 1 under <paramref name="procedureVersionId"/> with <c>sprk_publishstate</c> Draft) and
+    /// writes the VERSION's not-converted list LAST, which marks the run complete. Model output is a proposal: every rule passes the one
     /// validation of this service (<see cref="PolicyVersionValidator.ValidateForSave"/> with <see cref="RuleDomain.Billing"/>, plus the
     /// required columns) before anything is written, and a rule that fails it is not dropped: it is added to the not-converted list with
-    /// the reason. Re-running is safe: a rule whose type, body and clause equal one already in the rule set is skipped, and a run after
-    /// the marker is written is refused (409 <c>ruleset.already_drafted</c>).
+    /// the reason. Re-running is safe: a rule whose type, body and clause equal one already under this version is skipped, and a run after
+    /// the marker is written is refused (409 <c>ruleset.already_drafted</c>). Codes stay <c>BRD-{rule set}-{n}</c>, numbered per set.
     /// </summary>
     public virtual async Task<RuleSetOutcome<DraftsAdded>> AddDraftsAsync(
-        Guid ruleSetId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted, Guid? callerObjectId, CancellationToken ct)
+        Guid procedureVersionId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted, Guid? callerObjectId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(notConverted);
 
-        var set = await LoadRuleSetAsync(ruleSetId, ct);
-        if (set is null)
+        var target = await LoadDraftTargetAsync<DraftsAdded>(procedureVersionId, ct);
+        if (target.Refusal is { } refusal)
         {
-            return RuleSetOutcome<DraftsAdded>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+            return refusal;
         }
 
-        if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
-        {
-            return RuleSetOutcome<DraftsAdded>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted")))
+        if (target.AlreadyDrafted)
         {
             return RuleSetOutcome<DraftsAdded>.Refused(
-                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this rule set.");
+                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this Procedure Version.");
         }
+
+        var ruleSetId = target.RuleSet!.Id;
 
         // 1. Validate everything before the first write. A refusal is listed, never dropped.
         var listed = new List<NotConvertedClause>(notConverted);
@@ -946,7 +881,7 @@ public class RuleSetService
                     return RuleSetOutcome<DraftsAdded>.OwnerRefused(owner);
                 }
 
-                var existing = await LoadDraftedFingerprintsAsync(ruleSetId, ct);
+                var existing = await LoadDraftedFingerprintsAsync(ruleSetId, procedureVersionId, ct);
                 if (existing is null)
                 {
                     return RuleSetOutcome<DraftsAdded>.Refused(
@@ -969,23 +904,25 @@ public class RuleSetService
                     {
                         listed.Add(new NotConvertedClause(
                             rule.ClauseQuote, rule.ClauseLocation,
-                            "Not stored: a rule already in this rule set, from an earlier drafting run, covers this clause."));
+                            "Not stored: a rule already under this Procedure Version, from an earlier drafting run, covers this clause."));
                         continue;
                     }
 
                     var code = $"{DraftCodePrefix}{ruleSetId:N}-{next++.ToString("D3", CultureInfo.InvariantCulture)}";
-                    await CreateDraftRuleAsync(ruleSetId, code, rule, ruleType, consequence, note, owner, ct);
+                    await CreateDraftRuleAsync(ruleSetId, procedureVersionId, code, rule, ruleType, consequence, note, owner, ct);
                     stored++;
                 }
             }
 
-            // 2. The marker, last. After it, the job is a no-op and the trigger answers 409.
+            // 2. The marker, last, on the VERSION (task 116). After it, the job is a no-op and the trigger answers 409; another version of
+            //    the same Procedure has its own marker, so it can still be drafted.
             var json = BuildNotConvertedJson(listed);
-            await _entities.UpdateAsync(RuleSetEntity, ruleSetId, new Dictionary<string, object> { ["sprk_notconverted"] = json }, ct);
+            await _entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedColumn] = json }, ct);
 
             _logger.LogInformation(
-                "Rule set {RuleSetId}: drafting stored {Stored} rule(s), skipped {Present} already present, listed {NotConverted} as not converted",
-                ruleSetId, stored, present, listed.Count);
+                "Procedure Version {ProcedureVersionId} (rule set {RuleSetId}): drafting stored {Stored} rule(s), skipped {Present} already present, listed {NotConverted} as not converted",
+                procedureVersionId, ruleSetId, stored, present, listed.Count);
             return RuleSetOutcome<DraftsAdded>.Done(new DraftsAdded(stored, present, listed));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -995,7 +932,7 @@ public class RuleSetService
         catch (Exception ex)
         {
             // Rows already written stay (Proposed, Off, in force nowhere); the marker is not written, so a re-run adds the rest.
-            _logger.LogError(ex, "Rule set {RuleSetId}: drafting could not store its rules; the run can be repeated", ruleSetId);
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: drafting could not store its rules; the run can be repeated", procedureVersionId);
             return RuleSetOutcome<DraftsAdded>.Refused(
                 StatusCodes.Status500InternalServerError, CodeWriteFailed, "The drafted rules could not be saved. Try again; if it keeps failing, contact support.");
         }
@@ -1072,8 +1009,12 @@ public class RuleSetService
     private static string Fingerprint(int ruleType, string ruleBody, string clauseQuote) =>
         string.Create(CultureInfo.InvariantCulture, $"{ruleType}\n{ruleBody}\n{clauseQuote}");
 
-    /// <summary>The rules already in the rule set (for skipping repeats) and the next free index of the drafted-code sequence. Null when truncated.</summary>
-    private async Task<DraftedFingerprints?> LoadDraftedFingerprintsAsync(Guid ruleSetId, CancellationToken ct)
+    /// <summary>
+    /// The rules already under <paramref name="procedureVersionId"/> (for skipping repeats: task 116 scopes them to the version, so a clause an
+    /// earlier version drafted, or rejected, can be proposed again for this one; the copy-forward drafts of this version count) and the next
+    /// free index of the drafted-code sequence, which stays per SET. Null when truncated.
+    /// </summary>
+    private async Task<DraftedFingerprints?> LoadDraftedFingerprintsAsync(Guid ruleSetId, Guid procedureVersionId, CancellationToken ct)
     {
         var policies = await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId }), ct);
         if (policies.MoreRecords)
@@ -1108,7 +1049,7 @@ public class RuleSetService
                 return null;
             }
 
-            foreach (var v in versions.Entities)
+            foreach (var v in versions.Entities.Where(v => v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id == procedureVersionId))
             {
                 var row = ToVersion(v);
                 if (row.RuleType is { } type && row.RuleBody is not null && row.ClauseReference is not null)
@@ -1127,7 +1068,8 @@ public class RuleSetService
     }
 
     private async Task CreateDraftRuleAsync(
-        Guid ruleSetId, string code, DraftedRule rule, int ruleType, int consequence, string? note, RecordOwnerResolution owner, CancellationToken ct)
+        Guid ruleSetId, Guid procedureVersionId, string code, DraftedRule rule, int ruleType, int consequence, string? note,
+        RecordOwnerResolution owner, CancellationToken ct)
     {
         var policy = new Entity(PolicyEntity)
         {
@@ -1160,6 +1102,9 @@ public class RuleSetService
                 ["sprk_clausereference"] = rule.ClauseQuote,
                 // Required column; provisional until publish sets the effective date. No reader treats a non-current version as in force.
                 ["sprk_inforcefrom"] = DateTime.UtcNow,
+                // Task 116 (model 7.2): the draft belongs to the Procedure Version it was drafted from, Draft until that version publishes.
+                [ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, procedureVersionId),
+                [PublishStateColumn] = new OptionSetValue(PublishStateDraft),
             };
             if (!string.IsNullOrWhiteSpace(rule.ClauseLocation))
             {
@@ -2987,20 +2932,9 @@ public class RuleSetService
 
     private static DateTime ToUtcDate(DateOnly d) => new(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 
-    private static string SourceFileName(string uploaded, string ruleSetName)
-    {
-        var extension = Path.GetExtension(uploaded ?? string.Empty);
-        extension = extension.Length is > 0 and <= 8 && extension.All(ch => char.IsLetterOrDigit(ch) || ch == '.') ? extension : string.Empty;
-        var safe = new string(ruleSetName.Select(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_' ? ch : '_').ToArray()).Trim();
-        if (safe.Length > 80)
-        {
-            safe = safe[..80].TrimEnd();
-        }
-
-        return $"Rule set - {(safe.Length == 0 ? "source" : safe)} - {DateTime.UtcNow:yyyyMMddHHmmss}{extension}";
-    }
-
-    private static string MimeTypeOf(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
+    /// <summary>The media type of a Procedure source file, from its extension (task 116: the file route stores it server-derived, never the
+    /// client's claim). Anything not listed is <c>application/octet-stream</c>.</summary>
+    internal static string MimeTypeOf(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
     {
         ".pdf" => "application/pdf",
         ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
