@@ -443,6 +443,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             '?$select=sprk_issecure'
           )) as { sprk_issecure?: unknown } | null;
           if (request === associationRequestRef.current) setParentSecure(matter?.sprk_issecure === true);
+          // eslint-disable-next-line no-restricted-syntax -- an unreadable parent leaves the secure toggle editable; this read only presets the UI and the server's mapping-source rule decides on create (task 022)
         } catch {
           // Unknown: leave the toggle editable (the server's rule still applies).
         }
