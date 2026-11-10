@@ -31,7 +31,8 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 
 ## (b) Teams Developer Portal OAuth registration — done 2026-11-09 (owner)
 
-- Registration ID: `YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMyMmNjNzMzYS0yMTU1LTQ0M2YtOThlNy1mOGM0ZDU4YzgyYmU=`. It is base64 for `a221a95e-6abc-4434-aecc-e48338a1b2f2##22cc733a-2155-443f-98e7-f8c4d58c82be`, the tenant ID plus the registration GUID. The connector in step (c) needs this ID.
+- **Superseded 2026-11-10:** the registration below was deleted and re-created with Base URL = the full MCP URL. See (c).
+- Old registration ID: `YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMyMmNjNzMzYS0yMTU1LTQ0M2YtOThlNy1mOGM0ZDU4YzgyYmU=`. It is base64 for `a221a95e-6abc-4434-aecc-e48338a1b2f2##22cc733a-2155-443f-98e7-f8c4d58c82be`, the tenant ID plus the registration GUID. The connector in step (c) needs this ID.
 - Redirect URI: the portal does **not** display one for an OAuth client registration. Microsoft's guidance for Teams/Copilot OAuth registrations is the fixed `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`, on the connector app's **Web** platform. If T5's sign-in fails with `AADSTS50011`, the error names the redirect actually used; correct the redirect to that value.
 - Secret: **required** (the portal will not save without one, 2026-11-08). The owner created it in Entra and pasted it straight into the portal; the value is never in the repo or the agent. **Expiry: 2028-11-08** (24 months, ADR-028 A10 Path A, dev only). Named owner: the project owner. Rotate before expiry (runbook owed with task 052).
 
@@ -48,6 +49,10 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
     - **Ranked steps:** (1) a **fresh** registration with Base URL = MCP URL, the ID copied with the portal's copy button, retried in a new InPrivate window after 15 minutes; (2) the same Global Admin creates both the registration and the connector, holding the AI Administrator role; (3) no trailing spaces in the registration's Client ID or secret; (4) a Microsoft support case with the admin center's failing network request (dev tools) and the fact that no request reached the BFF.
     - **Rejected:** the agent's "try Entra SSO as a diagnostic" — A10 forbids that connector option and it issues tokens of a different shape; it needs an owner decision first.
 
-- Connector ID / date: _tbd_
+- **Unblocked 2026-11-10 (owner).** The Dev Portal registration was deleted and re-created with Base URL = the full MCP URL and a new secret. The owner reports the connector is **linked and ready to use**.
+  - Connector display name: **`Spaarke MCP`**. This deviates from naming note §1 (`Spaarke`); the owner was told and the rename is open.
+  - Secret, read 2026-11-10 (metadata only): exactly one password, `Teams Dev Portal OAuth – dev 2`, keyId `3f36b679-8141-4858-ac05-8b11fd1985cc`, start 2026-11-10 18:39 local, end **2028-11-09 18:39** local. The old keyId `fafba383-…`, whose value was exposed in a screenshot, is deleted. Web redirect unchanged; `isFallbackPublicClient` false.
+  - App Insights, 3 hours to 18:52Z: no request to `/mcp/*` or `/.well-known/*` from Microsoft yet. Linking did not call the server.
+  - New registration ID: _tbd (owner)_ · Connector ID: _tbd (owner)_ · Date: 2026-11-10
 
 ## (d) T5 — pending
