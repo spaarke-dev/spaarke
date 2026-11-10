@@ -775,6 +775,26 @@ public static class ChildRecordEndpoints
                 $"Column '{serverOwned}' is set by the server — omit it.");
         }
 
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step BEFORE
+        // anything is checked or written (the update planner, as the caller), so the re-file core's checks and the PATCH see the
+        // pair as it will be written. A failed read is the caller's own failure; nothing is written.
+        var prepared = await OwnedChildWrite.KeepRegardingPairWholeAsync(user, entity, entitySet, id, mapped.Item!, logger, ct)
+            .ConfigureAwait(false);
+        if (prepared.Refusal is { } pairRefusal)
+        {
+            return pairRefusal switch
+            {
+                { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
+                    $"The {Noun(entity)} was not saved: {pairInvalid}"),
+                { ParentUnavailable: true } => ParentNotFound(entity),
+                { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
+                _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not updated."),
+            };
+        }
+
+        mapped = mapped with { Item = prepared.Item };
+
         OwnedChildWrite.RefileOutcome outcome;
         try
         {

@@ -175,6 +175,7 @@ public class WriterOnlyTablesUpdateRefusalTests
         var world = World(table);
 
         var (updated, failed, skipped, errors, _) = await Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper,
             [new Sprk.Bff.Api.Models.FieldMapping.FieldMappingRuleDto
             {

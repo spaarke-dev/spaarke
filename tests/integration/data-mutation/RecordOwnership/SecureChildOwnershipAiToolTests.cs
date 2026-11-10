@@ -807,6 +807,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
                 ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
                 ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
+                // A matter's standalone regarding type (sprk_RecordType_Ref.xml; no sprk_regardingrecordid on the matter).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_project"] = new[]
             {
@@ -845,6 +847,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
                 ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
+                // Field mapping task 045b: the communication's ADR-024 pair type (live: SpaarkeMaster sprk_Communication
+                // Entity.xml, sprk_RegardingRecordType), which the communication filing route binds on a pair move.
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_document"] = new[]
             {

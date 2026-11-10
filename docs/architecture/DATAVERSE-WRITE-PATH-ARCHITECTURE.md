@@ -1,6 +1,7 @@
 # Dataverse Write-Path Architecture — Invariants Live on the Server
 
 > **Status**: Accepted — 2026-09-25
+> **Last Reviewed**: 2026-11-08 (field-mapping-server-write-path-r1 task 060: the per-table ownership matrix beside I-6 and the outbox / gate-record exceptions, against the BFF code; not a full-document review)
 > **Decision**: [ADR-002](../adr/ADR-002-no-heavy-plugins.md) review of 2026-09-25 (root CLAUDE.md §6.5 Path C + clarification; owner-approved)
 > **Concise rules**: [`.claude/adr/ADR-002-thin-plugins.md`](../../.claude/adr/ADR-002-thin-plugins.md) · [`.claude/constraints/plugins.md`](../../.claude/constraints/plugins.md)
 > **Scope**: How Spaarke guarantees rules that records must satisfy when saved, without Dataverse plugins, across every write path (Code Pages, PCF, Office add-ins, import, integrations, and writes outside the product).

@@ -81,6 +81,10 @@ public class OfficeQuickCreateRefusalMapTests
         Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, InternalError, ServerError);
         Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.TableUnsupportedCode, InternalError, ServerError);
 
+        // Task 022 fix round 3: a value copied from a secure source files the row — the service's code and words, 400.
+        Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.MappingSourceSecureFilingCode,
+            RecordCreationRefusal.MappingSourceSecureFilingCode, StatusCodes.Status400BadRequest);
+
         // OwnerUnresolved stays 403: the filed-under parent that cannot be told keeps its code, every other is OFFICE_022.
         Add(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined, RecordOwnerRefusal.ParentUndetermined, Forbidden);
         Add(RecordCreationRefusalKind.OwnerUnresolved, RecordCreationRefusal.OwnershipExceptionCode, OfficeErrorCodes.RecordOwnerUnresolved, Forbidden);

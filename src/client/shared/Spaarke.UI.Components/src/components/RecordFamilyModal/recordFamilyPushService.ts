@@ -50,10 +50,77 @@ export interface IPushPreviewChange {
   flags: string[];
 }
 
-/** A child the push refused or could not update; `error` is the server's fixed text. */
+/**
+ * A child the push refused or could not update; `error` is the server's fixed text. `reasonCode` is set only for the
+ * mapping-source rule's codes (task 022 fix round 4), on the apply and on the preview.
+ */
 export interface IPushError {
   recordId: string;
   error: string;
+  reasonCode?: string;
+}
+
+/**
+ * Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a record owned by
+ * that source's isolation owner. A child that is not is not written (`FieldMappingPushSourceGate.NotIsolatedReasonCode`).
+ */
+export const SECURE_SOURCE_NOT_ISOLATED_REASON_CODE = 'field_mapping.push.secure_source_not_isolated';
+
+/** Whether the source is secure, or the child's owner, could not be checked: the child is not written. */
+export const SECURE_SOURCE_UNDETERMINED_REASON_CODE = 'field_mapping.push.secure_source_undetermined';
+
+/**
+ * A push from a secure source never changes what a child is filed under: a child whose pushed values would change its filing
+ * is not written at all (`FieldMappingPushSourceGate.RefileNotAllowedReasonCode`).
+ */
+export const SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE = 'field_mapping.push.secure_source_refile_not_allowed';
+
+/**
+ * The per-record wording of each mapping-source code (never a generic error). Each code skips the record whole: no field is
+ * copied to it.
+ */
+const SOURCE_RULE_TEXT: Readonly<Record<string, string>> = {
+  [SECURE_SOURCE_NOT_ISOLATED_REASON_CODE]: 'No fields were copied to this record because the source record is secure.',
+  [SECURE_SOURCE_UNDETERMINED_REASON_CODE]:
+    'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
+  [SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE]:
+    "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
+};
+
+/** True when the entry is a child the mapping-source rule kept the push from writing. */
+export function isSourceRuleSkip(error: IPushError): boolean {
+  return error.reasonCode !== undefined && Object.prototype.hasOwnProperty.call(SOURCE_RULE_TEXT, error.reasonCode);
+}
+
+/** The text shown for one child the push did not update: the mapping-source code's wording, else the server's fixed text. */
+export function pushErrorText(error: IPushError): string {
+  return isSourceRuleSkip(error) ? SOURCE_RULE_TEXT[error.reasonCode as string] : error.error;
+}
+
+/**
+ * The preview's lines for the children the mapping-source rule keeps the push from writing, one per code; empty when there
+ * are none. Those children are not listed with values and will not be updated.
+ */
+export function sourceRuleSkipText(errors: readonly IPushError[]): string[] {
+  const lines: string[] = [];
+  const notIsolated = errors.filter(e => e.reasonCode === SECURE_SOURCE_NOT_ISOLATED_REASON_CODE).length;
+  const undetermined = errors.filter(e => e.reasonCode === SECURE_SOURCE_UNDETERMINED_REASON_CODE).length;
+  const refile = errors.filter(e => e.reasonCode === SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).length;
+  const records = (count: number) => (count === 1 ? '1 record' : `${count} records`);
+  if (refile > 0) {
+    lines.push(
+      `${records(refile)} will not be updated because ${refile === 1 ? 'its' : 'their'} filing can't be changed by a push from a secure record.`
+    );
+  }
+  if (notIsolated > 0) {
+    lines.push(`${records(notIsolated)} will not be updated because the source record is secure.`);
+  }
+  if (undetermined > 0) {
+    lines.push(
+      `${records(undetermined)} will not be updated because it could not be checked whether the source record is secure. Try again later.`
+    );
+  }
+  return lines;
 }
 
 /** The response, reduced to what the panel uses. Absent counts read as zero. */
@@ -178,7 +245,8 @@ function asError(raw: unknown): IPushError {
   const r = raw as Record<string, unknown>;
   const recordId = text(r.recordId);
   if (!recordId) throw new Error('The push response has an error without a record.');
-  return { recordId, error: text(r.error) ?? '' };
+  const reasonCode = text(r.reasonCode);
+  return reasonCode ? { recordId, error: text(r.error) ?? '', reasonCode } : { recordId, error: text(r.error) ?? '' };
 }
 
 /** Reads the body. It is untrusted server JSON: a body that is not the documented shape is an error, never an empty result. */

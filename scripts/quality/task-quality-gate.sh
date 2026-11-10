@@ -1,323 +1,407 @@
 #!/usr/bin/env bash
 # ============================================================================
-# task-quality-gate.sh — Claude Code TaskCompleted Quality Gate Hook
+# task-quality-gate.sh — Claude Code Stop hook: the session's quality gate
 #
-# Runs three quality checks when a Claude Code task completes:
-#   1. Build check:  dotnet build -warnaserror (clean compile)
-#   2. Lint check:   dotnet format / eslint on changed files
-#   3. Arch tests:   dotnet test Spaarke.ArchTests (if .cs files changed)
+# Registered in .claude/settings.json under "Stop". Runs when Claude is about
+# to end its turn, over the session's changes (tracked edits vs HEAD plus
+# untracked, non-ignored files):
+#   Gate 1  Build      dotnet build of each project that owns a changed .cs file
+#   Gate 2  Typecheck  tsc --noEmit for each tsconfig that owns a changed .ts/.tsx
+#   Gate 3  Lint       dotnet format / eslint on changed files (advisory)
+#   Gate 4  Arch tests tests/Spaarke.ArchTests (when .cs changed) + the
+#                      retired x- project-prefix check
 #
-# Non-code tasks (only .md, .poml, .yaml, .json changes) get a fast path
-# that skips build and architecture tests entirely.
+# BLOCKING CONTRACT (Claude Code hooks):
+#   exit 2  + report on stderr  → Claude is sent back to fix it (the stop is blocked)
+#   exit 0                      → Claude may stop
+#   any other exit              → non-blocking hook error; never used on purpose
+# Only definite code failures block: compiler errors (CS*), TypeScript errors in
+# a changed file, failing arch tests, a new x- project folder. Infrastructure
+# trouble (timeouts, file locks from a concurrent build, restore/network errors,
+# a missing tool) is reported as WARN and never blocks.
 #
-# Registered in .claude/settings.json as a TaskCompleted hook.
+# LOOP GUARD: when the stop was already blocked once ("stop_hook_active": true
+# on stdin), the gate never blocks again. If checks still fail it exits 0 and
+# shows the user a one-line warning (systemMessage), so a failure the session
+# cannot fix (another session's edits in a shared checkout, a pre-existing
+# break) costs one extra turn, not a loop.
 #
-# Output format:
-#   [GATE: PASS — description]    Check passed
-#   [GATE: FAIL — description]    Check failed (exit non-zero)
-#   [GATE: WARN — description]    Advisory finding (does not fail)
-#   [GATE: SKIP — description]    Check skipped (not applicable)
-#   [QUALITY GATE: PASSED/FAILED] Final summary
+# The build deliberately does NOT pass -warnaserror: Directory.Build.props owns
+# the warning policy (TreatWarningsAsErrors + WarningsNotAsErrors CS0618), the
+# same reason CI tier1 "compile" omits it (see the comment on that job and
+# docs/assessments/bff-warning-suppression-analysis-2026-06-01.md).
 #
-# Exit codes:
-#   0 — All checks passed (or non-code task fast path)
-#   1 — One or more checks failed
-#
-# Constraints:
-#   - Must complete in < 2 minutes total
-#   - Must not crash the Claude Code session (ERR trap)
-#   - Must preserve PostToolUse hook behavior (independent script)
+# Never call bare `python3` here: on Windows it can resolve to the WindowsApps
+# Store stub, which has hung at 100% CPU for days (memory: python3 stub spins).
 # ============================================================================
 
-# --- Global error trap: ensure we never crash Claude Code ---
-trap 'echo "[task-quality-gate] Hook error (non-fatal): $BASH_COMMAND" >&2; exit 0' ERR
 set -uo pipefail
+# Log unexpected command failures and carry on. Never `exit` from this trap: an
+# early exit 0 would silently drop a failure already recorded.
+trap 'echo "[task-quality-gate] unexpected command failure (continuing): $BASH_COMMAND" >&2' ERR
 
-# --- Counters for summary ---
-CHECKS_RUN=0
+# Keep the real stdout on fd 3 for the JSON systemMessage; everything else goes
+# to stderr, which is what Claude reads when the gate exits 2.
+exec 3>&1 1>&2
+
+# --- Hook input (absent when run by hand from a terminal) ---
+INPUT=""
+if [ ! -t 0 ]; then INPUT=$(cat 2>/dev/null || true); fi
+STOP_ACTIVE=false
+if printf '%s' "$INPUT" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  STOP_ACTIVE=true
+fi
+
+# --- Time budget: no new expensive check starts after this many seconds ---
+BUDGET_SECONDS=240
+over_budget() { [ "$SECONDS" -ge "$BUDGET_SECONDS" ]; }
+
+# Run a command under a hard time cap, output to a temp file; sets RUN_EXIT
+# (124 on timeout) and RUN_OUTPUT. Two Windows traps this avoids:
+#  - $(...) waits for EOF on the pipe, which MSBuild nodes / testhost hold
+#    open, so a 150 s cap measured 500+ s. Output goes to a file instead.
+#  - `timeout` kills only the direct child. `dotnet format` then left its
+#    BuildHost running forever (97 orphans found 2026-11-09). On timeout the
+#    whole Windows process tree is killed with taskkill /T.
+GATE_TMP="${TMPDIR:-/tmp}/task-quality-gate.$$.out"
+cleanup_tmp() { rm -f "$GATE_TMP" 2>/dev/null || true; }
+trap cleanup_tmp EXIT
+# POSIX fallback that does not rely on job control: kill descendants, then the process.
+# (pgrep is absent in Git Bash; there taskkill /T covers it.)
+kill_tree() {
+  local p="$1" c
+  for c in $(pgrep -P "$p" 2>/dev/null || true); do kill_tree "$c"; done
+  kill -KILL "$p" 2>/dev/null || true
+}
+run_capped() {
+  local secs="$1"; shift
+  local pid wp end=$((SECONDS + secs))
+  RUN_EXIT=0
+  # Job control on: the background job becomes its own process group (pgid = pid), so a timeout
+  # can kill everything it started on POSIX hosts, not just the wrapper shell.
+  set -m
+  "$@" >"$GATE_TMP" 2>&1 </dev/null &
+  pid=$!
+  set +m
+  # Wall-clock deadline: counting sleep iterations drifts on a loaded machine.
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$end" ]; then
+      wp=$(cat "/proc/$pid/winpid" 2>/dev/null || true)
+      if [ -n "$wp" ] && command -v taskkill >/dev/null 2>&1; then taskkill //T //F //PID "$wp" >/dev/null 2>&1 || true; fi
+      kill -TERM -- "-$pid" 2>/dev/null || true
+      kill_tree "$pid"
+      kill -KILL -- "-$pid" 2>/dev/null || true
+      RUN_EXIT=124
+      break
+    fi
+    sleep 1
+  done
+  if [ "$RUN_EXIT" -eq 124 ]; then wait "$pid" 2>/dev/null || true; else wait "$pid" || RUN_EXIT=$?; fi
+  RUN_OUTPUT=$(cat "$GATE_TMP" 2>/dev/null || true)
+}
+
+# Run "$@" with $1 as the working directory (for run_capped).
+in_dir() { local d="$1"; shift; cd "$d" && "$@"; }
+
+# --- Python for JSON validation (skip the WindowsApps python3 stub) ---
+PY=""
+for cand in python python3; do
+  p=$(command -v "$cand" 2>/dev/null) || continue
+  case "$p" in *WindowsApps*) continue ;; esac
+  PY="$cand"; break
+done
+
 CHECKS_PASSED=0
 CHECKS_FAILED=0
-CHECKS_SKIPPED=0
 CHECKS_WARNED=0
-GATE_FAILED=0
+CHECKS_SKIPPED=0
+FAILED_GATES=""
+
+pass() { echo "[GATE: PASS — $1]"; CHECKS_PASSED=$((CHECKS_PASSED + 1)); }
+warn() { echo "[GATE: WARN — $1]"; CHECKS_WARNED=$((CHECKS_WARNED + 1)); }
+skip() { echo "[GATE: SKIP — $1]"; CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1)); }
+fail() {
+  echo "[GATE: FAIL — $1]"
+  CHECKS_FAILED=$((CHECKS_FAILED + 1))
+  case ", $FAILED_GATES, " in *", $2, "*) ;; *) FAILED_GATES="${FAILED_GATES:+$FAILED_GATES, }$2" ;; esac
+}
+
+# Nearest file matching a glob in $1 or an ancestor directory. Stops before the
+# repo root (".") unless $3 = "include-root".
+nearest_up() {
+  local d="$1" pattern="$2" include_root="${3:-}" m
+  while :; do
+    if [ "$d" != "." ] || [ "$include_root" = "include-root" ]; then
+      m=$(compgen -G "$d/$pattern" 2>/dev/null | head -1 || true)
+      if [ -n "$m" ]; then printf '%s\n' "$m"; return 0; fi
+    fi
+    if [ "$d" = "." ] || [ "$d" = "/" ] || [ -z "$d" ]; then return 1; fi
+    d=$(dirname "$d")
+  done
+}
 
 # ============================================================================
-# Step 1: Detect changed files via git diff
+# Changed files: tracked edits vs HEAD + untracked, non-ignored files
 # ============================================================================
+mapfile -t CHANGED < <( { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | sort -u )
 
-# Get list of changed files (staged + unstaged relative to HEAD)
-CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null || true)
-
-if [ -z "$CHANGED_FILES" ]; then
-  echo "[GATE: SKIP — no changed files detected]"
-  echo ""
-  echo "========================================"
+if [ "${#CHANGED[@]}" -eq 0 ]; then
   echo "[QUALITY GATE: PASSED] (no changes)"
-  echo "========================================"
   exit 0
 fi
 
-# --- Categorize changed files ---
-CS_FILES=""
-TS_FILES=""
-PS_FILES=""
-DOC_FILES=""
-OTHER_FILES=""
-
-while IFS= read -r file; do
-  case "$file" in
-    *.cs)       CS_FILES="$CS_FILES $file" ;;
-    *.ts|*.tsx)  TS_FILES="$TS_FILES $file" ;;
-    *.ps1)      PS_FILES="$PS_FILES $file" ;;
-    *.md|*.poml|*.yaml|*.yml|*.json)
-                DOC_FILES="$DOC_FILES $file" ;;
-    *)          OTHER_FILES="$OTHER_FILES $file" ;;
+CS_FILES=(); TS_FILES=(); PS_FILES=(); JSON_FILES=()
+for f in "${CHANGED[@]}"; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    *.cs)      CS_FILES+=("$f") ;;
+    *.ts|*.tsx) TS_FILES+=("$f") ;;
+    *.ps1)     PS_FILES+=("$f") ;;
+    *.json)    JSON_FILES+=("$f") ;;
   esac
-done <<< "$CHANGED_FILES"
+done
 
-# Trim leading spaces
-CS_FILES=$(echo "$CS_FILES" | xargs 2>/dev/null || true)
-TS_FILES=$(echo "$TS_FILES" | xargs 2>/dev/null || true)
-PS_FILES=$(echo "$PS_FILES" | xargs 2>/dev/null || true)
-DOC_FILES=$(echo "$DOC_FILES" | xargs 2>/dev/null || true)
-OTHER_FILES=$(echo "$OTHER_FILES" | xargs 2>/dev/null || true)
-
-# Detect if this is a code change or documentation-only task
-HAS_CODE=false
-if [ -n "$CS_FILES" ] || [ -n "$TS_FILES" ] || [ -n "$PS_FILES" ]; then
-  HAS_CODE=true
-fi
-
-echo "=== Claude Code Task Quality Gate ==="
-echo "Changed files: $(echo "$CHANGED_FILES" | wc -l | xargs)"
-if [ -n "$CS_FILES" ]; then echo "  C# files:    $(echo "$CS_FILES" | wc -w)"; fi
-if [ -n "$TS_FILES" ]; then echo "  TS/TSX files: $(echo "$TS_FILES" | wc -w)"; fi
-if [ -n "$PS_FILES" ]; then echo "  PS1 files:   $(echo "$PS_FILES" | wc -w)"; fi
-if [ -n "$DOC_FILES" ]; then echo "  Doc files:   $(echo "$DOC_FILES" | wc -w)"; fi
-if [ -n "$OTHER_FILES" ]; then echo "  Other files: $(echo "$OTHER_FILES" | wc -w)"; fi
+echo "=== Claude Code Stop Quality Gate ==="
+echo "Changed files: ${#CHANGED[@]} (C#: ${#CS_FILES[@]}, TS: ${#TS_FILES[@]}, PS1: ${#PS_FILES[@]}, JSON: ${#JSON_FILES[@]})"
 echo ""
 
-# ============================================================================
-# Step 2: Non-code fast path
-# ============================================================================
-
-if [ "$HAS_CODE" = false ]; then
-  echo "[GATE: SKIP — no code changes (documentation/config only)]"
-  echo ""
-
-  # Validate JSON files if any were changed
-  if [ -n "$DOC_FILES" ]; then
-    JSON_FILES=""
-    for f in $DOC_FILES; do
-      case "$f" in
-        *.json) JSON_FILES="$JSON_FILES $f" ;;
-      esac
-    done
-    JSON_FILES=$(echo "$JSON_FILES" | xargs 2>/dev/null || true)
-
-    if [ -n "$JSON_FILES" ]; then
-      JSON_VALID=true
-      for jf in $JSON_FILES; do
-        if [ -f "$jf" ]; then
-          if command -v python3 &>/dev/null; then
-            if ! python3 -m json.tool "$jf" >/dev/null 2>&1; then
-              echo "[GATE: WARN — invalid JSON: $jf]"
-              JSON_VALID=false
-              CHECKS_WARNED=$((CHECKS_WARNED + 1))
-            fi
-          fi
-        fi
-      done
-      if [ "$JSON_VALID" = true ]; then
-        echo "[GATE: PASS — JSON files valid]"
-        CHECKS_PASSED=$((CHECKS_PASSED + 1))
-      fi
-      CHECKS_RUN=$((CHECKS_RUN + 1))
-    fi
-  fi
-
-  echo ""
-  echo "========================================"
-  echo "[QUALITY GATE: PASSED] (non-code task)"
-  echo "========================================"
-  exit 0
+# JSON validity (advisory) — always, cheap
+if [ "${#JSON_FILES[@]}" -gt 0 ] && [ -n "$PY" ]; then
+  for jf in "${JSON_FILES[@]}"; do
+    [ -f "$jf" ] || continue
+    if ! "$PY" -m json.tool "$jf" >/dev/null 2>&1; then warn "invalid JSON: $jf"; fi
+  done
 fi
 
-# ============================================================================
-# Step 3: Gate 1 — Build check (dotnet build -warnaserror)
-# ============================================================================
-
-if [ -n "$CS_FILES" ]; then
-  echo "--- Gate 1: Build Check ---"
-  CHECKS_RUN=$((CHECKS_RUN + 1))
-
-  if ! command -v dotnet &>/dev/null; then
-    echo "[GATE: SKIP — dotnet not found in PATH]"
-    CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1))
-  else
-    BUILD_OUTPUT=$(timeout 90 dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror --no-incremental 2>&1) || BUILD_EXIT=$?
-    BUILD_EXIT=${BUILD_EXIT:-0}
-
-    if [ "$BUILD_EXIT" -eq 0 ]; then
-      echo "[GATE: PASS — build clean (no warnings, no errors)]"
-      CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    else
-      echo "[GATE: FAIL — build errors or warnings detected]"
-      echo "$BUILD_OUTPUT" | grep -E "(error |warning )" | head -20
-      CHECKS_FAILED=$((CHECKS_FAILED + 1))
-      GATE_FAILED=1
-    fi
-  fi
-  echo ""
+if [ "${#CS_FILES[@]}" -eq 0 ] && [ "${#TS_FILES[@]}" -eq 0 ] && [ "${#PS_FILES[@]}" -eq 0 ]; then
+  NONCODE=true
 else
-  echo "--- Gate 1: Build Check ---"
-  echo "[GATE: SKIP — no C# files changed, skipping build]"
-  CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1))
-  CHECKS_RUN=$((CHECKS_RUN + 1))
+  NONCODE=false
+fi
+
+# ============================================================================
+# Gate 1 — Build each project that owns a changed .cs file (src/ and tests/)
+# ============================================================================
+if [ "${#CS_FILES[@]}" -gt 0 ]; then
+  echo "--- Gate 1: Build ---"
+  if ! command -v dotnet &>/dev/null; then
+    skip "dotnet not found in PATH"
+  else
+    declare -A PROJ_SEEN=()
+    PROJECTS=()
+    for f in "${CS_FILES[@]}"; do
+      case "$f" in src/*|tests/*) ;; *) continue ;; esac
+      proj=$(nearest_up "$(dirname "$f")" "*.csproj") || continue
+      if [ -z "${PROJ_SEEN[$proj]:-}" ]; then PROJ_SEEN[$proj]=1; PROJECTS+=("$proj"); fi
+    done
+    if [ "${#PROJECTS[@]}" -eq 0 ]; then
+      skip "no changed .cs file belongs to a project under src/ or tests/"
+    fi
+    for proj in "${PROJECTS[@]}"; do
+      if over_budget; then warn "time budget reached; not built: $proj"; continue; fi
+      run_capped 150 dotnet build "$proj" -nologo -v:q
+      BUILD_EXIT=$RUN_EXIT; BUILD_OUTPUT=$RUN_OUTPUT
+      CS_ERRORS=$(printf '%s\n' "$BUILD_OUTPUT" | grep -E ': error CS[0-9]+' | sort -u || true)
+      if [ "$BUILD_EXIT" -eq 0 ]; then
+        pass "build clean: $proj"
+      elif [ -n "$CS_ERRORS" ]; then
+        fail "compiler errors: $proj" "build"
+        printf '%s\n' "$CS_ERRORS" | head -20
+      elif [ "$BUILD_EXIT" -eq 124 ]; then
+        warn "build timed out (150s), not checked: $proj"
+      else
+        warn "build failed without compiler errors (file lock, restore or tool problem), not blocking: $proj"
+        printf '%s\n' "$BUILD_OUTPUT" | grep -E ': error ' | head -5 || true
+      fi
+    done
+  fi
   echo ""
 fi
 
 # ============================================================================
-# Step 4: Gate 2 — Lint changed files
+# Gate 2 — tsc --noEmit for each tsconfig that owns a changed .ts/.tsx
+#          Blocks only on errors located in a changed file.
 # ============================================================================
+if [ "${#TS_FILES[@]}" -gt 0 ]; then
+  echo "--- Gate 2: TypeScript typecheck ---"
+  declare -A TSC_SEEN=() TS_CHANGED=()
+  TSCONFIGS=()
+  for f in "${TS_FILES[@]}"; do
+    TS_CHANGED[$f]=1
+    case "$f" in src/*|tests/*) ;; *) continue ;; esac
+    [ -f "$f" ] || continue
+    cfg=$(nearest_up "$(dirname "$f")" "tsconfig.json") || continue
+    if [ -z "${TSC_SEEN[$cfg]:-}" ]; then TSC_SEEN[$cfg]=1; TSCONFIGS+=("$cfg"); fi
+  done
+  if [ "${#TSCONFIGS[@]}" -eq 0 ]; then
+    skip "no changed TS file belongs to a tsconfig under src/ or tests/"
+  fi
+  for cfg in "${TSCONFIGS[@]}"; do
+    if over_budget; then warn "time budget reached; not typechecked: $cfg"; continue; fi
+    # The package that owns the tsconfig must have its own dependencies installed. Otherwise a
+    # parent folder's tsc reports "cannot find module/namespace" for every import, and such an
+    # error in a changed file would block for a reason unrelated to the edit.
+    PKG=$(nearest_up "$(dirname "$cfg")" "package.json") || PKG=""
+    if [ -n "$PKG" ] && [ ! -d "$(dirname "$PKG")/node_modules" ]; then
+      skip "dependencies not installed for $(dirname "$PKG") (npm install there); not typechecked"; continue
+    fi
+    TSC=$(nearest_up "$(dirname "$cfg")" "node_modules/.bin/tsc" include-root) || TSC=""
+    if [ -z "$TSC" ]; then skip "typescript not installed for $cfg (run npm install there)"; continue; fi
+    run_capped 120 "$TSC" --noEmit --pretty false -p "$cfg"
+    TSC_EXIT=$RUN_EXIT; TSC_OUTPUT=$RUN_OUTPUT
+    if [ "$TSC_EXIT" -eq 0 ]; then pass "typecheck clean: $cfg"; continue; fi
+    if [ "$TSC_EXIT" -eq 124 ]; then warn "typecheck timed out (120s), not checked: $cfg"; continue; fi
+    IN_CHANGED=""; OTHER_COUNT=0
+    while IFS= read -r line; do
+      path=${line%%(*}; path=${path//\\//}
+      if [ -n "${TS_CHANGED[$path]:-}" ]; then IN_CHANGED+="$line"$'\n'; else OTHER_COUNT=$((OTHER_COUNT + 1)); fi
+    done < <(printf '%s\n' "$TSC_OUTPUT" | grep -E '^[^ ].*\([0-9]+,[0-9]+\): error TS[0-9]+' || true)
+    if [ -n "$IN_CHANGED" ]; then
+      fail "TypeScript errors in changed files: $cfg" "typecheck"
+      printf '%s' "$IN_CHANGED" | head -20
+    fi
+    if [ "$OTHER_COUNT" -gt 0 ]; then warn "$OTHER_COUNT TypeScript error(s) in unchanged files under $cfg (not blocking)"; fi
+    if [ -z "$IN_CHANGED" ] && [ "$OTHER_COUNT" -eq 0 ]; then
+      warn "tsc exited $TSC_EXIT without file errors, not blocking: $cfg"
+      printf '%s\n' "$TSC_OUTPUT" | head -5
+    fi
+  done
+  echo ""
+fi
 
-echo "--- Gate 2: Lint Changed Files ---"
-LINT_ISSUES=0
+# ============================================================================
+# Gate 3 — Lint changed files (advisory, capped)
+# ============================================================================
+# C#: `dotnet format whitespace --folder` (no MSBuild workspace, so seconds,
+# not minutes; full style/analyzer formatting stays with CI tier2 `format`).
+# ENDOFLINE is ignored: .gitattributes normalises line endings on commit.
+# TS: ESLint once per config folder, run from that folder with its own
+# eslint, so the package's config and plugins resolve. A timeout is "not
+# checked", never a finding (type-aware configs load the whole TS program).
+if [ "${#CS_FILES[@]}" -gt 0 ] || [ "${#TS_FILES[@]}" -gt 0 ]; then
+  echo "--- Gate 3: Lint (advisory) ---"
 
-# Lint C# files with dotnet format
-if [ -n "$CS_FILES" ]; then
-  if command -v dotnet &>/dev/null; then
-    for csfile in $CS_FILES; do
-      if [ -f "$csfile" ]; then
-        CHECKS_RUN=$((CHECKS_RUN + 1))
-        FORMAT_OUTPUT=$(timeout 10 dotnet format --include "$csfile" --verify-no-changes 2>&1) || FORMAT_EXIT=$?
-        FORMAT_EXIT=${FORMAT_EXIT:-0}
-        if [ "$FORMAT_EXIT" -ne 0 ]; then
-          echo "[GATE: WARN — format issue: $(basename "$csfile")]"
-          LINT_ISSUES=$((LINT_ISSUES + 1))
-          CHECKS_WARNED=$((CHECKS_WARNED + 1))
-        else
-          CHECKS_PASSED=$((CHECKS_PASSED + 1))
-        fi
-      fi
+  if command -v dotnet &>/dev/null && [ "${#CS_FILES[@]}" -gt 0 ]; then
+    declare -A FMT_FILES=()
+    for f in "${CS_FILES[@]}"; do
+      [ -f "$f" ] || continue
+      case "$f" in src/*|tests/*) ;; *) continue ;; esac
+      proj=$(nearest_up "$(dirname "$f")" "*.csproj") || continue
+      pdir=$(dirname "$proj")
+      FMT_FILES[$pdir]+="${f#"$pdir"/}"$'\n'
+    done
+    for pdir in "${!FMT_FILES[@]}"; do
+      if over_budget; then skip "time budget reached; C# whitespace not checked: $pdir"; continue; fi
+      mapfile -t rel < <(printf '%s' "${FMT_FILES[$pdir]}")
+      run_capped 60 dotnet format whitespace "$pdir" --folder --verify-no-changes --include "${rel[@]}"
+      FINDINGS=$(printf '%s\n' "$RUN_OUTPUT" | grep -E ': (error|warning) [A-Z]+:' | grep -v 'ENDOFLINE' | head -10 || true)
+      if [ "$RUN_EXIT" -eq 124 ]; then skip "C# whitespace check timed out (60s): $pdir"
+      elif [ -n "$FINDINGS" ]; then warn "C# whitespace findings in $pdir (run: dotnet format whitespace $pdir --folder)"; printf '%s\n' "$FINDINGS"
+      else pass "C# whitespace clean: $pdir"; fi
     done
   fi
-fi
 
-# Lint TypeScript files with ESLint
-if [ -n "$TS_FILES" ]; then
-  if command -v npx &>/dev/null; then
-    for tsfile in $TS_FILES; do
-      if [ -f "$tsfile" ]; then
-        CHECKS_RUN=$((CHECKS_RUN + 1))
-        ESLINT_OUTPUT=$(timeout 10 npx eslint "$tsfile" --format compact 2>&1) || ESLINT_EXIT=$?
-        ESLINT_EXIT=${ESLINT_EXIT:-0}
-        if [ "$ESLINT_EXIT" -ne 0 ]; then
-          echo "[GATE: WARN — eslint issue: $(basename "$tsfile")]"
-          LINT_ISSUES=$((LINT_ISSUES + 1))
-          CHECKS_WARNED=$((CHECKS_WARNED + 1))
-        else
-          CHECKS_PASSED=$((CHECKS_PASSED + 1))
-        fi
-      fi
+  if [ "${#TS_FILES[@]}" -gt 0 ]; then
+    declare -A LINT_FILES=()
+    for f in "${TS_FILES[@]}"; do
+      [ -f "$f" ] || continue
+      case "$f" in src/*|tests/*) ;; *) continue ;; esac
+      cfg=""
+      for pat in "eslint.config.*" ".eslintrc.*" ".eslintrc"; do
+        c=$(nearest_up "$(dirname "$f")" "$pat") || continue
+        # keep the deepest match across patterns
+        if [ -z "$cfg" ] || [ "${#c}" -gt "${#cfg}" ]; then cfg="$c"; fi
+      done
+      [ -n "$cfg" ] || continue
+      cdir=$(dirname "$cfg")
+      LINT_FILES[$cdir]+="${f#"$cdir"/}"$'\n'
+    done
+    if [ "${#LINT_FILES[@]}" -eq 0 ]; then skip "no ESLint config covers the changed TS files"; fi
+    for cdir in "${!LINT_FILES[@]}"; do
+      if over_budget; then skip "time budget reached; ESLint not run: $cdir"; continue; fi
+      ESLINT=$(nearest_up "$cdir" "node_modules/.bin/eslint" include-root) || ESLINT=""
+      if [ -z "$ESLINT" ]; then skip "eslint not installed for $cdir (run npm install there)"; continue; fi
+      ESLINT_ABS="$(cd "$(dirname "$ESLINT")" && pwd)/eslint"
+      mapfile -t rel < <(printf '%s' "${LINT_FILES[$cdir]}")
+      # Default "stylish" output: the "compact" formatter left ESLint core in v9
+      # (every `--format compact` call exited 2 before 2026-11-09).
+      run_capped 90 in_dir "$cdir" "$ESLINT_ABS" "${rel[@]}"
+      FINDINGS=$(printf '%s\n' "$RUN_OUTPUT" | grep -E '^[[:space:]]+[0-9]+:[0-9]+[[:space:]]+(error|warning)[[:space:]]' | grep -v 'File ignored because' | head -10 || true)
+      if [ "$RUN_EXIT" -eq 124 ]; then skip "ESLint timed out (90s), not checked: $cdir"
+      elif [ -n "$FINDINGS" ]; then warn "ESLint findings in $cdir"; printf '%s\n' "$RUN_OUTPUT" | grep -E '^[[:space:]]+[0-9]+:[0-9]+[[:space:]]+(error|warning)[[:space:]]|^[A-Za-z]:|^/' | head -20 || true
+      elif [ "$RUN_EXIT" -eq 0 ] || [ "$RUN_EXIT" -eq 1 ]; then pass "ESLint clean: $cdir"
+      else skip "ESLint could not run (exit $RUN_EXIT) in $cdir: $(printf '%s\n' "$RUN_OUTPUT" | grep -v -i 'MODULE_TYPELESS\|Reparsing\|eliminate this warning' | grep -m1 . || true)"; fi
     done
   fi
+  echo ""
 fi
 
-if [ "$LINT_ISSUES" -eq 0 ] && { [ -n "$CS_FILES" ] || [ -n "$TS_FILES" ]; }; then
-  echo "[GATE: PASS — lint clean]"
-elif [ "$LINT_ISSUES" -gt 0 ]; then
-  echo "[GATE: WARN — $LINT_ISSUES file(s) with lint issues]"
-elif [ -z "$CS_FILES" ] && [ -z "$TS_FILES" ]; then
-  echo "[GATE: SKIP — no lintable files changed]"
-  CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1))
-  CHECKS_RUN=$((CHECKS_RUN + 1))
-fi
-echo ""
-
 # ============================================================================
-# Step 5: Gate 3 — Architecture tests (only if .cs files changed)
+# Gate 4 — Architecture tests + retired x- project-prefix check
 # ============================================================================
+echo "--- Gate 4: Architecture ---"
 
-echo "--- Gate 3: Architecture Tests ---"
-
-# Fast project-archive-prefix check (no dotnet). Gate 3 skips when no .cs file changed, and the CI router
-# treats a projects/-only diff as docs-only, so a rename to projects/x-<slug> would otherwise reach no test
-# until a later unrelated PR. Covers staged, unstaged and untracked adds/renames in the session diff.
+# Fast project-archive-prefix check (no dotnet). The CI router treats a
+# projects/-only diff as docs-only, so a rename to projects/x-<slug> would
+# otherwise reach no test until a later unrelated PR.
 PROJECT_PATHS=$( { git diff --name-only -M --diff-filter=AR HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | grep -E '^projects/[xX]-' || true)
 if [ -n "$PROJECT_PATHS" ]; then
-  CHECKS_RUN=$((CHECKS_RUN + 1))
   if PREFIX_OUTPUT=$(printf '%s\n' "$PROJECT_PATHS" | sh scripts/quality/check-project-archive-prefix.sh 2>&1); then
-    echo "[GATE: PASS — no new x- project folders]"
-    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    pass "no new x- project folders"
   else
-    echo "[GATE: FAIL — new project folder with the retired x- archive prefix]"
-    echo "$PREFIX_OUTPUT" | head -10
-    CHECKS_FAILED=$((CHECKS_FAILED + 1))
-    GATE_FAILED=1
+    fail "new project folder with the retired x- archive prefix" "project prefix"
+    printf '%s\n' "$PREFIX_OUTPUT" | head -10
   fi
 fi
 
-CHECKS_RUN=$((CHECKS_RUN + 1))
-
-if [ -z "$CS_FILES" ]; then
-  echo "[GATE: SKIP — no C# files changed, skipping architecture tests]"
-  CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1))
+if [ "${#CS_FILES[@]}" -eq 0 ]; then
+  skip "no C# files changed, skipping architecture tests"
+elif ! command -v dotnet &>/dev/null; then
+  skip "dotnet not found in PATH"
+elif over_budget; then
+  warn "time budget reached; architecture tests not run"
+elif [ -n "$FAILED_GATES" ] && [[ "$FAILED_GATES" == *build* ]]; then
+  skip "build failed; architecture tests not run"
 else
-  if ! command -v dotnet &>/dev/null; then
-    echo "[GATE: SKIP — dotnet not found in PATH]"
-    CHECKS_SKIPPED=$((CHECKS_SKIPPED + 1))
+  run_capped 150 dotnet test tests/Spaarke.ArchTests/ -nologo
+  ARCH_EXIT=$RUN_EXIT; ARCH_OUTPUT=$RUN_OUTPUT
+  if [ "$ARCH_EXIT" -eq 0 ]; then
+    pass "architecture tests passed"
+  elif [ "$ARCH_EXIT" -eq 124 ]; then
+    warn "architecture tests timed out (150s), not checked"
+  elif printf '%s\n' "$ARCH_OUTPUT" | grep -Eq 'Failed:[[:space:]]*[1-9]|: error CS[0-9]+'; then
+    fail "architecture tests failed" "arch tests"
+    printf '%s\n' "$ARCH_OUTPUT" | grep -E '^[[:space:]]*Failed |Failed:|: error CS[0-9]+' | head -15 || true
   else
-    ARCH_OUTPUT=$(timeout 90 dotnet test tests/Spaarke.ArchTests/ --no-build 2>&1) || ARCH_EXIT=$?
-    ARCH_EXIT=${ARCH_EXIT:-0}
-
-    if [ "$ARCH_EXIT" -eq 0 ]; then
-      echo "[GATE: PASS — architecture tests passed]"
-      CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    else
-      # If --no-build fails (no prior build), retry with build
-      if echo "$ARCH_OUTPUT" | grep -qi "build"; then
-        ARCH_OUTPUT=$(timeout 90 dotnet test tests/Spaarke.ArchTests/ 2>&1) || ARCH_EXIT=$?
-        ARCH_EXIT=${ARCH_EXIT:-0}
-        if [ "$ARCH_EXIT" -eq 0 ]; then
-          echo "[GATE: PASS — architecture tests passed (with build)]"
-          CHECKS_PASSED=$((CHECKS_PASSED + 1))
-        else
-          echo "[GATE: FAIL — architecture tests failed]"
-          echo "$ARCH_OUTPUT" | grep -E "(Failed|Error)" | head -10
-          CHECKS_FAILED=$((CHECKS_FAILED + 1))
-          GATE_FAILED=1
-        fi
-      else
-        echo "[GATE: FAIL — architecture tests failed]"
-        echo "$ARCH_OUTPUT" | grep -E "(Failed|Error)" | head -10
-        CHECKS_FAILED=$((CHECKS_FAILED + 1))
-        GATE_FAILED=1
-      fi
-    fi
+    warn "architecture test run failed for a non-test reason (lock, restore or tool problem), not blocking"
+    printf '%s\n' "$ARCH_OUTPUT" | grep -E ': error ' | head -5 || true
   fi
 fi
 echo ""
 
 # ============================================================================
-# Step 6: Summary
+# Summary and verdict
 # ============================================================================
+echo "=== Quality Gate: passed $CHECKS_PASSED, failed $CHECKS_FAILED, warnings $CHECKS_WARNED, skipped $CHECKS_SKIPPED (${SECONDS}s) ==="
 
-echo "========================================"
-echo "=== Quality Gate Summary ==="
-echo "  Checks run:     $CHECKS_RUN"
-echo "  Passed:         $CHECKS_PASSED"
-echo "  Failed:         $CHECKS_FAILED"
-echo "  Warnings:       $CHECKS_WARNED"
-echo "  Skipped:        $CHECKS_SKIPPED"
-echo "========================================"
-
-if [ "$GATE_FAILED" -eq 1 ]; then
-  echo "[QUALITY GATE: FAILED]"
-  echo "========================================"
-  exit 1
-else
-  echo "[QUALITY GATE: PASSED]"
-  echo "========================================"
+if [ "$CHECKS_FAILED" -eq 0 ]; then
+  if [ "$NONCODE" = true ]; then echo "[QUALITY GATE: PASSED] (non-code changes)"; else echo "[QUALITY GATE: PASSED]"; fi
   exit 0
 fi
+
+if [ "$STOP_ACTIVE" = true ]; then
+  # Already blocked once this stop: never loop. Tell the user instead.
+  echo "[QUALITY GATE: FAILED] (not blocking again: already blocked once)"
+  printf '{"systemMessage":"Stop quality gate still failing (%s) after one retry. Run: bash scripts/quality/task-quality-gate.sh"}\n' "$FAILED_GATES" >&3
+  exit 0
+fi
+
+echo "[QUALITY GATE: FAILED] ($FAILED_GATES)"
+if [[ "$FAILED_GATES" == *typecheck* ]]; then
+  echo "Note: errors about a sibling @spaarke/* package's exports can mean its local dist/ is stale"
+  echo "(tsconfig paths point at ../<Package>/dist): run 'npm run build' in that package, then recheck."
+fi
+echo "Fix the failures above before finishing. If a failure was not caused by this session's changes"
+echo "(another session's edits in a shared checkout, or a break already on the branch), say so plainly"
+echo "in your reply and stop: the gate blocks only once per stop."
+exit 2

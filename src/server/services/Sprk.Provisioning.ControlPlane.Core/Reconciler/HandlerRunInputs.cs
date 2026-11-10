@@ -154,6 +154,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.RedisEndpoint)),     // T242: Redis__Endpoint
                 RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
                 RunInput.Output(nameof(InterStepState.StorageBlobEndpoint)),   // T186 follow-up: SessionFileStore__BlobEndpoint
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId)),   // T266: Ontology__Writer__ManagedIdentityClientId
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
@@ -204,6 +205,8 @@ public static class HandlerRunInputs
                 // T259 (ISS-010): the customer's business unit H10 created — H7b checks it is a direct child of the root
                 // and that both application users are in it (INCOMING-145 §6 T1/T3).
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
+                // T266 S24 (#2605): the ontology writer's App User (H10) — role and the two writer profiles.
+                RunInput.Output(nameof(InterStepState.OntologyWriterSystemUserId)),
             ],
             [HandlerIds.H8] =
             [
@@ -237,6 +240,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId)),   // T266: the writer's App User
+                RunInput.Output(nameof(InterStepState.OntologyWriterObjectId)),   // T266: its azureactivedirectoryobjectid
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H11] =
@@ -290,6 +295,10 @@ public static class HandlerRunInputs
                 // T265 (#2265): T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit
                 // (absent → T7 Failed, not an H13 rejection).
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId), required: false),
+                // T266 (#2605): T7 checks both slots carry the writer's client id; T3 that the writer holds no Graph app role
+                // (absent → T7 / T3 Failed, not an H13 rejection).
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId), required: false),
+                RunInput.Output(nameof(InterStepState.OntologyWriterObjectId), required: false),
             ],
             [HandlerIds.H14] =
             [

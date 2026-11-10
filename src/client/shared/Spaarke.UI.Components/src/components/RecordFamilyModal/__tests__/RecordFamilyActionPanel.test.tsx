@@ -21,10 +21,16 @@ import {
   buildPushRequest,
   groupRowsByTable,
   isNoProfileRefusal,
+  parsePushResponse,
   PUSH_FAILED_TEXT,
   PUSH_PATH,
+  pushErrorText,
   pushFieldMappings,
   PushRequestError,
+  SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+  SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
+  SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+  sourceRuleSkipText,
 } from '../recordFamilyPushService';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
@@ -309,6 +315,114 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
     expect(screen.getByText(refused)).toBeTruthy();
     expect(screen.getAllByText('Hearing B').length).toBeGreaterThan(0);
+  });
+
+  // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a record owned
+  // by that source's isolation owner; a record that is not is returned with a stable code, on the preview and the apply.
+  it('says, on the preview, that fields from a secure source are not copied to a record, and does not list it', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(await screen.findByText('1 record will not be updated because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('says why when every record the preview found is kept from the push by the source rule', async () => {
+    const { fetchFn } = pushServer({
+      preview: () =>
+        previewBody([], {
+          errors: [{ recordId: EVENT_A, error: 'server text', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE }],
+        }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        '1 record will not be updated because it could not be checked whether the source record is secure. Try again later.'
+      )
+    ).toBeTruthy();
+    expect(screen.getByText('Nothing to update among the records that can be updated.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('already have the current values');
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the source rule's wording, never a generic error, for a record the apply did not write", async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(screen.getByText('No fields were copied to this record because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
+    expect(screen.queryByText('server text')).toBeNull();
+  });
+
+  // UAC-r2 (a): a push from a secure source never changes what a record is filed under; such a record is not written at all.
+  it("says, on the preview, that a record's filing can't be changed by a push from a secure record, and does not list it", async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [
+            { recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+          ],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        "1 record will not be updated because its filing can't be changed by a push from a secure record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('shows the re-file wording, never a generic error, for a record the apply did not write', async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No fields were copied to this record because its filing can't be changed by a push from a secure record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
   });
 
   it.each([403, 404, 500])('shows one fixed text, and no cause, when the preview answers %i', async status => {
@@ -625,5 +739,55 @@ describe('recordFamilyPushService', () => {
       { table: 'sprk_event', ids: [EVENT_A, EVENT_B] },
       { table: 'sprk_invoice', ids: [INVOICE_A] },
     ]);
+  });
+
+  // Task 022 fix round 4: the mapping-source codes are read from the body and mapped to their wording.
+  it('reads the reason code of an entry and maps each source-rule code to its wording, else keeps the server text', () => {
+    const parsed = parsePushResponse({
+      success: true,
+      errors: [
+        { recordId: EVENT_A, error: 'server text A', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE },
+        { recordId: EVENT_B, error: 'server text B', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE },
+        { recordId: EVENT_A, error: 'server text R', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+        { recordId: INVOICE_A, error: 'server text C' },
+        { recordId: MATTER, error: 'server text D', reasonCode: 'constructor' },
+      ],
+    });
+
+    expect(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).toBe('field_mapping.push.secure_source_refile_not_allowed');
+    expect(parsed.errors.map(e => e.reasonCode)).toEqual([
+      SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+      SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+      SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
+      undefined,
+      'constructor',
+    ]);
+    expect(parsed.errors.map(pushErrorText)).toEqual([
+      'No fields were copied to this record because the source record is secure.',
+      'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
+      "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
+      'server text C',
+      'server text D',
+    ]);
+  });
+
+  // Task 022 fix round 4: each source-rule code skips the record whole; the preview counts say so, singular and plural.
+  it('counts the records each source-rule code keeps from the push, as records that will not be updated', () => {
+    const entry = (reasonCode: string) => ({ recordId: EVENT_A, error: 'x', reasonCode });
+    expect(
+      sourceRuleSkipText([
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+      ])
+    ).toEqual([
+      "1 record will not be updated because its filing can't be changed by a push from a secure record.",
+      '2 records will not be updated because the source record is secure.',
+      '3 records will not be updated because it could not be checked whether the source record is secure. Try again later.',
+    ]);
+    expect(sourceRuleSkipText([])).toEqual([]);
   });
 });

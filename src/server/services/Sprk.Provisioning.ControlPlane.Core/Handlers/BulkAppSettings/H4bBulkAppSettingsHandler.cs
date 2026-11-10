@@ -346,7 +346,8 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                     $"'{sourceKey}' from {source.Location}, which is absent or empty" +
                     (source.ProducerHandlerId is null
                         ? $" — supply it at intake ({source.Location})."
-                        : $" — {source.ProducerHandlerId} must complete before H4b.");
+                        : $" — {source.ProducerHandlerId} must complete before H4b. If {source.ProducerHandlerId} already " +
+                          "completed, the run predates this output and a resume does not re-run a completed handler: start a new run.");
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BulkAppSettingsRejectionCodes.PerEnvInputMissing, diagnostic, cancellationToken)
                     .ConfigureAwait(false);

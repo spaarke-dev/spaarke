@@ -52,6 +52,22 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task S23_TheRuntimeRoleGoesToInterStepStateSystemUserId_NotToTheAppRegistrationUser()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles.Keys.Should().BeEquivalentTo(new[] { dv.MiAppUser, dv.WriterAppUser },
+            "systemUserId is the managed identity's application user; (T266 S24) ontologyWriterSystemUserId is the writer's");
+        dv.UserRoles.Should().NotContainKey(dv.BffAppUser);
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+    }
+
+    [Fact]
     public async Task AbsentInviteCodeHash_IsRecordedInTheVerifiedGateEvidence_NotFailed()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);   // SpaarkeMaster 1.2.2.0: no sprk_externalinvitecodehash yet
@@ -290,6 +306,86 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task ARunCompletedUnderProcedureVersion5_DoesNotShortCircuit_AndAssignsTheOntologyServiceRole()
+    {
+        // An environment H7b configured before S23: the run row records the phase under the v5 key.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles[dv.MiAppUser].Remove(dv.OntologyRoleId);
+        dv.Writes.Clear();
+        var v5Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=5\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v5Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v5Hash);
+        dv.UserRoles[dv.MiAppUser].Should().Contain(dv.OntologyRoleId);
+        dv.Writes.Should().ContainSingle().Which.Should().StartWith("AssociateUserRole");
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion6_DoesNotShortCircuit_AndConfiguresTheOntologyWriter()
+    {
+        // An environment H7b configured before S24 (#2605): the run row records the phase under the v6 key, and the writer
+        // holds neither its role nor a profile membership.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles.Remove(dv.WriterAppUser);
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Clear();
+        dv.ProfileUsers[dv.OntologyWriterFirmReasonProfileId].Clear();
+        dv.Writes.Clear();
+        var v6Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=6\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v6Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v6Hash);
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.ProfileUsers[dv.OntologyWriterFirmReasonProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.Writes.Should().HaveCount(3);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task AMissingOntologyWriter_IsResumable_TellingTheOperatorToStartANewRun_AndWritesNothing(string? writer)
+    {
+        // A run whose H10 completed before task 266 has no writer App User; H7b reads its absence as Guid.Empty.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.InterStepState.OntologyWriterSystemUserId = writer;
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.OntologyWriterUnresolved);
+        failure.Diagnostic.Should().Contain("start a new run");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task DryRun_RecordsTheIdentityLinkMembershipsInThePlan()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
@@ -473,6 +569,7 @@ public sealed class H7bSecureRecordSetupHandlerTests
         run.InterStepState.BffAppRegSystemUserId = dv.BffAppUser.ToString();
         run.InterStepState.SystemUserId = dv.MiAppUser.ToString();
         run.InterStepState.CustomerBusinessUnitId = dv.CustomerUnitId.ToString();   // T259 (H10)
+        run.InterStepState.OntologyWriterSystemUserId = dv.WriterAppUser.ToString();  // T266 (H10)
         return run;
     }
 

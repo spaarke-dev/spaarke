@@ -796,6 +796,7 @@ public class FieldMappingPushAuthorizationContractTests
             // one, so the children the caller's query found exist here too (no core lookups stored).
             Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+            ArrangeSourceGateRead("sprk_matter");
             FieldMappings
                 .Setup(f => f.UpdateExistingRecordFieldsAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -892,6 +893,28 @@ public class FieldMappingPushAuthorizationContractTests
                     };
                 });
         }
+
+        /// <summary>
+        /// Task 022 fix round 4 (the mapping-source rule): the source's gate columns as the app-only read returns them — its
+        /// owner, and the secure flag on a root. By default an ordinary source: owned by a user, flag explicitly off.
+        /// </summary>
+        public void ArrangeSourceGateRead(string sourceTable, Microsoft.Xrm.Sdk.EntityReference? owner = null, bool? secureFlag = false)
+        {
+            Entities.Setup(e => e.RetrieveAsync(sourceTable, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                {
+                    var row = new Microsoft.Xrm.Sdk.Entity(table, id)
+                    {
+                        ["ownerid"] = owner ?? new Microsoft.Xrm.Sdk.EntityReference("systemuser", SourceOwnerUserId),
+                    };
+                    if (secureFlag is { } flag)
+                        row["sprk_issecure"] = flag;
+                    return row;
+                });
+        }
+
+        /// <summary>The user who owns the source in <see cref="ArrangeSourceGateRead"/> by default.</summary>
+        public static readonly Guid SourceOwnerUserId = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
 
         /// <summary>Every child PATCH, with a copy of its payload.</summary>
         public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();

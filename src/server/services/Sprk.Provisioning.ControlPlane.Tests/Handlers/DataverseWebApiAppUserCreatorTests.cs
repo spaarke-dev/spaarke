@@ -17,6 +17,8 @@
 //       azureactivedirectoryobjectid, auth-v4 §10.4) — never the root;
 //     - the role is the copy IN the customer unit (filter by its id), associated once; a held role writes nothing;
 //     - an existing App User in another unit → InForeignBusinessUnit, nothing written (never moved);
+//     - T266: an existing App User whose azureactivedirectoryobjectid is not the requested principal id (empty, or the
+//       client id) is a Failure, nothing written (never rewritten); a matching one is adopted;
 //     - a role missing from the unit, or ambiguous, is a Failure (no name-only fallback that could pick another unit's copy).
 // -----------------------------------------------------------------------------
 
@@ -144,6 +146,33 @@ public sealed class DataverseWebApiAppUserCreatorTests
         associate.Body.Should().Contain($"https://spaarke-acme.crm.dynamics.com/api/data/v9.2/roles({RoleCopy})");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(CustomerBu)]
+    public async Task AppUser_NoRoleRequested_CreatesOrAdoptsTheUserOnly_AndTouchesNoRole(string? existingUnit)
+    {
+        // T266 (#2605): the ontology writer's App User — H10 associates no role; H7b S24 owns its one role.
+        var http = AppUserFake(existingUnit: existingUnit, roleRows: 1, roleHeld: false);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId) with { SecurityRoleName = null }, CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests.Should().NotContain(r => r.Uri.Contains("/roles?"), "no role is looked up");
+        http.Requests.Should().NotContain(r => r.Uri.Contains("systemuserroles_association"), "no role is read or associated");
+        http.Requests.Count(r => r.Method == HttpMethod.Post).Should().Be(existingUnit is null ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task AppUser_ABlankRoleName_IsACallerBug_NotNoRole()
+    {
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: false);
+
+        var act = () => Creator(http).EnsureAppUserAsync(Request() with { SecurityRoleName = " " }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Requests.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task AppUser_ExistingInTheCustomerUnit_WithTheRole_WritesNothing()
     {
@@ -167,6 +196,32 @@ public sealed class DataverseWebApiAppUserCreatorTests
 
         outcome.Should().Be(new DataverseAppUserCreationOutcome.InForeignBusinessUnit(SystemUser, Guid.Parse(unit)));
         http.Requests.Should().ContainSingle("nothing after the read: no role, no PATCH");
+    }
+
+    [Fact]
+    public async Task AppUser_ExistingWithTheRequestedObjectId_IsAdopted()
+    {
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: true, existingObjectId: UamiObjectId.ToUpperInvariant());
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests[0].Uri.Should().Contain("azureactivedirectoryobjectid");
+    }
+
+    [Theory]
+    [InlineData(AppId)]   // the trap: the client id where the principal id belongs
+    [InlineData(null)]    // never set
+    public async Task AppUser_ExistingWithAnotherObjectId_IsAFailure_NothingWritten(string? heldObjectId)
+    {
+        // auth-v4 §10.4 on adoption (T266 review): such a row passes every existence check yet fails every app-only call.
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: false, existingObjectId: heldObjectId);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId) with { SecurityRoleName = null }, CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseAppUserCreationOutcome.Failure>().Which.Diagnostic
+            .Should().Contain(UamiObjectId).And.Contain(heldObjectId ?? "(empty)");
+        http.Requests.Should().ContainSingle("nothing after the read: no PATCH, no role");
     }
 
     [Theory]
@@ -193,7 +248,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
             ? Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""")
             : Json($$"""{"value":{{namedRows}}}"""));
 
-    private static FakeHttp AppUserFake(string? existingUnit, int roleRows, bool roleHeld)
+    private static FakeHttp AppUserFake(string? existingUnit, int roleRows, bool roleHeld, string? existingObjectId = UamiObjectId)
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
@@ -207,7 +262,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
             {
                 return Json(existingUnit is null
                     ? """{"value":[]}"""
-                    : $$"""{"value":[{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{existingUnit}}"}]}""");
+                    : $$"""{"value":[{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{existingUnit}}","azureactivedirectoryobjectid":{{(existingObjectId is null ? "null" : $"\"{existingObjectId}\"")}}}]}""");
             }
             if (uri.Contains("/roles?"))
             {

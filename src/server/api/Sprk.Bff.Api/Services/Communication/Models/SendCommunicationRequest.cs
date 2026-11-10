@@ -149,4 +149,14 @@ public sealed record SendCommunicationRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     internal ServerSendOptions? ServerSend { get; init; }
+
+    /// <summary>
+    /// Ontology task 176 (D-216; review round 2 item 7): when the send's find-or-create step CREATES the email's thread, it is
+    /// created Private (<see cref="ThreadResolutionRequest.CreatePrivate"/>), so a follow-up posted into it with the composer's
+    /// External default is still stored internal-only. Only the budget inquiry send sets it (<c>InquiryEmailSender.Build</c>).
+    /// No effect on a send into an existing thread. Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>:
+    /// server code sets it, a request body never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal bool CreateThreadPrivate { get; init; }
 }

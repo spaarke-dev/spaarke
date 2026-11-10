@@ -5,6 +5,10 @@
  * after its write succeeds, so wizard-created assignees get access at creation (owner R3 "immediate"), and a failed sync
  * call is logged and never fails the wizard (the reconciliation job is the safety net). The body carries ONLY the record
  * — the server reads the subjects from the record itself.
+ *
+ * Since the work assignment (ontology task 046), the matter (field-mapping-server-write-path-r1 task 021) and the project
+ * (task 022) are created through the BFF child-records route, none of the three wizard services calls the sync route:
+ * the server's root create runs the pass. The cases below pin that no call is made.
  */
 
 import { syncAssignedAccess, ASSIGNED_ACCESS_SYNC_PATH } from '../assignedAccessSync';
@@ -155,22 +159,29 @@ describe('the client writers call the sync route after their create (criterion 1
     isSecure: false,
   };
 
-  it('Create Project: syncs a standard project at create', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
+  // Task 022: the project is created through the BFF child-records route, a ROOT create, so the server owns the
+  // Assigned * grant exactly as for the matter (the maker's share inline, the full pass queued, tasks 049/049b; a
+  // secure-from-creation project's pass waits for the securing). The Create Project wizard no longer calls the sync route.
+  const PROJECT_ROUTE = `${BFF}/api/v1/child-records/sprk_project`;
+  const projectFetch = (): jest.Mock =>
+    jest.fn(async (url: string) => (url.startsWith(PROJECT_ROUTE) ? ok({ id: CREATED }) : ok()));
 
-    const result = await new ProjectService(dataService(), fetchMock, BFF).createProject(projectForm);
+  it.each([false, true])(
+    'Create Project: does NOT call the sync route -- the server grants the Assigned * access from the create (secure: %s)',
+    async isSecure => {
+      const fetchMock = projectFetch();
 
-    expect(result.success).toBe(true);
-    expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'project', recordId: CREATED } }]);
-  });
+      const result = await new ProjectService(dataService(), fetchMock, BFF).createProject({
+        ...projectForm,
+        assignedAttorneyId: 'att-guid-1',
+        isSecure,
+      });
 
-  it('Create Project: a project about to be SECURED is not synced at create (the wizard syncs after provisioning)', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
-
-    await new ProjectService(dataService(), fetchMock, BFF).createProject({ ...projectForm, isSecure: true });
-
-    expect(syncCalls(fetchMock)).toEqual([]);
-  });
+      expect(result.success).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith(PROJECT_ROUTE))).toBe(true);
+      expect(syncCalls(fetchMock)).toEqual([]);
+    }
+  );
 
   // Ontology task 046 (D-21; uac-r2 D-113): the work assignment is created through POST /api/v1/child-records/
   // sprk_workassignment, which materializes the Assigned-To access INLINE on the server (ChildRecordEndpoints

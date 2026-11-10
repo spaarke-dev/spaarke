@@ -357,14 +357,45 @@ public sealed class SecureChildShareSynchronizer
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (review pass 3): this environment's Secure Record owner team as
-    /// <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/> answers it — the
-    /// id, or none (no Secure Record business unit or team) with a refusal when it is ambiguous — for a caller that must
-    /// tell "not the Secure team" from "the Secure team cannot be told" (Repair's mapping-source gate fails closed on the
-    /// latter). <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
+    /// field-mapping-server-write-path-r1 task 016 (review pass 3), task 022 fix round 6: this environment's Secure Record
+    /// owner team for the mapping-source copy gate (<see cref="ResolveSecureOwnerTeamForCopyGateAsync"/>), for a caller that
+    /// must tell "not the Secure team" from "the Secure team cannot be told" (the gate fails closed on the latter).
+    /// <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
     /// </summary>
     internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
-        ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct);
+        ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct);
+
+    /// <summary>The refusal <see cref="ResolveSecureOwnerTeamForCopyGateAsync"/> gives when the Secure Record business unit
+    /// exists and holds no Secure Record owner team with the configured name.</summary>
+    internal const string SecureOwnerTeamNotFoundRefusal =
+        "the Secure Record business unit holds no Secure Record owner team with the configured name";
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022 fix round 6: the Secure Record owner team as the mapping-source copy gate
+    /// needs it, with "not set up" told apart from "set up but not found" — the rule the ownership resolver applies
+    /// (<c>RecordOwnershipResolver</c>: no Secure Record business unit means no secure owner; a business unit whose named
+    /// team is missing or not unique is a refusal):
+    /// <list type="bullet">
+    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/>
+    /// answers it;</item>
+    /// <item><c>(null, null)</c>: this environment has no Secure Record business unit, so no team can own a secure record;</item>
+    /// <item><c>(null, refusal)</c>: the business unit is ambiguous, or the named team is ambiguous, or the business unit
+    /// exists and holds no such team (<see cref="SecureOwnerTeamNotFoundRefusal"/>).</item>
+    /// </list>
+    /// A Dataverse fault propagates. The business unit is read a second time only when no team was found.
+    /// </summary>
+    internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamForCopyGateAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (team.TeamId is not null || team.Refusal is not null)
+            return team;
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return (null, "more than one business unit carries the Secure Record name");
+        return secureBu.Id is null ? (null, null) : (null, SecureOwnerTeamNotFoundRefusal);
+    }
 
     /// <summary>
     /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a

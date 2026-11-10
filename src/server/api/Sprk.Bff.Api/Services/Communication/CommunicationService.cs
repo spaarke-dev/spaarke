@@ -47,6 +47,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -112,8 +114,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
-        TrackingFooterGate? trackingFooterGate = null)
+        TrackingFooterGate? trackingFooterGate = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -188,7 +192,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
                 ? regarding.EntityName!
-                : $"{regarding.EntityType} {regarding.EntityId}";
+                : "a Spaarke record"; // never the logical name or the id
 
             var footerText = settings.MessageTemplate
                 .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
@@ -852,6 +856,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = CommunicationDirection.Outgoing,
                     Message = envelope,
                     AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                    // Ontology task 176 (D-216): the budget inquiry's new thread is created Private.
+                    CreatePrivate = request.CreateThreadPrivate,
                 },
                 ct);
         }
@@ -1569,21 +1575,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
             // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned). #2091: then
             // the step after a re-file (its mirror, what is filed under it, its gate Decision Records), never thrown.
+            // Task 054: a message joining a Direct thread gets its two participants in this same update.
             var assignment = await ThreadResolver.JoinThreadAsync(
                 _genericEntityService,
                 _ownership,
                 _scopeFactory,
                 _logger,
+                _recordShares,
                 communicationId,
                 threadId,
-                token => _genericEntityService.UpdateAsync(
-                    "sprk_communication",
-                    communicationId,
-                    new Dictionary<string, object>
-                    {
-                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-                    },
-                    token),
+                (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
+                    _genericEntityService, _logger, communicationId, threadId, alongside, token),
                 ct);
 
             _logger.LogInformation(
@@ -2893,6 +2895,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (RegardingLookupMap.TryGetValue(primary.EntityType, out var mapping))
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
+
+            // Ontology task 176 (D-216): a server-set secondary association the caller files the row under too (the budget
+            // inquiry's matter). Written BEFORE the stamp, so the inherited Access Permission and the owner question see it.
+            foreach (var also in associations.Skip(1).Where(a => a.AlsoRegarding && a.EntityId != Guid.Empty))
+            {
+                if (RegardingLookupMap.TryGetValue(also.EntityType, out var alsoMapping))
+                    communication[alsoMapping.LookupField] = new EntityReference(also.EntityType, also.EntityId);
+            }
 
             // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
             // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an

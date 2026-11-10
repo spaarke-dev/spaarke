@@ -69,6 +69,12 @@ public class RegardingPairTypeImpliesIdGuardTests
             @"\$""\{\s*(?:\w+\.)*" + shared + @"\s*\}(?:@odata\.bind)?""",
             @"\b(?:\w+\.)*" + shared + @"\b",
         };
+        // The per-table navigation property helper, interpolated with the bind (found in passing, task 045b: the type's key is
+        // case-sensitive, so a create that binds the type asks OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(table)).
+        // Only the QUALIFIED call is read: OwnedChildWrite's own unqualified call writes the planner's columns in a loop
+        // (the id with them, through a run-time key), a shape this guard documents as unseen.
+        if (string.Equals(column, TypeColumn, StringComparison.Ordinal))
+            keys.Add(@"\$""\{\s*OwnedChildWrite\s*\.\s*RegardingRecordTypeNavigationPropertyOf\([^)]*\)\s*\}@odata\.bind""");
         foreach (Match m in Regex.Matches(code, @"\bconst\s+string\s+(\w+)\s*=\s*""" + Regex.Escape(column) + @"(?:@odata\.bind)?""\s*;",
                      RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             keys.Add(@"\b" + Regex.Escape(m.Groups[1].Value) + @"\b");
@@ -174,6 +180,8 @@ public class RegardingPairTypeImpliesIdGuardTests
         Assert.Single(Scan("""writer.WriteString("sprk_regardingrecordtype@odata.bind", path);""").Problems);
         Assert.Single(Scan("""extra[SecureRootInheritance.PairTypeColumn] = r;""").Problems);
         Assert.Single(Scan("""payload[$"{RegardingRecordType.EventRecordTypeNavigationProperty}@odata.bind"] = path;""").Problems);
+        Assert.Single(Scan("""payload[$"{OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(Table)}@odata.bind"] = path;""").Problems);
+        Assert.Empty(Scan("""written[$"{RegardingRecordTypeNavigationPropertyOf(table)}@odata.bind"] = path;""").Problems); // the documented unseen shape
         Assert.Single(Scan("""
             private const string RegardingTypeField = "sprk_regardingrecordtype";
             void M() { entity[RegardingTypeField] = r; }

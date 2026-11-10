@@ -50,7 +50,7 @@
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
 | 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code done and merged into the work branch 2026-11-08 (deafbd328c; `task/fm-021` ffd2336afc). NFR-02 re-measure r3 +1288 ms; owner: the verdict is taken in UAT. Left: next PR to master, then UAC-r2 deploys the wizard (owner go) and the live check |
-| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔄 code + fix round 1 on `task/fm-022` (7f821892ef); fix round 2 (a secure source maps only into a row owned by its isolation owner) running on `task/fm-022-2`; UAC-r2 reviews before merge |
+| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | ✅ on the work branch (merge 10655f4dfe, `task/fm-022-6` 152ba139c9; rounds 1–6, two adversarial passes, UAC-r2 OK 2026-11-09). Not yet on master. K4 → DI-024 #2648 |
 | 022b | [Mapping from a Restricted source; document access permission set in the create](022b-restricted-mapping-source.poml) | FR-16, FR-08 | opus / high | FULL | W3-wizards | 022 round 2 | 🔲 split from 022 round 2 (UAC-r2 2026-11-08); UAC-r2 reviews |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
 | 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
@@ -83,7 +83,7 @@
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
 | 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 (033 dropped; its Repair metadata-reader wiring is in scope here) | 🔄 split into 052a–e. 052a ✅ on master via #2629. Owner: exclude task and account; contacts go to the `ExternalAccess:CustomerBusinessUnitId` default team (fail closed), also for the chat contact create. 052b job waits on 032b-1 (shared gates); then 052c trigger, 052d report, 052e cascade design |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
-| 054 | [Direct 1:1 messages: owner team, BFF-only thread flags, existing-row move](054-direct-message-owner-team.poml) | FR-26 (owner ruling 2026-11-08) | opus / high | FULL | none | 060, 045b; UAC-r2 share side | 🔲 POML approved by UAC-r2 2026-11-08; parts 054a/b/c; live steps need the owner's go |
+| 054 | [Direct 1:1 messages: owner team, BFF-only thread flags, existing-row move](054-direct-message-owner-team.poml) | FR-26 (owner ruling 2026-11-08) | opus / high | FULL | none | 060, 045b; UAC-r2 share side | 🔄 054a piece 1 is in UAC-r2's 198. Piece 2 (`sprk_directrecipient` live on dev, plus the BFF stamp) is merged to the work branch (4605e234c8, UAC-r2 approved). Piece 3 is blocked on the owner's routing decision (the resolver-CREATE gap). 054b and 054c are not started, and their live steps need the owner's go |
 
 ## Phase 6 — W6 Standard, guards, docs, retirement
 

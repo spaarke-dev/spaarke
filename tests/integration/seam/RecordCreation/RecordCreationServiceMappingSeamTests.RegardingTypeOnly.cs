@@ -462,6 +462,51 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _user.Paths.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal), "no caller to read as");
     }
 
+    [Fact(DisplayName = "045a (PR #2659 review): a matter's standalone regarding type and number are kept as sent, as the caller and as the system principal")]
+    public async Task CreateAsync_AMatterWithAStandaloneRegardingType_KeepsTheTypeAndNumber_AsCallerAndSystem()
+    {
+        // A matter holds sprk_regardingrecordtype and sprk_regardingrecordnumber but no sprk_regardingrecordid: it has no pair to
+        // keep whole (OwnedChildWrite.RegardingPairTables), so step 4½ never fills or clears it.
+        TheRecordTypes();
+        var callerMatter = Request("sprk_matter", new Dictionary<string, object?>
+        {
+            ["sprk_mattername"] = "Smith v Jones",
+            [TypeBind] = $"/sprk_recordtype_refs({ProjectType:D})",
+            ["sprk_regardingrecordnumber"] = "PRJ-0042",
+        }, mapping: false);
+        var systemBody = new Dictionary<string, object?>
+        {
+            ["sprk_mattername"] = "Smith v Jones",
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = ProjectType },
+            ["sprk_regardingrecordnumber"] = "PRJ-0042",
+        };
+        var mapped = await DataverseWriteItemMapper.MapAsync(
+            _scripted, "sprk_matter", JsonSerializer.SerializeToElement(systemBody), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        var systemMatter = new RecordCreationRequest("sprk_matter", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+
+        var asCaller = await Service().CreateAsync(callerMatter, AsCaller(), CancellationToken.None);
+        var asSystem = await Service().CreateAsync(
+            systemMatter, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        foreach (var outcome in new[] { asCaller, asSystem })
+        {
+            outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+            outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.RegardingTypeClearedCode);
+        }
+
+        _creates.Should().HaveCount(2);
+        foreach (var create in _creates)
+        {
+            StringOf(create.Fields, TypeBind).Should().Be($"/sprk_recordtype_refs({ProjectType:D})", "the matter's type stands");
+            StringOf(create.Fields, "sprk_regardingrecordnumber").Should().Be("PRJ-0042", "the matter's number stands");
+            create.Fields.Should().NotContainKey(SecureRootInheritance.PairIdColumn, "a matter has no regarding id to fill");
+        }
+    }
+
     /// <summary>An event the caller files under (an intermediate), itself filed under the ordinary matter.</summary>
     private void WithTheTypeOnlyParentEvent()
     {

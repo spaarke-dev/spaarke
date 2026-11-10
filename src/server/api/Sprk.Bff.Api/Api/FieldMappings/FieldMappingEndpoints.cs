@@ -475,7 +475,9 @@ public static class FieldMappingEndpoints
         // Assigned-To classifier reads. Required: a host without them fails the request (500) instead of pushing without them.
         [FromServices] Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader familyReader,
         [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
-        [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership)
+        [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership,
+        // Task 022 fix round 4: the Secure Record owner team's configuration, for the mapping-source rule.
+        [FromServices] IConfiguration configuration)
     {
         logger.LogInformation(
             "Pushing field mappings. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}, TargetEntity={TargetEntity}, "
@@ -715,12 +717,17 @@ public static class FieldMappingEndpoints
                 entityService,
                 ct);
 
+            // Task 022 fix round 4 (the mapping-source rule): every value a push writes is copied from the source, so each child
+            // is asked, on the preview and on the apply, whether the source may be copied into it.
+            var sourceGate = FieldMappingPushSourceGate.For(
+                entityService, configuration, request.SourceEntity, request.SourceRecordId, logger);
+
             if (request.Preview)
             {
                 return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        selection.SkippedCount, isAssignedToColumn, refusedChildIds),
+                        selection.SkippedCount, isAssignedToColumn, sourceGate, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
@@ -754,6 +761,7 @@ public static class FieldMappingEndpoints
 
             // Step 4: For each child, apply mapping rules and update
             var (updatedCount, failedCount, skippedCount, errors, fieldResults) = await ApplyMappingsToChildRecordsAsync(
+                sourceGate,
                 dataverseService,
                 restamper,
                 rules,
@@ -766,7 +774,8 @@ public static class FieldMappingEndpoints
                 scopes,
                 rootFiling,
                 lookupBinds,
-                entityService);
+                entityService,
+                impersonatedQuery);
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1290,8 +1299,11 @@ public static class FieldMappingEndpoints
     /// </summary>
     /// <remarks>Internal (not private) so the test assembly can drive it directly: task 156 (the re-file cascade), and
     /// task 142's writer test, which asserts the inline Assigned-To trigger after a push that wrote a root's "Assigned *"
-    /// column (InternalsVisibleTo).</remarks>
+    /// column (InternalsVisibleTo).
+    /// <para>Task 022 fix round 4: <paramref name="sourceGate"/> is the mapping-source rule for the push's source. It is a
+    /// required, non-nullable parameter, so the compiler holds every caller to pass one.</para></remarks>
     internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
+        FieldMappingPushSourceGate sourceGate,
         IFieldMappingDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         FieldMappingRuleDto[] rules,
@@ -1304,7 +1316,8 @@ public static class FieldMappingEndpoints
         IServiceScopeFactory? scopes = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
-        IGenericEntityService? appOnlyEntities = null)
+        IGenericEntityService? appOnlyEntities = null,
+        IImpersonatedCommunicationQuery? callerQuery = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1321,26 +1334,10 @@ public static class FieldMappingEndpoints
                 childRecordIds.Select(id => new PushFieldMappingsError { RecordId = id, Error = writerOnly.Reason! }).ToArray(), []);
         }
 
-        // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
-        // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
-        // never asked for. Refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
-        // (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
-        if (lookupBinds is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
-        {
-            var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
-            foreach (var (rule, plan) in lookupBinds)
-            {
-                checkedBinds[rule] = plan.BindKey is { } bindKey
-                                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
-                                         rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
-                    ? LookupBindPlan.Refused(
-                        $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
-                        + "the lookup was not copied.")
-                    : plan;
-            }
-
-            lookupBinds = checkedBinds;
-        }
+        // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing (refused per rule).
+        // Task 022 fix round 5 (F1): decided by the one helper the preview calls too, so both ask the gate with one payload.
+        if (lookupBinds is not null)
+            lookupBinds = FieldMappingPushLookups.ConfineToNamedColumn(targetEntity, lookupBinds);
 
         foreach (var childRecordId in childRecordIds)
         {
@@ -1427,6 +1424,52 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a
+                    // row owned by that source's isolation owner (MappingSourceCopyGate, the one predicate), and a push from a
+                    // secure source never changes a child's filing (UAC-r2 (a)). A child either refuses, or whose answer cannot
+                    // be told, is not written at all; its entry carries the stable code.
+                    if (await sourceGate.RefusalForChildAsync(targetEntity, childRecordId, updatePayload, ct) is { } sourceRefusal)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = FieldMappingPushSourceGate.MessageFor(sourceRefusal),
+                            ReasonCode = sourceRefusal,
+                        });
+                        continue;
+                    }
+
+                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
+                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
+                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
+                    // caller has not read. Runs FIRST, before any re-file step (agreed with unified-access-control-r2, #2094).
+                    // Task 045b: and before the pair planner below, so a family row's refusal keeps its own code; the planner
+                    // never writes a lookup this guard decides on (only the pair and its display columns), so the decision is the
+                    // same. The filing gate below (work assignment, project — never a family table) stays after the planner.
+                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
+                        });
+                        continue;
+                    }
+
+                    // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
+                    // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
+                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
+                    // its display columns cleared; any other failed read fails this child.
+                    updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
+                        lookupsAreMapped: true,
+                        displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId));
+
                     // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
                     // whether that record is secure must be readable, or this record is not written (fail closed; a
                     // host without the gate refuses such a write too).
@@ -1452,22 +1495,6 @@ public static class FieldMappingEndpoints
                             });
                             continue;
                         }
-                    }
-
-                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
-                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
-                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
-                    // caller has not read. Runs FIRST, before any re-file step (agreed with unified-access-control-r2, #2094).
-                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
-                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
-                    {
-                        failed++;
-                        errors.Add(new PushFieldMappingsError
-                        {
-                            RecordId = childRecordId,
-                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
-                        });
-                        continue;
                     }
 
                     // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES

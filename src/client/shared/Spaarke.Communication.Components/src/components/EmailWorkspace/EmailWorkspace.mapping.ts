@@ -180,6 +180,40 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
   return filed;
 }
 
+/** The record's `sprk_regardingrecordid` (its denormalized primary regarding) as a cleaned GUID, or null. */
+function readRegardingRecordId(raw: RawCommunicationRecord): string | null {
+  const id = asNullableString(raw['sprk_regardingrecordid']);
+  return id ? cleanGuid(id) : null;
+}
+
+/**
+ * The associations a Reply / Reply All / Forward of this record inherits (ontology task 176, review round 3, R3-2).
+ *
+ * The send signs its tracking footer from `associations[0]` (the BFF's `ApplyTrackingFooterAsync`), and a reply to a
+ * forward has only that quoted token to come back by. So when the record has a denormalized PRIMARY regarding
+ * (`sprk_regardingrecordid`) that is one of its filed regarding lookups, that association goes FIRST — the typed lookup
+ * it matches supplies its type. A budget inquiry thread's primary is the service request: signing the matter (the first
+ * field in `COMMUNICATION_REGARDING_FIELDS`) instead filed the next reply matter-only, where it was lowered and visible to
+ * external contacts on the matter. Otherwise (no primary, or a primary that is none of the filed lookups) the filed order
+ * stands. Each association appears once. The global field order is unchanged (the pills and the review surface keep it).
+ */
+export function replyParentAssociations(
+  state: Pick<EmailWorkspaceRecordState, 'filedAssociations' | 'regardingRecordId'> | null | undefined
+): FiledAssociation[] {
+  const filed = state?.filedAssociations ?? [];
+  const primaryId = state?.regardingRecordId?.toLowerCase() ?? null;
+  const primary = primaryId ? filed.find(a => a.recordId.toLowerCase() === primaryId) : undefined;
+  const ordered = primary ? [primary, ...filed.filter(a => a !== primary)] : filed;
+
+  const seen = new Set<string>();
+  return ordered.filter(a => {
+    const key = `${a.entityType}:${a.recordId}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Envelope/association/tracking fields this workspace derives from one
  * `retrieveRecord` (no `$select`) call per selection.
@@ -207,6 +241,8 @@ export interface EmailWorkspaceRecordState {
   regardingRecordNumber: string | null;
   /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — human type label for the confirmed chip. */
   regardingRecordType: string | null;
+  /** `sprk_regardingrecordid` — the id of the record's denormalized PRIMARY regarding (cleaned GUID), or null. */
+  regardingRecordId: string | null;
   associationStatus: number | null;
   associationProvenanceJson: string | null;
   filedAssociations: FiledAssociation[];
@@ -233,6 +269,7 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
     regardingRecordType: asNullableString(
       raw['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue']
     ),
+    regardingRecordId: readRegardingRecordId(raw),
     associationStatus: asNullableNumber(raw['sprk_associationstatus']),
     associationProvenanceJson: asNullableString(raw['sprk_associationprovenance']),
     filedAssociations: readFiledAssociations(raw),
