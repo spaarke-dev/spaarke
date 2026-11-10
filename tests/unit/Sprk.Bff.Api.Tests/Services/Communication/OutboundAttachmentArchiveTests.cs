@@ -477,6 +477,39 @@ public class OutboundAttachmentArchiveTests
             "the copy stays associated to the communication");
     }
 
+    // ── ontology task 177 A3: the record link on a SECURE record's .eml changes neither its owner nor its container ─────
+
+    [Fact]
+    public async Task FiledToASecureMatter_TheLinkedEml_IsOwnedByTheSecureTeam_InTheSecureContainer()
+    {
+        var secureMatter = Guid.NewGuid();
+        var secureTeam = Guid.NewGuid();
+        var h = await BuildAsync([], (world, communicationId) =>
+        {
+            SecureMatter(world, secureMatter, "drive-secure-m9");
+            world.Rows[("sprk_communication", communicationId)] = new Entity("sprk_communication", communicationId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", secureMatter),
+            };
+        }, communicationFromWorld: true);
+        h.Ownership.TeamId = secureTeam;
+        h.Ownership.IsSecureOwner = true;
+
+        var response = await h.Sut.SendAsync(Request(SendMode.SharedMailbox) with
+        {
+            ArchiveToSpe = false,
+            Associations = [new CommunicationAssociation { EntityType = "sprk_matter", EntityId = secureMatter }],
+        });
+
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject.Entity;
+        eml.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(secureMatter, "linked to its secure matter");
+        eml.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(secureTeam,
+            "owned as task 146 owns the communication's content: the Secure team");
+        eml.GetAttributeValue<string>("sprk_graphdriveid").Should().Be("drive-secure-m9", "in the secure matter's own container");
+        h.EmlUploads.Should().ContainSingle().Which.DriveId.Should().Be("drive-secure-m9");
+    }
+
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static SendCommunicationRequest Request(SendMode sendMode, params SourceDocument[] documents) => new()

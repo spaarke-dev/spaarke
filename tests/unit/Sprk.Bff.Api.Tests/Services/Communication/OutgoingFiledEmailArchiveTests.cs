@@ -345,9 +345,10 @@ public class OutgoingFiledEmailArchiveTests
         var (emlEntity, emlId) = h.ArchivedEmls.Single();
         var communicationId = h.Communications.Single().Id;
 
-        // The document exactly as the send created it, with a record link on it as well: the communication leg alone decides.
+        // A3: the document exactly as the send created it, WITH the record link the send wrote (no stand-in): a contact with a
+        // grant on that matter reaches it through this link, and the communication leg alone decides whether it is shown.
         var document = ArchivedEmlNarrowing.AsStored(emlEntity, emlId);
-        document["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        document.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the send links the .eml to its matter");
 
         // The communication and its thread as Dataverse would answer the narrowing's app-only reads. A contact and a systemuser
         // flagged external are both "not an internal systemuser": the narrowing is the same decision for both.
@@ -355,10 +356,227 @@ public class OutgoingFiledEmailArchiveTests
         world.AddCommunication(communicationId, internalOnly, (int)threadPrivacy);
 
         var (shown, reason) = await ArchivedEmlNarrowing.ExternalAsync(document, world);
+        var shownOnTheInternalPlane = await ArchivedEmlNarrowing.InternalPlaneFlaggedExternalAsync(document, world);
 
-        shown.Should().Be(visible);
+        shown.Should().Be(visible, "the external plane (a contact with a grant on the linked matter)");
+        shownOnTheInternalPlane.Should().Be(visible, "the internal plane, for a systemuser flagged external");
         if (!visible)
             reason.Should().Be(DocumentNarrowingReason.CommunicationHidden);
+    }
+
+    [Fact]
+    public async Task InternalOnlyBudgetInquiryEml_LinkedToTheMatter_IsHiddenOnBothPlanes()
+    {
+        // Must not fire: the internal-only inquiry's .eml, linked by the send to the matter, never reaches an external caller.
+        var h = Build();
+        await h.Sut.SendAsync(Request(SendMode.SharedMailbox) with
+        {
+            IsInternalOnly = true,
+            Associations =
+            [
+                new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = ServiceRequestId },
+                Matter(MatterId) with { AlsoRegarding = true },
+            ],
+        });
+        var (emlEntity, emlId) = h.ArchivedEmls.Single();
+        var document = ArchivedEmlNarrowing.AsStored(emlEntity, emlId);
+        document.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
+
+        var world = new ArchivedEmlNarrowing.World();
+        world.AddCommunication(h.Communications.Single().Id, internalOnly: true, (int)ThreadPrivacyState.Open);
+
+        var (shown, reason) = await ArchivedEmlNarrowing.ExternalAsync(document, world);
+        shown.Should().BeFalse("a contact with a grant on the matter does not see an internal-only message's .eml");
+        reason.Should().Be(DocumentNarrowingReason.CommunicationHidden);
+        (await ArchivedEmlNarrowing.InternalPlaneFlaggedExternalAsync(document, world)).Should().BeFalse(
+            "nor does a systemuser flagged external");
+    }
+
+    // ── A3 (D-218, uac-r2 Option A): the archived .eml is linked to its record in its own create ──────────────────────
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task ArchivedEml_IsLinkedToItsMatter_InTheSameCreateAsItsCommunicationLink(SendMode mode)
+    {
+        var h = Build();
+
+        await h.Sut.SendAsync(Request(mode) with { Associations = [Matter(MatterId)] }, mode == SendMode.User ? UserContext() : null);
+
+        // One create carries both: the entity handed to CreateAsync holds the record link and the communication link.
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject.Entity;
+        var link = eml.GetAttributeValue<EntityReference>("sprk_matter");
+        link.Should().NotBeNull("an archived email shows in its record's Documents (D-218)");
+        link.LogicalName.Should().Be("sprk_matter");
+        link.Id.Should().Be(MatterId);
+        eml.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(h.Communications.Single().Id);
+        LinkColumnsOn(eml).Should().Equal(["sprk_matter"], "exactly one record link is written");
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task BudgetInquiryShape_ArchivedEml_IsLinkedToTheMatter(SendMode mode)
+    {
+        var h = Build();
+        var request = Request(mode) with
+        {
+            IsInternalOnly = true,
+            Associations =
+            [
+                new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = ServiceRequestId },
+                Matter(MatterId) with { AlsoRegarding = true },
+            ],
+        };
+
+        await h.Sut.SendAsync(request, mode == SendMode.User ? UserContext() : null);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject.Entity;
+        eml.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId,
+            "a service request has no document column, so the first regarding the map maps (the matter) is the link");
+        LinkColumnsOn(eml).Should().Equal(["sprk_matter"], "exactly one record link is written");
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task ServiceRequestOnly_ArchivedEml_HasNoRecordLink_AndIsNotRefreshed(SendMode mode)
+    {
+        var refresh = new DocumentRefreshProbe();
+        var h = Build(coreAncestors: refresh.Resolver);
+
+        await h.Sut.SendAsync(
+            Request(mode) with
+            {
+                Associations = [new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = ServiceRequestId }],
+            },
+            mode == SendMode.User ? UserContext() : null);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle("it is filed, so it is archived (D-217)").Subject;
+        LinkColumnsOn(eml.Entity).Should().BeEmpty("no regarding the document map maps means no link");
+        refresh.Documents.Should().NotContain(eml.Id, "a document with no record link has no parent to inherit from");
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task LinkedEml_ItsAccessPermissionIsRefreshedAfterTheCreate(SendMode mode)
+    {
+        var refresh = new DocumentRefreshProbe();
+        var h = Build(coreAncestors: refresh.Resolver);
+
+        await h.Sut.SendAsync(Request(mode) with { Associations = [Matter(MatterId)] }, mode == SendMode.User ? UserContext() : null);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject;
+        refresh.Documents.Should().Contain(eml.Id, "a linked document takes its record's Access Permission at once (I-16)");
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task LinkedEml_ARefreshThatFails_NeverFailsTheArchive(SendMode mode)
+    {
+        var refresh = new DocumentRefreshProbe(fails: true);
+        var h = Build(coreAncestors: refresh.Resolver);
+
+        var response = await h.Sut.SendAsync(
+            Request(mode) with { Associations = [Matter(MatterId)] }, mode == SendMode.User ? UserContext() : null);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject;
+        refresh.Documents.Should().Contain(eml.Id);
+        response.ArchivedDocumentId.Should().Be(eml.Id, "the reconciliation job corrects the value within its cycle");
+        response.ArchivalWarning.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(CommunicationDirection.Outgoing, true)]
+    [InlineData(CommunicationDirection.Incoming, false)]
+    public async Task OnDemandArchive_LinksAnOutgoingEmail_NeverAnIncomingOne(CommunicationDirection direction, bool linked)
+    {
+        var communicationId = Guid.NewGuid();
+        var h = Build(sourceCommunication: new Entity("sprk_communication", communicationId)
+        {
+            ["sprk_subject"] = "Filed earlier",
+            ["sprk_to"] = "recipient@example.com",
+            ["sprk_direction"] = new OptionSetValue((int)direction),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingrecordid"] = MatterId.ToString(),
+        });
+
+        var result = await h.Sut.ArchiveExistingAsync(communicationId, CancellationToken.None);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject;
+        result.ArchiveDocumentId.Should().Be(eml.Id);
+        if (linked)
+        {
+            LinkColumnsOn(eml.Entity).Should().Equal(["sprk_matter"],
+                "the on-demand archive of an outgoing email is linked from the communication's regarding");
+            eml.Entity.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
+        }
+        else
+        {
+            LinkColumnsOn(eml.Entity).Should().BeEmpty("an inbound email's archive is not linked by this path");
+        }
+    }
+
+    [Fact]
+    public void StageArchiveRecordLink_PrimaryWins_WhenTheMapMapsIt()
+    {
+        // The primary (a project) is not first in RegardingFieldMap order (the matter is), and still wins.
+        var projectId = Guid.NewGuid();
+        var communication = new Entity("sprk_communication", Guid.NewGuid())
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingproject"] = new EntityReference("sprk_project", projectId),
+            ["sprk_regardingrecordid"] = projectId.ToString(),
+        };
+        var document = new Entity("sprk_document");
+
+        CommunicationService.StageArchiveRecordLink(document, communication).Should().BeTrue();
+
+        LinkColumnsOn(document).Should().Equal(["sprk_project"]);
+        document.GetAttributeValue<EntityReference>("sprk_project").Id.Should().Be(projectId);
+    }
+
+    /// <summary>The record-association columns a document create may write (DocumentAssociationMap's columns), as written.</summary>
+    private static List<string> LinkColumnsOn(Entity document) =>
+        new[] { "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment", "sprk_relatedevent", "sprk_relatedtodo", "sprk_relatedcontact" }
+            .Where(document.Attributes.ContainsKey).ToList();
+
+    /// <summary>
+    /// A real <c>CoreAncestorResolver</c> whose reads record every <c>sprk_document</c> its Access Permission refresh reads (the
+    /// refresh reads the document before it decides), and can fail those reads.
+    /// </summary>
+    private sealed class DocumentRefreshProbe
+    {
+        public List<Guid> Documents { get; } = new();
+        public Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver Resolver { get; }
+
+        public DocumentRefreshProbe(bool fails = false)
+        {
+            var reads = new Mock<IGenericEntityService>(MockBehavior.Loose);
+            reads.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                {
+                    if (table == "sprk_document")
+                    {
+                        Documents.Add(id);
+                        if (fails)
+                            throw new InvalidOperationException("Dataverse unavailable");
+                    }
+
+                    return new Entity(table, id);
+                });
+            Resolver = new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+                reads.Object,
+                CoreAncestorResolverFixtures.ProbeReturning(
+                [
+                    .. CoreAncestorResolverFixtures.AllRootColumns,
+                    Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column,
+                    Sprk.Bff.Api.Services.Access.AccessInheritance.Column,
+                ]),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
+        }
     }
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -386,7 +604,8 @@ public class OutgoingFiledEmailArchiveTests
     };
 
     private static Harness Build(
-        Entity? sourceCommunication = null, string? optedOutMailbox = null, bool uploadFails = false, Entity? targetThread = null)
+        Entity? sourceCommunication = null, string? optedOutMailbox = null, bool uploadFails = false, Entity? targetThread = null,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? coreAncestors = null)
     {
         var options = new CommunicationOptions
         {
@@ -460,7 +679,7 @@ public class OutgoingFiledEmailArchiveTests
             BuildJobQueue(jobs),
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
-            CoreAncestorResolverFixtures.Inert(),
+            coreAncestors ?? CoreAncestorResolverFixtures.Inert(),
             new RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: SpeScopeFactoryStub.Create(spe.Object, SpeScopeFactoryStub.NonSecureContainerResolver()));

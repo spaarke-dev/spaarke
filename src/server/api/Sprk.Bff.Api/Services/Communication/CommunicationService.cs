@@ -265,7 +265,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             record = await _genericEntityService.RetrieveAsync(
                 "sprk_communication",
                 communicationId,
-                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
+                // Ontology task 177 A3: plus the regarding (its typed lookups and the primary's id), from which an outbound
+                // archive chooses its record link (StageArchiveRecordLink).
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid" }
+                    .Concat(Engine.RegardingFieldMap.AllRegardingFields).ToArray(),
                 ct);
         }
         catch (Exception ex)
@@ -343,7 +346,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Guid archiveDocumentId;
         try
         {
-            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct, emailDirection, requestedBy);
+            archiveDocumentId = await ArchiveToSpeAsync(
+                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record);
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
         {
@@ -2101,7 +2105,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         request, partialResponse, communicationId.Value, cancellationToken,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User),
                         sentAttachments: fileAttachments ?? [],
-                        sentSources: attachmentSources ?? []);
+                        sentSources: attachmentSources ?? [],
+                        filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
@@ -2447,7 +2452,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         request, partialResponse, communicationId.Value, ct,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId),
                         sentAttachments: fileAttachments ?? [],
-                        sentSources: attachmentSources ?? []);
+                        sentSources: attachmentSources ?? [],
+                        filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
@@ -3146,6 +3152,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// the document attachments; an attachment with no source document has no entry). The .eml carries their bytes, so it is
     /// created with their most restrictive own Access Permission (<see cref="EmbeddedSourcesAccessPermissionAsync"/>).
     /// </param>
+    /// <param name="filedCommunication">
+    /// Ontology task 177 A3 (D-218): the communication as written — the row the send created, or the row the on-demand archive
+    /// read — from whose regarding an OUTBOUND archive takes its record link (<see cref="StageArchiveRecordLink"/>). An inbound
+    /// archive is never linked here (its ingestion files it). Null: no link.
+    /// </param>
     private async Task<Guid> ArchiveToSpeAsync(
         SendCommunicationRequest request,
         SendCommunicationResponse partialResponse,
@@ -3154,7 +3165,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         int emailDirection = 100000001, // default Sent — send-path callers are always outbound
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
         IReadOnlyList<ChannelAttachment>? sentAttachments = null,
-        IReadOnlyList<OutboundAttachmentSource>? sentSources = null)
+        IReadOnlyList<OutboundAttachmentSource>? sentSources = null,
+        DataverseEntity? filedCommunication = null)
     {
         // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
         // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
@@ -3268,8 +3280,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_emaildirection"] = new OptionSetValue(emailDirection), // 100000001 Sent (default) / 100000000 Received
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
-        ApplyContentOwner(document, archiveOwner); // task 146
+        ApplyContentOwner(document, archiveOwner); // task 146 — unchanged by the record link below
         StageEmbeddedAttachmentNarrowing(document, embeddedNarrowing); // review F1b + uac-r2: in this same create
+
+        // Ontology task 177 A3 (D-218, uac-r2 Option A): an outbound archive is linked to the record its communication is
+        // filed to, in this same create, so it shows in that record's Documents. Inbound (on-demand re-archive) is not.
+        var linked = emailDirection == SentEmailDirection && StageArchiveRecordLink(document, filedCommunication);
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -3277,7 +3293,66 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             "Created sprk_document record for archived .eml | DocumentId: {DocumentId}, CommunicationId: {CommunicationId}",
             documentId, communicationId);
 
+        if (linked)
+            await RefreshLinkedArchiveAccessPermissionAsync(documentId, communicationId, ct);
+
         return documentId;
+    }
+
+    /// <summary>The archive document's <c>sprk_emaildirection</c> for a sent email (Received is 100000000).</summary>
+    private const int SentEmailDirection = 100000001;
+
+    /// <summary>
+    /// Ontology task 177 A3 (D-218, uac-r2 Option A): stages the archived .eml's record link onto its create row from the
+    /// communication as written: the primary regarding (the typed lookup whose id is <c>sprk_regardingrecordid</c>) when the
+    /// document association map maps its table, otherwise the first typed regarding lookup, in
+    /// <see cref="Engine.RegardingFieldMap.All"/> order, that it maps (a budget inquiry filed to a service request and its matter
+    /// links to the matter). <see cref="Spaarke.Dataverse.DocumentAssociationMap.TryApply(Microsoft.Xrm.Sdk.Entity, string?, Guid?)"/>
+    /// alone chooses the column and its target. No mappable regarding: nothing is written.
+    /// </summary>
+    /// <returns>Whether a link was written.</returns>
+    internal static bool StageArchiveRecordLink(DataverseEntity document, DataverseEntity? communication)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (communication is null)
+            return false;
+
+        var filed = Engine.RegardingFieldMap.All
+            .Select(m => (Table: m.EntityLogicalName, Id: communication.GetAttributeValue<EntityReference>(m.RegardingField)?.Id ?? Guid.Empty))
+            .Where(r => r.Id != Guid.Empty)
+            .ToList();
+        var primaryId = communication.GetAttributeValue<string>("sprk_regardingrecordid");
+        var primaryFirst = filed.Where(r => SameRecord(primaryId, r.Id.ToString())).Concat(filed);
+
+        foreach (var (table, id) in primaryFirst)
+        {
+            if (Spaarke.Dataverse.DocumentAssociationMap.TryApply(document, table, id))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Ontology task 177 A3: a linked archive takes its record's inherited Access Permission at once (I-16), as a created child
+    /// does (<c>RecordCreationService</c>'s after-create step, through <c>CoreAncestorRestamper</c>'s pass-through to this same
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RefreshInheritedAccessPermissionAsync"/>). The refresh keeps
+    /// max(own, inherited), so it never lowers an own narrowing the create wrote. A failure never fails the archive: it is
+    /// logged, and the secure-child reconciliation job decides the document within its cycle.
+    /// </summary>
+    private async Task RefreshLinkedArchiveAccessPermissionAsync(Guid documentId, Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            await _coreAncestors.RefreshInheritedAccessPermissionAsync("sprk_document", documentId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "The archived .eml's inherited Access Permission was not refreshed after it was linked to its record; the " +
+                "reconciliation job decides it within its cycle | DocumentId: {DocumentId}, CommunicationId: {CommunicationId}",
+                documentId, communicationId);
+        }
     }
 
     /// <summary>
