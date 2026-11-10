@@ -31,15 +31,18 @@ Describe 'the forms spec no longer carries sprk_sourcedocument (116)' {
         $cols | Should -Contain 'ownerid'
     }
 
-    It 'sprk_ruleset keeps its general section columns and the not-converted section' {
+    It 'sprk_ruleset keeps its general section columns' {
         $general = @($script:Spec['sprk_ruleset'].Sections | Where-Object { $_.Name -eq 'general' })[0].Cols
         $general | Should -Be @('sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'statuscode', 'ownerid')
-        @($script:Spec['sprk_ruleset'].Sections | ForEach-Object { $_.Name }) | Should -Contain 'notconverted'
     }
 
     It 'sprk_ratecard keeps its general section columns and the rates subgrid' {
         $general = @($script:Spec['sprk_ratecard'].Sections | Where-Object { $_.Name -eq 'general' })[0].Cols
         $general | Should -Be @('sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid')
         $script:Spec['sprk_ratecard'].Subgrids[0].Target | Should -Be 'sprk_ratecardrate'
+    }
+    It 'sprk_ruleset has no section bound to sprk_notconverted, which nothing writes since 116 (fix round 1)' {
+        @($script:Spec['sprk_ruleset'].Sections | ForEach-Object { $_.Name }) | Should -Not -Contain 'notconverted'
+        @($script:Spec['sprk_ruleset'].Sections | ForEach-Object { $_.Cols }) | Should -Not -Contain 'sprk_notconverted'
     }
 }
