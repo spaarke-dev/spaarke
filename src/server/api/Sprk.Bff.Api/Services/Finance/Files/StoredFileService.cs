@@ -370,10 +370,12 @@ public sealed class StoredFileService
 
         try
         {
+            // Task 116 fix round 2: the flip runs on CancellationToken.None. A cancelled request must not see a committed flip as a fault and
+            // stop before what follows it (the replace's re-check and withdraw, which run on None too), or the parent keeps two Servable files.
             await _entities.UpdateIfRowVersionMatchesAsync(
                 StoredFileSchema.Entity, fileId, rowVersion,
                 new Dictionary<string, object> { [StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Servable) },
-                ct).ConfigureAwait(false);
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (DBConcurrencyException)
         {

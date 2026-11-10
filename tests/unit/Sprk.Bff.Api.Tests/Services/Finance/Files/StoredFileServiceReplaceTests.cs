@@ -357,4 +357,30 @@ public sealed class StoredFileServiceReplaceTests
         StatusOf(rig, earlier).Should().Be(StoredFileStatus.Removed);
         rig.Dataverse.Rows.Keys.Count(id => StatusOf(rig, id) == StoredFileStatus.Servable).Should().Be(1);
     }
+
+    [Fact(DisplayName = "116 fix 2 (item 7) must-fire: a request cancelled as the flip commits still finishes the replace: exactly one Servable file")]
+    public async Task Replace_CancelledAsTheFlipCommits_StillLeavesExactlyOneServableFile()
+    {
+        var rig = Rig();
+        var earlier = Guid.NewGuid();
+        rig.SeedFile(earlier, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+        using var request = new CancellationTokenSource();
+
+        // The new row's flip commits, the client goes away, and the call then observes the token it was given, as a real Dataverse call does.
+        rig.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, It.Is<Guid>(id => id != earlier), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string _, Dictionary<string, object> fields, CancellationToken token) =>
+            {
+                rig.Dataverse.Rows[id][StoredFileSchema.Status] = fields[StoredFileSchema.Status];
+                request.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+
+        var result = await ReplaceChecked(rig, _ => Task.FromResult(true), request.Token);
+
+        result.IsCreated.Should().BeTrue();
+        StatusOf(rig, earlier).Should().Be(StoredFileStatus.Removed);
+        rig.Dataverse.Rows.Keys.Count(id => StatusOf(rig, id) == StoredFileStatus.Servable).Should().Be(1);
+    }
 }
