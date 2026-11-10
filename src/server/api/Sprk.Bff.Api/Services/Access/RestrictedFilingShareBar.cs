@@ -130,8 +130,18 @@ internal sealed class RestrictedFilingShareBar
     /// (<c>rootIsRestricted: null</c>). Each of those reports <c>Complete = false</c>, so the caller retries. Never throws
     /// (cancellation aside).
     /// </summary>
+    internal Task<(IReadOnlyList<Guid> Eligible, bool Complete)> EligibleForGrantAsync(
+        Guid communicationId, IReadOnlyList<Guid> candidates, CancellationToken ct) =>
+        EligibleForGrantAsync(communicationId, candidates, excludeDisabled: false, ct);
+
+    /// <summary>
+    /// <see cref="EligibleForGrantAsync(Guid, IReadOnlyList{Guid}, CancellationToken)"/>, and, with
+    /// <paramref name="excludeDisabled"/> (task 198 R2, the Direct pair), from the SAME user read: a user whose <c>isdisabled</c> is
+    /// <c>true</c> is not eligible and that is settled (<c>Complete</c> unchanged); a user whose <c>isdisabled</c> did not come back
+    /// is not eligible and the answer is incomplete (retried).
+    /// </summary>
     internal async Task<(IReadOnlyList<Guid> Eligible, bool Complete)> EligibleForGrantAsync(
-        Guid communicationId, IReadOnlyList<Guid> candidates, CancellationToken ct)
+        Guid communicationId, IReadOnlyList<Guid> candidates, bool excludeDisabled, CancellationToken ct)
     {
         var ids = candidates.Where(id => id != Guid.Empty).Distinct().ToList();
         if (ids.Count == 0)
@@ -165,6 +175,25 @@ internal sealed class RestrictedFilingShareBar
         }
 
         var read = ids.Where(users.ContainsKey).ToList();
+
+        if (excludeDisabled)
+        {
+            foreach (var unknown in read.Where(id => users[id].IsDisabled is null))
+            {
+                complete = false;
+                _logger.LogWarning("[RESTRICTED-FILING] {Table} {Id}: whether user {UserId} is disabled could not be read; it is not " +
+                    "granted.", CommunicationTable, communicationId, unknown);
+            }
+
+            var disabled = read.Count(id => users[id].IsDisabled == true);
+            if (disabled > 0)
+            {
+                _logger.LogInformation("[RESTRICTED-FILING] {Table} {Id}: {Disabled} disabled user(s) are not granted.",
+                    CommunicationTable, communicationId, disabled);
+            }
+
+            read = read.Where(id => users[id].IsDisabled == false).ToList();
+        }
 
         // Only a user flagged external can be barred, so the message's Access Permission is read only when one is a candidate.
         bool? restricted = false;

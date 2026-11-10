@@ -7,7 +7,8 @@
 //       SecureChildShareSynchronizer keeps SECURE children's shares equal to their root's; RestrictedFilingShareBar removes
 //       barred users' shares on a filed communication. None of them repairs a Direct-team-owned message whose grant did not land,
 //       whose content rows appeared after the grant, or that returned to the Direct team (unfiled, or out of secure).
-//   (2) Extension — It reuses the live grant's audience rule (the thread's user owner and POA systemuser sharees), the ONE
+//   (2) Extension — It reuses the live grant's audience rule (fix round 1 R2: the message's BFF-stamped sprk_sentby and
+//       sprk_directrecipient, ParticipantsOf), the ONE
 //       Direct-team check (moved here from DirectThreadAccessService, which now calls it), the ONE Secure check
 //       (SecureChildShareSynchronizer.IsSecureOwnerTeamAsync), the ONE eligibility rule (RestrictedFilingShareBar.
 //       EligibleForGrantAsync over InternalShareEndpoints.IsBarredOnRestricted) and the one share seam. It is not a method of
@@ -30,18 +31,20 @@ using Sprk.Bff.Api.Services.Dataverse;
 namespace Sprk.Bff.Api.Services.Access;
 
 /// <summary>
-/// Keeps a Direct-team-owned message readable by EXACTLY its thread's participants: Read on the message and on its content rows
-/// the same team owns, for every participant the Restricted bar allows; and on the message, no direct user share for anyone
-/// else (the anchor record's grantees an unfile leaves behind). Idempotent: it writes only the difference it reads.
+/// Keeps a Direct-team-owned message readable by EXACTLY its participants: Read on the message and on its content rows the same
+/// team owns, for every participant the Restricted bar allows; and on the message, no direct user share for anyone else (the
+/// anchor record's grantees an unfile leaves behind). Idempotent: it writes only the difference it reads.
 /// </summary>
 /// <remarks>
-/// <para><b>The audience is re-derived, never trusted from a column the owner can write.</b> (1) The message must be owned by the
-/// Direct-message owner team — an owner only the BFF assigns, on a row whose owner team has no members, so no participant holds
-/// more than Read on it. (2) Its thread is the message's own <c>sprk_communicationthread</c> lookup on that row, which no
-/// participant can write. (3) The participants are that thread's user owner and its POA systemuser sharees — the two-party list the
-/// Direct join created and the live grant uses — read STRICTLY (a share-read fault grants and revokes nothing). The thread's
-/// <c>sprk_threadtype</c> (Direct) and <c>sprk_isdefaultthread</c> (not the per-user master thread) only NARROW: a thread that is
-/// not Direct, or is the master thread, grants nothing.</para>
+/// <para><b>The audience is a record of the pair only the BFF writes.</b> (1) The message must be owned by the Direct-message
+/// owner team — an owner only the BFF assigns, on a row whose owner team has no members, so no participant holds more than Read
+/// on it. (2) Fix round 1 R2: the participants are the message's own <c>sprk_sentby</c> and <c>sprk_directrecipient</c>, read
+/// by name in the same row read as the owner (<see cref="ParticipantsOf"/>): exactly two distinct, non-empty <c>systemuser</c>
+/// ids, or nobody — nothing granted, nothing revoked, settled (a later stamp moves <c>modifiedon</c> and the share job lists the
+/// message again). There is no fallback to the thread's owner or shares. (3) The message's thread (its
+/// <c>sprk_communicationthread</c> lookup), its <c>sprk_threadtype</c> (Direct) and <c>sprk_isdefaultthread</c> (not the per-user
+/// master thread) only NARROW: a message with no thread, a thread that is not Direct, or the master thread, grants nothing. A
+/// disabled participant is not granted (settled), and does not stop the other's grant.</para>
 /// <para><b>Fail closed, every unknown retried.</b> Whether the owner is the Direct team, or the Secure team, that cannot be told:
 /// nothing is written and the outcome is incomplete. A Secure answer is the synchronizer's alone: nothing is written. A user the
 /// flag read does not return, a user-flag fault, an undecidable Restricted value, a capped or faulted content-row read, a share
@@ -58,6 +61,20 @@ internal sealed class DirectMessageParticipantShares
 
     internal const string ThreadTypeColumn = "sprk_threadtype";
     internal const string DefaultThreadColumn = "sprk_isdefaultthread";
+
+    /// <summary>Fix round 1 R2: the message's sender, a lookup to <c>systemuser</c> the BFF stamps (fm task 054).</summary>
+    internal const string SentByColumn = "sprk_sentby";
+
+    /// <summary>Fix round 1 R2: the Direct message's recipient, a lookup to <c>systemuser</c> the BFF stamps (fm task 054a).</summary>
+    internal const string DirectRecipientColumn = "sprk_directrecipient";
+
+    /// <summary>
+    /// The ONE row read of the message: its owner, its thread and its participant pair, each selected by name. An attribute the
+    /// SDK does not return reads as absent, which names no participant (nothing granted or revoked): it fails safe.
+    /// </summary>
+    internal static readonly string[] MessageColumns = ["owningteam", ThreadLookup, SentByColumn, DirectRecipientColumn];
+
+    private const string SystemUserTable = "systemuser";
 
     /// <summary><c>sprk_communicationthread.sprk_threadtype</c> Direct (task 004 schema).</summary>
     internal const int ThreadTypeDirect = 100000001;
@@ -119,7 +136,8 @@ internal sealed class DirectMessageParticipantShares
         /// <summary>Whether it is Direct- or Secure-owned, or who its participants are, cannot be told now: nothing written.</summary>
         Unknown,
 
-        /// <summary>Direct-owned, but its thread names no audience (none, not Direct, or the per-user master thread).</summary>
+        /// <summary>Direct-owned, but it names no audience: no thread, a thread that is not Direct, the per-user master thread, or
+        /// (fix round 1 R2) no valid stamped pair. Settled: nothing granted or revoked, not retried.</summary>
         NoAudience,
 
         /// <summary>Direct-owned and reconciled (see <see cref="Outcome.Complete"/>).</summary>
@@ -246,8 +264,8 @@ internal sealed class DirectMessageParticipantShares
 
     private async Task<Outcome> ReconcileCoreAsync(Guid communicationId, Guid? listedDirectTeam, CancellationToken ct)
     {
-        // ── 1. The message and its owner ──
-        var message = await ReadRowAsync(CommunicationTable, communicationId, ["owningteam", ThreadLookup], ct).ConfigureAwait(false);
+        // ── 1. The message: its owner, its thread and its participant pair, in one read ──
+        var message = await ReadRowAsync(CommunicationTable, communicationId, MessageColumns, ct).ConfigureAwait(false);
         if (message is null)
             return Outcome.Settled(Status.NotDirect, "not found");
 
@@ -287,11 +305,12 @@ internal sealed class DirectMessageParticipantShares
         if (_shares is null)
             return Outcome.Retry("no share seam is available");
 
-        // ── 4. The audience: the message's own thread's two-party list ──
+        // ── 4. The thread only NARROWS: it must be a Direct thread that is not the per-user master thread ──
+        // Fix round 1 R2: the thread supplies no participant (its owner and shares are not read).
         if (message.GetAttributeValue<EntityReference>(ThreadLookup)?.Id is not { } threadId || threadId == Guid.Empty)
             return NoAudience(communicationId, "it has no thread");
 
-        var thread = await ReadRowAsync(ThreadTable, threadId, ["ownerid", ThreadTypeColumn, DefaultThreadColumn], ct).ConfigureAwait(false);
+        var thread = await ReadRowAsync(ThreadTable, threadId, [ThreadTypeColumn, DefaultThreadColumn], ct).ConfigureAwait(false);
         if (thread is null)
             return NoAudience(communicationId, "its thread was not found");
         if (thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value != ThreadTypeDirect)
@@ -299,22 +318,23 @@ internal sealed class DirectMessageParticipantShares
         if (thread.GetAttributeValue<bool?>(DefaultThreadColumn) == true)
             return NoAudience(communicationId, "its thread is the per-user master thread");
 
-        var derived = await DeriveParticipantsAsync(_dataverse, _shares, communicationId, threadId, _logger, ct).ConfigureAwait(false);
+        // ── 5. The audience: the message's own stamped pair, from the row read in step 1 ──
+        var derived = ParticipantsOf(message);
         if (derived.Participants is not { } participants)
         {
-            _logger.LogWarning("{Prefix} {Table} {Id}: its participants are unknown ({Reason}); nothing is granted or revoked now, and " +
-                "it is retried.", LogPrefix, CommunicationTable, communicationId, derived.Unknown);
-            return Outcome.Retry(derived.Unknown ?? "the participants are unknown");
+            // An invalid pair is settled, not retried: a later stamp (a repair, fm 054c's backfill) moves modifiedon and the share
+            // job lists the message again. fm 054a logs the missing recipient at create, so this is not an error here.
+            _logger.LogInformation("{Prefix} {Table} {Id} is owned by the Direct-message owner team, but {Reason}; nothing is granted " +
+                "or revoked.", LogPrefix, CommunicationTable, communicationId, derived.NoPair);
+            return Outcome.Settled(Status.NoAudience, derived.NoPair);
         }
 
-        if (participants.Count == 0)
-            return NoAudience(communicationId, "its thread names no participant");
-
-        // ── 5. Who may be granted: the Restricted bar ──
-        var (eligibleList, complete) = await _bar.EligibleForGrantAsync(communicationId, participants.ToList(), ct).ConfigureAwait(false);
+        // ── 6. Who may be granted: the Restricted bar; a disabled participant is not granted (and not retried) ──
+        var (eligibleList, complete) = await _bar.EligibleForGrantAsync(communicationId, participants.ToList(), excludeDisabled: true, ct)
+            .ConfigureAwait(false);
         var eligible = eligibleList.ToHashSet();
 
-        // ── 6. The rows: the message, then its content rows the Direct team owns ──
+        // ── 7. The rows: the message, then its content rows the Direct team owns ──
         var rows = new List<(string Table, string EntitySet, Guid Id)>
         {
             (CommunicationTable, SecureChildLineage.Children[CommunicationTable].EntitySet, communicationId),
@@ -431,49 +451,80 @@ internal sealed class DirectMessageParticipantShares
         return new Outcome(Status.Reconciled, granted, revoked, complete);
     }
 
-    /// <summary>Who a Direct-team-owned message's participants are: the set, or <c>null</c> with why it cannot be told.</summary>
-    internal sealed record ParticipantDerivation(IReadOnlySet<Guid>? Participants, string? Unknown)
+    /// <summary>
+    /// Who a Direct-team-owned message's participants are. Exactly one of: <see cref="Participants"/> (the two users);
+    /// <see cref="NoPair"/> (the message names no valid pair: settled, nothing granted or revoked); <see cref="Unknown"/> (it could
+    /// not be read: retried, nothing granted or revoked).
+    /// </summary>
+    internal sealed record ParticipantDerivation(IReadOnlySet<Guid>? Participants, string? Unknown, string? NoPair = null)
     {
-        internal static ParticipantDerivation Of(IReadOnlySet<Guid> participants) => new(participants, null);
+        internal static ParticipantDerivation Of(Guid sender, Guid recipient) => new(new HashSet<Guid> { sender, recipient }, null);
 
         internal static ParticipantDerivation NotKnown(string reason) => new(null, reason);
+
+        internal static ParticipantDerivation None(string reason) => new(null, null, reason);
     }
 
     /// <summary>
-    /// THE participant derivation of a Direct-team-owned message — the ONE seam the live grant
-    /// (<c>DirectThreadAccessService</c>), the re-file step and the share job all call, so they can never derive differently.
-    /// Today's source: <paramref name="threadId"/>'s user owner and its POA systemuser sharees (any right), the shares read
-    /// STRICTLY. A thread read or share read that faults is <see cref="ParticipantDerivation.NotKnown"/> (nothing granted or
-    /// revoked; retried). Never throws (cancellation aside).
+    /// THE participant rule of a Direct-team-owned message (fix round 1 R2), over the message row read with
+    /// <see cref="MessageColumns"/>: its BFF-stamped <see cref="SentByColumn"/> and <see cref="DirectRecipientColumn"/>. The pair is
+    /// valid only as exactly two distinct, non-empty <c>systemuser</c> ids; anything else (either one absent or empty, both equal,
+    /// or a lookup to another table) is <see cref="ParticipantDerivation.None"/>. There is no fallback: the thread's owner and its
+    /// shares are never a source. The live grant, the re-file step and the share job all apply this one rule.
     /// </summary>
-    /// <remarks>Fix round 1: the source is under review (R2: a source only the BFF writes). Swapping it changes this method only;
-    /// <paramref name="communicationId"/> is the message whose participants are derived, for that source.</remarks>
+    internal static ParticipantDerivation ParticipantsOf(Entity message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        var (sender, senderProblem) = UserOf(message, SentByColumn, "sender");
+        var (recipient, recipientProblem) = UserOf(message, DirectRecipientColumn, "recipient");
+        if ((recipientProblem ?? senderProblem) is { } problem)
+            return ParticipantDerivation.None(problem);
+        if (sender is not { } from || recipient is not { } to)
+        {
+            return ParticipantDerivation.None(sender is null && recipient is null ? "no sender or recipient stamped"
+                : recipient is null ? "no recipient stamped" : "no sender stamped");
+        }
+
+        return from == to
+            ? ParticipantDerivation.None("its sender and recipient are the same user")
+            : ParticipantDerivation.Of(from, to);
+    }
+
+    /// <summary>
+    /// The live grant's form of <see cref="ParticipantsOf"/>: reads the message row (<see cref="MessageColumns"/>) and applies the
+    /// one rule. A read that faults, or a message not found, is <see cref="ParticipantDerivation.NotKnown"/> (nothing granted; the
+    /// share job retries it). Never throws (cancellation aside).
+    /// </summary>
     internal static async Task<ParticipantDerivation> DeriveParticipantsAsync(
-        IGenericEntityService dataverse, IDataverseRecordShareService shares, Guid communicationId, Guid threadId, ILogger logger,
-        CancellationToken ct)
+        IGenericEntityService dataverse, Guid communicationId, ILogger logger, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
-        ArgumentNullException.ThrowIfNull(shares);
         try
         {
-            var participants = new HashSet<Guid>();
-            var thread = await dataverse.RetrieveAsync(ThreadTable, threadId, ["ownerid"], ct).ConfigureAwait(false);
-            if (thread?.GetAttributeValue<EntityReference>("ownerid") is { } threadOwner
-                && string.Equals(threadOwner.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase)
-                && threadOwner.Id != Guid.Empty)
-            {
-                participants.Add(threadOwner.Id);
-            }
-
-            participants.UnionWith(DirectUsers(await shares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct).ConfigureAwait(false)));
-            return ParticipantDerivation.Of(participants);
+            var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet(MessageColumns), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, communicationId);
+            var message = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+            return message is null ? ParticipantDerivation.NotKnown("the message was not found") : ParticipantsOf(message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "{Prefix} {Table} {Id}: thread {ThreadId} or its shares could not be read, so its participants are " +
-                "unknown.", LogPrefix, CommunicationTable, communicationId, threadId);
-            return ParticipantDerivation.NotKnown("the thread or its shares could not be read");
+            logger.LogWarning(ex, "{Prefix} {Table} {Id}: the message could not be read, so its participants are unknown.", LogPrefix,
+                CommunicationTable, communicationId);
+            return ParticipantDerivation.NotKnown("the message could not be read");
         }
+    }
+
+    /// <summary>
+    /// The non-empty <c>systemuser</c> id a lookup names. <c>(null, null)</c>: not stamped (absent from the row, null, or an empty
+    /// id). <c>(null, problem)</c>: a value that is not a lookup to <c>systemuser</c>.
+    /// </summary>
+    private static (Guid? Id, string? Problem) UserOf(Entity row, string column, string role)
+    {
+        if (!row.Attributes.TryGetValue(column, out var value) || value is null)
+            return (null, null);
+        if (value is not EntityReference reference || !string.Equals(reference.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase))
+            return (null, $"its {role} is not a system user");
+        return reference.Id == Guid.Empty ? (null, null) : (reference.Id, null);
     }
 
     /// <summary>

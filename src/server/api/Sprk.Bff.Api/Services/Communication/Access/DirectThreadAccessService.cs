@@ -311,9 +311,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private const int MaxDirectContentRowsPerTable = 250;
 
     /// <summary>
-    /// A Direct-team-owned message: Read to exactly its thread's participants (the join's two-party list, the sender
-    /// included: the sender no longer owns the row), on the message and on its content rows the same team owns. Never the
-    /// anchor record's grantees and never a team: a join that is not Direct grants nothing here.
+    /// A Direct-team-owned message: Read to exactly its participants — the message's BFF-stamped sender and recipient (fix
+    /// round 1 R2; the sender included: the sender no longer owns the row) — on the message and on its content rows the same
+    /// team owns. Never the anchor record's grantees, never the thread's owner or sharees as such, and never a team: a join
+    /// that is not Direct grants nothing here.
     /// </summary>
     private async Task GrantDirectTeamMessageAsync(
         Guid communicationId, ThreadAssignment assignment, Guid directTeam, CancellationToken ct)
@@ -327,19 +328,24 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             return;
         }
 
-        // Fix round 1: the ONE participant derivation the re-file step and the share job also use (a read that faults derives
-        // nobody here; the job retries the message).
-        var derived = await DirectMessageParticipantShares.DeriveParticipantsAsync(
-            _entityService, _accessGrant, communicationId, threadId, _logger, ct);
+        // Fix round 1 R2: the ONE participant rule the re-file step and the share job also apply — the message's BFF-stamped
+        // sender and recipient (sprk_sentby, sprk_directrecipient), never the thread's owner or shares. An invalid pair grants
+        // nobody and is settled (fm 054a logs a missing recipient at create); a read that faults grants nobody and the share job
+        // retries the message.
+        var derived = await DirectMessageParticipantShares.DeriveParticipantsAsync(_entityService, communicationId, _logger, ct);
+        if (derived.NoPair is { } noPair)
+        {
+            _logger.LogInformation(
+                "Message {CommunicationId} is owned by the Direct-message owner team, but {Reason}; no participant is granted " +
+                "(ThreadId={ThreadId}).", communicationId, noPair, threadId);
+            return;
+        }
+
         if (derived.Participants is not { Count: > 0 } derivedParticipants)
         {
-            if (derived.Participants is null)
-            {
-                _logger.LogWarning(
-                    "Message {CommunicationId}: its participants are unknown ({Reason}); none is granted now, and the share " +
-                    "reconciliation retries it (ThreadId={ThreadId}).", communicationId, derived.Unknown, threadId);
-            }
-
+            _logger.LogWarning(
+                "Message {CommunicationId}: its participants are unknown ({Reason}); none is granted now, and the share " +
+                "reconciliation retries it (ThreadId={ThreadId}).", communicationId, derived.Unknown, threadId);
             return;
         }
 
@@ -347,10 +353,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
         // Task 198 Part C (ruling 6): every Direct grant applies the Restricted bar — the message's own or inherited Access
         // Permission, through the one predicate. A participant it does not clear (barred, unread, or undecidable) is not granted
-        // here; the share job retries the message.
+        // here; the share job retries the message. R2: a disabled participant is not granted either (settled, not retried).
         var bar = new RestrictedFilingShareBar(
             _entityService, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _accessGrant, _webApi, _logger);
-        var (eligible, complete) = await bar.EligibleForGrantAsync(communicationId, participants, ct);
+        var (eligible, complete) = await bar.EligibleForGrantAsync(communicationId, participants, excludeDisabled: true, ct);
         if (!complete)
         {
             _logger.LogWarning(
