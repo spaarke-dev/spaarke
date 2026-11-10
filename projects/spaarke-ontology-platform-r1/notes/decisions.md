@@ -480,7 +480,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **Q2, "the same Signal stays open with its title recomputed" is withdrawn.** It assumed the writer could rewrite an open row's title; it refreshes only `sprk_lastevaluated` (`SignalWriter.cs` ~:340-352). A changed reason set closes the Signal Superseded (record-free, R16) and opens episode n+1, as ontology's own version change and ebilling 101's corrections re-evaluation do. Conditions:
     - supersede only when the reason set actually changed, never on every run;
     - the new episode starts its own first-detected date (the Worklist age restarts; accepted);
-    - a stored Override or Return set that names the superseded Signal closes it as `LeftAsIs` (resolved otherwise), not a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503;
+    - a stored Override or Return set that names the superseded Signal is never a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503. Which outcome follows the commit route's rule (`SignalWriter.CloseActedByDecisionAsync`): a Superseded close made BEFORE the stored set was read is `LeftAsIs`; a record-free Superseded close made at or after that read is re-closed Acted with the decision's record, so the Signal and the record agree (text aligned to the writer 2026-11-06, ebilling 095d-2b-2; both cases pinned by ebilling's tests);
     - the 114b filter matches on policy + subject and so carries over to the new episode.
   - **ebilling EB-D-185, EB-D-186, EB-D-187 (owner 2026-11-05, relayed by ebilling; first relayed as D-148/149/150, renumbered by ebilling for an ID clash; ontology notes, no change to the rulings above).**
     - **EB-D-185, no substantive invoice decision without a firm.** While an invoice has no firm, is held for its firm, or its post-Set-firm re-run is pending, line decisions (single and batch), every Override and approve refuse 409 and write nothing (`ebilling.line_decision.firm_missing`, `ebilling.override.firm_missing`, `ebilling.approve.firm_missing`). Return stays open. Slice 095d-0. **Amended by EB-D-190 (owner 2026-11-05, relayed; ebilling `92d0421725`):** a whole-invoice Reject is refused the same way (409, nothing written); only Return and Set firm stay available.
@@ -710,3 +710,49 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Formats:** JPS playbook (`sprk_analysisplaybook`, JSON, executed) · legal playbook (Markdown master, read by Copilot/Cowork Agent Skills) · contract-review playbook (Microsoft's four-column subtype).
 - **Writing rule:** qualify by format where the format matters. **Changed text:** the §3 Internal Standard row no longer says a reviewer's handbook is "not a JPS AI playbook". **Unchanged:** §4.11 (a Policy is a predicate, never a playbook's control flow); a one-line note says that section means the JPS format.
 - **Recorded in** `ontology-component-model.md` §3. Told legal-ai-accelerator and spaarkeai-mcp-bff-api-r1.
+
+## D-210 — The Signal core-record pair is not field-secured (owner, 2026-11-06; relayed from field-mapping-server-write-path-r1)
+
+- **Ruling (relayed):** `sprk_signal.sprk_corerecordtype` and `sprk_corerecordid` get no field security. Readability of a Signal stays decided by the core record's own row security.
+- **Write integrity** of the pair (the 042c rule: a half pair is never written on any path) rests on role privileges, the writers' server-side refusal, column auditing (D-206) and field-mapping 052's report, which also flags a pair changed after create.
+- **Readers:** Signal access fails closed whenever the server cannot confirm the pair (field-mapping 044 fix round, reviewed by ontology and uac-r2).
+- **Recorded in** this file. Told field-mapping and uac-r2. Detail of the review is kept out of this public file.
+
+## D-211 — Reviewer-added invoice lines count toward budget spend (owner, 2026-11-07; ebilling EB-D-205, relayed)
+
+- **Ruling (relayed):** the derived spend and budget Thresholds read the invoice approved total (ebilling-r1 D-130), and that total now includes reviewer-added lines (EB-D-199/EB-D-205). An added line counts its amount while undecided or Accepted, its approved amount when Reduced, and nothing when Disallowed. Pending spend moves when a line is added; counted spend moves once the invoice is in a counted status.
+- **Code:** no evaluator change. `FinanceBaseValues` doc comments updated by ebilling (164a, with ontology's OK). Reviewed by ontology (164a: no F findings).
+
+## D-212 — Work Item privilege flag is derived from communication classification (owner, 2026-11-08; relayed from spaarkeai-mcp-bff-api-r1)
+
+- **Ruling (relayed), FR-04 "option A widened":** a Work Item is privilege-flagged when its subject (when the subject is a communication) or any witness or evidence communication has `sprk_privilegeclassification` Privileged or Potentially Privileged. The read is made as the caller and fails closed: unreadable, faulted or uninterpretable sources flag the item. None or null does not flag. `sprk_signal.sprk_privilegeflagged` is not a source (DI-64). Privilege still never gates a read (2026-07-16).
+- **Code:** mcp-bff task 018, `Services/Signals/WorkItemPrivilege.cs` (`SourcesOf`, `FlaggedAsync`). Reviewed by ontology: no F findings.
+- **Ontology follow-up:** DI-143 (#2630) reuses that helper for the Decision Record snapshot once 018 is on master.
+- **Known limits accepted with the ruling:** the AI's own flag (stored in association provenance) is not a source; field security on the classification column would read as not flagged; an untyped non-communication subject is over-flagged.
+
+## D-213 — A published rate card is not evidence that its Procedure Version opened a window (ontology ruling, 2026-11-08; ebilling 085)
+
+- **Ruling (ontology, on D-203 (5a)/(9)):** a Retired Procedure Version opened a window only when it has a Published policy version (as before). Rate cards are not evidence: import accepts only a Draft version and card publish does not check version status, so a card can be Published under a version that was never published. ebilling's 085 fix-1 rule (F1-b, "Retired + Published card = opened") is withdrawn, in both the resolver and the scope lock.
+- **Known limit (extended):** a rate-card-only version that was in force and then Retired without a successor reads as never opened (work in its window is not applicable). Proper fix, offered to ebilling as a follow-up on its own table (schema, owner approval): stamp the version at publish and test that stamp.
+- **Rejected:** making card publish wait for version publish (an in-force window with no approved rate; existing data stays ambiguous); publishing cards inside version publish (a half-done follow-on step).
+
+## D-214 — A decision on a worklist row may close the row's other items through add-on options (owner, 2026-11-08)
+
+- **Owner confirmation:** while testing Create budget on a matter, the owner also closed that row's other open items (including 17 billing "Submission integrity" items) through the decision panel's add-on option, and called it "a good feature; no changes necessary". No change to the commit route's row-level resolution.
+- **Note:** D-207 (held PRs #2580/#2579) still moves billing items out of the Console decision route into Invoice Review once ebilling 112 is on dev; until then a row decision can close billing items with the row.
+
+## D-215 — Gate Decision Records of Direct messages follow the message's participants (owner, 2026-11-09, asked directly; uac-r2 task 198 Part E)
+
+- **Context:** the owner approved Direct 1:1 messages being owned by a dedicated Direct-message owner team (fm 054a) and ruled that participants keep their message shares after filing (except secure targets, and Restricted targets for external users). Under D-169 as built, a team-owned message's gate Decision Records got no participant share, and filing revoked every share.
+- **Ruling (1):** a gate Decision Record of a message owned by the Direct-message owner team is shared Read with the message's internal participants who can read the message now. It is never more visible than its message; an unknown or unreadable case grants nothing. Every other team-owned communication keeps D-169's behaviour.
+- **Ruling (2), amends D-169 for Direct messages only:** on filing to an ordinary record the record is re-owned to the record's team as before and keeps Read for those participants (recomputed, not carried over). A secure target stays with the Secure mirror. External users never get a Decision Record share (D-169 internal only).
+- **Added with uac-r2 (ontology agreed):** unfiling a message back to Direct re-owns its gate Decision Records to the Direct-message owner team, recomputes the participant shares and revokes every other share, so the record team keeps no access the message no longer gives.
+- **Revoke side:** no path removes an internal participant's Read on a Direct message (uac-r2, 198 design), so no revoke-side mirror is built. If uac-r2's rework adds one, it adds the mirror.
+- **Implementation:** uac-r2 (198 Part E) edits `Services/Signals/GateDecisionRecordSharing.cs` after fm 054a's recipient column lands; ontology reviews the diff, plus one independent review, before merge. D-123's secure wall is unchanged.
+
+## D-216 — The budget inquiry email is filed under both the inquiry and the matter, and archived as a Document (owner, 2026-11-09, asked directly; UAT of 161 on REAL-2026-123456.02)
+
+- **Finding (owner UAT):** Revise budget worked; the inquiry email was sent and the `sprk_servicerequest` was created under the matter. But the `sprk_communication` has only `sprk_regardingservicerequest` set (`sprk_regardingmatter` empty), so it does not show on the matter, and no .eml Document was archived. Cause: `BudgetInquiryExecutor.Build` puts the service request first, `CommunicationService.MapAssociationFieldsAsync` maps only `associations[0]`, and the executor never sets `ArchiveToSpe` (default false; the email composer defaults it to true).
+- **Ruling:** the inquiry email is filed under BOTH the inquiry (service request) and the matter, and the sent email is archived as an .eml Document like a composer send. Chosen over "matter only" (which would move reply linking to the matter).
+- **Implementation (to come, ours):** the matter association also sets its own lookup at create, before the core-ancestor stamp so the inherited Access Permission takes both parents in; opt-in for this sender only; `ArchiveToSpe = true`. Access questions (two core lookups on one communication; external visibility through the matter; a secure matter) go to uac-r2 before the build. Regression test plus an independent review; dev deploy needs the owner's go.
+- **Internal-only (owner, 2026-11-10, relayed by uac-r2, then confirmed directly in this session: "Budget inquiry are internal only"):** "Budget inquiry can be internal only" (option a). The inquiry email and the replies resolved to an inquiry service request are created with `sprk_isinternalonly = true` in the same create, so filing them under the matter does not make them visible to the matter's external grantees. Scope stays inquiry service requests only (anything wider goes back to uac-r2 and the owner). The matter is read from the service request presence-aware and fails closed (absent, unread or faulted read: fail or retry, never service-request-only); an explicit null stays as today. The email joins the matter's thread at send (the thread sweep skips rows with two typed lookups).

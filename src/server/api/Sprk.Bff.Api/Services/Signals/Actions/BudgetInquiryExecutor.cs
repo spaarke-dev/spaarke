@@ -39,14 +39,23 @@ public enum BudgetInquiryOutcome
 }
 
 /// <summary>The executor's answer. <see cref="ServiceRequestId"/> is set whenever a row was written, even when the send failed.</summary>
+/// <param name="ArchivalWarning">Ontology task 176 (D-216): set on a <see cref="BudgetInquiryOutcome.Sent"/> inquiry whose email was sent
+/// but NOT archived as .eml (the communication core's <c>ArchivalWarning</c>, for example the matter's container could not be
+/// resolved). Server-side text: it can carry an exception message, so it is logged by id and never shown to the caller.</param>
 public sealed record BudgetInquiryResult(
     BudgetInquiryOutcome Outcome,
     Guid? ServiceRequestId = null,
     Guid? CommunicationId = null,
-    string? Error = null)
+    string? Error = null,
+    string? ArchivalWarning = null)
 {
     public bool Succeeded => Outcome == BudgetInquiryOutcome.Sent;
 }
+
+/// <summary>What <see cref="InquiryEmailSender.SendAsync"/> hands back: the tracked communication and the core's archival warning.</summary>
+/// <param name="CommunicationId">The <c>sprk_communication</c> id when the core tracked one.</param>
+/// <param name="ArchivalWarning">The core's <c>ArchivalWarning</c>: the email went out but the .eml was not archived (D-216).</param>
+public sealed record InquirySendResult(Guid? CommunicationId, string? ArchivalWarning = null);
 
 /// <summary>
 /// The inquiry email send: <see cref="CommunicationService.SendAsync"/> as the signed-in user (OBO), the same core
@@ -58,15 +67,16 @@ public sealed record BudgetInquiryResult(
 public class InquiryEmailSender(CommunicationService communication, IHttpContextAccessor http, InquiryRecordFacts? facts = null)
 {
     /// <summary>Sends the inquiry email, associated with the matter and the service request. Throws on failure.</summary>
-    /// <returns>The <c>sprk_communication</c> id when the core tracked one.</returns>
-    public virtual async Task<Guid?> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+    /// <returns>The <c>sprk_communication</c> id when the core tracked one, and the core's archival warning (D-216: the send is
+    /// archived as .eml, and an archive that failed must not vanish).</returns>
+    public virtual async Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
     {
         var context = http.HttpContext
             ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
 
         var send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
         var response = await communication.SendAsync(send, context, ct).ConfigureAwait(false);
-        return response.CommunicationId;
+        return new InquirySendResult(response.CommunicationId, response.ArchivalWarning);
     }
 
     /// <summary>
@@ -88,8 +98,9 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     /// <c>sprk_communication.sprk_regardingservicerequest</c>, so a reply links to the inquiry through the association
     /// ladder and the footer names the inquiry. Chosen over a follow-up PATCH of
     /// <c>sprk_servicerequest.sprk_regardingcommunication</c> because that is a second write that could fail AFTER the
-    /// email went out. The matter stays reachable through <c>sprk_servicerequest.sprk_regardingmatter</c> and is still the
-    /// second association (counted, not mapped). Plain text: the wizard's body is plain text.
+    /// email went out. Ontology task 176 (D-216): the matter is the second association AND is written as
+    /// <c>sprk_regardingmatter</c> (<see cref="CommunicationAssociation.AlsoRegarding"/>), so the email sits in the matter's thread
+    /// and takes its access; it is internal-only and archived as .eml. Plain text: the wizard's body is plain text.
     /// <para>Task 160 (D-181; owner 2026-10-23): the service request's <c>EntityName</c> names the RECORD, "{core name} ({core number})"
     /// with no "Budget inquiry:" prefix (the subject already says so), because it is both the footer's record reference and
     /// <c>sprk_communication.sprk_regardingrecordname</c>. When the record's name could not be read it is the inquiry's own name (its
@@ -109,6 +120,11 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             Body = lines.Count > 0 ? $"{request.Body}\n\n{string.Join("\n", lines)}" : request.Body,
             BodyFormat = BodyFormat.PlainText,
             SendMode = SendMode.User,
+            // Ontology task 176 (D-216): archived as .eml and internal-only.
+            ArchiveToSpe = true,
+            IsInternalOnly = true,
+            // Review round 2, item 7: the new matter thread is created Private, so a follow-up posted into it stays internal.
+            CreateThreadPrivate = true,
             Associations =
             [
                 new CommunicationAssociation
@@ -117,7 +133,8 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
                     EntityId = serviceRequestId,
                     EntityName = extras?.RecordLabel ?? InquiryRecordFacts.RecordLabel(request.Subject, null),
                 },
-                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId },
+                // D-216: filed under the matter too (its thread, its access), not only counted.
+                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId, AlsoRegarding = true },
             ],
         };
     }
@@ -143,6 +160,9 @@ public sealed class BudgetInquiryExecutor(
     ILogger<BudgetInquiryExecutor> logger)
 {
     public const string ActionCode = "send-budget-inquiry";
+
+    /// <summary>Commit warning (D-216): the inquiry email went out but was not archived as .eml. A fixed code; the client words it.</summary>
+    internal const string EmailNotArchivedWarning = "inquiry_email_not_archived";
     internal const string Table = "sprk_servicerequest";
     /// <summary>sprk_servicerequest.sprk_direction: Outbound (task 001).</summary>
     internal const int DirectionOutbound = 100000001;
@@ -307,8 +327,18 @@ public sealed class BudgetInquiryExecutor(
         // cancellable: a cancelled caller must not leave an email that may or may not have gone out and no id to list.
         try
         {
-            var communicationId = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
-            return new(BudgetInquiryOutcome.Sent, serviceRequestId, communicationId);
+            var sent = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(sent.ArchivalWarning))
+            {
+                // D-216: the email is meant to be archived as .eml. The send stands (it is out), but a missing archive is never silent.
+                // Ids only: the warning text can carry an exception message, and the core already logged the exception itself.
+                logger.LogWarning(
+                    "Budget inquiry email sent but not archived | ServiceRequestId: {ServiceRequestId}, CommunicationId: {CommunicationId}",
+                    serviceRequestId, sent.CommunicationId);
+            }
+
+            return new(BudgetInquiryOutcome.Sent, serviceRequestId, sent.CommunicationId,
+                ArchivalWarning: string.IsNullOrWhiteSpace(sent.ArchivalWarning) ? null : sent.ArchivalWarning);
         }
         catch (Exception ex)
         {

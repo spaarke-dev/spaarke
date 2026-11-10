@@ -1526,6 +1526,22 @@ public class DecisionActionExecutorsTests
         sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
     }
 
+    [Fact]
+    public void InquiryAdapter_ASentInquiryWhoseEmlWasNotArchived_IsDone_WithTheFixedCommitWarning_Task176()
+    {
+        var sr = Guid.NewGuid();
+        var comm = Guid.NewGuid();
+
+        var unarchived = BudgetInquiryActionExecutor.ToOutcome(
+            new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm, ArchivalWarning: "archival failed: container x/secret"));
+        var archived = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm));
+
+        unarchived.Status.Should().Be(DecisionActionStatus.Done, "the email is out; the decision stands");
+        unarchived.Warning.Should().Be("inquiry_email_not_archived", "a fixed code, never the core's text");
+        unarchived.Detail.Should().BeNull();
+        archived.Warning.Should().BeNull();
+    }
+
     /// <summary>Captures what is logged, to show where the inquiry's raw error text goes.</summary>
     private sealed class CapturingLogger : ILogger
     {

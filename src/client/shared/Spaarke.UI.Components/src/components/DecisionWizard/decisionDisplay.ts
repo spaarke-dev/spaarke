@@ -190,6 +190,8 @@ const WARNING_TEXT: Record<string, string> = {
   signal_changed: 'An item kept changing while it was being closed, so it was left as it is.',
   signal_close_failed: 'An item could not be closed and was left open.',
   signal_subject_missing: 'An item refers to a record that no longer exists, so it was left open.',
+  // Task 176 (D-216): the inquiry email went out; its copy was not filed in the matter's documents.
+  inquiry_email_not_archived: 'The inquiry email was sent, but a copy of it could not be saved to the matter.',
   // Task 168 (D-194): the task was created and the decision recorded; only the email did not go.
   assignee_email_not_sent: 'The task was assigned, but the email to the assignee could not be sent.',
   assignee_email_missing: 'The task was assigned, but the assignee has no email address, so no email was sent.',
