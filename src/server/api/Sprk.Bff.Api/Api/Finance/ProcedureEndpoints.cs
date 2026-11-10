@@ -358,11 +358,13 @@ public static class ProcedureEndpoints
         StoredFileCreateResult stored;
         try
         {
+            // The stored media type is derived from the name, never the client's claimed Content-Type (RuleSetService.MimeTypeOf).
+            var fileName = Path.GetFileName(file.FileName);
             await using var content = file.OpenReadStream();
             stored = await files.ReplaceForCallerAsync(
                 http.User, TokenHelper.ExtractBearerTokenOrNull(http), StoredFilePurpose.ProcedureSource,
-                new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), Path.GetFileName(file.FileName),
-                string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType, content, ct);
+                new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), fileName,
+                RuleSetService.MimeTypeOf(fileName), content, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

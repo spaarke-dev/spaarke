@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -54,6 +55,8 @@ public sealed class ProcedureEndpointsTests
         { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/publish" },
         { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/retire" },
         { "GET", $"{Base}/{ProcedureId}/retire-preview" },
+        { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/draft" },
+        { "PUT", $"{Base}/{ProcedureId}/versions/{VersionId}/file" },
         { "POST", $"{Base}/{ProcedureId}/retire" },
     };
 
@@ -66,6 +69,8 @@ public sealed class ProcedureEndpointsTests
         { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/publish" },
         { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/retire" },
         { "GET", $"{Base}/{ProcedureId}/retire-preview" },
+        { "POST", $"{Base}/{ProcedureId}/versions/{VersionId}/draft" },
+        { "PUT", $"{Base}/{ProcedureId}/versions/{VersionId}/file" },
         { "POST", $"{Base}/{ProcedureId}/retire" },
     };
 
@@ -74,6 +79,7 @@ public sealed class ProcedureEndpointsTests
         BillingAdminAuthorization.CreateProcedurePrivilege, BillingAdminAuthorization.CreateRuleSetPrivilege,
         BillingAdminAuthorization.WriteRuleSetPrivilege, BillingAdminAuthorization.CreatePolicyVersionPrivilege,
         BillingAdminAuthorization.WritePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyPrivilege,
+        BillingAdminAuthorization.CreatePolicyPrivilege, // task 116: the /draft route (DraftRules)
     };
 
     internal sealed class Host : IAsyncDisposable
@@ -92,10 +98,15 @@ public sealed class ProcedureEndpointsTests
         public readonly Mock<IGenericEntityService> Entities = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
+
+        /// <summary>Task 116: the drafting route's rule set store and queue, and the file route's REAL file store over its fakes.</summary>
+        public readonly Mock<RuleSetService> RuleSets = NewRuleSets();
+        public readonly Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> Jobs = NewJobs();
+        public readonly Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files = new();
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true)
+        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25)
         {
             var host = new Host();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -109,7 +120,14 @@ public sealed class ProcedureEndpointsTests
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
             host.StepZero = StatedCaller.Register(builder.Services);
-            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
+            builder.Services.AddOptions<EbillingOptions>().Configure(o =>
+            {
+                o.Enabled = ebillingEnabled;
+                o.MaxSubmissionFileSizeMb = maxFileMb;
+            });
+            builder.Services.AddSingleton(host.RuleSets.Object);
+            builder.Services.AddSingleton(host.Jobs.Object);
+            builder.Services.AddSingleton(host.Files.Service);
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
@@ -155,6 +173,39 @@ public sealed class ProcedureEndpointsTests
             Access.Grant(ProcedureSet, ProcedureId, AccessRights.Read | AccessRights.Write);
         }
 
+        private static Mock<RuleSetService> NewRuleSets()
+        {
+            var entities = Mock.Of<IGenericEntityService>();
+            var schema = new RuleBodySchemaValidator();
+            var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
+            return new Mock<RuleSetService>(
+                MockBehavior.Strict,
+                entities, Mock.Of<IRecordOwnershipResolver>(), validator,
+                new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
+                Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
+        }
+
+        private static Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> NewJobs() => new(
+            MockBehavior.Strict,
+            Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions
+            {
+                QueueName = "test-jobs",
+                CommunicationQueueName = "test-comms",
+                ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
+            }),
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+
+        /// <summary>Task 116: the routes' own services were never reached (the procedure store, the rule set store, the queue, the file store).</summary>
+        public void VerifyNothingReached()
+        {
+            Service.VerifyNoOtherCalls();
+            RuleSets.VerifyNoOtherCalls();
+            Jobs.VerifyNoOtherCalls();
+            Files.Dataverse.Calls.Should().BeEmpty();
+            Files.Gateway.StorageCalls.Should().Be(0);
+        }
+
         public async ValueTask DisposeAsync()
         {
             Client.Dispose();
@@ -166,7 +217,10 @@ public sealed class ProcedureEndpointsTests
     private static HttpRequestMessage Req(string method, string url, bool authenticated = true, HttpContent? content = null) =>
         RateCardImportEndpointsTests.Req(method, url, authenticated, content);
 
-    private static HttpContent? BodyFor(string method) => method is "PATCH" or "PUT" or "POST" ? JsonContent.Create(new { }) : null;
+    /// <summary>A JSON body for a write; the file route accepts only multipart/form-data (routing answers 415 to anything else).</summary>
+    private static HttpContent? BodyFor(string method, string url = "") =>
+        url.EndsWith("/file", StringComparison.Ordinal) ? FileBody(1)
+        : method is "PATCH" or "PUT" or "POST" ? JsonContent.Create(new { }) : null;
 
     private static async Task<JsonObject> Json(HttpResponseMessage r) => JsonNode.Parse(await r.Content.ReadAsStringAsync())!.AsObject();
 
@@ -184,10 +238,10 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync();
 
-        var response = await host.Client.SendAsync(Req(method, url, authenticated: false, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, authenticated: false, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     public static IEnumerable<object[]> AllRoutesRefused => StatedCaller.Cross(AllRoutes, StatedCaller.RefusedKinds);
@@ -201,12 +255,12 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync();
         host.StepZero.Kind = kind;
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
         host.Probe.Calls.Should().BeEmpty();
         host.Access.Calls.Should().BeEmpty();
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory(DisplayName = "081 must-not-fire: a flag that reads false or blank reaches the route's own check")]
@@ -216,11 +270,11 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync(admin: false);
         host.StepZero.Kind = kind;
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (host.Probe.Calls.Count + host.Access.Calls.Count).Should().BePositive("the route asked Dataverse, as the caller");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -230,10 +284,10 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync();
         host.Probe.Release(BillingAdminAuthorization.WriteRuleSetPrivilege);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -243,11 +297,11 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync();
         host.Access.Grant(ProcedureSet, ProcedureId, AccessRights.Read);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         host.Access.Calls.Should().Contain(c => c.Set == ProcedureSet && c.Id == ProcedureId && c.HasToken, "asked as the caller, about THAT Procedure");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -257,10 +311,10 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync();
         host.Access.ThrowOnEveryCall = new HttpRequestException("simulated Dataverse fault");
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "fail closed");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -270,10 +324,10 @@ public sealed class ProcedureEndpointsTests
         await using var host = await Host.StartAsync();
         host.Probe.ThrowOnEveryCall = new HttpRequestException("simulated Dataverse fault");
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "fail closed");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -290,10 +344,10 @@ public sealed class ProcedureEndpointsTests
         host.Probe.Release(missing);
 
         var response = await host.Client.SendAsync(Req(method,
-            Base + path.Replace("{p}", ProcedureId.ToString()).Replace("{v}", VersionId.ToString()), content: BodyFor(method)));
+            Base + path.Replace("{p}", ProcedureId.ToString()).Replace("{v}", VersionId.ToString()), content: BodyFor(method, path)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Fact]
@@ -322,11 +376,11 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync(ebillingEnabled: false);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Theory]
@@ -335,7 +389,7 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync(ebillingEnabled: false, admin: false);
 
-        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method)));
+        var response = await host.Client.SendAsync(Req(method, url, content: BodyFor(method, url)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the flag never replaces authorization");
     }
@@ -384,7 +438,7 @@ public sealed class ProcedureEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode);
         host.Probe.Calls.Should().Contain(c => c.Privilege == missing, "the card privilege was asked of Dataverse as the caller");
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Fact(DisplayName = "085 must-not-fire (F1-c): the same caller creating a version of a GUIDELINE Procedure is allowed: no card is copied")]
@@ -431,7 +485,7 @@ public sealed class ProcedureEndpointsTests
         var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(403);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Fact(DisplayName = "085 (F1-c, fail closed): a fault reading the Procedure's type is 403 system_failure and nothing is written")]
@@ -445,7 +499,7 @@ public sealed class ProcedureEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Fact(DisplayName = "085 (F1-c, fail closed): an unanswered privilege question on a Rate card Procedure is 403 system_failure, not insufficient_privilege")]
@@ -461,7 +515,7 @@ public sealed class ProcedureEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
-        host.Service.VerifyNoOtherCalls();
+        host.VerifyNothingReached();
     }
 
     [Fact]
@@ -509,5 +563,243 @@ public sealed class ProcedureEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         token.Should().NotBeNullOrEmpty("the count is asked as the caller");
         (await Json(response)).Select(p => p.Key).Should().BeEquivalentTo("warning", "affectedText", "visibleOpenInvoices");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 116 (model 5.3, 7.2, 3.2, 4.2): POST …/versions/{v}/draft and PUT …/versions/{v}/file
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid SetId = Guid.NewGuid();
+    private static readonly Guid SourceFileId = Guid.NewGuid();
+    private static string DraftUrl => $"{Base}/{ProcedureId}/versions/{VersionId}/draft";
+    private static string FileUrl => $"{Base}/{ProcedureId}/versions/{VersionId}/file";
+    private static readonly StoredFileParent VersionParent = new(StoredFileParentKind.ProcedureVersion, VersionId);
+
+    private static DraftSource Source(bool drafted = false) => new(VersionId, ProcedureId, SetId, SourceFileId, "ocg.pdf", drafted);
+
+    private static MultipartFormDataContent FileBody(int bytes, string name = "ocg.pdf")
+    {
+        var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Enumerable.Repeat((byte)'%', bytes).ToArray());
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        content.Add(file, "file", name);
+        return content;
+    }
+
+    private static void TheVersionIsADraft(Host host) =>
+        host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Done(new ProcedureVersionView(VersionId, 1, "Draft", null, null, null)));
+
+    private static StoredFileStatus Status(Host host, Guid id) =>
+        (StoredFileStatus)host.Files.Dataverse.Rows[id].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value;
+
+    [Theory(DisplayName = "116 must-fire: /draft needs every DraftRules privilege (the rule set marker and Create on both policy tables)")]
+    [InlineData(BillingAdminAuthorization.WriteRuleSetPrivilege)]
+    [InlineData(BillingAdminAuthorization.CreatePolicyPrivilege)]
+    [InlineData(BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
+    public async Task Draft_WithoutADraftRulesPrivilege_Is403_AndReachesNothing(string missing)
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.Release(missing);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNothingReached();
+    }
+
+    [Fact(DisplayName = "116 must-not-fire: /draft with Write on the Procedure and the DraftRules privileges queues the version's job (202, Location = the rule set read)")]
+    public async Task Draft_QueuesTheVersionsJob_AndReturns202()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        Sprk.Bff.Api.Services.Jobs.JobContract? queued = null;
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback((Sprk.Bff.Api.Services.Jobs.JobContract job, CancellationToken _) => queued = job)
+            .Returns(Task.CompletedTask);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        response.Headers.Location!.ToString().Should().Be($"/api/finance/rulesets/{SetId}");
+        var body = await Json(response);
+        body["procedureVersionId"]!.GetValue<Guid>().Should().Be(VersionId);
+        body["ruleSetId"]!.GetValue<Guid>().Should().Be(SetId);
+        queued!.SubjectId.Should().Be(VersionId.ToString());
+        queued.IdempotencyKey.Should().Be(VersionId.ToString());
+        queued.Payload!.RootElement.GetProperty("procedureVersionId").GetGuid().Should().Be(VersionId);
+        host.Access.Calls.Should().Contain(c => c.Set == ProcedureSet && c.Id == ProcedureId && c.HasToken, "Write on THAT Procedure, asked as the caller");
+    }
+
+    [Theory(DisplayName = "116: /draft answers a refused source now (another Procedure's version is the unknown-id 404) and queues nothing")]
+    [InlineData(404, "procedure.version_not_found")]
+    [InlineData(400, "procedure.not_billing")]
+    [InlineData(409, "procedure_version.not_draft")]
+    [InlineData(409, "procedure.retired")]
+    [InlineData(409, "procedure.ruleset_missing")]
+    [InlineData(422, "ruleset.source_missing")]
+    public async Task Draft_ARefusedSource_IsAnsweredNow_AndNoJobIsQueued(int status, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(status, code, "refused"));
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        ((int)response.StatusCode).Should().Be(status);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(code);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116: /draft on a drafted version is 409 ruleset.already_drafted; a queue fault is 503 ruleset.draft_not_queued")]
+    public async Task Draft_AlreadyDrafted_Is409_AndAQueueFault_Is503()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.SetupSequence(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source(drafted: true)))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Service Bus outage"));
+
+        var drafted = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+        var down = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        drafted.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(drafted))["errorCode"]!.GetValue<string>().Should().Be(RuleSetService.CodeAlreadyDrafted);
+        down.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(down))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeDraftNotQueued);
+        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "116 must-fire: PUT /file over the size limit by Content-Length is 413 before any service is asked")]
+    public async Task File_OverTheLimitByContentLength_Is413_BeforeAnything()
+    {
+        await using var host = await Host.StartAsync(maxFileMb: 1);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody((2 * 1024 * 1024) + 10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileTooLarge);
+        host.VerifyNothingReached();
+    }
+
+    [Fact(DisplayName = "116 must-fire: PUT /file whose FILE is over the limit (Content-Length within the slack) is 413 and stores nothing")]
+    public async Task File_OverTheLimitByFileLength_Is413_AndStoresNothing()
+    {
+        await using var host = await Host.StartAsync(maxFileMb: 1);
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody((1024 * 1024) + 512)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileTooLarge);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "116: PUT /file on a version that is not a Draft (a missing status included), retired, or of another Procedure stores nothing")]
+    [InlineData(409, "procedure_version.not_draft")]
+    [InlineData(409, "procedure.retired")]
+    [InlineData(404, "procedure.version_not_found")]
+    public async Task File_ARefusedVersion_IsAnswered_AndStoresNothing(int status, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Refused(status, code, "refused"));
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        ((int)response.StatusCode).Should().Be(status);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(code);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116: PUT /file stores the version's file and replaces the earlier one: the new row is Servable, the earlier Removed")]
+    public async Task File_StoresTheVersionsFile_AndReplacesTheEarlierOne()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
+        var earlier = Guid.NewGuid();
+        host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await Json(response);
+        body["procedureVersionId"]!.GetValue<Guid>().Should().Be(VersionId);
+        var created = body["fileId"]!.GetValue<Guid>();
+        Status(host, created).Should().Be(StoredFileStatus.Servable);
+        Status(host, earlier).Should().Be(StoredFileStatus.Removed);
+        host.Files.Dataverse.Rows[created].GetAttributeValue<EntityReference>(StoredFileSchema.ProcedureVersionTable).Id.Should().Be(VersionId);
+    }
+
+    [Fact(DisplayName = "116 must-fire: PUT /file when the earlier file cannot be withdrawn is 500 file_write_failed; the new file is withdrawn, the earlier stays Servable")]
+    public async Task File_AFailedWithdraw_Is500_AndTheEarlierFileStaysServable()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Write);
+        var earlier = Guid.NewGuid();
+        host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        host.Files.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, earlier, It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse 429"));
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileWriteFailed);
+        Status(host, earlier).Should().Be(StoredFileStatus.Servable);
+        var created = host.Files.Dataverse.Rows.Keys.Where(id => id != earlier).Should().ContainSingle().Subject;
+        Status(host, created).Should().Be(StoredFileStatus.Removed);
+    }
+
+    [Fact(DisplayName = "116 must-fire: PUT /file without the caller's own Write on the VERSION is 403 insufficient_rights from the file store; nothing stored")]
+    public async Task File_WithoutWriteOnTheVersion_Is403_AndStoresNothing()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Files.Dataverse.Writes.Should().Be(0);
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116: PUT /file with no file part is 400 procedure_version.file_missing")]
+    public async Task File_WithNoFile_Is400()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: new MultipartFormDataContent { { new StringContent("x"), "note" } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileMissing);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "116: PUT /file stores the media type derived from the file name, never the client's claimed Content-Type")]
+    public async Task File_StoresTheServerDerivedMediaType_NotTheClientsClaim()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Write);
+        var body = new MultipartFormDataContent();
+        var part = new ByteArrayContent(new byte[] { 1, 2, 3 });
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/html");
+        body.Add(part, "file", "ocg.pdf");
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var created = (await Json(response))["fileId"]!.GetValue<Guid>();
+        host.Files.Dataverse.Rows[created].GetAttributeValue<string>(StoredFileSchema.ContentType).Should().Be("application/pdf");
     }
 }
