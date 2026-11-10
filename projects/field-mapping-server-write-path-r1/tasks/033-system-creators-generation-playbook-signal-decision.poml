@@ -4,7 +4,7 @@
     <title>System creators (To Do generation, TaskActionCore, SignalWriter, DecisionRecordWriter) create through the system principal (FR-21 part a)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>dropped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, jobs, ai-nodes, ownership; touches ontology-owned writers with a restricted writer identity (security); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -138,4 +138,5 @@
   <notes>Spec FR-21 part a, FR-07, FR-11, NFR-01, NFR-08. Inbound communication and document ingestion are task 034. The ownership matrix and exception assessment (notification outbox, Decision Record communication owner) are task 060.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <!-- Dropped 2026-11-07 (owner, in fm's session): under the W3 direction these system creators (generation, playbook, Signal, Decision) stay outside RecordCreationService as named exceptions; ontology-r1 agreed leaving the ledger writers out is valid. Its one piece other tasks needed, wiring the app-only column-metadata reader into Repair, moves to task 052. -->
 </task>

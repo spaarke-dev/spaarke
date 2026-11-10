@@ -12,7 +12,7 @@
 //      • Hit  → row exists; Added/Updated → UPDATE (overwrite role +
 //                                            sprk_lastsyncedon).
 //                                          Removed → DELETE.
-//      • Miss (FaultException `Cannot find the record`) → row absent;
+//      • Miss (fault 0x80060891, see IsRetrieveMiss) → row absent;
 //                                            Added/Updated → CREATE.
 //                                            Removed → no-op (delete of
 //                                                      absent row is
@@ -149,34 +149,12 @@ public sealed class MembershipJunctionUpdater : IMembershipJunctionUpdater
             // Honor NFR-07 drain — propagate cancellation as-is.
             throw;
         }
-        catch (InvalidOperationException ex) when (
-            ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex) when (IsRetrieveMiss(ex))
         {
-            // Miss path — DataverseServiceClientImpl wraps the
-            // SDK's "Cannot find the record" FaultException as
-            // InvalidOperationException with a "not found" substring.
+            // Miss path — the row is absent. Anything else (privilege
+            // fault, throttling, timeout, a broken key) is NOT a miss and
+            // propagates so the host abandons the message and retries.
             existing = null;
-        }
-        catch (Exception ex)
-        {
-            // Catch the SDK's FaultException without taking a direct
-            // dependency on Microsoft.Xrm.Sdk message types here.
-            // FaultException's full name contains "FaultException";
-            // its Detail/Message commonly contains "Cannot find the
-            // record" or "does not exist".
-            var t = ex.GetType().FullName ?? string.Empty;
-            var m = ex.Message ?? string.Empty;
-            if (t.Contains("FaultException", StringComparison.Ordinal) &&
-                (m.Contains("Cannot find", StringComparison.OrdinalIgnoreCase) ||
-                 m.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-                 m.Contains("not found", StringComparison.OrdinalIgnoreCase)))
-            {
-                existing = null;
-            }
-            else
-            {
-                throw;
-            }
         }
 
         switch (evt.MutationType)
@@ -275,5 +253,33 @@ public sealed class MembershipJunctionUpdater : IMembershipJunctionUpdater
                 correlationId: evt.CorrelationId,
                 ct: ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether the alternate-key probe failed because no junction row matches (#2292).
+    /// <list type="number">
+    /// <item>The typed Dataverse fault <c>0x80060891</c> anywhere in the chain
+    /// (<see cref="DataverseServiceClientImpl.IsAlternateKeyNoMatch"/>) — what Dataverse actually returns for an
+    /// absent row. The previous string filters missed it: <c>DataverseServiceClientImpl</c> wraps it in an
+    /// <see cref="InvalidOperationException"/> whose message says "does not exist", not "not found", so every
+    /// first-time membership event was abandoned and dead-lettered.</item>
+    /// <item><c>DataverseServiceClientImpl</c>'s OWN literal "not found with provided alternate key values",
+    /// thrown when the retrieve returns no entity. That is our literal, not a localized Dataverse string, so an
+    /// exact ordinal match is safe; it is kept because it is the other way that client reports an absent row.</item>
+    /// </list>
+    /// </summary>
+    private static bool IsRetrieveMiss(Exception ex)
+    {
+        if (DataverseServiceClientImpl.IsAlternateKeyNoMatch(ex))
+            return true;
+
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is InvalidOperationException
+                && current.Message.Contains("not found with provided alternate key values", StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 }

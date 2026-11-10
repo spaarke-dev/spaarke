@@ -19,6 +19,7 @@
 - [Power Pages vs Entra External ID (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
 
 ## Word add-in / Office / Teams
+- [NAA web/new Outlook fallback + redirect (2026-11-03)](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME config; brk-multihub redirectUri = AADSTS7000471; use https redirect; isSetSupported gate; WebView2 cookies
 - [TAC INVALID_PRIVILEGE (2026-10-29)](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page; licence/propagation community-only; New-TeamsApp/Graph alternatives
 - [Teams upload icon error + disabled Add (2026-10-29)](teams-app-upload-icon-invalid-and-add-disabled-2026-10-29.md) — "too small" undocumented; Add disabled = Available-to/org-wide custom setting
 - [NAA pre-auth of Teams/broker IDs (2026-10-29)](naa-preauthorized-teams-clients-2026-10-29.md) — not needed (docs explicit); IDs are Teams-SSO only; broker undocumented

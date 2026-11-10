@@ -13,6 +13,7 @@
 //   - Null hosted-service peer (ADR-032): logs once on start + returns;
 //     no Service Bus interaction.
 
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -89,6 +90,31 @@ public class MembershipJunctionUpdaterTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(
                 $"Entity {JunctionEntityName} not found with provided alternate key values"));
+
+    // #2292 — what DataverseServiceClientImpl.RetrieveByAlternateKeyAsync ACTUALLY throws: its own
+    // InvalidOperationException wrapper ("Failed to retrieve … by alternate key: …") around the SDK fault.
+    private const int AlternateKeyNoMatchCode = unchecked((int)0x80060891);
+    private const int PrivilegeDeniedCode = unchecked((int)0x80040220);
+
+    private static InvalidOperationException WrappedFault(int errorCode, string message) =>
+        new($"Failed to retrieve {JunctionEntityName} by alternate key: {message}",
+            new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = errorCode, Message = message },
+                new FaultReason(message)));
+
+    private static void SetupRetrieveThrows(Mock<IDataverseService> dataverse, Exception ex) =>
+        dataverse
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                JunctionEntityName,
+                It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(ex);
+
+    private static void SetupRetrieveRealMiss(Mock<IDataverseService> dataverse) =>
+        SetupRetrieveThrows(dataverse, WrappedFault(
+            AlternateKeyNoMatchCode,
+            $"A record with the specified key values does not exist in {JunctionEntityName} entity"));
 
     private static void SetupRetrieveHit(
         Mock<IDataverseService> dataverse,
@@ -247,6 +273,126 @@ public class MembershipJunctionUpdaterTests
             Times.Never);
         dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // ─── #2292: the real Dataverse miss shape ──────────────────────────────
+
+    [Fact]
+    public async Task HandleAsync_Added_WrappedNoMatchFault_CreatesFullRow()
+    {
+        // #2292 regression: the retrieve's real miss is InvalidOperationException wrapping fault 0x80060891
+        // ("does not exist", not "not found"). Before the fix the string filters missed it, so every
+        // first-time membership event threw, was retried 10 times and dead-lettered.
+        var (sut, dataverse) = CreateSut();
+        SetupRetrieveRealMiss(dataverse);
+
+        Entity? capturedEntity = null;
+        dataverse
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        await sut.HandleAsync(BuildEvent(MembershipMutationType.Added), CancellationToken.None);
+
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!.LogicalName.Should().Be(JunctionEntityName);
+        capturedEntity["sprk_personid"].Should().Be(PersonId.ToString("D"));
+        ((OptionSetValue)capturedEntity["sprk_personidtype"]).Value
+            .Should().Be((int)PersonIdentityType.User);
+        capturedEntity["sprk_entitylogicalname"].Should().Be(EntityLogicalName);
+        capturedEntity["sprk_entityrecordid"].Should().Be(EntityRecordId.ToString("D"));
+        capturedEntity["sprk_sourcefield"].Should().Be(SourceField);
+        capturedEntity["sprk_role"].Should().Be(Role);
+        capturedEntity["sprk_lastsyncedon"].Should().Be(FixedNow.UtcDateTime);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Updated_WrappedNoMatchFault_CreatesFullRow()
+    {
+        var (sut, dataverse) = CreateSut();
+        SetupRetrieveRealMiss(dataverse);
+
+        Entity? capturedEntity = null;
+        dataverse
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        const string newRole = "reviewingAttorney";
+        await sut.HandleAsync(
+            BuildEvent(MembershipMutationType.Updated, role: newRole),
+            CancellationToken.None);
+
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!["sprk_personid"].Should().Be(PersonId.ToString("D"));
+        capturedEntity["sprk_entityrecordid"].Should().Be(EntityRecordId.ToString("D"));
+        capturedEntity["sprk_sourcefield"].Should().Be(SourceField);
+        capturedEntity["sprk_role"].Should().Be(newRole);
+        capturedEntity["sprk_lastsyncedon"].Should().Be(FixedNow.UtcDateTime);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Removed_WrappedNoMatchFault_IsNoOp()
+    {
+        // Removed on an absent row stays the idempotent no-op it is for the client's own
+        // "not found" literal (HandleAsync_Removed_IsNoOpWhenRowAbsent) — no delete, no create, no throw.
+        var (sut, dataverse) = CreateSut();
+        SetupRetrieveRealMiss(dataverse);
+
+        await sut.HandleAsync(BuildEvent(MembershipMutationType.Removed), CancellationToken.None);
+
+        dataverse.Verify(d => d.DeleteAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Added_WrappedPrivilegeFault_PropagatesAndDoesNotCreate()
+    {
+        // Must-not-fire: a non-miss fault is not "row absent". It propagates unchanged so the host
+        // abandons the message and Service Bus retries.
+        var (sut, dataverse) = CreateSut();
+        var thrown = WrappedFault(PrivilegeDeniedCode, "Principal user is missing prvReadsprk_userentityassociation privilege");
+        SetupRetrieveThrows(dataverse, thrown);
+
+        var act = () => sut.HandleAsync(BuildEvent(MembershipMutationType.Added), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(thrown);
+        dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Added_PlainInvalidOperationWithoutFault_PropagatesAndDoesNotCreate()
+    {
+        // Must-not-fire: a timeout (no fault in the chain) is not a miss.
+        var (sut, dataverse) = CreateSut();
+        var thrown = new InvalidOperationException(
+            $"Failed to retrieve {JunctionEntityName} by alternate key: The request channel timed out.",
+            new TimeoutException("The request channel timed out."));
+        SetupRetrieveThrows(dataverse, thrown);
+
+        var act = () => sut.HandleAsync(BuildEvent(MembershipMutationType.Added), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(thrown);
+        dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Added_OtherNotFoundMessage_PropagatesAndDoesNotCreate()
+    {
+        // Must-not-fire: only the client's own "not found with provided alternate key values" literal is a
+        // miss; any other "not found" text (e.g. a missing key definition) is a fault and propagates.
+        var (sut, dataverse) = CreateSut();
+        var thrown = new InvalidOperationException(
+            $"Failed to retrieve {JunctionEntityName} by alternate key: key sprk_uea_natural_key not found");
+        SetupRetrieveThrows(dataverse, thrown);
+
+        var act = () => sut.HandleAsync(BuildEvent(MembershipMutationType.Added), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(thrown);
+        dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ─── Idempotency: duplicate delivery ───────────────────────────────────
