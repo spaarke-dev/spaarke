@@ -192,11 +192,23 @@ public sealed class GateDecisionRecordSharing
         try
         {
             var communication = await ReadCommunicationAsync(communicationId).ConfigureAwait(false);
-            if (communication is null || IsFiled(communication, communicationId)
-                || communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is not { } team || team == Guid.Empty)
+            if (communication is null)
             {
+                // 198 pass 2 N4: not a silent return (as the user-owned path, ShareWithCommunicationShareesAsync).
+                ShareFailed(null, "the communication could not be read", recordId, communicationId);
                 return;
             }
+
+            if (IsFiled(communication, communicationId))
+            {
+                // 198 pass 2 N1 (mirrors ShareAtWriteAsync for D-169): a filing landed between the writer's owner decision and the create,
+                // and that filing's gate step found no record yet. A record the Direct team owns is re-owned as that filing would have.
+                await ReownFiledAtWriteAsync(recordId, communicationId, communication).ConfigureAwait(false);
+                return;
+            }
+
+            if (communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is not { } team || team == Guid.Empty)
+                return;
 
             var direct = await IsDirectTeamAsync(team).ConfigureAwait(false);
             if (direct is null)
@@ -213,6 +225,42 @@ public sealed class GateDecisionRecordSharing
         {
             ShareFailed(ex, "at write, the record of a Direct message could not be shared (D-215)", recordId, communicationId);
         }
+    }
+
+    /// <summary>
+    /// 198 pass 2 N1: at write, the record of a communication that is already FILED. Only a record the Direct-message owner team owns (the
+    /// one Direct check, by id) is re-owned, as the filing's own step would have (<see cref="ReownAsync"/> with <c>keepAudience</c>, D-215
+    /// rule 4). Any other owner writes nothing; an unknown answer writes nothing and is logged. A fault propagates to the caller's catch.
+    /// </summary>
+    private async Task ReownFiledAtWriteAsync(Guid recordId, Guid communicationId, Entity communication)
+    {
+        var record = (await FindGateRecordsAsync(communicationId, CancellationToken.None).ConfigureAwait(false))
+            .FirstOrDefault(r => r.Id == recordId);
+        if (record?.OwnerTeamId is not { } recordTeam)
+        {
+            _logger.LogInformation(
+                "Gate Decision Record {RecordId} of filed communication {CommunicationId} is not team-owned at write; nothing is written here (D-215).",
+                recordId, communicationId);
+            return;
+        }
+
+        var direct = await IsDirectTeamAsync(recordTeam).ConfigureAwait(false);
+        if (direct is null)
+        {
+            ReownFailed(null, "at write, the communication is filed and whether the record's owner team is the Direct-message owner team " +
+                "cannot be told; nothing is re-owned (D-215)", recordId, communicationId);
+            return;
+        }
+
+        if (direct == false)
+        {
+            _logger.LogInformation(
+                "Gate Decision Record {RecordId} of filed communication {CommunicationId} is owned by another team; nothing is written at write (D-169).",
+                recordId, communicationId);
+            return;
+        }
+
+        await ReownAsync(communicationId, record, keepAudience: true, communication).ConfigureAwait(false);
     }
 
     /// <summary>
