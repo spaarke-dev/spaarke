@@ -223,3 +223,47 @@ Branch `task/fm-054a-4` (cut from a26074e6d6). FULL rigor. No live Dataverse wri
 rework: 054a piece 2 fix round 1 — the Direct recipient stamp reads the thread's owner and Read shares itself with the strict share read; zero-mask shares, application users and unread shares give no recipient; the tests are driven by the thread as stored; notes corrected (reachability, the resolver-CREATE gap, 054b writers, deploy order).
 
 - **C1 — DI wiring test.** `Spaarke.ArchTests.DirectMessageRecipientDiWiringTests` boots the real BFF (`BootedBff`, Development and Production) and asserts the composed `CommunicationService` and `IThreadResolver` each hold a non-null `IDataverseRecordShareService` (`_recordShares`, read by reflection). Fail-then-pass: with `_recordShares = null` forced in both constructors, **Failed 2, Passed 0** (message: "holds NO IDataverseRecordShareService ... stamp silently does nothing"); restored, **Passed 2, Failed 0**. The shared boot gained a `Communication:DefaultMailbox` and approved sender so the Production boot can construct `CommunicationService` (a config stub, as the other validator stubs there). The five booted-host classes: 120 passed, 0 failed.
+
+## 054a piece 2 — fix round 2 (missing-column fail-safe)
+
+Branch `task/fm-054a-6` (cut from 47c6a26627). FULL rigor. No live Dataverse write, no deploy. Code commit 9e20911e4d.
+
+### The finding (F)
+
+The stamp's columns ride in the same update as the message's thread lookup. `sprk_directrecipient` exists only where `scripts/Set-DirectRecipientSchema.ps1 -Apply` has run. In any other environment that update is refused, the thread lookup is not written either, and the message lands unthreaded behind a non-fatal Warning.
+
+### The fix
+
+- **One helper.** `DirectMessageRecipient.WriteThreadFilingAsync` is the ONE filing write. `ThreadResolver.AssignThreadAsync` (the resolver's join and create) and `CommunicationService.AssignExplicitThreadAsync` (respond-into-thread) both call it. `ThreadResolver.ThreadFilingFields` is unchanged and only this helper writes it.
+- **Retry once.** When the write carried stamp columns and the refusal is "this column does not exist on the table" for one of them, the write is sent once more with the thread lookup alone. Then one Error is logged: event `direct_message.recipient_column_missing` (EventId 5405). It names `scripts/Set-DirectRecipientSchema.ps1 -Apply` and carries the message id and the thread id.
+- **Narrow.** Any other fault propagates unchanged to the caller's best-effort catch. So does any fault of a write without stamp columns, and any fault of the retry.
+
+### The fault matcher and its source
+
+Reused, not new: `CommunicationService.IsMissingColumnFault(ex, column)` (ebilling-r1 task 151c-2, the batch-link column on the communication create). It is tested against each stamp column the write carried, never the thread lookup. It walks the exception chain. A link matches only when its message names the column AND either:
+
+- it is the SDK's typed `FaultException<OrganizationServiceFault>` with error code `0x80041103` (QueryBuilderNoAttribute; the same constant as `RecordOwnershipResolver.AttributeDoesNotExistErrorCode`); or
+- its text says the table has no such attribute or property ("doesn't contain attribute", "does not contain attribute / an attribute", "Could not find a property named" (the Web API's `0x80060888`), "Invalid property", "does not exist on type").
+
+What `IGenericEntityService.UpdateAsync` surfaces: the BFF's implementation (`DataverseServiceClientImpl.UpdateAsync`) calls the SDK `ServiceClient` and rethrows any fault as `InvalidOperationException("Failed to update … : {inner message}", inner)`. The typed fault is therefore the inner exception, and the wrapper's message carries its text. The matcher covers both, and the Web API text form as well.
+
+### Evidence
+
+- **Fail-then-pass** (filter `FullyQualifiedName~DirectMessageRecipientStampTests`; the new tests use no new source symbol, so they compile against the old source).
+  - Before (the three source files checked out from 47c6a26627 and rebuilt): **Failed 8, Passed 37, Total 45.** The 8 failures are exactly the must-fire tests: send join × 3 fault shapes (SDK typed + wrapped, SDK typed + localized message, Web API unknown property), the resolver create, the inbound join, and respond × 3 fault shapes. Reason: one filing attempt where two were expected.
+  - After: **Passed 45, Failed 0.**
+  - The must-not-fire tests pass before and after, as they should: they pin today's behaviour. They cover privilege-on-the-column, throttle, HTTP 403 and missing-referenced-row (code `0x80040217`, naming the column) faults on both the resolver join and the respond path (one attempt, nothing written, the non-fatal Warning, no new event); a stamp-less write that faults on a missing attribute (one attempt, both paths); and a successful combined write (exactly one update, both paths).
+  - Rig change: `DirectMessageRecipientStampTests` became partial. The update double records every attempt and can fault by columns. The service gets a recording logger. A flag gives a thread the run creates a pair, used only to drive the create path's filing write.
+- **Builds (after the commit's `dotnet format`):** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each built with 0 warnings and 0 errors.
+- **Filtered run (after the commit):** the filter was (DirectMessageRecipient | ThreadResolver | CommunicationService | Communication | Messaging | FieldMapping | RecordCreation) with `FullyQualifiedName!~Api.Office.` (#2060). Result: **3562 passed, 0 failed, 2 skipped.**
+- **ArchTests:** `DirectMessageRecipientDiWiring`, **2 passed, 0 failed.**
+- **CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` reports no vulnerable packages. No package was added.
+- **Publish-size delta:** not measured here (`scripts/publish-delta.ps1` runs in the main session). No package or project reference was added.
+
+### The rule
+
+The schema script runs before a BFF built from this branch deploys; when it hasn't, the thread lookup is still written and one Error names the script.
+
+Order: the retry runs first and the Error is logged after it. If the retry itself faults, that fault goes to the caller's non-fatal Warning, and no `recipient_column_missing` Error is logged for that message.
+
+rework: 054a piece 2 fix round 2 — the Direct filing write is one helper (`DirectMessageRecipient.WriteThreadFilingAsync`) used by the resolver and the respond path; a refusal because a stamp column does not exist (the reused `CommunicationService.IsMissingColumnFault`: SDK `0x80041103` or the no-such-attribute/property text) is retried once with the thread lookup alone and logs one Error `direct_message.recipient_column_missing` naming the schema script; every other fault is unchanged.
