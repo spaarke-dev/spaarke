@@ -511,3 +511,14 @@ Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build
   `@`-mention a declarative agent, that agent takes over the chat, and it can only use its own instructions,
   knowledge and actions. Microsoft gives declarative agents no tool to edit the open Word document. The research
   flagged this handover as the spike's key question; the answer is no. Nothing in our setup is broken.
+- **Owner follow-up: scripts, Harvey, Legora (2026-11-09).**
+  - **Scripts:** a Python script (as in the redline video and our `core/engines/ooxml_redline.py`) edits a *file*.
+    So it gives a redlined **copy** with real tracked changes and comments, never live edits in the open window.
+    It already works in the Claude/Cowork edition (Act 5: 12 revisions, 13 comments). In Copilot it would need a
+    declarative agent with Code Interpreter. Three things are unverified: whether the agent gets the actual .docx
+    (it reads the open document only as plain text, so the user may have to attach it), whether a skill can ship
+    and run our script, and whether `lxml` is available.
+  - **Harvey and Legora:** both edit in place through **their own Word add-ins**, which call Word's editing
+    interface directly (Harvey for Word Edit mode and playbooks; Harvey custom agents in Word, September 2026;
+    Legora Word add-in with native tracked changes). Microsoft's Legal agent in Word and Anthropic's Claude for Word
+    are built the same way. A Copilot declarative agent cannot do this.
