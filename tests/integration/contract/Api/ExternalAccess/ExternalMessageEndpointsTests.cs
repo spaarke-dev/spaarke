@@ -1276,14 +1276,17 @@ public class ExternalMessageEndpointsTests
 
     // ── service requests: requester scope ──────────────────────────────────────────────────────────
 
-    private Guid ServiceRequestRequestedBy(Guid requester)
+    private Guid ServiceRequestRequestedBy(Guid requester, Guid? invoice = null)
     {
         var request = Guid.NewGuid();
-        _records[("sprk_servicerequest", request)] = new Dictionary<string, object?>
+        var record = new Dictionary<string, object?>
         {
             ["id"] = request,
             ["sprk_requestedby"] = Lookup(requester, "contact"),
         };
+        if (invoice is { } linked)
+            record["sprk_regardinginvoice"] = Lookup(linked, "sprk_invoice");
+        _records[("sprk_servicerequest", request)] = record;
         return request;
     }
 
@@ -1298,7 +1301,72 @@ public class ExternalMessageEndpointsTests
 
         messages.Should().HaveCount(1);
         _lastOData.Should().Contain($"_sprk_regardingservicerequest_value eq {request}");
-        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby");
+        // ebilling-r1 task 130-0b F3b: a service request is an invoice-linked child, so the root read also selects its invoice link.
+        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby", "sprk_regardinginvoice");
+    }
+
+    // ebilling-r1 task 130-0b F3b: a service request follows the child rule on the message routes. A request with no invoice link
+    // is read as before; one linked to a visible invoice is read; one linked to a hidden invoice is the uniform refusal and no
+    // message is read; one whose invoice decision faulted is the invoice-unreadable 503 (only for the requester, so no oracle).
+    [Fact(DisplayName = "130-0b F3b service request thread (must not fire): no link and a visible invoice are read")]
+    public async Task F3b_ServiceRequestThread_NoLinkOrAVisibleInvoice_IsRead()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var plain = ServiceRequestRequestedBy(me);
+        var linked = ServiceRequestRequestedBy(me, invoice);
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", plain, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        Messages(await Get("servicerequests", plain, WorkforceContact(contactId: me))).Should().HaveCount(1);
+        _invoiceHiding.Calls.Should().NotContain(call => call.Contains(invoice));
+
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", linked, internalOnly: false, "2026-10-01T09:00:00Z"));
+        Messages(await Get("servicerequests", linked, WorkforceContact(contactId: me))).Should().HaveCount(1);
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice), "the linked request's invoice is decided");
+    }
+
+    [Fact(DisplayName = "130-0b F3b service request thread (must fire): a hidden invoice is the uniform refusal and no message is read")]
+    public async Task F3b_ServiceRequestThread_AHiddenInvoice_IsTheUniformRefusal_AndNoMessageIsRead()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me, invoice);
+        _invoiceHiding = InvoiceHidingStub.Hiding(invoice);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeTheSameAnswer(
+            await Get("servicerequests", request, WorkforceContact(contactId: me)),
+            await Get("servicerequests", Guid.NewGuid(), WorkforceContact(contactId: me)));
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact(DisplayName = "130-0b F3b service request thread (must fire): a faulted invoice decision is the 503 only for the requester; no predicate fails closed")]
+    public async Task F3b_ServiceRequestThread_AFaultedDecision_IsThe503_OnlyForTheRequester_AndNoPredicateFailsClosed()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me, invoice);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        var problem = (await Get("servicerequests", request, WorkforceContact(contactId: me))).Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+
+        // Someone else's request is the uniform refusal before any invoice decision, faulted or not.
+        ShouldBeTheSameAnswer(
+            await Get("servicerequests", request, WorkforceContact(contactId: Guid.NewGuid())),
+            await Get("servicerequests", Guid.NewGuid(), WorkforceContact(contactId: Guid.NewGuid())));
+
+        // No (a') predicate configured: a linked request cannot be decided; it is never shown.
+        var data = _roots.NewService();
+        var noPredicate = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "servicerequests", request, WorkforceContact(contactId: me), ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            hideInvoices: null);
+        noPredicate.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().NotBe(StatusCodes.Status200OK);
+        ShouldNotHaveReadMessages();
     }
 
     [Fact]

@@ -581,6 +581,35 @@ public sealed class ExternalInvoiceLinkedDescendantRouteTests : IClassFixture<Ex
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 
+    // ebilling-r1 task 130-0b F3b: the service requests module's single-record route (/data/record/sprk_servicerequest/{id}). The
+    // module's scope is the REQUESTER (sprk_requestedby), so the Tier-2 gate compares the request id with the caller's contact id and
+    // refuses every request id before any read: it has no row to decide by an invoice (the same shape as the documents module).
+    [Fact(DisplayName = "F3b service request: the module's single-record route refuses a request id before any read, so it returns no linked row")]
+    public async Task ServiceRequestModule_SingleRecordRead_IsRefusedForARequestId_BeforeAnyRead()
+    {
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights>(),
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+        };
+        var registry = Registry();
+        var request = Guid.NewGuid();
+        var reads = 0;
+
+        registry.FindByEntity("sprk_servicerequest")!.IsRecordAccessible(caller, request).Should().BeFalse();
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_servicerequest", request, select: null, caller, registry,
+            (_, _, _, _) => { reads++; return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>()); },
+            NullLogger.Instance, CancellationToken.None, _hiding.Seam);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
+        reads.Should().Be(0, "no request row is read, so none can be returned with an invoice link");
+    }
+
     private static ExternalModuleRegistry Registry()
     {
         var services = new ServiceCollection();

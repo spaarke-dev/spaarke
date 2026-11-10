@@ -228,7 +228,10 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
                 return Task.FromResult(new FetchResponseDto(ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
             },
             data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
-            data.GetLiveParentRootsAsync);
+            data.GetLiveParentRootsAsync,
+            // ebilling-r1 task 130-0b F3b: the route passes the chain reader (the invoice links up a row's parent chain); a row that
+            // has a parent and is given no reader is undecidable, so it is hidden.
+            readDocumentChains: data.ReadModuleDocumentAncestorLinksAsync);
 
         executed.Should().Contain("name=\"sprk_accesspermission\"").And.Contain("name=\"sprk_parentdocument\"")
             .And.Contain("name=\"sprk_relatedcommunication\"");

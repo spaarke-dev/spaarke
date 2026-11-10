@@ -238,14 +238,17 @@ public class ExternalMessageSendTests
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
         new(StringComparer.OrdinalIgnoreCase) { ["id"] = id, ["logicalName"] = entity, ["name"] = "n" };
 
-    private Guid ServiceRequestRequestedBy(Guid contactId)
+    private Guid ServiceRequestRequestedBy(Guid contactId, Guid? invoice = null)
     {
         var request = Guid.NewGuid();
-        _records[("sprk_servicerequest", request)] = new Dictionary<string, object?>
+        var record = new Dictionary<string, object?>
         {
             ["id"] = request,
             ["sprk_requestedby"] = Lookup(contactId, "contact"),
         };
+        if (invoice is { } linked)
+            record["sprk_regardinginvoice"] = Lookup(linked, "sprk_invoice");
+        _records[("sprk_servicerequest", request)] = record;
         return request;
     }
 
@@ -1200,7 +1203,50 @@ public class ExternalMessageSendTests
         var row = TheRow();
         row.GetAttributeValue<EntityReference>("sprk_regardingservicerequest").Id.Should().Be(request);
         row.GetAttributeValue<EntityReference>("sprk_createdbycontact").Id.Should().Be(me);
-        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby");
+        // ebilling-r1 task 130-0b F3b: a service request is an invoice-linked child, so the root read also selects its invoice link.
+        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby", "sprk_regardinginvoice");
+    }
+
+    // ebilling-r1 task 130-0b F3b: a service request follows the child rule on the post route. No link and a visible invoice post as
+    // before; a hidden invoice is the uniform refusal and writes nothing; a faulted decision is the invoice-unreadable 503 and writes
+    // nothing (only for the requester, so it is no existence oracle).
+    [Fact(DisplayName = "130-0b F3b service request post (must not fire): no link and a visible invoice post as before")]
+    public async Task F3b_ServiceRequestPost_NoLinkOrAVisibleInvoice_Posts()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Created(await Post("servicerequests", ServiceRequestRequestedBy(me), WorkforceContact(contactId: me)));
+        Created(await Post("servicerequests", ServiceRequestRequestedBy(me, invoice), WorkforceContact(contactId: me)));
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice), "the linked request's invoice is decided");
+    }
+
+    [Fact(DisplayName = "130-0b F3b service request post (must fire): a hidden invoice is the uniform refusal and a faulted decision the 503; nothing is written")]
+    public async Task F3b_ServiceRequestPost_AHiddenInvoice_IsRefused_AndAFaultIsThe503_AndNothingIsWritten()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me, invoice);
+
+        _invoiceHiding = InvoiceHidingStub.Hiding(invoice);
+        var hidden = await Post("servicerequests", request, WorkforceContact(contactId: me));
+        var missing = await Post("servicerequests", Guid.NewGuid(), WorkforceContact(contactId: me));
+        ShouldBeForbidden(hidden, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ((ProblemHttpResult)hidden).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
+        ShouldHaveWrittenNothing();
+
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        var problem = (await Post("servicerequests", request, WorkforceContact(contactId: me))).Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+
+        // Someone else's request is the uniform refusal before any invoice decision.
+        ShouldBeForbidden(
+            await Post("servicerequests", request, WorkforceContact(contactId: Guid.NewGuid())),
+            ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldHaveWrittenNothing();
     }
 
     /// <summary>
