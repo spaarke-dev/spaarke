@@ -602,6 +602,8 @@ internal static class AssignedAccessTestDoubles
                 ProjectId = type == ExternalGrantRootType.Project ? rootId : null,
                 MatterId = type == ExternalGrantRootType.Matter ? rootId : null,
                 WorkAssignmentId = type == ExternalGrantRootType.WorkAssignment ? rootId : null,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
                 AccessLevel = level,
                 ExpiresDate = expiry,
                 StateCode = 0,
@@ -668,7 +670,28 @@ internal static class AssignedAccessTestDoubles
                 _ => throw new InvalidOperationException($"Unexpected query of {entitySetName} through the grant table."),
             };
 
-            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
+            var json = JsonSerializer.Serialize(rows);
+            if (entitySetName == GrantSet && OmittedGrantColumns.Count > 0)
+                json = WithoutColumns(json);
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(json)!);
+        }
+
+        /// <summary>
+        /// Fix round 3g: grant-row columns the double's reads do NOT return (a column absent from the Web API payload, as opposed to
+        /// an explicit null). Applied to grant queries only; a test sets it to show a consumer's answer to an unread column.
+        /// </summary>
+        public HashSet<string> OmittedGrantColumns { get; } = new(StringComparer.Ordinal);
+
+        private string WithoutColumns(string json)
+        {
+            var array = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsArray();
+            foreach (var row in array)
+            {
+                if (row is not System.Text.Json.Nodes.JsonObject obj) continue;
+                foreach (var column in OmittedGrantColumns) obj.Remove(column);
+            }
+
+            return array.ToJsonString();
         }
 
         public override Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null,
@@ -745,6 +768,8 @@ internal static class AssignedAccessTestDoubles
                 ProjectId = BoundId(payload, "sprk_Project@odata.bind"),
                 MatterId = BoundId(payload, "sprk_Matter@odata.bind"),
                 WorkAssignmentId = BoundId(payload, "sprk_WorkAssignment@odata.bind"),
+                GrantedBySystemUserId = BoundId(payload, "sprk_GrantedBy@odata.bind"),
+                GrantedByContactId = BoundId(payload, $"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"),
                 AccessLevel = (int?)payload["sprk_accesslevel"],
                 ExpiresDate = payload.TryGetValue("sprk_expiresdate", out var e) && e is string s
                     ? DateOnly.ParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture)

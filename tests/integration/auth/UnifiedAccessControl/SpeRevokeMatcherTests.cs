@@ -127,8 +127,12 @@ public class SpeRevokeMatcherTests
         {
             Id = AccessRecordId,
             ProjectId = ProjectId,
+            MatterId = null,
+            WorkAssignmentId = null,
             ContactId = contactOnGrantRow,
             OrganizationId = contactOnGrantRow is null ? OrganizationId : null,
+            GrantedBySystemUserId = null,
+            GrantedByContactId = null,
             StateCode = 0
         };
 
@@ -828,16 +832,24 @@ public class SpeRevokeMatcherTests
             {
                 Id = AccessRecordId,
                 ProjectId = ProjectId,
+                MatterId = null,
+                WorkAssignmentId = null,
                 ContactId = null,
                 OrganizationId = OrganizationId,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
                 StateCode = 0
             });
             _grantRows.Add(new ExternalGrantRow
             {
                 Id = PersonalGrantId,
                 ProjectId = ProjectId,
+                MatterId = null,
+                WorkAssignmentId = null,
                 ContactId = MemberOne,
                 OrganizationId = OrganizationId,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
                 StateCode = 0
             });
 
