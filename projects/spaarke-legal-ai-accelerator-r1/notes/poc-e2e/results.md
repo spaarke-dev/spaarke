@@ -499,3 +499,15 @@ Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build
 - **Packages** (manifest v1.9, the same route as Spaarke AI): three upload zips in `POC-DA1/packages/`, each
   carrying its playbook as an agent skill (no knowledge source). This is the only way to test skills (B), since the
   builder has no skills option. Codes `-B`.
+
+### First runs (owner, 2026-11-09): our agent can't edit the open document
+- `@Spaarke NDA Review` (Copilot Studio agent) gives a review table in chat but **can't change the open document**.
+  Asked to apply its recommendations, it said it "cannot write changes back into the currently open SharePoint
+  document" and instead **created a revised copy** of Brightwater and linked it. It's not yet checked whether that
+  copy has tracked changes and comments or is clean text.
+- The agent and Microsoft's Legal plugin **can't run in the same chat** (N-4/N-5).
+- **Why:** the redlines with comments we saw before (Act 7 R3: 12 insertions, 17 deletions, 13 comments) and in the
+  demo video come from Microsoft's own Word agent and its legal skills, which can edit the document. Once you
+  `@`-mention a declarative agent, that agent takes over the chat, and it can only use its own instructions,
+  knowledge and actions. Microsoft gives declarative agents no tool to edit the open Word document. The research
+  flagged this handover as the spike's key question; the answer is no. Nothing in our setup is broken.
