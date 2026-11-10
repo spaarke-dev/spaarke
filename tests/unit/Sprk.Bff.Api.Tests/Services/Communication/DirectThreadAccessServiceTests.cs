@@ -634,13 +634,13 @@ public class DirectThreadAccessServiceTests
     /// </summary>
     private DirectThreadAccessService DirectTeamSut(
         DirectMessageOwnerTeamDouble? directory = null, ILogger<DirectThreadAccessService>? logger = null,
-        UserFlagDirectoryDouble? users = null) => new(
+        UserFlagDirectoryDouble? users = null, Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gate = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         logger ?? Mock.Of<ILogger<DirectThreadAccessService>>(),
-        new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
+        gate ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
         (directory ?? DirectDirectory()).Lookup(),
         users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
@@ -752,6 +752,27 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_decisionrecords", It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task DirectTeamMessage_TheGrantIsMirroredToTheMessagesGateDecisionRecords_D215()
+    {
+        // Task 198 Part E (D-215 rule 3): after the participant grant, the message's gate records (owned by the Direct team) are brought
+        // in line with the participants who read it, through GateDecisionRecordSharing (its own world: the message, its pair and shares).
+        DirectTeamMessageWorld();
+        var gateWorld = new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld()
+            .WithTeam(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.DirectTeam, DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false)
+            .WithCommunication(CommunicationId, Caller, owningTeam: Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.DirectTeam)
+            .WithPair(CommunicationId, Caller, Other)
+            .WithUser(Caller).WithUser(Other)
+            .Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Communication, CommunicationId, Caller)
+            .Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Communication, CommunicationId, Other)
+            .WithGateRecord(GateRecordId, CommunicationId, Caller);
+        gateWorld.OwnByTeam(GateRecordId, Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.DirectTeam);
+
+        await DirectTeamSut(gate: gateWorld.Sharing).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        gateWorld.RecordSharees(GateRecordId).Should().Equal(new[] { Caller, Other }.OrderBy(g => g));
     }
 
     [Fact]

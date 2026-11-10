@@ -769,6 +769,61 @@ public sealed partial class DecisionRecordWriterTests
         world.RecordSharees(result.RecordId).Should().BeEmpty("a filed communication's record gets no participant share");
     }
 
+    // ── uac-r2 task 198 Part E (D-215): a Direct 1:1 message's gate record follows its participants from the write ─────
+
+    /// <summary>An unfiled communication in ChildBu owned by <paramref name="owningTeam"/>; the participant-share world holds the same message
+    /// (the pair <see cref="CommunicationOwner"/> → <see cref="CommunicationSharee"/>, both reading it) and, after the create, the record as
+    /// the writer left it (owned by the resolver's team).</summary>
+    private static (Harness H, GateSharingWorld World) TeamOwnedCommunication(Guid owningTeam)
+    {
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu, owningTeam: owningTeam);
+        var world = new GateSharingWorld()
+            .WithTeam(GateSharingWorld.DirectTeam, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false)
+            .WithTeam(ChildTeam, "Child unit", isDefault: true)
+            .WithCommunication(CommunicationId, CommunicationOwner, owningTeam: owningTeam)
+            .WithPair(CommunicationId, CommunicationOwner, CommunicationSharee)
+            .WithUser(CommunicationOwner).WithUser(CommunicationSharee).WithUser(BasicColleague)
+            .Share(GateSharingWorld.Communication, CommunicationId, CommunicationOwner)
+            .Share(GateSharingWorld.Communication, CommunicationId, CommunicationSharee)
+            .Share(GateSharingWorld.Communication, CommunicationId, BasicColleague);
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
+        CommunicationOwnedBy(h, new EntityReference("team", owningTeam));
+        h.Rows[("sprk_communication", CommunicationId)]["owningteam"] = new EntityReference("team", owningTeam);
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                h.Created.Add(e);
+                world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner);
+                world.OwnByTeam(h.NewId, ((EntityReference)e["ownerid"]).Id);
+                return Task.FromResult(h.NewId);
+            });
+        return (h, world);
+    }
+
+    [Fact]
+    public async Task Gate_ADirectMessagesRecord_IsReownedToTheDirectTeam_AndSharedWithItsParticipants_AtWrite_D215()
+    {
+        var (h, world) = TeamOwnedCommunication(GateSharingWorld.DirectTeam);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        world.Rows[(GateSharingWorld.Record, result.RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id
+            .Should().Be(GateSharingWorld.DirectTeam, "D-215 rule 3: while unfiled, owned by the Direct-message owner team");
+        world.RecordSharees(result.RecordId).Should().Equal(new[] { CommunicationOwner, CommunicationSharee }.OrderBy(g => g),
+            "the pair that reads the message; the colleague reads it but is no participant");
+    }
+
+    [Fact]
+    public async Task Gate_ARecordOfAnotherTeamsMessage_GetsNoShare_D169_D123()
+    {
+        var (h, world) = TeamOwnedCommunication(ChildTeam);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        world.RecordSharees(result.RecordId).Should().BeEmpty();
+        world.Calls.Should().BeEmpty("a team-owned record of a message the Direct team does not own is never shared or re-owned at write");
+    }
+
     // ── Owner decision 2026-10-29: a communication filed under a person-owned work assignment ──────────────────────────
 
     /// <summary>A person-owned communication (ChildBu) filed under a person-owned work assignment (GeneralBu) that is filed under an

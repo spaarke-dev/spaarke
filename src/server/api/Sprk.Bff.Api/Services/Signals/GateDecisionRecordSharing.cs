@@ -92,7 +92,9 @@ public sealed class GateDecisionRecordSharing
         OntologyWriterDataverseClient writer,
         IRecordOwnershipResolver ownership,
         IMembershipCacheInvalidator cacheInvalidator,
-        ILogger<GateDecisionRecordSharing> logger)
+        ILogger<GateDecisionRecordSharing> logger,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null,
+        IConfiguration? configuration = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _shares = shares ?? throw new ArgumentNullException(nameof(shares));
@@ -100,7 +102,11 @@ public sealed class GateDecisionRecordSharing
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _cacheInvalidator = cacheInvalidator ?? throw new ArgumentNullException(nameof(cacheInvalidator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _ = (directMessageOwnerTeam, configuration); // D-215 (task 198 Part E): surface only; the behaviour lands in the next commit.
     }
+
+    /// <summary>D-215 (task 198 Part E): the team-owned at-write share. Surface only in this commit (fail-first); it writes nothing.</summary>
+    public Task ShareTeamOwnedAtWriteAsync(Guid recordId, Guid communicationId, Guid ownerTeamId) => Task.CompletedTask;
 
     /// <summary>
     /// After the gate record of an unfiled communication was created owned by <paramref name="ownerUserId"/>: shares it, Read only, with the

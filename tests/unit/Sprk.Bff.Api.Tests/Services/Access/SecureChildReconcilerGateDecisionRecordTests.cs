@@ -33,7 +33,9 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
     private readonly Mock<IThreadResolver> _threads = new();
     private readonly CapturingLogger<SecureChildReconciler> _log = new();
 
-    private SecureChildReconciler Reconciler(GateDecisionRecordSharing gate, Mock<IGenericEntityService>? uacEntities = null)
+    private SecureChildReconciler Reconciler(
+        GateDecisionRecordSharing gate, Mock<IGenericEntityService>? uacEntities = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         var entities = uacEntities ?? new Mock<IGenericEntityService>();
         var configuration = new ConfigurationBuilder().Build();
@@ -41,7 +43,30 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
             entities.Object, Mock.Of<IRecordOwnershipResolver>(),
             new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
                 NullLogger<SecureChildShareSynchronizer>.Instance),
-            null!, configuration, _log, gate, threads: _threads.Object);
+            null!, configuration, _log, gate, threads: _threads.Object,
+            recordShares: directMessageOwnerTeam is null ? null : Mock.Of<IDataverseRecordShareService>(),
+            directMessageOwnerTeam: directMessageOwnerTeam);
+    }
+
+    [Fact]
+    public async Task AfterRefile_OfACommunication_RunsTheGateStepLast_AfterTheDirectParticipantStep_D215()
+    {
+        // Task 198 Part E (D-215): a Direct message's gate records take the participants who read the message NOW, so the gate step
+        // runs after the Direct participant step (which reads the message first) has granted them again.
+        var gate = SharedGateRecord();
+        var uac = new Mock<IGenericEntityService>();
+        uac.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((query, _) => gate.Calls.Add($"uac-query:{query.EntityName}"))
+            .ReturnsAsync(new EntityCollection());
+        var directory = new Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble().WithDirectTeam(GateSharingWorld.DirectTeam);
+
+        await Reconciler(gate.Sharing, uac, directory.Lookup())
+            .AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, RefileThreadStep.PlacedByWriter, CancellationToken.None);
+
+        var directStepRead = gate.Calls.FindLastIndex(c => c == "uac-query:sprk_communication");
+        var assign = gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        directStepRead.Should().BeGreaterThanOrEqualTo(0, "the Direct participant step read the message");
+        assign.Should().BeGreaterThan(directStepRead, "the gate Decision Record step runs last");
     }
 
     /// <summary>The re-filed communication's user-owned gate record, shared with a participant, and the resolver's ordinary answer.</summary>
