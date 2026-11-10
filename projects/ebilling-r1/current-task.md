@@ -61,7 +61,12 @@
          - F-116-R2: everything that can be validated (file present, name and type, size) must be checked BEFORE the reset, so a refused upload leaves the marker and list alone. A fault inside the store is a K. Test: a refused name or type leaves the marker and list untouched.
        - **Question:** does the rate-card import route answer 409 or 413 before a version-rights check? If so, apply the same order as the version routes.
        - **Citation clean-up is OURS:** remove `("sprk_ruleset","sprk_sourcedocument")` at `RecordOwnershipResolver.cs:1809`, the `SecureChildLineage.cs` comment and `SecureChildLineageTests`. These came from our 089a commits `f901b2dbe5` and `0eaee2810c`. Keep master's `ParentLineage.cs:859`.
-       - **Next:** fix round 2 (Opus), with these items plus whatever the re-check finds, launched once the re-check returns. The round covered:
+       - **The Opus re-check came back NOT APPROVED.** Its findings:
+         - F2: a stale marker Yes survives a fault after the marker is written, so the version is stuck as "drafted" for the old file;
+         - F4: Delete (same as R1);
+         - F3: the handler's file-id wiring is untested;
+         - Ks: a publish racing an upload erases the published version's list; the 404 hidden-vs-unknown timing differs; the Servable flip runs on `ct`; a quick retry can be poisoned; the superseded discriminator uses `createdon`.
+       - **Fix round 2 RUNNING** (Opus, from `ebc4f178d5`) covers: the file id inside the list JSON (a stale Yes counts as not drafted); Delete on both policy tables; validation before the reset; the first reset writes the marker only; handler wiring tests; the always-run rights probe; the flip on None; the discriminator; the rate-card route order; and the citation clean-up. **Then:** a scoped re-check, and the delta to uac-r2. The round-1 work covered:
        - A1–A6, F4/K1, the 422-vs-409 order (K4) and §11;
        - A2 per EB-D-214: clear the drafted state first, then stage the file; the job re-checks its source; no duplicate drafts on a redraft;
        - uac-r2's NFR-01 route order on BOTH routes: 404 for missing, foreign or unreadable, then 403 without Write on the version, then 409, then 413. The draft route adds the caller's Write on the version, and the POML acceptance criteria are refined to match.
