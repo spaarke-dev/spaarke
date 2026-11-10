@@ -17,9 +17,18 @@ I'm an in-house lawyer at Acme Company. Mark results as drafts for attorney revi
 
 Restore your protocol instruction after the spike (S9).
 
-### S1. Install the agents (about 15 minutes)
-Round 1 found that agents built in Agent Builder or Copilot Studio don't appear in Word (`results.md`, Spike DA-1).
-So install them the way Spaarke AI was installed: as **declarative-agent packages**.
+### S1. The agents (about 15 minutes)
+**Your three Copilot Studio agents (do this first).** They now show in Word; publishing took a while. One fix: their
+knowledge is the four-column Word playbooks, which are tables, and agents drop tables. Replace each agent's knowledge
+with the table-free copy in OneDrive `Documents/Cowork/Test/POC-DA1/knowledge/`, then publish again:
+- Spaarke NDA Review → `Spaarke NDA – Mutual v1.2 (text).docx`
+- Spaarke Legal Hold Review → `Spaarke Legal Hold Notice – Employee Custodians v1.0 (text).docx`
+
+They answer with the `-A` codes (`NDAR-1109-A`, `LHR-1109-A`). Run the LH and N tests with them, typing the names
+without " DA" (for example `@Spaarke NDA Review`).
+
+**Packages (for the B tests and R-1).** The builder has no skills option, so the one-agent-with-skills design can
+only be tested as **declarative-agent packages**, installed the way Spaarke AI was.
 
 The packages are in OneDrive `Documents/Cowork/Test/POC-DA1/packages/` (built by `da-spike/Build-SpikePackages.ps1`):
 

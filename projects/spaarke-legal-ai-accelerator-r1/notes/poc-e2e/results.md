@@ -491,9 +491,11 @@ Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build
 | 2, 5 | Knowledge won't accept `.md` files. The owner used the four-column Word playbooks instead | Those are tables, which agents drop. Replaced by table-free Word copies: `POC-DA1/knowledge/* (text).docx` |
 | 3 | No "starters"; the field is called *Suggested prompts* | Naming only |
 | 4 | No *skills* option in the builder | Architecture B can't be built there |
-| 6, 7 | All three agents were built in **Copilot Studio** and **don't appear in Word**. Owner's view: Word lists only declarative agents | Consistent with what we know: the one agent ever seen in Word (`@Spaarke AI`) was an uploaded declarative-agent package. Microsoft's docs don't say which agents Word lists |
+| 6, 7 | All three agents were built in **Copilot Studio** and at first **didn't appear in Word**. **Update (same day): they appeared later**; publishing just took a while | Agents built there do reach Word's `@` list, so a "not there" right after building means "wait", not "wrong agent type" |
 
-**Change.** Use declarative-agent **packages** (manifest v1.9, the same route as Spaarke AI): three upload zips in
-`POC-DA1/packages/`, each carrying its playbook as an agent skill (no knowledge source, so no `.md` or table
-problem and no SharePoint dependency). The Copilot Studio agents become one control test (do they ever appear in
-Word?).
+**Change.** Two routes, both kept:
+- **A (owner's Copilot Studio agents):** swap their knowledge from the four-column Word playbooks (tables, which
+  agents drop) to the table-free copies in `POC-DA1/knowledge/* (text).docx`. Codes `-A`.
+- **Packages** (manifest v1.9, the same route as Spaarke AI): three upload zips in `POC-DA1/packages/`, each
+  carrying its playbook as an agent skill (no knowledge source). This is the only way to test skills (B), since the
+  builder has no skills option. Codes `-B`.
