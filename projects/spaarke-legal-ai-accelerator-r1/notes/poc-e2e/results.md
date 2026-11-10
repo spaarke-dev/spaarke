@@ -530,3 +530,26 @@ Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build
   decision (owner, 2026-11-02), not a technical limit. Spaarke's own in-place route is **Compose** (Spaarke AI
   writes redline suggestions into the live editor as tracked changes; `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
   The Spaarke Word add-in (`spaarkeai-word-add-in-r1`) is save and context only today.
+
+### Cowork with the custom agent (owner, 2026-11-10)
+Steps: new chat (no agent), open `Brightwater Mutual NDA.docx`, add **Spaarke NDA Review** (Copilot Studio agent),
+"review this NDA", then "apply edits including redline and comments".
+- **Review:** the agent's format, code `NDAR-1109-A`, "the full 42-line mutual NDA … against all 24 playbook topics".
+  Cites `Spaarke NDA – Mutual v1.2`; that copy's 2013 date is python-docx's default, so it appears to be the
+  table-free `(text).docx` knowledge copy. Only the first rows were captured, so it hasn't been scored yet.
+- **Redline:** `Brightwater Mutual NDA - Redlined.docx` with real tracked changes and comments. Comments are authored
+  "Spaarke NDA Review" and start with the topic ID. A plain "apply edits" gave neither; the owner had to ask for
+  redline and comments.
+- **Personalization** shows the custom instruction ("Mark results as drafts for attorney review") and generated
+  memories, so Cowork applies them.
+- **Limits:**
+  - the preview is read-only, and *Open in Word* opens Word for the web only;
+  - Word for the web has no Microsoft Legal plugin (the Spaarke NDA (MVP) plugin is listed);
+  - one agent or skill at a time (swap to change);
+  - chat-editing afterwards works but is slow.
+- **Word for the web, sources:** adding the legal hold playbook there brought up *Verify sources for your request*,
+  listing old OneDrive test files (MVP retest notes, `SKILL`, converted-plugin probes, `03-nda-review-instructions`,
+  old NDA playbooks, "Spaarke Cowork for Legal"). Gap #34 reaches Word for the web too. The rest of that step was
+  not reported.
+
+Synopsis of Word desktop vs Cowork across all acts: `synopsis-word-and-cowork.md`.
