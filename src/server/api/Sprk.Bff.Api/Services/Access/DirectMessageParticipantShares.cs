@@ -387,38 +387,16 @@ internal sealed class DirectMessageParticipantShares
                 continue;
             }
 
-            var readers = access
-                .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & ReadMask) != 0)
-                .Select(s => s.Principal.Id)
-                .ToHashSet();
-
-            // 198 pass 2 F1: a content row is granted, then its owner is read back by id; a row no longer owned by exactly this
-            // Direct team (a filing into a Secure or Restricted record in between), or one whose owner cannot be read, has THIS
-            // call's grants revoked and is retried.
+            // 198 pass 2 F1 (content rows) and 198 fix round (the message row itself): the row is granted, then its owner is read
+            // back by id; a row no longer owned by exactly this Direct team (a filing into a Secure or Restricted record between
+            // the message's pre-check above and the grant), or one whose owner cannot be read, has every grant ATTEMPTED here
+            // revoked and is retried. Never anyone but an eligible participant; a share held before the call is never revoked.
+            var (rowGranted, rowComplete) = await GrantContentRowAndConfirmAsync(_dataverse, _shares, table, id, owner,
+                eligible, access, communicationId, _logger, ct).ConfigureAwait(false);
+            granted.AddRange(rowGranted.Select(user => (table, id, user)));
+            complete &= rowComplete;
             if (table != CommunicationTable)
-            {
-                var (rowGranted, rowComplete) = await GrantContentRowAndConfirmAsync(_dataverse, _shares, table, id, owner,
-                    eligible, access, communicationId, _logger, ct).ConfigureAwait(false);
-                granted.AddRange(rowGranted.Select(user => (table, id, user)));
-                complete &= rowComplete;
                 continue;
-            }
-
-            // Grant the missing ones: never anyone but an eligible participant.
-            foreach (var user in eligible.Where(u => !readers.Contains(u)))
-            {
-                try
-                {
-                    await _shares.GrantAccessAsync(entitySet, id, DataversePrincipalRef.User(user), ReadAccessRights, ct).ConfigureAwait(false);
-                    granted.Add((table, id, user));
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-                {
-                    complete = false;
-                    _logger.LogWarning(ex, "{Prefix} Granting {UserId} Read on {Table} {RowId} (of {Communication} {Id}) failed; it is " +
-                        "retried.", LogPrefix, user, table, id, CommunicationTable, communicationId);
-                }
-            }
 
             // On the message: no direct user share for anyone who is not a participant (an unfile's anchor grantees).
             var others = DirectUsers(access).Where(u => !participants.Contains(u)).ToList();
@@ -573,7 +551,8 @@ internal sealed class DirectMessageParticipantShares
     }
 
     /// <summary>
-    /// 198 pass 2 F1: grants Read on one content row of a Direct message to the <paramref name="participants"/> that hold no share on
+    /// 198 pass 2 F1: grants Read on one content row of a Direct message (198 fix round: or on the message row itself, the same
+    /// grant-then-confirm) to the <paramref name="participants"/> that hold no share on
     /// it (<paramref name="existingShares"/>, read by the caller), then reads the row's owner back by id. When it is no longer exactly
     /// <paramref name="directTeam"/> (a filing into a Secure or Restricted record re-owned it between the listing and the grant), or
     /// cannot be read, every grant ATTEMPTED here is revoked (a share held before the call is never touched) and the answer is
