@@ -116,7 +116,12 @@ internal static class ExternalDocumentNarrowing
 
     // ── Row parsing ─────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>One OData document row (its <c>$select</c> must carry <see cref="SelectColumns"/>), keyed by column.</summary>
+    /// <summary>
+    /// One OData document row (its <c>$select</c> must carry <see cref="SelectColumns"/>), keyed by column. Absent is not null,
+    /// for a lookup and for the <c>sprk_accesspermission</c> choice column alike: a column the row did not carry is
+    /// <c>Unreadable</c> (the row is not trusted to be unrestricted), while an explicit JSON null is a filed "none" and reads
+    /// <c>NotNarrowed</c>.
+    /// </summary>
     internal static DocumentNarrowingRow FromWebApi(Guid documentId, IReadOnlyDictionary<string, JsonElement>? row) =>
         FromJson(documentId, column => row is not null && row.TryGetValue(column, out var v) ? v : null);
 

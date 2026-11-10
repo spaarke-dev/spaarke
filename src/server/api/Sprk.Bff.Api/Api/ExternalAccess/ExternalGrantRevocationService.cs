@@ -151,8 +151,8 @@ internal sealed class ExternalGrantRevocationService
                 // silent partial revocation A-11 describes, so refusing is the fail-closed answer.
                 _logger.LogError(
                     "[EXT-REVOKE] Access record {AccessRecordId} has no derivable grant key (no root " +
-                    "and/or no grantee lookup). Refusing to revoke: sibling rows cannot be identified, so " +
-                    "success cannot be guaranteed.", accessRecordId);
+                    "and/or no grantee lookup, or a root/grantee column the read did not return). Refusing to revoke: " +
+                    "sibling rows cannot be identified, so success cannot be guaranteed.", accessRecordId);
 
                 return GrantRevocation.Refused(GrantRevocationStatus.NoGrantKey);
             }
@@ -330,7 +330,18 @@ internal sealed class ExternalGrantRevocationService
 
             foreach (var row in grants.Take(MaxOrganizationGrantsPerPersonCleanup))
             {
-                if (ExternalGrantLifecycle.DeriveKey(row) is { IsOrganizationGrant: true } key)
+                if (!row.KeyLookupsRead)
+                {
+                    // Fix round 3g: a grant row that did not carry a root, contact or organization column cannot be placed on a
+                    // root, so its container cannot be derived. Counted with every other part of the cleanup that could not be
+                    // checked: the cleanup reports not completed and the removal step is retried.
+                    _logger.LogError(
+                        "[EXT-REMOVE-PERSON] Organization grant {AccessRecordId} did not carry every root, contact and " +
+                        "organization column; its container cannot be derived and is counted as not completed.",
+                        row.Id);
+                    failed++;
+                }
+                else if (ExternalGrantLifecycle.DeriveKey(row) is { IsOrganizationGrant: true } key)
                 {
                     roots.Add((key.RootType, key.RootId));
                 }
@@ -602,6 +613,18 @@ internal sealed class ExternalGrantRevocationService
             if (!ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today))
             {
                 continue;
+            }
+
+            if (!row.ContactRead || !row.OrganizationRead)
+            {
+                // Fix round 3g: a conferring row that did not carry the contact or the organization column names a grantee
+                // that cannot be told. The set of contacts it still entitles is not known, which is this method's own null:
+                // no permission is kept on the strength of another grant (fail closed).
+                logger.LogWarning(
+                    "[EXT-REVOKE] A remaining grant on {RootType} {RootId} did not carry the contact or the organization " +
+                    "column; the contacts it entitles cannot be told, so no permission is kept on the strength of another " +
+                    "grant (fail closed).", rootType, rootId);
+                return null;
             }
 
             if (row.ContactId is { } contactId)

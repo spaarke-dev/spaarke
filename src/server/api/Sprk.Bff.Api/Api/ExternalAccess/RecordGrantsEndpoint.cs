@@ -132,9 +132,19 @@ public static class RecordGrantsEndpoint
                 unaddressable, root.Type, root.Id);
         }
 
+        // Fix round 3g: a row that did not carry the contact or organization column would list as a grant to nobody. It is
+        // withheld like a row without an id (the listing shows only what it can name), and logged.
+        var unreadable = rows.Count(r => r.Id != Guid.Empty && !(r.ContactRead && r.OrganizationRead));
+        if (unreadable > 0)
+        {
+            logger.LogWarning(
+                "[RECORD-GRANTS] {Count} active grant row(s) of {RootType} {RootId} did not carry the contact or organization " +
+                "column and are not listed.", unreadable, root.Type, root.Id);
+        }
+
         var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
         var grants = rows
-            .Where(r => r.Id != Guid.Empty)
+            .Where(r => r.Id != Guid.Empty && r.ContactRead && r.OrganizationRead)
             .Take(MaxGrantsListed)
             .Select(r => new RecordGrant(
                 AccessRecordId: r.Id,
