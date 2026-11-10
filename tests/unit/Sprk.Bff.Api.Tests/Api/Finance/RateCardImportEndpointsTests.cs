@@ -24,6 +24,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
@@ -42,7 +43,8 @@ public sealed class RateCardImportEndpointsTests
     internal const string Import = "/api/finance/ratecards/import";
     internal static readonly Guid FirmId = Guid.NewGuid();
     private static readonly Guid CardId = Guid.NewGuid();
-    internal static readonly Guid VersionId = Guid.NewGuid();
+    // 116 fix round 2: the known version is the one the bad-query cases name, so the version rights check passes them on to the handler.
+    internal static readonly Guid VersionId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
     private static readonly Guid ProcedureId = Guid.NewGuid();
 
     public static TheoryData<string, string> AllRoutes => new()
@@ -63,6 +65,9 @@ public sealed class RateCardImportEndpointsTests
         public readonly Mock<IGenericEntityService> Entities = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
+
+        /// <summary>116 fix round 2: the file store the import filter asks the caller's rights on the version through.</summary>
+        public readonly Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files = new();
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
@@ -101,6 +106,7 @@ public sealed class RateCardImportEndpointsTests
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
             builder.Services.AddSingleton(host.Service.Object);
+            builder.Services.AddSingleton(host.Files.Service);
             host.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new EntityCollection());
             builder.Services.AddSingleton(host.Entities.Object);
@@ -172,6 +178,11 @@ public sealed class RateCardImportEndpointsTests
             {
                 Probe.Hold(p);
             }
+
+            // 116 fix round 2: an admin of the version's Procedure, with Read and Write on the version itself.
+            VersionBelongsTo(VersionId, ProcedureId);
+            Access.Grant("sprk_procedures", ProcedureId, AccessRights.Read | AccessRights.Write);
+            Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
         }
 
         public async ValueTask DisposeAsync()
@@ -412,6 +423,7 @@ public sealed class RateCardImportEndpointsTests
     {
         await using var host = await Host.StartAsync();
         host.VersionBelongsTo(VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.None); // 116 fix round 2: the host's admin default grants it
         host.Access.Fault("sprk_procedures", ProcedureId);
 
         var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
@@ -435,8 +447,46 @@ public sealed class RateCardImportEndpointsTests
         host.Service.VerifyNoOtherCalls();
     }
 
-    [Fact(DisplayName = "085: an unknown version asks no Procedure check; the service answers 400 ratecard.procedure_version_invalid")]
-    public async Task Import_OnAnUnknownVersion_AsksNoProcedureCheck_AndTheServiceRefuses400()
+    [Fact(DisplayName = "116 fix 2 (item 9) must-fire: an unknown version and a version the caller cannot read get the same 404 (status and body); no Procedure check, no service call")]
+    public async Task Import_AnUnknownVersion_AndAnUnreadableOne_AnswerTheSame404()
+    {
+        await using var host = await Host.StartAsync();
+        var unknownVersion = Guid.NewGuid();
+        var unknown = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={unknownVersion}&name=Card", content: Upload(new byte[] { 1 })));
+
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.None);
+        var hidden = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await hidden.Content.ReadAsStringAsync()).Should().Be(await unknown.Content.ReadAsStringAsync());
+        (await Json(unknown))["errorCode"]!.GetValue<string>().Should().Be(ProcedureService.CodeVersionNotFound);
+        host.Files.Probe.Calls.Select(c => (c.Set, c.Id)).Should().Contain(
+            new[] { (StoredFileSchema.ProcedureVersionEntitySet, unknownVersion), (StoredFileSchema.ProcedureVersionEntitySet, VersionId) },
+            "the version rights are asked for an unknown id too");
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 2 (item 9) must-fire: Read without Write on the version is 403 before any answer about the workbook; the service is never reached")]
+    public async Task Import_ReadWithoutWriteOnTheVersion_Is403_BeforeTheWorkbookIsChecked()
+    {
+        await using var host = await Host.StartAsync();
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read);
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await Json(response);
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be("You need Write on this Procedure Version.");
+        host.Files.Probe.Calls.Should().Contain(c => c.Set == StoredFileSchema.ProcedureVersionEntitySet && c.Id == VersionId && c.Token != null,
+            "asked as the caller");
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 2 (item 9): a readable version that is not usable for a card still reaches the service, whose 400 ratecard.procedure_version_invalid stands")]
+    public async Task Import_AReadableVersionNotUsable_TheServiceRefuses400()
     {
         await using var host = await Host.StartAsync();
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
@@ -446,7 +496,6 @@ public sealed class RateCardImportEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.procedure_version_invalid");
-        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
     }
 
     [Fact]
@@ -639,6 +688,7 @@ public sealed class RateCardImportEndpointsTests
     {
         await using var host = await Host.StartAsync();
         host.CardOfProcedure(CardId, VersionId, ProcedureId);
+        host.Access.Grant("sprk_procedures", ProcedureId, AccessRights.None); // 116 fix round 2: the host's admin default grants it
         host.Access.Fault("sprk_procedures", ProcedureId);
 
         var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
@@ -708,7 +758,7 @@ public sealed class RateCardImportEndpointsTests
     public async Task Publish_OnAVersionWithNoProcedure_Returns403_AndNeverReachesTheService()
     {
         await using var host = await Host.StartAsync();
-        host.CardBelongsTo(CardId, VersionId); // the version itself is unknown to the default read
+        host.CardBelongsTo(CardId, Guid.NewGuid()); // a version unknown to the read (116 fix round 2: the host's VersionId now has a Procedure)
 
         var response = await host.Client.SendAsync(Req("POST", $"/api/finance/ratecards/{CardId}/publish"));
 

@@ -85,6 +85,7 @@ public static class RateCardImportEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
@@ -135,8 +136,11 @@ public static class RateCardImportEndpoints
     /// 085 (I-P5): the import also needs the caller's own Write on the Procedure the named version belongs to: the Record-path "write" check on
     /// <c>sprk_procedures</c> the Procedure routes declare, asked of Dataverse as the caller (<see cref="CallerReadCheck"/>, which keeps "denied" apart
     /// from "no answer"). The Procedure is read server-side from the stored version. Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
-    /// (step 0 and the table privileges run first). An unreadable or unknown version is passed on: the service answers 400
-    /// <c>ratecard.procedure_version_invalid</c>. A fault reading the version is a 403 <c>system_failure</c> (fail closed).
+    /// (step 0 and the table privileges run first). Task 116 fix round 2: before that, the caller's own rights on the VERSION are asked as the
+    /// user for every id (<see cref="ProcedureEndpoints.CallerVersionRefusalAsync"/>): an unknown version, one with no Procedure and one the caller
+    /// cannot read are the same 404 <c>procedure.version_not_found</c>; Read without Write is 403. Only then the Procedure check and the handler
+    /// (whose 400 <c>ratecard.procedure_version_invalid</c> covers a readable version that is not a Draft of a rate card Procedure). A fault
+    /// reading the version is a 403 <c>system_failure</c> (fail closed).
     /// </summary>
     /// <remarks>§11: <i>Existing</i> — <c>BillingAdminAuthorization.RequireWriteOnTheRuleSetsProcedure</c> asks this question from a rule set's id.
     /// <i>Extension</i> — it is keyed to the <c>ruleSetId</c> route value and the rule set service; this route carries a version id in the query, so
@@ -151,6 +155,12 @@ public static class RateCardImportEndpoints
                 return await next(context); // the handler answers the 400
             }
 
+            // 116 fix round 2: the caller's own rights on the VERSION, asked as the user, before any answer that depends on the version, for
+            // every id (an unknown one too): a missing or unreadable version is the same 404, Read without Write 403. Then the Procedure check.
+            var denied = await ProcedureEndpoints.CallerVersionRefusalAsync(
+                http.RequestServices.GetRequiredService<StoredFileService>(), versionId, ProcedureEndpoints.VersionNotFoundForDraft, http,
+                http.RequestServices.GetService<ILogger<FinanceAuthorizationFilter>>() ?? (ILogger)Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                http.RequestAborted);
             var read = await ReadVersionsProcedureAsync(http, versionId);
             if (read.Faulted)
             {
@@ -159,7 +169,12 @@ public static class RateCardImportEndpoints
 
             if (read.ProcedureId is not { } id || id == Guid.Empty)
             {
-                return await next(context);
+                return ProcedureEndpoints.VersionNotFound(ProcedureEndpoints.VersionNotFoundForDraft, http);
+            }
+
+            if (denied is not null)
+            {
+                return denied;
             }
 
             return await CheckCallerWriteOnProcedureAsync(http, id, $"Rate card import: caller write on the Procedure of version {versionId}")

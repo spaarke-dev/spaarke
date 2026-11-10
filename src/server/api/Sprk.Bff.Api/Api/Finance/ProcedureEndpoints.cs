@@ -285,13 +285,15 @@ public static class ProcedureEndpoints
     {
         // The source, the version's state and a finished run are decided here, so the admin hears 404 / 409 / 422 now, not from a dead-lettered job.
         // Fix round 1: the route checks the caller's rights on the version before its other answers (an unknown version first, then those rights).
+        // Fix round 2: the rights are asked for every id, an unknown one too, before the version is read, so both answers take the same path.
+        var denied = await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct);
         var found = await ruleSets.GetDraftSourceAsync(procedureId, versionId, ct);
         if (found.Kind != RuleSetOutcomeKind.Done && found.StatusCode == StatusCodes.Status404NotFound)
         {
             return Map(found, http);
         }
 
-        if (await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct) is { } denied)
+        if (denied is not null)
         {
             return denied;
         }
@@ -339,13 +341,15 @@ public static class ProcedureEndpoints
         Guid procedureId, Guid versionId, ProcedureService procedures, StoredFileService files, IOptionsMonitor<EbillingOptions> ebilling,
         HttpContext http, ILogger<StoredFileService> logger, CancellationToken ct)
     {
+        // Fix round 2: the caller's rights on the version are asked for every id (an unknown one too) before the version is read.
+        var denied = await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForFile, http, logger, ct);
         var target = await procedures.GetDraftVersionForFileAsync(procedureId, versionId, ct);
         if (target.Kind != RuleSetOutcomeKind.Done && target.StatusCode == StatusCodes.Status404NotFound)
         {
             return Map(target, http);
         }
 
-        if (await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForFile, http, logger, ct) is { } denied)
+        if (denied is not null)
         {
             return denied;
         }
@@ -394,6 +398,19 @@ public static class ProcedureEndpoints
             return FileTooLarge(maxMb);
         }
 
+        // The stored media type is derived from the name, never the client's claimed Content-Type (RuleSetService.MimeTypeOf).
+        var fileName = Path.GetFileName(file.FileName);
+        var mediaType = RuleSetService.MimeTypeOf(fileName);
+        var parent = new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId);
+
+        // Fix round 2: what the store would refuse about the request itself (name, type, size, an unconfigured store) is answered before the
+        // reset below, so such a request changes nothing.
+        if (files.PrecheckUpload(StoredFilePurpose.ProcedureSource, parent, fileName, mediaType, file.Length) is { } early)
+        {
+            logger.LogWarning("Procedure Version {ProcedureVersionId}: the source file was refused before anything changed ({Code})", versionId, early);
+            return FileRefused(StoredFileCreateResult.Refused(early), maxMb, http);
+        }
+
         // Owner ruling 2026-11-10 (reset and allow redraft): a drafted version is made draftable again BEFORE the new file is staged, so a
         // later fault leaves at worst an undrafted version that still has its old file, never a new file on a version marked drafted.
         bool stillDraft;
@@ -415,13 +432,9 @@ public static class ProcedureEndpoints
         StoredFileCreateResult stored;
         try
         {
-            // The stored media type is derived from the name, never the client's claimed Content-Type (RuleSetService.MimeTypeOf).
-            var fileName = Path.GetFileName(file.FileName);
             await using var content = file.OpenReadStream();
             stored = await files.ReplaceForCallerAsync(
-                http.User, TokenHelper.ExtractBearerTokenOrNull(http), StoredFilePurpose.ProcedureSource,
-                new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), fileName,
-                RuleSetService.MimeTypeOf(fileName), content, ct,
+                http.User, TokenHelper.ExtractBearerTokenOrNull(http), StoredFilePurpose.ProcedureSource, parent, fileName, mediaType, content, ct,
                 parentStillAccepts: token => procedures.RecheckDraftAfterNewFileAsync(versionId, token));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -437,7 +450,12 @@ public static class ProcedureEndpoints
         }
 
         logger.LogWarning("Procedure Version {ProcedureVersionId}: the source file was refused ({Code})", versionId, stored.RefusalCode);
-        return stored.RefusalCode switch
+        return FileRefused(stored, maxMb, http);
+    }
+
+    /// <summary>A refused caller write of the version's source file, as the route answers it (also the early refusals of fix round 2).</summary>
+    private static IResult FileRefused(StoredFileCreateResult stored, int maxMb, HttpContext http) =>
+        stored.RefusalCode switch
         {
             StoredFileRefusal.CallerNotInternal => ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier),
             StoredFileRefusal.NoWriteOnParent => ProblemDetailsHelper.Forbidden(
@@ -450,11 +468,11 @@ public static class ProcedureEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = StoredFileRefusal.NotConfigured }),
             StoredFileRefusal.InvalidRequest => FileMissing("The file name or type is not accepted."),
             StoredFileRefusal.ParentNoLongerAccepts => NotDraft(),
+            StoredFileRefusal.SizeOutOfRange => FileTooLarge(maxMb),
             _ => FileWriteFailed(),
         };
-    }
 
-    private const string VersionNotFoundForDraft = "The Procedure Version was not found.";
+    internal const string VersionNotFoundForDraft = "The Procedure Version was not found.";
     private const string VersionNotFoundForFile = "The version was not found in this Procedure.";
 
     /// <summary>
@@ -462,7 +480,7 @@ public static class ProcedureEndpoints
     /// cref="StoredFileService.GetCallerRightsOnParentAsync"/>). No Read answers exactly as an unknown version does (<paramref
     /// name="notFoundDetail"/> is the route's own unknown-id text); Read without Write is 403; a fault is 403 <c>system_failure</c>. Null: go on.
     /// </summary>
-    private static async Task<IResult?> CallerVersionRefusalAsync(
+    internal static async Task<IResult?> CallerVersionRefusalAsync(
         StoredFileService files, Guid versionId, string notFoundDetail, HttpContext http, ILogger logger, CancellationToken ct)
     {
         AccessRights rights;
@@ -479,7 +497,7 @@ public static class ProcedureEndpoints
 
         if (!rights.HasFlag(AccessRights.Read))
         {
-            return Map(RuleSetOutcome<ProcedureVersionView>.Refused(StatusCodes.Status404NotFound, ProcedureService.CodeVersionNotFound, notFoundDetail), http);
+            return VersionNotFound(notFoundDetail, http);
         }
 
         return rights.HasFlag(AccessRights.Write)
@@ -487,6 +505,10 @@ public static class ProcedureEndpoints
             : ProblemDetailsHelper.Forbidden(
                 FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier);
     }
+
+    /// <summary>The unknown-version 404 (<c>procedure.version_not_found</c>) with the route's own text; the same body as no Read on it.</summary>
+    internal static IResult VersionNotFound(string detail, HttpContext http) =>
+        Map(RuleSetOutcome<ProcedureVersionView>.Refused(StatusCodes.Status404NotFound, ProcedureService.CodeVersionNotFound, detail), http);
 
     private static IResult NotDraft() =>
         Results.Problem(

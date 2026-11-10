@@ -103,14 +103,19 @@ public sealed class ProcedureEndpointsTests
         /// <summary>Task 116: the drafting route's rule set store and queue, and the file route's REAL file store over its fakes.</summary>
         public readonly Mock<RuleSetService> RuleSets = NewRuleSets();
         public readonly Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> Jobs = NewJobs();
-        public readonly Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files = new();
+        public Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files { get; private set; } = new();
         private WebApplication _app = null!;
         public HttpClient Client = null!;
         public IServiceProvider Services => _app.Services;
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25)
+        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25, bool storeConfigured = true)
         {
             var host = new Host();
+            if (!storeConfigured)
+            {
+                host.Files = new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig(configured: false); // fix round 2: a store with no configuration
+            }
+
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
             builder.Services
@@ -1046,5 +1051,59 @@ public sealed class ProcedureEndpointsTests
 
         endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata>()!.MaxRequestBodySize
             .Should().Be(InvoiceSubmissionHttp.MaxRequestBodyBytes);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 116 fix round 2
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "116 fix 2 (item 6) must-fire: both version routes ask the caller's rights on the version for an unknown id too, then answer 404")]
+    public async Task BothRoutes_AskTheVersionRights_ForAnUnknownVersionToo()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsUnknown(host);
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(404, ProcedureService.CodeVersionNotFound, "The Procedure Version was not found."));
+
+        var file = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+        var asksAfterFile = host.Files.Probe.Calls.Count(c => c.Set == StoredFileSchema.ProcedureVersionEntitySet && c.Id == VersionId);
+        var draft = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+        var asksAfterDraft = host.Files.Probe.Calls.Count(c => c.Set == StoredFileSchema.ProcedureVersionEntitySet && c.Id == VersionId);
+
+        file.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        draft.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        asksAfterFile.Should().Be(1, "PUT /file asks the version rights before acting on the 404");
+        asksAfterDraft.Should().Be(2, "/draft asks them too");
+        host.Jobs.VerifyNoOtherCalls();
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "116 fix 2 (item 3) must-fire: PUT /file with a name the store refuses is 400 before the drafted state is reset; nothing is written")]
+    public async Task File_ARefusedName_Is400_BeforeTheReset()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10, name: "folder/")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileMissing);
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (item 3) must-fire: PUT /file with no configured file store is 503 before the drafted state is reset; nothing is written")]
+    public async Task File_AnUnconfiguredStore_Is503_BeforeTheReset()
+    {
+        await using var host = await Host.StartAsync(storeConfigured: false);
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(StoredFileRefusal.NotConfigured);
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
     }
 }

@@ -446,6 +446,38 @@ public sealed class StoredFileService
         _probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, parent.EntitySet, parent.Id, ct);
 
     /// <summary>
+    /// Task 116 fix round 2: the refusals <see cref="UploadForCallerAsync"/> would give for the request itself (the row's name and type rules,
+    /// a length the size column holds, a configured store), decided with no read or write, so a route can answer them before it changes
+    /// anything. Null: the upload goes on to its own checks (which still run). Otherwise the <see cref="StoredFileRefusal"/> code.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the same checks inside <see cref="UploadForCallerAsync"/> and the stage.
+    /// (2) Extension — they run there only after the caller's version route has already reset the drafted state; this exposes them, it adds no
+    /// rule. (3) Cost of doing nothing — a refused name or an unconfigured store would leave a drafted version reset with no new file.</remarks>
+    internal string? PrecheckUpload(StoredFilePurpose purpose, StoredFileParent parent, string name, string contentType, long length)
+    {
+        var spec = new StoredFileRowSpec
+        {
+            FileId = StoredFileIds.New(),
+            Purpose = purpose,
+            Parent = parent,
+            Name = name,
+            ContentType = contentType,
+            FirmVisible = false,
+        };
+        if (spec.Invalid() is not null)
+        {
+            return StoredFileRefusal.InvalidRequest;
+        }
+
+        if (!StoredFileSize.TryToColumnValue(length, out _))
+        {
+            return StoredFileRefusal.SizeOutOfRange;
+        }
+
+        return _blobs.IsConfigured ? null : StoredFileRefusal.NotConfigured;
+    }
+
+    /// <summary>
     /// stage → row → flip for a caller that has ALREADY authorized the work (150's export files): no caller checks here. The owner
     /// is the row's own answer (its table and lookups, UAC 194b R4b-2); <paramref name="requestedBy"/> is also the acting user a
     /// parent that files nothing falls back to, and is recorded as the creator person when given. A
