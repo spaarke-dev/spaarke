@@ -5,7 +5,15 @@
 - **Piece 1** (the Direct team lookup and its settings): FINAL on `task/fm-054a-2` (ac6f1743b3). UAC-r2 merged it into 198.
 - **Piece 2** (no dependency on 198): the `sprk_DirectRecipient` lookup (to systemuser, on `sprk_communication`) and the BFF stamp at create on Direct messages: send, respond, inbound join, new Direct thread. When the inbound join cannot map the chat identity to a systemuser, no recipient is stamped and a stable Error is logged with the message id.
   - Creating the column on an environment is a live schema change, so it needs the owner's go in this project's session.
-  - After it exists, confirm the Web API navigation property (expected `sprk_DirectRecipient`) and the read column (`_sprk_directrecipient_value`) from live metadata, then send them to UAC-r2. UAC-r2's 198 R2 starts on that.
+  - **Column created on spaarkedev1 on 2026-11-09, with the owner's go**, by `scripts/Set-DirectRecipientSchema.ps1 -Apply`; `-Verify` passes.
+    - From live metadata: navigation property `sprk_DirectRecipient` (bind `sprk_DirectRecipient@odata.bind` → `/systemusers(<id>)`), read column `_sprk_directrecipient_value`.
+    - The relationship is `sprk_systemuser_sprk_communication_directrecipient`: NoCascade for Assign, Share, Unshare, Reparent and Merge; Delete is RemoveLink. It is in SpaarkeCore and published.
+    - The names were sent to UAC-r2 (198 R2).
+    - Not yet done: field-level security (054b, which needs its own owner go) and the BFF stamp (piece 2 code). The repo's solution export (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml`) is not refreshed; the next solution export picks the column up.
+  - §11 for the new column:
+    - **Existing:** `sprk_sentby` records only the sender, and the thread's participants are thread-scoped and can change.
+    - **Extension:** the thread cannot be used, because a Direct message's audience must not follow later changes to its thread (owner, option A).
+    - **Cost of doing nothing:** 198's reconcile has no per-message recipient, so it cannot grant the recipient Read once the message is owned by the Direct team.
 - **Piece 3** (moving the owner to the Direct team): built against UAC-r2's behaviour contract below. It needs no code from 198's branch.
 
 ## Piece 3 contract (from UAC-r2, 2026-11-09)
