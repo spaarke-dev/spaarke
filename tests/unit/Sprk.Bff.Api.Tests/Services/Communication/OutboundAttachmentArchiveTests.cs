@@ -12,11 +12,13 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -67,6 +69,170 @@ public class OutboundAttachmentArchiveTests
             .Where(c => c.Entity.LogicalName == "sprk_document"
                         && c.Entity.GetAttributeValue<OptionSetValue>("sprk_sourcetype")?.Value == EmailAttachmentSourceType)
             .ToList();
+
+        public List<(Entity Entity, Guid Id)> ArchivedEmls => Created
+            .Where(c => c.Entity.LogicalName == "sprk_document"
+                        && c.Entity.GetAttributeValue<OptionSetValue>("sprk_sourcetype")?.Value == EmailArchiveSourceType)
+            .ToList();
+
+        public List<Upload> EmlUploads => Uploads.Where(u => u.Path.EndsWith(".eml", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        /// <summary>The world the task 166 resolver reads (the source documents' rows, and a read fault).</summary>
+        public TestRecordContainerResolver.DocumentPointerWorld? World { get; init; }
+    }
+
+    private const int EmailArchiveSourceType = 659490003;
+    private static readonly Guid FiledMatterId = Guid.Parse("c3c3c3c3-0000-0000-0000-000000000001");
+
+    // ── ontology task 177 review F1a/F1b: the D-217 auto-archive of a filed send ────────────────────────────────────
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task FiledSend_ArchiveToSpeFalse_WithAnAttachment_CreatesTheEmlOnly(SendMode sendMode)
+    {
+        // F1a: D-217 accepts the .eml (and its profile run) only; the separate attachment copies stay opt-in.
+        var exhibit = Doc("drive-bu-north", "item-exhibit", "exhibit.pdf");
+        var h = await BuildAsync(exhibit);
+
+        var response = await h.Sut.SendAsync(Filed(Request(sendMode, exhibit) with { ArchiveToSpe = false }),
+            sendMode == SendMode.User ? UserContext() : null);
+
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+        h.Uploads.Should().ContainSingle("only the .eml is uploaded").Which.Path.Should().EndWith(".eml");
+        h.ArchivedEmls.Should().ContainSingle();
+        h.ArchivedAttachments.Should().BeEmpty("no attachment document is created by the auto-archive");
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
+    public async Task FiledSend_ArchiveToSpeTrue_WithAnAttachment_AlsoCopiesTheAttachment_AsToday(SendMode sendMode)
+    {
+        var exhibit = Doc("drive-bu-north", "item-exhibit", "exhibit.pdf");
+        var h = await BuildAsync(exhibit);
+
+        await h.Sut.SendAsync(Filed(Request(sendMode, exhibit)), sendMode == SendMode.User ? UserContext() : null);
+
+        h.EmlUploads.Should().ContainSingle();
+        AttachmentUploads(h, exhibit).Should().ContainSingle("the requested archive still copies each attachment");
+        h.ArchivedAttachments.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox, false)]
+    [InlineData(SendMode.User, false)]
+    [InlineData(SendMode.SharedMailbox, true)]
+    [InlineData(SendMode.User, true)]
+    public async Task FiledSend_WithAPdfAttachment_TheArchivedEmlContainsIt(SendMode sendMode, bool archiveToSpe)
+    {
+        // F1b: the attachment rows are created after the archive, so the embed is built from the bytes just sent.
+        var pdf = Doc("drive-bu-north", "item-pdf", "exhibit.pdf", Encoding.UTF8.GetBytes("%PDF-1.7 the exhibit"));
+        var h = await BuildAsync(pdf);
+
+        await h.Sut.SendAsync(Filed(Request(sendMode, pdf) with { ArchiveToSpe = archiveToSpe }),
+            sendMode == SendMode.User ? UserContext() : null);
+
+        var eml = h.EmlUploads.Should().ContainSingle().Subject;
+        using var message = MimeKit.MimeMessage.Load(new MemoryStream(eml.Content));
+        var part = message.Attachments.OfType<MimeKit.MimePart>().Should().ContainSingle("the .eml reproduces the sent email").Subject;
+        part.FileName.Should().Be("exhibit.pdf");
+        using var decoded = new MemoryStream();
+        part.Content!.DecodeTo(decoded);
+        decoded.ToArray().Should().Equal(pdf.Content, "the embedded bytes are the bytes that were sent");
+    }
+
+    // ── uac-r2 binding addition to F1b: the embedded bytes never widen access ───────────────────────────────────────
+
+    [Fact]
+    public async Task FiledSend_RestrictedSourceAttached_TheEmlIsCreatedRestricted_AndHiddenOnBothPlanes()
+    {
+        // Must fire: the .eml carries a Restricted document's bytes, so it is created with that own narrowing (and its record).
+        var secret = Doc("drive-bu-north", "item-secret", "secret.pdf");
+        var h = await BuildAsync([secret], arrange: (world, _) => WithAccessPermission(world, secret, Restricted));
+
+        await h.Sut.SendAsync(Filed(Request(SendMode.SharedMailbox, secret) with { ArchiveToSpe = false }));
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        emlEntity.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value.Should().Be(Restricted);
+        var record = emlEntity.GetAttributeValue<string>("sprk_accessinheritance");
+        record.Should().Be(Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(Restricted).Serialize(),
+            "the own narrowing is recorded in the same create (task 189), not provisional");
+
+        // An Open, not internal-only message: only the embedded narrowing hides its .eml.
+        var (visible, reason, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId);
+        visible.Should().BeFalse("a contact with a grant on the matter must not read a Restricted document's bytes");
+        reason.Should().Be(DocumentNarrowingReason.OwnRestricted);
+        internalPlane.Should().BeFalse("nor a systemuser flagged external, on the internal plane");
+    }
+
+    [Fact]
+    public async Task FiledSend_StandardSourcesAttached_TheEmlKeepsItsValue_AndIsShown_AsToday()
+    {
+        // Must not fire: Standard sources narrow nothing, so no Access Permission or record is written on the .eml.
+        var first = Doc("drive-bu-north", "item-a", "a.pdf");
+        var second = Doc("drive-bu-south", "item-b", "b.pdf");
+        var h = await BuildAsync([first, second], arrange: (world, _) =>
+        {
+            WithAccessPermission(world, first, Standard);
+            WithAccessPermission(world, second, null);
+        });
+
+        await h.Sut.SendAsync(Filed(Request(SendMode.User, first, second) with { ArchiveToSpe = false }), UserContext());
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        emlEntity.Attributes.Should().NotContainKey("sprk_accesspermission");
+        emlEntity.Attributes.Should().NotContainKey("sprk_accessinheritance");
+        var (visible, _, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId);
+        visible.Should().BeTrue();
+        internalPlane.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task FiledSend_ASourceWhoseAccessCannotBeRead_IsTreatedRestricted()
+    {
+        // Fail closed: the source's own value cannot be read app-only, so the .eml is created Restricted.
+        var unknown = Doc("drive-bu-north", "item-unknown", "unknown.pdf");
+        var h = await BuildAsync([unknown], arrange: (world, _) => world.RetrieveFault = (entity, columns) =>
+            entity == "sprk_document" && columns.Contains("sprk_accesspermission")
+                ? new InvalidOperationException("Dataverse unavailable")
+                : null);
+
+        await h.Sut.SendAsync(Filed(Request(SendMode.SharedMailbox, unknown) with { ArchiveToSpe = false }));
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        emlEntity.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value.Should().Be(Restricted);
+        var (visible, _, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId);
+        visible.Should().BeFalse();
+        internalPlane.Should().BeFalse();
+    }
+
+    private const int Standard = 100000000;
+    private const int Restricted = 100000002;
+
+    private static SendCommunicationRequest Filed(SendCommunicationRequest request) => request with
+    {
+        Associations = [new CommunicationAssociation { EntityType = "sprk_matter", EntityId = FiledMatterId }],
+    };
+
+    private static void WithAccessPermission(TestRecordContainerResolver.DocumentPointerWorld world, SourceDocument document, int? level)
+    {
+        var row = TestRecordContainerResolver.DocumentPointerWorld.Document(document.Id);
+        if (level is { } value)
+            row["sprk_accesspermission"] = new OptionSetValue(value);
+        world.Rows[("sprk_document", document.Id)] = row;
+    }
+
+    /// <summary>The .eml as created, linked to its Open, not internal-only message, decided on both planes.</summary>
+    private static async Task<(bool Visible, DocumentNarrowingReason Reason, bool InternalPlane)> DecideBothPlanesAsync(
+        Harness h, Entity emlEntity, Guid emlId)
+    {
+        var document = ArchivedEmlNarrowing.AsStored(emlEntity, emlId);
+        var world = new ArchivedEmlNarrowing.World();
+        world.AddCommunication(h.CommunicationId, internalOnly: false, threadPrivacy: (int)ThreadPrivacyState.Open);
+        var (visible, reason) = await ArchivedEmlNarrowing.ExternalAsync(document, world);
+        var internalPlane = await ArchivedEmlNarrowing.InternalPlaneFlaggedExternalAsync(document, world);
+        return (visible, reason, internalPlane);
     }
 
     private static SourceDocument Doc(string drive, string item, string name, byte[]? content = null)
@@ -457,7 +623,7 @@ public class OutboundAttachmentArchiveTests
         // The capture lists are shared by reference: the SUT writes into them during the act.
         return new Harness
         {
-            Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs, Ownership = ownership,
+            Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs, Ownership = ownership, World = world,
         };
     }
 

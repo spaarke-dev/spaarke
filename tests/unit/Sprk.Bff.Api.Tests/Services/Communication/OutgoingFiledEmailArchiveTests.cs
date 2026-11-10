@@ -2,7 +2,6 @@ using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -175,6 +174,68 @@ public class OutgoingFiledEmailArchiveTests
     [Theory]
     [InlineData(SendMode.SharedMailbox)]
     [InlineData(SendMode.User)]
+    public async Task PostIntoAThread_WithNoAssociations_InheritingTheThreadsRegarding_IsArchived(SendMode mode)
+    {
+        // Review F3 (must fire): an explicit ThreadId send with no Associations and ArchiveToSpe = false takes the thread's
+        // regarding (task 065 fix round 2) and so is filed — the decision reads the created row, not Associations.
+        var threadId = Guid.NewGuid();
+        var h = Build(targetThread: new Entity("sprk_communicationthread", threadId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_privacystate"] = new OptionSetValue((int)ThreadPrivacyState.Open),
+        });
+
+        await h.Sut.SendAsync(Request(mode) with { ThreadId = threadId }, mode == SendMode.User ? UserContext() : null);
+
+        h.Communications.Single().Entity.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId,
+            "the post inherited its thread's regarding");
+        h.ArchivedEmls.Should().ContainSingle("a post filed through its thread is archived (D-217)");
+        h.UploadPaths.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task SystemMailSend_FiledToAMatter_IsNeverArchived()
+    {
+        // Review F3 (must not fire): system mail keeps its secret out of storage, so it is never archived, filed or not.
+        var h = Build();
+        var request = Request(SendMode.SharedMailbox) with
+        {
+            Associations = [Matter(MatterId)],
+            SystemMail = new SystemMailOptions { StoredBody = "<p>[redacted]</p>" },
+        };
+
+        var response = await h.Sut.SendAsync(request);
+
+        h.Communications.Single().Entity.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId,
+            "the row is filed, so only the system-mail exclusion keeps it out of the archive");
+        h.ArchivedEmls.Should().BeEmpty();
+        h.UploadPaths.Should().BeEmpty("no .eml is uploaded for system mail");
+        response.ArchivedDocumentId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ServerSend_FiledToAMatter_IsNeverArchived()
+    {
+        // Review F3 (must not fire): a server-only send never copies its content into storage, filed or not.
+        var h = Build();
+        var request = Request(SendMode.User) with
+        {
+            Associations = [Matter(MatterId)],
+            ServerSend = new ServerSendOptions(),
+        };
+
+        var response = await h.Sut.SendAsync(request, UserContext());
+
+        h.Communications.Single().Entity.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId,
+            "the row is filed, so only the server-send exclusion keeps it out of the archive");
+        h.ArchivedEmls.Should().BeEmpty();
+        h.UploadPaths.Should().BeEmpty("no .eml is uploaded for a server-only send");
+        response.ArchivedDocumentId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(SendMode.SharedMailbox)]
+    [InlineData(SendMode.User)]
     public async Task RecordLessSend_ArchiveToSpeFalse_IsNotArchived(SendMode mode)
     {
         var h = Build();
@@ -285,31 +346,19 @@ public class OutgoingFiledEmailArchiveTests
         var communicationId = h.Communications.Single().Id;
 
         // The document exactly as the send created it, with a record link on it as well: the communication leg alone decides.
-        var document = new Entity("sprk_document", emlId);
-        foreach (var attribute in emlEntity.Attributes)
-            document[attribute.Key] = attribute.Value;
+        var document = ArchivedEmlNarrowing.AsStored(emlEntity, emlId);
         document["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
 
         // The communication and its thread as Dataverse would answer the narrowing's app-only reads. A contact and a systemuser
         // flagged external are both "not an internal systemuser": the narrowing is the same decision for both.
-        var threadId = Guid.NewGuid();
-        var world = new NarrowingWorld();
-        world.Add("sprk_communications", "sprk_communicationid", communicationId, new Dictionary<string, object?>
-        {
-            ["sprk_isinternalonly"] = internalOnly,
-            ["_sprk_communicationthread_value"] = threadId.ToString(),
-        });
-        world.Add("sprk_communicationthreads", "sprk_communicationthreadid", threadId, new Dictionary<string, object?>
-        {
-            ["sprk_privacystate"] = (int)threadPrivacy,
-        });
+        var world = new ArchivedEmlNarrowing.World();
+        world.AddCommunication(communicationId, internalOnly, (int)threadPrivacy);
 
-        var row = ExternalDocumentNarrowing.FromEntity(document);
-        var result = await ExternalDocumentNarrowing.DecideAsync([row], world.Query, CancellationToken.None);
+        var (shown, reason) = await ArchivedEmlNarrowing.ExternalAsync(document, world);
 
-        result.IsVisible(row).Should().Be(visible);
+        shown.Should().Be(visible);
         if (!visible)
-            result.ReasonFor(row).Should().Be(DocumentNarrowingReason.CommunicationHidden);
+            reason.Should().Be(DocumentNarrowingReason.CommunicationHidden);
     }
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -336,7 +385,8 @@ public class OutgoingFiledEmailArchiveTests
         }, "Test")),
     };
 
-    private static Harness Build(Entity? sourceCommunication = null, string? optedOutMailbox = null, bool uploadFails = false)
+    private static Harness Build(
+        Entity? sourceCommunication = null, string? optedOutMailbox = null, bool uploadFails = false, Entity? targetThread = null)
     {
         var options = new CommunicationOptions
         {
@@ -352,6 +402,10 @@ public class OutgoingFiledEmailArchiveTests
             .Setup(s => s.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                 sourceCommunication is not null && sourceCommunication.Id == id ? sourceCommunication : null!);
+        entityService
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                targetThread is not null && targetThread.Id == id ? targetThread : null!);
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
@@ -459,37 +513,5 @@ public class OutgoingFiledEmailArchiveTests
             .Callback((JobContract job, CancellationToken _) => submitted.Add(job))
             .Returns(Task.CompletedTask);
         return jobs.Object;
-    }
-
-    /// <summary>
-    /// The narrowing's app-only reads over seeded rows: each by-key read answers the rows whose key is in the filter, projected
-    /// through the query's own <c>$select</c> (a column the predicate does not select reads as absent).
-    /// </summary>
-    private sealed class NarrowingWorld
-    {
-        private readonly Dictionary<string, (string Key, List<Dictionary<string, JsonElement>> Rows)> _sets = new();
-
-        public void Add(string set, string key, Guid id, Dictionary<string, object?> columns)
-        {
-            if (!_sets.TryGetValue(set, out var entry))
-                _sets[set] = entry = (key, new List<Dictionary<string, JsonElement>>());
-            var row = columns.ToDictionary(kv => kv.Key, kv => JsonSerializer.SerializeToElement(kv.Value));
-            row[key] = JsonSerializer.SerializeToElement(id.ToString());
-            entry.Rows.Add(row);
-        }
-
-        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> Query(string set, string odata, CancellationToken ct)
-        {
-            if (!_sets.TryGetValue(set, out var entry))
-                return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>([]);
-            var ids = Regex.Matches(odata, $@"{entry.Key} eq ([0-9a-fA-F-]{{36}})").Select(m => m.Groups[1].Value)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var select = Regex.Match(odata, @"\$select=([^&]*)").Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal);
-            IReadOnlyList<Dictionary<string, JsonElement>> hit = entry.Rows
-                .Where(r => ids.Contains(r[entry.Key].GetString()!))
-                .Select(r => r.Where(kv => select.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
-                .ToList();
-            return Task.FromResult(hit);
-        }
     }
 }

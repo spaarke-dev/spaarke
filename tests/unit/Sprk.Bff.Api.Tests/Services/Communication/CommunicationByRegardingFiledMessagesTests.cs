@@ -227,6 +227,29 @@ public class CommunicationByRegardingFiledMessagesTests
         _world.AddedThreadReads.Should().HaveCount(2, "60 distinct threads in chunks of 50: two batched reads");
     }
 
+    [Fact]
+    public async Task AnchoredThreadsFillTheBudget_TheSkippedFiledRead_IsLogged()
+    {
+        // Review F2: 200 anchored threads (MaxThreads) leave no budget, so the filed-message read is skipped. The result has no
+        // truncation flag, so the cut must reach the log (the same Warning event as every other bound here).
+        for (var i = 0; i < 200; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+        var elsewhere = _world.Thread("Budget inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        _world.Message(elsewhere, regarding: [("sprk_regardingmatter", MatterId)]);
+        var logger = new Mock<ILogger<CommunicationThreadReadService>>();
+
+        var result = await Sut(logger: logger.Object).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().NotContain(t => t.ThreadId == elsewhere, "the budget is spent on the anchored threads");
+        logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("the filed-message read was bounded")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
     [Theory]
     [InlineData("sprk_project", "sprk_regardingproject")]
     [InlineData("contact", "sprk_regardingperson")]
@@ -244,7 +267,7 @@ public class CommunicationByRegardingFiledMessagesTests
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private CommunicationThreadReadService Sut(bool external = false)
+    private CommunicationThreadReadService Sut(bool external = false, ILogger<CommunicationThreadReadService>? logger = null)
     {
         var resolver = new Mock<ICallerSystemUserResolver>();
         resolver
@@ -258,7 +281,7 @@ public class CommunicationByRegardingFiledMessagesTests
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             resolver.Object,
             identity.Object,
-            Mock.Of<ILogger<CommunicationThreadReadService>>());
+            logger ?? Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
     private static ClaimsPrincipal Caller() =>

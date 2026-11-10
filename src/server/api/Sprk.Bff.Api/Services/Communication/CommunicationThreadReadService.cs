@@ -445,7 +445,14 @@ public sealed class CommunicationThreadReadService
         CancellationToken ct)
     {
         if (threadBudget <= 0)
+        {
+            // Review F2: the anchored threads used the whole budget, so the filed-message read is skipped. The result shape has
+            // no truncation flag, so the cut is logged as every other bound here is (the same Warning event).
+            _logger.LogWarning(
+                "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
+                recordId, callerSystemUserId, 0, 0, 0, MaxRegardingScan);
             return Array.Empty<ThreadReadResult>();
+        }
 
         var filed = await QueryVisibleMessagesAsync(
             $"_{regardingField}_value eq {recordId}", MaxRegardingScan, callerSystemUserId, ct);

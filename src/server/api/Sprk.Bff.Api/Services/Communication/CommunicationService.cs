@@ -2096,9 +2096,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
                 try
                 {
+                    // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
                         request, partialResponse, communicationId.Value, cancellationToken,
-                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
+                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User),
+                        sentAttachments: fileAttachments ?? [],
+                        sentSources: attachmentSources ?? []);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
@@ -2113,8 +2116,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
 
                 // Archive outbound attachments: each one is saved as its OWN new file in the communication's
-                // container, with its own sprk_document (best-effort; task 097 option A)
-                if (archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
+                // container, with its own sprk_document (best-effort; task 097 option A). Only when ASKED for
+                // (ArchiveToSpe): the D-217 auto-archive of a filed send creates the .eml alone (review F1a).
+                if (request.ArchiveToSpe && archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
                 {
                     try
                     {
@@ -2438,8 +2442,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
                 try
                 {
+                    // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, ct, requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+                        request, partialResponse, communicationId.Value, ct,
+                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId),
+                        sentAttachments: fileAttachments ?? [],
+                        sentSources: attachmentSources ?? []);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
@@ -2454,8 +2462,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
 
                 // Archive outbound attachments: each one is saved as its OWN new file in the communication's
-                // container, with its own sprk_document (best-effort; task 097 option A)
-                if (archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
+                // container, with its own sprk_document (best-effort; task 097 option A). Only when ASKED for
+                // (ArchiveToSpe): the D-217 auto-archive of a filed send creates the .eml alone (review F1a).
+                if (request.ArchiveToSpe && archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
                 {
                     try
                     {
@@ -3126,13 +3135,26 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Archives the sent communication as a .eml file in SharePoint Embedded
     /// and creates a sprk_document record linking to the archived file.
     /// </summary>
+    /// <param name="sentAttachments">
+    /// Ontology task 177 (review F1b): the attachments the send just transmitted, in memory. The two send paths pass them (an
+    /// empty list when the send had none), because their <c>sprk_communicationattachment</c> rows are created AFTER this archive
+    /// (Step 7), so a row-based embed would always be empty. Null on the on-demand archive (<c>ArchiveExistingAsync</c>), which
+    /// keeps reading the rows (<see cref="FetchEmlAttachmentsForEmbedAsync"/>), unchanged.
+    /// </param>
+    /// <param name="sentSources">
+    /// The source <c>sprk_document</c> of each of <paramref name="sentAttachments"/> that was read from one (index-aligned with
+    /// the document attachments; an attachment with no source document has no entry). The .eml carries their bytes, so it is
+    /// created with their most restrictive own Access Permission (<see cref="EmbeddedSourcesAccessPermissionAsync"/>).
+    /// </param>
     private async Task<Guid> ArchiveToSpeAsync(
         SendCommunicationRequest request,
         SendCommunicationResponse partialResponse,
         Guid communicationId,
         CancellationToken ct,
         int emailDirection = 100000001, // default Sent — send-path callers are always outbound
-        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
+        IReadOnlyList<ChannelAttachment>? sentAttachments = null,
+        IReadOnlyList<OutboundAttachmentSource>? sentSources = null)
     {
         // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
         // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
@@ -3145,7 +3167,20 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (archiveOwner.IsRefused)
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_document", archiveOwner);
 
-        var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+        // Review F1b: at send time the embed is the bytes just sent (the attachment rows do not exist yet); on demand, the rows.
+        var emlAttachments = sentAttachments is not null
+            ? sentAttachments.Select(a => new EmlAttachment
+            {
+                FileName = a.Name,
+                Content = a.Content,
+                ContentType = a.ContentType ?? InferContentType(a.Name),
+            }).ToList()
+            : await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+
+        // The embedded bytes must not widen access (uac-r2): the .eml takes its sources' most restrictive own value.
+        var embeddedNarrowing = sentSources is { Count: > 0 }
+            ? await EmbeddedSourcesAccessPermissionAsync(sentSources, communicationId, ct)
+            : null;
 
         var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
             .GenerateEml(request, partialResponse, emlAttachments);
@@ -3234,6 +3269,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
         ApplyContentOwner(document, archiveOwner); // task 146
+        StageEmbeddedAttachmentNarrowing(document, embeddedNarrowing); // review F1b + uac-r2: in this same create
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -3242,6 +3278,64 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             documentId, communicationId);
 
         return documentId;
+    }
+
+    /// <summary>
+    /// Ontology task 177 review F1b (uac-r2 binding addition): the most restrictive OWN <c>sprk_accesspermission</c> of the
+    /// source documents whose bytes the sent .eml embeds (<see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.MostRestrictive"/>),
+    /// read app-only by id. A source that cannot be read, is not found, or holds an unknown level counts as Restricted (fail
+    /// closed). Returns <see langword="null"/> when every source is Standard (nothing is written: the .eml's value stands).
+    /// </summary>
+    private async Task<int?> EmbeddedSourcesAccessPermissionAsync(
+        IReadOnlyList<OutboundAttachmentSource> sources, Guid communicationId, CancellationToken ct)
+    {
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        var values = new List<int?>(sources.Count);
+        foreach (var source in sources)
+        {
+            if (!Guid.TryParse(source.DocumentId, out var sourceId) || sourceId == Guid.Empty)
+            {
+                values.Add(restricted);
+                continue;
+            }
+
+            try
+            {
+                var row = await _genericEntityService.RetrieveAsync(
+                    "sprk_document", sourceId, [Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column], ct);
+                values.Add(row is null
+                    ? restricted
+                    : row.GetAttributeValue<OptionSetValue>(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column)?.Value);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "An embedded attachment's source document Access Permission could not be read; the archived .eml is " +
+                    "created Restricted (fail closed) | CommunicationId: {CommunicationId}", communicationId);
+                values.Add(restricted);
+            }
+        }
+
+        // An unknown level is never ranked by guess: it fails closed to Restricted.
+        var level = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.MostRestrictive(values) ?? restricted;
+        return level == Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Standard ? null : level;
+    }
+
+    /// <summary>
+    /// Ontology task 177 review F1b (uac-r2): stages the archived .eml's OWN narrowing (Limited or Restricted, from
+    /// <see cref="EmbeddedSourcesAccessPermissionAsync"/>) on its create, with its <c>sprk_accessinheritance</c> record
+    /// (<see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>, task 189) in the same write, so the reconciler
+    /// keeps it as the document's own and never widens it below its sources. <see langword="null"/> writes nothing.
+    /// </summary>
+    internal static void StageEmbeddedAttachmentNarrowing(DataverseEntity document, int? level)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (level is not { } own)
+            return;
+
+        document[Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column] = new OptionSetValue(own);
+        document[Sprk.Bff.Api.Services.Access.AccessInheritance.Column] =
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(own).Serialize();
     }
 
     /// <summary>
