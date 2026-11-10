@@ -666,8 +666,14 @@ internal static class DiRegistrationScan
 
                 _result.Registrations.Add(new Reg
                 {
-                    Key = key, Impl = impl, HasFactoryOrInstance = hasArgs, FactoryDeps = factoryDeps,
-                    Path = path.ToList(), File = file, Line = line, Method = method,
+                    Key = key,
+                    Impl = impl,
+                    HasFactoryOrInstance = hasArgs,
+                    FactoryDeps = factoryDeps,
+                    Path = path.ToList(),
+                    File = file,
+                    Line = line,
+                    Method = method,
                 });
             }
 
@@ -678,8 +684,14 @@ internal static class DiRegistrationScan
                 {
                     _result.Registrations.Add(new Reg
                     {
-                        Key = provided, Impl = null, HasFactoryOrInstance = false, FactoryDeps = Array.Empty<string>(),
-                        Path = path.ToList(), File = file, Line = LineOf(t, s + m.Index), Method = method,
+                        Key = provided,
+                        Impl = null,
+                        HasFactoryOrInstance = false,
+                        FactoryDeps = Array.Empty<string>(),
+                        Path = path.ToList(),
+                        File = file,
+                        Line = LineOf(t, s + m.Index),
+                        Method = method,
                     });
                 }
             }
