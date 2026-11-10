@@ -56,6 +56,6 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
   - Secret, read 2026-11-10 (metadata only): exactly one password, `Teams Dev Portal OAuth – dev 2`, keyId `3f36b679-8141-4858-ac05-8b11fd1985cc`, start 2026-11-10 18:39 local, end **2028-11-09 18:39** local. The old keyId `fafba383-…`, whose value was exposed in a screenshot, is deleted. Web redirect unchanged; `isFallbackPublicClient` false.
   - App Insights, 3 hours to 18:52Z: no request to `/mcp/*` or `/.well-known/*` from Microsoft yet. Linking did not call the server.
   - Connector ID: _tbd (owner)_ · Date: 2026-11-10
-- **First T5 attempt, 2026-11-10 (account not confirmed as non-admin; T5 requires one):** Copilot answered "couldn't call spike_whoami" because it searched the connected **Dataverse** MCP instead of Spaarke MCP. No `tools/call` reached the BFF. Retry with Spaarke MCP explicitly selected in the chat, as a non-admin user.
+- **First T5 attempt, 2026-11-10 (the owner's admin account, confirmed 2026-11-10, so a pre-check only; T5 requires a licensed non-admin user):** Copilot answered "couldn't call spike_whoami" because it searched the connected **Dataverse** MCP instead of Spaarke MCP. No `tools/call` reached the BFF. Retry with Spaarke MCP explicitly selected in the chat, as a non-admin user.
 
 ## (d) T5 — pending
