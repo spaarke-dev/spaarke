@@ -136,7 +136,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // planner, with this handler's own app-only reader) BEFORE the filing gate below and the write, so they see the pair as it
         // will be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
         fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
-                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct)
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
+                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
             .ConfigureAwait(false);
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether

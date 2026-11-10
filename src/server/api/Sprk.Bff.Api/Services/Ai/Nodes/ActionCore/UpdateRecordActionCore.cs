@@ -254,9 +254,13 @@ internal sealed class UpdateRecordActionCore
         if (OwnedChildWrite.RegardingPairPlannerApplies(input.EntityLogicalName, updatePayload))
         {
             using var pairScope = _scopeFactory.CreateScope();
+            var pairEntities = pairScope.ServiceProvider.GetService<IGenericEntityService>();
             updatePayload = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
-                    pairScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
-                    updatePayload, "UpdateRecord", _logger, cancellationToken)
+                    pairEntities, input.EntityLogicalName, input.RecordId,
+                    updatePayload, "UpdateRecord", _logger, cancellationToken,
+                    movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(
+                        pairScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
+                        pairEntities, input.ImpersonateSystemUserId))
                 .ConfigureAwait(false);
         }
 

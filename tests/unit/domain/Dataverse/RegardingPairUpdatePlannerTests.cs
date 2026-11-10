@@ -706,11 +706,16 @@ public sealed class RegardingPairUpdatePlannerTests
             catalog.ThrowsAsync(new TimeoutException("socket"));
         else
             catalog.ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
-        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterB, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+        // The moved pair's display is read as the person the write runs for (F-045b-1): their read times out.
+        var person = Guid.Parse("a0450b00-0000-4000-8000-0000000000aa");
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        var asPerson = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
+        asPerson.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), person, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("socket"));
 
         var act = () => KeepRegardingPairWholeAppOnlyAsync(entities.Object, "sprk_todo", Row,
-            new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, "UpdateRecord", null, default);
+            new() { ["sprk_regardingrecordid"] = MatterB.ToString("D") }, "UpdateRecord", null, default,
+            movedDisplayRecord: MovedDisplayReader(asPerson.Object, entities.Object, person));
 
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
     }
