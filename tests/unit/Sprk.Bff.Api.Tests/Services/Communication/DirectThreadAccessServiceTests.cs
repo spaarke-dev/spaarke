@@ -644,16 +644,32 @@ public class DirectThreadAccessServiceTests
         (directory ?? DirectDirectory()).Lookup(),
         users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
+    /// <summary>Task 198 R2: the message's stamped sender and recipient (<c>null</c>: not stamped). Read when the message is.</summary>
+    private Guid? _stampedSender = Caller;
+    private Guid? _stampedRecipient = Other;
+
+    /// <summary>The message row owned by <paramref name=teamId/>, with the stamped pair, projected to the query's select as
+    /// Dataverse answers (a column not selected is absent).</summary>
+    private Entity MessageRow(QueryExpression query, Guid teamId)
+    {
+        var row = new Entity("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", teamId) };
+        if (_stampedSender is { } sender)
+            row["sprk_sentby"] = new EntityReference("systemuser", sender);
+        if (_stampedRecipient is { } recipient)
+            row["sprk_directrecipient"] = new EntityReference("systemuser", recipient);
+        var projected = new Entity(row.LogicalName, row.Id);
+        foreach (var column in row.Attributes.Keys.Where(c => query.ColumnSet.AllColumns || query.ColumnSet.Columns.Contains(c)))
+            projected[column] = row[column];
+        return projected;
+    }
+
     /// <summary>The message is owned by a non-default Owner team that is not the Secure team (the Direct team's shape).</summary>
     private void MessageOwnedByOwnerTeam(Guid teamId)
     {
         _entityService
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", teamId) },
-            }));
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => new EntityCollection(new List<Entity> { MessageRow(q, teamId) }));
         TeamsAndUnitsMatchedAsDataverse(
             new[] { (teamId, DirectMessageOwnerTeamDouble.RootUnitId, "Spaarke Direct Message Owners", false, 0) },
             Array.Empty<(Guid, string)>());
@@ -909,17 +925,103 @@ public class DirectThreadAccessServiceTests
         _entityService
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new EntityCollection(new List<Entity>
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => new EntityCollection(new List<Entity>
             {
-                new("sprk_communication")
-                {
-                    Id = CommunicationId,
-                    ["owningteam"] = new EntityReference("team", reads++ == 0 ? DirectTeamId : OtherTeamId),
-                },
+                // R2: the pair is stamped, so only the owner change (read again right before the grant) stops it.
+                MessageRow(q, reads++ == 0 ? DirectTeamId : OtherTeamId),
             }));
 
         await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
+        VerifyNoGrantAtAll();
+    }
+
+    // ── Task 198 fix round 1, R2: the live grant derives the pair from the message's stamped columns, as the job does ──
+
+    [Fact(DisplayName = "198 R2 must-fire: the live grant grants the stamped pair, not the thread's sharee")]
+    public async Task R2_Live_GrantsTheStampedPair_NotTheThreadsSharee()
+    {
+        // The thread is owned by Caller and shared to Other; the message's pair is Caller -> ThirdUser.
+        DirectTeamMessageWorld();
+        _stampedRecipient = ThirdUser;
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communications", CommunicationId, ThirdUser);
+        VerifyGrant("sprk_documents", DocumentRowId, ThirdUser);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the live grant reads the sender and the recipient by name")]
+    public async Task R2_Live_TheMessageRead_SelectsThePair()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _entityService.Invocations
+            .Where(i => i.Method.Name == nameof(IGenericEntityService.RetrieveMultipleAsync))
+            .Select(i => (QueryExpression)i.Arguments[0])
+            .Should().Contain(q => q.EntityName == "sprk_communication"
+                && q.ColumnSet.Columns.Contains("sprk_sentby") && q.ColumnSet.Columns.Contains("sprk_directrecipient"));
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: no recipient stamped, the live grant grants nobody")]
+    public async Task R2_Live_NoRecipient_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        _stampedRecipient = null;
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNoGrantAtAll();
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: sender and recipient the same user, the live grant grants nobody")]
+    public async Task R2_Live_SenderIsRecipient_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        _stampedRecipient = Caller;
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNoGrantAtAll();
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: a disabled recipient is not granted live; the sender is")]
+    public async Task R2_Live_ADisabledRecipient_IsNotGranted_TheSenderIs()
+    {
+        DirectTeamMessageWorld();
+        var users = new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser);
+        users.Disabled[Other] = true;
+
+        await DirectTeamSut(users: users).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communicationattachments", AttachmentRowId, Caller);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the message read for the pair faults, the live grant grants nobody")]
+    public async Task R2_Live_WhenThePairReadFaults_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        var reads = 0;
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => reads++ == 0
+                ? new EntityCollection(new List<Entity> { MessageRow(q, DirectTeamId) })
+                : throw new InvalidOperationException("Test: the message could not be read."));
+
+        var act = () => DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        await act.Should().NotThrowAsync();
         VerifyNoGrantAtAll();
     }
 

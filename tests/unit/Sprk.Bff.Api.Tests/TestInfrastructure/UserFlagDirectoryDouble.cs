@@ -26,9 +26,18 @@ internal sealed class UserFlagDirectoryDouble : DataverseWebApiClient
     /// <summary>Each user's stored flag (<c>null</c> = blank); a user absent here is not returned.</summary>
     public Dictionary<Guid, bool?> Flags { get; } = new();
 
+    /// <summary>
+    /// Task 198 R2: each user's <c>isdisabled</c>. A user not listed here is returned enabled (<c>false</c>), as Dataverse always
+    /// returns the selected column; a user mapped to <c>null</c> is returned WITHOUT the column (an unreadable value).
+    /// </summary>
+    public Dictionary<Guid, bool?> Disabled { get; } = new();
+
     public bool Faults { get; set; }
 
     public List<string> Queries { get; } = new();
+
+    /// <summary>The <c>$select</c> of every <c>systemusers</c> read, in order.</summary>
+    public List<string> Selects { get; } = new();
 
     /// <summary>Marks every user in <paramref name="users"/> internal.</summary>
     public UserFlagDirectoryDouble Internal(params Guid[] users)
@@ -46,13 +55,21 @@ internal sealed class UserFlagDirectoryDouble : DataverseWebApiClient
             return Task.FromResult(new List<T>());
 
         Queries.Add(filter ?? string.Empty);
+        Selects.Add(select ?? string.Empty);
         if (Faults)
             throw new HttpRequestException("Test: the users could not be read.");
 
         var rows = UserId.Matches(filter ?? string.Empty)
             .Select(m => Guid.Parse(m.Groups[1].Value))
             .Where(Flags.ContainsKey)
-            .Select(id => new Dictionary<string, object?> { ["systemuserid"] = id, ["sprk_isexternal"] = Flags[id] })
+            .Select(id =>
+            {
+                var row = new Dictionary<string, object?> { ["systemuserid"] = id, ["sprk_isexternal"] = Flags[id] };
+                var disabled = Disabled.TryGetValue(id, out var value) ? value : false;
+                if (disabled is not null)
+                    row["isdisabled"] = disabled;
+                return row;
+            })
             .ToList();
         return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
     }

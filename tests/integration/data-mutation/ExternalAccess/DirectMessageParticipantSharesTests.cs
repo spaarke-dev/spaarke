@@ -41,12 +41,15 @@ public class DirectMessageParticipantSharesTests
     private static readonly Guid Outsider = Guid.Parse("c1980000-0000-4000-8000-0000000000a3");
     private static readonly Guid AnchorGrantee = Guid.Parse("c1980000-0000-4000-8000-0000000000a4");
 
+    /// <summary>R2: a user on no thread, stamped as a message's recipient.</summary>
+    private static readonly Guid Stamped = Guid.Parse("c1980000-0000-4000-8000-0000000000a5");
+
     private static readonly string[] ContentTables =
         ["sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_document"];
 
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
     private readonly FakeRecordShareTable _shares = new();
-    private readonly UserFlagDirectoryDouble _users = new UserFlagDirectoryDouble().Internal(Caller, Other, Outsider, AnchorGrantee);
+    private readonly UserFlagDirectoryDouble _users = new UserFlagDirectoryDouble().Internal(Caller, Other, Outsider, AnchorGrantee, Stamped);
     private readonly DirectMessageOwnerTeamDouble _directory = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero));
     private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -83,7 +86,8 @@ public class DirectMessageParticipantSharesTests
     }
 
     /// <summary>A message owned by <paramref name="owner"/> in <paramref name="thread"/>, with one row per content table owned by the
-    /// same owner, filed through <paramref name="filing"/>.</summary>
+    /// same owner, filed through <paramref name="filing"/>. R2: its sender (<see cref="Caller"/>) and recipient (<see cref="Other"/>)
+    /// are stamped, as fm's Direct writer stamps them (the same two users as the thread's two-party list).</summary>
     private (Guid Message, IReadOnlyList<(string Table, Guid Id)> Rows) Message(
         Guid thread, (string Column, object Value) owner, params (string Column, string Target, Guid Id)[] filing)
     {
@@ -91,6 +95,7 @@ public class DirectMessageParticipantSharesTests
         var columns = new List<(string, object)> { owner, ("sprk_communicationthread", new EntityReference("sprk_communicationthread", thread)) };
         columns.AddRange(filing.Select(f => (f.Column, (object)new EntityReference(f.Target, f.Id))));
         _world.Add("sprk_communication", message, columns.ToArray());
+        Stamp(message, Caller, Other);
         var rows = new List<(string Table, Guid Id)> { ("sprk_communication", message) };
         foreach (var table in ContentTables)
         {
@@ -101,6 +106,13 @@ public class DirectMessageParticipantSharesTests
         }
 
         return (message, rows);
+    }
+
+    /// <summary>R2: stamps (or, for <c>null</c>, clears) the message's sender and recipient lookups.</summary>
+    private void Stamp(Guid message, Guid? sender, Guid? recipient)
+    {
+        _world.Set("sprk_communication", message, "sprk_sentby", sender is { } s ? new EntityReference("systemuser", s) : null);
+        _world.Set("sprk_communication", message, "sprk_directrecipient", recipient is { } r ? new EntityReference("systemuser", r) : null);
     }
 
     private static (string, object) OwnedBy(Guid team) => ("owningteam", new EntityReference("team", team));
@@ -342,6 +354,7 @@ public class DirectMessageParticipantSharesTests
             var message = Guid.NewGuid();
             _world.Add("sprk_communication", message, OwnedBy(DirectTeam),
                 ("sprk_communicationthread", new EntityReference("sprk_communicationthread", thread)), ("modifiedon", recent));
+            Stamp(message, Caller, Other);
             messages.Add(message);
         }
 
@@ -379,6 +392,7 @@ public class DirectMessageParticipantSharesTests
             if (modifiedOn(i) is { } at)
                 columns.Add(("modifiedon", at));
             _world.Add("sprk_communication", message, columns.ToArray());
+            Stamp(message, Caller, Other);
             messages.Add(message);
         }
 
@@ -552,6 +566,7 @@ public class DirectMessageParticipantSharesTests
         var message = Guid.NewGuid();
         _world.SecureChild("sprk_communication", message, ("sprk_regardingmatter", "sprk_matter", secureRoot));
         _world.Set("sprk_communication", message, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+        Stamp(message, Caller, Other);
 
         var shares = new DirectMessageParticipantShares(
             SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, directory.Lookup(_time), _configuration,
@@ -650,6 +665,7 @@ public class DirectMessageParticipantSharesTests
         var message = Guid.NewGuid();
         _world.SecureChild("sprk_communication", message, ("sprk_regardingmatter", "sprk_matter", secureRoot));
         _world.Set("sprk_communication", message, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+        Stamp(message, Caller, Other);
         _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(AnchorGrantee), Read); // the mirror
 
         UnfileToDirect(message, "sprk_regardingmatter");
@@ -687,6 +703,265 @@ public class DirectMessageParticipantSharesTests
             SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance).AfterRefileAsync(message, CancellationToken.None);
 
         outcome.Status.Should().Be(DirectMessageParticipantShares.Status.NotDirect);
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Fix round 1 R2: the participants are the message's BFF-stamped pair (sprk_sentby, sprk_directrecipient), never the thread's
+    // owner or sharees. An invalid pair grants and revokes nothing and is settled; a read fault is retried.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private DirectMessageParticipantShares Reconciler198() => new(
+        SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, Lookup(), _configuration,
+        SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance);
+
+    [Fact(DisplayName = "198 R2 must-fire: the job grants the stamped pair and revokes a third user's share on the message")]
+    public async Task R2_Job_GrantsTheStampedPair_AndRevokesAThirdUsersShare()
+    {
+        var (message, rows) = DirectMessage();
+        Stamp(message, Caller, Stamped);
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue($"the stamped sender reads {table}");
+            Holds(table, id, Stamped).Should().BeTrue($"the stamped recipient reads {table}");
+        }
+
+        Holds("sprk_communication", message, Outsider).Should().BeFalse("a user outside the pair loses the message");
+        _shares.WriteLog.Should().Contain(w => w.Action == "RevokeAccess" && w.Principal == DataversePrincipalRef.User(Outsider));
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the thread's sharee is not granted when it is not in the pair (the old source is gone)")]
+    public async Task R2_TheThreadsSharee_IsNotGranted_WhenNotInThePair()
+    {
+        // The thread is owned by Caller and shared to Other; the message's pair is Caller -> Stamped.
+        var (message, rows) = DirectMessage();
+        Stamp(message, Caller, Stamped);
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Other), Read);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Reconciled);
+        outcome.Complete.Should().BeTrue();
+        _shares.WriteLog.Where(w => w.Action == "GrantAccess")
+            .Should().OnlyContain(w => w.Principal == DataversePrincipalRef.User(Caller) || w.Principal == DataversePrincipalRef.User(Stamped));
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table}: the thread's sharee is not the message's recipient");
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the thread's owner is not granted when it is not in the pair")]
+    public async Task R2_TheThreadsOwner_IsNotGranted_WhenNotInThePair()
+    {
+        var (message, rows) = DirectMessage();
+        Stamp(message, Other, Stamped);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue();
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeFalse($"{table}: the thread's owner is not in the pair");
+            Holds(table, id, Other).Should().BeTrue();
+            Holds(table, id, Stamped).Should().BeTrue();
+        }
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the message row read selects the sender and the recipient by name, with the owner and the thread")]
+    public async Task R2_TheMessageRead_SelectsTheSenderAndTheRecipient()
+    {
+        var (message, _) = DirectMessage();
+
+        await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        _world.Queries.Should().Contain(q => q.EntityName == "sprk_communication"
+            && q.ColumnSet.Columns.Contains("owningteam") && q.ColumnSet.Columns.Contains("sprk_communicationthread")
+            && q.ColumnSet.Columns.Contains("sprk_sentby") && q.ColumnSet.Columns.Contains("sprk_directrecipient"));
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: no recipient stamped, the job grants and revokes nothing, settles it, and does not carry it")]
+    public async Task R2_Job_NoRecipient_GrantsAndRevokesNothing_IsSettled_AndIsNotCarried_UntilItIsStamped()
+    {
+        var (message, rows) = DirectMessage();
+        Stamp(message, Caller, null);
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeTrue(first.ErrorMessage);
+        first.ResultJson.Should().Contain("\"incomplete\":0").And.Contain("\"carried\":0").And.Contain("\"examined\":1");
+        _shares.WriteLog.Should().BeEmpty("an unstamped pair grants and revokes nothing");
+        Holds("sprk_communication", message, Outsider).Should().BeTrue();
+
+        // A later repair stamps the recipient (modifiedon moves): the pass lists it again and grants the pair.
+        Stamp(message, Caller, Other);
+        _world.Modified("sprk_communication", message, _time.GetUtcNow().UtcDateTime);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue();
+            Holds(table, id, Other).Should().BeTrue();
+        }
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: no recipient stamped is a settled NoAudience outcome, not a retry")]
+    public async Task R2_NoRecipient_IsSettledNoAudience()
+    {
+        var (message, _) = DirectMessage();
+        Stamp(message, Caller, null);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.NoAudience);
+        outcome.Complete.Should().BeTrue();
+        outcome.Detail.Should().Contain("recipient");
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "198 R2 must-fire: an invalid pair grants and revokes nothing, and is settled")]
+    [InlineData("no sender")]
+    [InlineData("neither")]
+    [InlineData("sender is recipient")]
+    [InlineData("recipient is a contact")]
+    [InlineData("sender is a team")]
+    public async Task R2_AnInvalidPair_GrantsAndRevokesNothing(string shape)
+    {
+        var (message, _) = DirectMessage();
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+        switch (shape)
+        {
+            case "no sender": Stamp(message, null, Other); break;
+            case "neither": Stamp(message, null, null); break;
+            case "sender is recipient": Stamp(message, Caller, Caller); break;
+            case "recipient is a contact":
+                _world.Set("sprk_communication", message, "sprk_directrecipient", new EntityReference("contact", Other));
+                break;
+            case "sender is a team":
+                _world.Set("sprk_communication", message, "sprk_sentby", new EntityReference("team", Caller));
+                break;
+        }
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.NoAudience);
+        outcome.Complete.Should().BeTrue();
+        _shares.WriteLog.Should().BeEmpty("an invalid pair grants nothing and revokes nothing");
+        Holds("sprk_communication", message, Outsider).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: a pair absent from the returned row grants nothing and revokes nothing")]
+    public async Task R2_APairAbsentFromTheReturnedRow_GrantsAndRevokesNothing()
+    {
+        // The row as Dataverse answers a select that did not take the lookups, or a row never stamped: the attributes are not in it.
+        var (message, rows) = DirectMessage();
+        Stamp(message, null, null);
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _shares.WriteLog.Should().BeEmpty();
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeFalse("the thread's owner is not a source");
+            Holds(table, id, Other).Should().BeFalse("the thread's sharee is not a source");
+        }
+
+        Holds("sprk_communication", message, Outsider).Should().BeTrue("nothing is revoked");
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: a disabled recipient is not granted; the sender still is, and the outcome is complete")]
+    public async Task R2_ADisabledRecipient_IsNotGranted_TheSenderIs_AndItIsComplete()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Disabled[Other] = true;
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Reconciled);
+        outcome.Complete.Should().BeTrue("a disabled participant is settled, not retried");
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Caller).Should().BeTrue($"the sender reads {table}");
+            Holds(table, id, Other).Should().BeFalse($"the disabled recipient is not granted {table}");
+        }
+
+        _users.Selects.Should().OnlyContain(select => select.Split(',').Contains("isdisabled"), "the one user read carries isdisabled");
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: whether a participant is disabled cannot be read, it is not granted and the message is retried")]
+    public async Task R2_AnUnreadableDisabledFlag_IsNotGranted_AndIsRetried()
+    {
+        var (message, _) = DirectMessage();
+        _users.Disabled[Other] = null;
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse();
+        Holds("sprk_communication", message, Other).Should().BeFalse();
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: the user read faults, nothing is granted and the message is retried")]
+    public async Task R2_AUserReadFault_GrantsNothing_AndIsRetried()
+    {
+        var (message, _) = DirectMessage();
+        _users.Faults = true;
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse();
+        Grants().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "198 R2 must-fire: a fault reading the message is retried, nothing written")]
+    public async Task R2_AFaultReadingTheMessage_IsRetried()
+    {
+        var (message, _) = DirectMessage();
+        _world.FailingRowReadsOf("sprk_communication", message);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Unknown);
+        outcome.Complete.Should().BeFalse();
+        _shares.WriteLog.Should().BeEmpty();
+    }
+
+    // ── Must-not-fire ──
+
+    [Fact(DisplayName = "198 R2 must-not-fire: a valid pair already holding exactly its shares writes nothing")]
+    public async Task R2_AValidPairHoldingItsShares_WritesNothing()
+    {
+        var (message, rows) = DirectMessage();
+        Stamp(message, Caller, Stamped);
+        foreach (var (table, id) in rows)
+        foreach (var user in new[] { Caller, Stamped })
+            _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
+
+        var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _shares.WriteLog.Should().BeEmpty("idempotent");
+    }
+
+    [Fact(DisplayName = "198 R2 must-not-fire: a thread that is not Direct is NoAudience with a valid pair stamped, unchanged")]
+    public async Task R2_ANonDirectThread_IsNoAudience_WithAValidPair()
+    {
+        var (message, _) = Message(DirectThread(type: ThreadTypeRecordAnchored), OwnedBy(DirectTeam));
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.NoAudience);
+        outcome.Detail.Should().Be("its thread is not a Direct thread");
+        outcome.Complete.Should().BeTrue();
         _shares.WriteLog.Should().BeEmpty();
     }
 }
