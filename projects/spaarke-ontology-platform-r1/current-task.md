@@ -4,7 +4,7 @@
 > session **`ontology-r1`**). State only: history is in git log, task `<completion>` blocks and `notes/handoff-history/2026-11.md`
 > (the previous checkpoint is archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions:
 > [`notes/decisions.md`](notes/decisions.md) (D-1..D-215). Deferred work: one self-contained GitHub issue per item, label
-> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-146**). Sub-agents never edit this file.
+> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-147**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -35,7 +35,7 @@
 - **D-215 (owner, 2026-11-09):** gate Decision Records of Direct messages follow the message's internal participants (shared at write, kept on ordinary filing, re-owned on unfile back to Direct). uac 198 Part E edits `GateDecisionRecordSharing.cs` after fm 054a lands `sprk_directrecipient` and 198's R2 rework; the 7 conditions + unfile-back case were sent privately by message. **We review the diff + one independent review before merge.** Waiting for their SHA.
 - Move notice to `spa-r4` expired undelivered (permission-mode mismatch); owner told.
 
-**Ours, after the critical path:** DI-144 #2632 (writer lookups also require `createdonbehalfby` empty); DI-145 #2639 (environment identity ids in source/tests/notes, public-repo hygiene); F-R3-1 footer fix (on docs only; needs docs→master + dev deploy); `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`; five stale `DecisionRecordWriter.cs` comments wait for ebilling 074; close #2212 when ebilling `f0884a175f` reaches master.
+**Ours, after the critical path:** DI-144 #2632 (writer lookups also require `createdonbehalfby` empty); DI-145 #2639 (environment identity ids in source/tests/notes, public-repo hygiene); DI-146 #2650 (decision commit closes items one by one: 41.7 s for 18 items; performance only); F-R3-1 footer fix (on docs only; needs docs→master + dev deploy); `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`; five stale `DecisionRecordWriter.cs` comments wait for ebilling 074; close #2212 when ebilling `f0884a175f` reaches master.
 
 **Dev checks DONE 2026-11-09 (ontology-r1):** (a) `20669df6a9` gate open point **PASS**: Signals routes since 16:44:51Z all 200/204 (worklist 9, decision-plan 5, suppression 4, decision POST 2), no 5xx, no 403. (b) Task 170 **PASS**: 1 WhoAmI per commit (was 35); wall time 18.6 s (one decision) and 41.7 s (Create budget that also closed 17 billing items, D-214), about 18 sequential Dataverse calls per item closed. (c) **BUD-001003** on the new budget: PASS. Evidence row in `notes/168-173-live-proof.md` §6. Method: Log Analytics `spe-logs-dev-67e2xz` (`AppRequests`/`AppDependencies`), because the App Insights query returns only the current day; telemetry is sampled at 25%. **Gotcha:** Dataverse MCP returns datetimes in local time (UTC-5), not UTC.
 
