@@ -1,7 +1,11 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
@@ -240,6 +244,95 @@ public partial class ChildAccessPermissionReconcileTests
             "the sweep cursor does not pass a row that was neither decided nor carried");
         later[^1].GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
         first.GetProperty("carryOverflow").GetInt32().Should().Be(1, "the row past the cap is counted, never silently dropped");
+    }
+
+    // ── Pass 2, item 4: projection pins. The world honours a query's column set, so a column the reconciler stops asking for
+    // reads as null. These pin the columns the reconciler's listing reads ask for (ColumnSetAsync): the document's value and
+    // own-narrowing record, and the communication's value, which R3's parentless own-value read depends on ─────────────────
+
+    /// <summary>The reconciler alone (no other pass) over a world: every query in <see cref="SecureChildShareWorld.Queries"/> is its own.</summary>
+    private static async Task<(SecureChildShareWorld World, List<Guid> Barred)> ReconcilerRunAsync(
+        Action<SecureChildShareWorld>? arrange = null, bool writes = false, params string[] tablesWithoutAccessPermission)
+    {
+        var world = SecureChildShareWorld.Standard();
+        arrange?.Invoke(world);
+        var probe = SecureChildShareWorld.CoreAncestorsOver(() => world, tablesWithoutAccessPermission);
+        var barred = new List<Guid>();
+        var reconciler = new ChildAccessPermissionReconciler(
+            SecureChildShareWorld.EntitiesOver(() => world).Object, (table, token) => probe.ProbeColumnsAsync(table, token),
+            NullLogger.Instance, _ => Task.FromResult(true),
+            (communication, _) => { barred.Add(communication); return Task.FromResult(true); });
+        world.Queries.Clear();
+        await reconciler.RunAsync(Start.AddHours(-1),
+            [("sprk_document", Guid.NewGuid()), ("sprk_communication", Guid.NewGuid())], // the by-id read of carried rows
+            ChildAccessPermissionReconciler.SweepFromStart, 100, writes, maxWrites: 10, CancellationToken.None);
+        return (world, barred);
+    }
+
+    /// <summary>The reconciler's three listing reads of a table: changed since the window, carried rows by id, the sweep.</summary>
+    private static List<QueryExpression> ListingReadsOf(SecureChildShareWorld world, string table)
+    {
+        var reads = world.Queries.Where(q => q.EntityName == table).ToList();
+        var changed = reads.Where(q => q.Criteria.Conditions.Any(c => c.AttributeName == "modifiedon")).ToList();
+        var byId = reads.Where(q => q.Criteria.Conditions.Any(c => c.AttributeName == table + "id" && c.Operator == ConditionOperator.In)).ToList();
+        var sweep = reads.Where(q => q.Orders.Any(o => o.AttributeName == table + "id")).ToList();
+        changed.Should().NotBeEmpty($"the reconciler lists {table} rows changed since the window");
+        byId.Should().NotBeEmpty($"the reconciler reads carried {table} rows by id");
+        sweep.Should().NotBeEmpty($"the reconciler sweeps {table}");
+        return [.. changed, .. byId, .. sweep];
+    }
+
+    private static bool Asks(QueryExpression query, string column) =>
+        query.ColumnSet.AllColumns || query.ColumnSet.Columns.Contains(column, StringComparer.OrdinalIgnoreCase);
+
+    [Fact(DisplayName = "198 pass 2 pin (must-fire): every listing read of sprk_document asks for its value and its own-narrowing record")]
+    public async Task Pin_TheDocumentListingReads_AskForTheValueAndTheRecord()
+    {
+        var (world, _) = await ReconcilerRunAsync();
+
+        ListingReadsOf(world, "sprk_document").Should().OnlyContain(
+            q => Asks(q, InheritedAccessPermission.Column) && Asks(q, AccessInheritance.Column),
+            "DecideDocument reads both from the listed row; a column not asked for reads as null");
+    }
+
+    [Fact(DisplayName = "198 pass 2 pin (must-not-fire): documents without the record column are listed with the value only")]
+    public async Task Pin_DocumentsWithoutTheRecordColumn_AreListedWithTheValueOnly()
+    {
+        var (world, _) = await ReconcilerRunAsync(w => w.DocumentsLackAccessRecordColumn = true);
+
+        ListingReadsOf(world, "sprk_document").Should().OnlyContain(
+            q => Asks(q, InheritedAccessPermission.Column) && !Asks(q, AccessInheritance.Column));
+    }
+
+    [Fact(DisplayName = "198 pass 2 pin (must-fire): every listing read of sprk_communication asks for its value, and a parentless Restricted message is barred")]
+    public async Task Pin_TheCommunicationListingReads_AskForTheValue_AndTheParentlessOwnValueIsRead()
+    {
+        var message = Guid.NewGuid();
+        var (world, barred) = await ReconcilerRunAsync(
+            w => w.OrdinaryChild("sprk_communication", message).Set("sprk_communication", message, Column, new OptionSetValue(Restricted)),
+            writes: true);
+
+        ListingReadsOf(world, "sprk_communication").Should().OnlyContain(q => Asks(q, InheritedAccessPermission.Column),
+            "R3 reads a parentless message's own value from the listed row");
+        barred.Should().Equal([message], "its own value, read from the listing, is Restricted");
+    }
+
+    [Fact(DisplayName = "198 pass 2 pin (must-not-fire): a table without the column is listed without it, and a parentless Standard message is not barred")]
+    public async Task Pin_ACommunicationTableWithoutTheColumn_IsListedWithoutIt_AndAStandardMessageIsNotBarred()
+    {
+        var standard = Guid.NewGuid();
+        var (_, barredStandard) = await ReconcilerRunAsync(
+            w => w.OrdinaryChild("sprk_communication", standard).Set("sprk_communication", standard, Column, new OptionSetValue(Standard)),
+            writes: true);
+        barredStandard.Should().BeEmpty("its own value is Standard");
+
+        var restricted = Guid.NewGuid();
+        var (world, barred) = await ReconcilerRunAsync(
+            w => w.OrdinaryChild("sprk_communication", restricted).Set("sprk_communication", restricted, Column, new OptionSetValue(Restricted)),
+            writes: true, "sprk_communication");
+        world.Queries.Where(q => q.EntityName == "sprk_communication")
+            .Should().OnlyContain(q => !Asks(q, InheritedAccessPermission.Column), "the column does not exist here");
+        barred.Should().BeEmpty("a table without the column is not reconciled");
     }
 
     [Fact(DisplayName = "198 pass 2 F2 must-fire: rows the capped bar leaves (listed only under a change) are found again by a restarted sweep, without holding the watermark")]
