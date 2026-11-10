@@ -576,9 +576,14 @@ internal sealed class DirectMessageParticipantShares
     /// 198 pass 2 F1: grants Read on one content row of a Direct message to <paramref name="users"/> (the ones that do not hold it;
     /// the caller read the row's shares), then reads the row's owner back by id. When it is no longer exactly
     /// <paramref name="directTeam"/> (a filing into a Secure or Restricted record re-owned it between the listing and the grant), or
-    /// cannot be read, every grant made HERE is revoked (a share held before the call is never touched) and the answer is
+    /// cannot be read, every grant ATTEMPTED here is revoked (a share held before the call is never touched) and the answer is
     /// incomplete, so the caller retries the message. Grant-then-confirm, not check-then-grant: a re-own that lands after the
     /// read-back lands after the grant too, so the re-owning path (the Secure synchronizer, the Restricted bar) sees the grant.
+    /// <para>198 fix round K1: a grant that throws may still have committed (a timeout after the server applied it), so every
+    /// ATTEMPTED user counts: the read-back runs whenever one was attempted, and its undo covers them all (each was verified by the
+    /// caller to hold no Read before the grant, so revoking it removes only what this call may have added). The undo runs in a
+    /// <c>finally</c> on its own short token (<see cref="UndoTimeout"/>), so a cancellation after a grant does not skip it; the
+    /// caller's cancellation still propagates after it.</para>
     /// Never throws (cancellation aside).
     /// </summary>
     /// <returns>The users granted and kept, and whether the row is settled.</returns>
@@ -587,44 +592,69 @@ internal sealed class DirectMessageParticipantShares
         IReadOnlyList<Guid> users, Guid communicationId, ILogger logger, CancellationToken ct)
     {
         var entitySet = SecureChildLineage.Children[table].EntitySet;
+        var attempted = new List<Guid>();
         var granted = new List<Guid>();
         var complete = true;
-        foreach (var user in users)
+        var confirmed = false;
+        try
         {
-            try
+            foreach (var user in users)
             {
-                await shares.GrantAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), ReadAccessRights, ct).ConfigureAwait(false);
-                granted.Add(user);
+                ct.ThrowIfCancellationRequested();
+                attempted.Add(user); // before the call: a grant that throws may still have committed
+                try
+                {
+                    await shares.GrantAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), ReadAccessRights, ct).ConfigureAwait(false);
+                    granted.Add(user);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    complete = false;
+                    logger.LogWarning(ex, "{Prefix} Granting {UserId} Read on {Table} {RowId} (of {Communication} {Id}) failed; it is " +
+                        "retried.", LogPrefix, user, table, rowId, CommunicationTable, communicationId);
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                complete = false;
-                logger.LogWarning(ex, "{Prefix} Granting {UserId} Read on {Table} {RowId} (of {Communication} {Id}) failed; it is " +
-                    "retried.", LogPrefix, user, table, rowId, CommunicationTable, communicationId);
-            }
-        }
 
-        if (granted.Count == 0
-            || await RowOwnedByAsync(dataverse, table, rowId, directTeam, "grant read-back", logger, ct).ConfigureAwait(false))
-        {
-            return (granted, complete);
+            confirmed = attempted.Count == 0
+                || await RowOwnedByAsync(dataverse, table, rowId, directTeam, "grant read-back", logger, ct).ConfigureAwait(false);
+            if (confirmed)
+                return (granted, complete);
         }
-
-        foreach (var user in granted)
+        finally
         {
-            try
-            {
-                await shares.RevokeAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                logger.LogError(ex, "{Prefix} {Table} {RowId} (of {Communication} {Id}) is no longer the Direct team's, and removing the " +
-                    "Read just granted to {UserId} failed; the owning path's own reconcile removes it.", LogPrefix, table, rowId,
-                    CommunicationTable, communicationId, user);
-            }
+            if (!confirmed && attempted.Count > 0)
+                await UndoAttemptedGrantsAsync(shares, entitySet, table, rowId, attempted, communicationId, logger).ConfigureAwait(false);
         }
 
         return ([], false);
+    }
+
+    /// <summary>198 fix round K1: bounds the undo of an unconfirmed content-row grant, which runs on its own token.</summary>
+    internal static readonly TimeSpan UndoTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// 198 fix round K1: revokes every attempted grant on a content row whose owner was not confirmed as the Direct team, or whose
+    /// grant or read-back was cancelled. Runs on its own token (<see cref="UndoTimeout"/>), never the caller's, and never throws: it
+    /// runs in a <c>finally</c>, so a fault here must not replace the caller's exception.
+    /// </summary>
+    private static async Task UndoAttemptedGrantsAsync(
+        IDataverseRecordShareService shares, string entitySet, string table, Guid rowId, IReadOnlyList<Guid> attempted,
+        Guid communicationId, ILogger logger)
+    {
+        using var undo = new CancellationTokenSource(UndoTimeout);
+        foreach (var user in attempted)
+        {
+            try
+            {
+                await shares.RevokeAccessAsync(entitySet, rowId, DataversePrincipalRef.User(user), undo.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "{Prefix} {Table} {RowId} (of {Communication} {Id}) is not confirmed as the Direct team's, and removing " +
+                    "the Read attempted for {UserId} failed; the owning path's own reconcile removes it.", LogPrefix, table, rowId,
+                    CommunicationTable, communicationId, user);
+            }
+        }
     }
 
     private Task<bool> OwnerUnchangedAsync(Guid communicationId, Guid owner, string step, CancellationToken ct) =>
