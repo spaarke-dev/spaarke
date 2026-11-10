@@ -117,7 +117,7 @@ Manifest schema read by H6:
   imports SpaarkeMaster** → H7 (environment-variable values) and H11 (users get the package's roles). The BFF deploy
   (H9) waits for H6.
 - **Type**: intake `solutionPackageType` = `managed` (default) or `unmanaged` (explicit instruction only); stored on the
-  run and the registry row (`sprk_solutionversion` = `SpaarkeMaster {version} ({managed|unmanaged})`, written by H13).
+  run and the registry row (`sprk_solutionversion` = `SpaarkeMaster {Managed|Unmanaged} {version}`, written by H13).
 - **Pre-import steps**: required Power Platform apps and org settings (e.g. `maxuploadfilesize`) are applied before the
   import (task 253 moves them off `pac`).
 - **Verification**: SpaarkeMaster present **and** `ismanaged` equals the requested type.

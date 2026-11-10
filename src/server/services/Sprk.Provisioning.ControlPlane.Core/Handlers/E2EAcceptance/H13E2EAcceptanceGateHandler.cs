@@ -1004,7 +1004,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///   sprk_provisionedon       ← <paramref name="readyStamp"/> (always)
     ///   sprk_bffversion          ← run.InterStepState.BffBuildId (H9 output — the deployed build)
     ///   sprk_solutionversion     ← ImportedSolutionSet.ComputeVersion(run.InterStepState.ImportedSolutions)
-    ///                              (H6 output — "SpaarkeMaster {version} ({managed|unmanaged})", T218b)
+    ///                              (H6 output — "SpaarkeMaster {Managed|Unmanaged} {version}", T218b)
     ///   sprk_azuresubscriptionid ← run.Parameters.NonSecret["subscriptionId"] (intake — the run's subscription)
     ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
     ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)

@@ -19,8 +19,8 @@
 
 ## 🔔 Owner questions open
 
-1. **ACME registry row**: SpaarkeMaster on ACME is now **1.3.0.0** (ontology ran it 2026-11-07; run log). The registry row `sprk_solutionversion` still holds the run's value — update it? (spaarkeextid write, owner OK).
-2. **#2618** — customer default team contact-owner role vs ontology writer least privilege (options in the issue; recommend option 1).
+1. (Done 2026-11-10, owner OK) Registry format is now `SpaarkeMaster {Managed|Unmanaged} {version}` (owner: no "(managed)" after the number) — code, skill Step 6a, docs, matrix v4; ACME row set to `SpaarkeMaster Managed 1.3.0.0` (spaarkedev1, read back). Open: `version-compat-matrix.json` has one stale v1 cell, so any upgrade-mode H0 is RED until cells are added.
+2. **#2618 DECIDED (owner 2026-11-10): option 3 + Basic User.** `Spaarke Basic User` (customer-unit copy) on the customer unit's default team (meets the owner-Read rule: contact/matter/project/document/event Read Deep; users already hold it via H11); the ontology writer's app user moves to a dedicated memberless unit (direct child of root; its default team in NO profile, no role). H10 + H7b S24 + guide; ACME migration is a separate live step (owner OK). Ontology told 2026-11-10. Needs a task (267) — not started.
 3. (Decided 2026-11-10: include `isuseraccessauditenabled` — done in code.) ACME's own setting changes only on its next H6 run or by hand (owner OK).
 4. #2443 / #2532 (073 go-live): read-only 2026-11-10 — no production workforce SPA client exists in the Spaarke tenant (only dev `5859e812`, redirects to the dev SWA); external.spaarke.com serves the SWA placeholder (nothing deployed). Open gates: prod workforce client, CIAM BFF app (T240d), routing (T240c, owner), GitHub env vars, A9 on ACME, DNS.
 5. Older: L56 AI content for ACME (H12a seeds 4 of 12 sets); demo accounts unclassified; dev BFF secrets printed locally (rotation); ISS-026 publisher verification.

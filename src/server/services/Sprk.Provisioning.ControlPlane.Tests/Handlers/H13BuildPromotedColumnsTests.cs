@@ -11,7 +11,7 @@
 // (task 245a, G25): resource group / App Service / customer Key Vault from
 // InterStepState (H2a outputs); containerTypeId from the intake parameter only.
 // Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← H6's
-// SpaarkeMaster record as "SpaarkeMaster {version} ({type})" (T218b),
+// SpaarkeMaster record as "SpaarkeMaster {Type} {version}" (T218b),
 // sprk_clientcachebusttoken ← the run id. T257: sprk_bffappid ← H3's BffAppRegId (the Copilot agent render reads it).
 // -----------------------------------------------------------------------------
 
@@ -124,9 +124,9 @@ public class H13BuildPromotedColumnsTests
     {
         // Pinned vectors — the /provision-environment Step 6a registry fallback builds the same string in PowerShell.
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "1.4.2.0", true)))
-            .Should().Be("SpaarkeMaster 1.4.2.0 (managed)");
+            .Should().Be("SpaarkeMaster Managed 1.4.2.0", "the version stays a bare number; the type is in the name (owner 2026-11-10)");
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", " 1.4.2.0 ", false)))
-            .Should().Be("SpaarkeMaster 1.4.2.0 (unmanaged)", "the package type is recorded on the registry row (owner D8)");
+            .Should().Be("SpaarkeMaster Unmanaged 1.4.2.0", "the package type is recorded on the registry row (owner D8)");
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "65535.65535.65535.65535", false)))!
             .Length.Should().BeLessThanOrEqualTo(50, "sprk_solutionversion is String(50)");
 
