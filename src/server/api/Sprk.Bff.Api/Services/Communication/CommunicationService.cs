@@ -852,6 +852,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = CommunicationDirection.Outgoing,
                     Message = envelope,
                     AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                    // Ontology task 176 (D-216): the budget inquiry's new thread is created Private.
+                    CreatePrivate = request.CreateThreadPrivate,
                 },
                 ct);
         }

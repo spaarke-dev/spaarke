@@ -876,6 +876,9 @@ public sealed class IncomingCommunicationProcessor
                         ChannelType = CommunicationType.Email,
                         Direction = CommunicationDirection.Incoming,
                         Message = envelope,
+                        // Ontology task 176 (D-216): a reply to an inquiry that CREATES its thread creates it Private. A join
+                        // leaves the thread as it is; the reply stays internal-only below either way.
+                        CreatePrivate = keepInternalOnly,
                     },
                     ct);
             }

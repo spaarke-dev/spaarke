@@ -208,8 +208,10 @@ public sealed class ThreadResolver : IThreadResolver
             ["sprk_name"] = TruncateTo(BuildTopic(request, anchor), 200),
             // Record-Anchored when the message resolved a regarding record; else a Direct 1:1 conversation.
             ["sprk_threadtype"] = new OptionSetValue(anchor is not null ? ThreadTypeRecordAnchored : ThreadTypeDirect),
-            // Threads start Open; the point-forward privacy flip (Private) is task 042, not this seam.
-            ["sprk_privacystate"] = new OptionSetValue(PrivacyStateOpen),
+            // Threads start Open; the point-forward privacy flip (Private) is task 042, not this seam. Ontology task 176
+            // (D-216): a budget inquiry's thread is created Private in this same create (never a follow-up PATCH).
+            [CommunicationInternalOnlyFloor.ThreadPrivacyField] = new OptionSetValue(
+                request.CreatePrivate ? (int)Membership.ThreadPrivacyState.Private : PrivacyStateOpen),
             // FR-07 (task 071) — stamp Auto explicitly so ReDeriveThreadNameAsync re-derives on a later
             // regarding change, until a user renames the thread (marker flips to Edited).
             [NameIsAutoDerivedField] = true,

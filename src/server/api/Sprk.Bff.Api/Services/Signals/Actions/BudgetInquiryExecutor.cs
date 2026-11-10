@@ -123,6 +123,8 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             // Ontology task 176 (D-216): archived as .eml and internal-only.
             ArchiveToSpe = true,
             IsInternalOnly = true,
+            // Review round 2, item 7: the new matter thread is created Private, so a follow-up posted into it stays internal.
+            CreateThreadPrivate = true,
             Associations =
             [
                 new CommunicationAssociation

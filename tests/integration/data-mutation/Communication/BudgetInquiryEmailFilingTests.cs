@@ -14,12 +14,15 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -43,8 +46,8 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 [Trait("status", "new")]
 public class BudgetInquiryEmailFilingTests
 {
-    private static readonly Guid ServiceRequestId = Guid.Parse("17600000-0000-4000-8000-000000000001");
-    private static readonly Guid MatterId = Guid.Parse("17600000-0000-4000-8000-000000000002");
+    internal static readonly Guid ServiceRequestId = Guid.Parse("17600000-0000-4000-8000-000000000001");
+    internal static readonly Guid MatterId = Guid.Parse("17600000-0000-4000-8000-000000000002");
     private static readonly Guid OtherMatterId = Guid.Parse("17600000-0000-4000-8000-000000000003");
     /// <summary>A matter the ownership double treats as SECURE (task 176 review 2, F2): the double answers Secure for this id only.</summary>
     private static readonly Guid SecureMatterId = Guid.Parse("17600000-0000-4000-8000-000000000004");
@@ -60,7 +63,7 @@ public class BudgetInquiryEmailFilingTests
     private static BudgetInquiryRequest Inquiry(Guid? matterId = null) =>
         new(matterId ?? MatterId, ["counsel@firm.example"], "Budget inquiry: Q3", "Please explain the overrun.", Confirmed: true);
 
-    private static SendCommunicationRequest InquirySend(Guid? matterId = null) =>
+    internal static SendCommunicationRequest InquirySend(Guid? matterId = null) =>
         InquiryEmailSender.Build(Inquiry(matterId), ServiceRequestId, new InquiryEmailExtras("Acme v. Roe (MAT-000176)", []));
 
     [Fact]
@@ -214,7 +217,7 @@ public class BudgetInquiryEmailFilingTests
     /// <summary>The real send over a REAL <see cref="CoreAncestorResolver"/> (in-memory filing world) and an owner double. With
     /// <c>realThreads</c> the send path's thread step runs the REAL <see cref="ThreadResolver"/> over the REAL
     /// <see cref="EmailThreadKeyStrategy"/> (only Dataverse is doubled).</summary>
-    private sealed class SendHarness
+    internal sealed class SendHarness
     {
         private readonly List<DataverseEntity> _created = new();
         private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
@@ -261,14 +264,15 @@ public class BudgetInquiryEmailFilingTests
                     NullLogger<CommunicationAccountService>.Instance),
                 Mock.Of<IDistributedCache>(), NullLogger<ApprovedSenderValidator>.Instance);
 
-            var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
+            var entities = Entities;
             entities.Setup(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
                 .Returns<DataverseEntity, CancellationToken>((e, _) =>
                 {
                     _created.Add(e);
                     var id = e.LogicalName switch
                     {
-                        "sprk_communication" => CommunicationId,
+                        // The first communication is the send under test; a later one (a follow-up post) gets its own id.
+                        "sprk_communication" => CommunicationRows.Count() == 1 ? CommunicationId : Guid.NewGuid(),
                         "sprk_communicationthread" => (CreatedThreadId = Guid.NewGuid()).Value,
                         _ => Guid.NewGuid(),
                     };
@@ -284,7 +288,11 @@ public class BudgetInquiryEmailFilingTests
                 .Returns(Task.CompletedTask);
             // The thread step reads the communication row the send wrote (its regarding lookups) to anchor the thread.
             entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .Returns(() => Task.FromResult(Communication()));
+                .Returns(() => Task.FromResult(CommunicationRows.First()));
+            // Task 176 review 2, item 7: a thread the send created reads back as it was written (a later post into it reads its
+            // privacy and regarding); any other thread does not exist.
+            entities.Setup(e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid id, string[] _, CancellationToken _) => Task.FromResult(Threads.FirstOrDefault(t => t.Id == id)!));
             var communications = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
 
             var dispatcher = new CommunicationChannelDispatcher(
@@ -306,6 +314,12 @@ public class BudgetInquiryEmailFilingTests
         public CommunicationService Service { get; }
 
         public RecordOwnershipResolverDouble Ownership { get; }
+
+        /// <summary>The Dataverse double (every create, read and write the send makes).</summary>
+        public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Loose);
+
+        /// <summary>Every <c>sprk_communication</c> row created, in order.</summary>
+        public IEnumerable<DataverseEntity> CommunicationRows => _created.Where(e => e.LogicalName == "sprk_communication");
 
         /// <summary>The id the created <c>sprk_communication</c> row gets (the create answers it).</summary>
         public Guid CommunicationId { get; } = Guid.Parse("17600000-0000-4000-8000-0000000000c1");
@@ -627,6 +641,335 @@ public class BudgetInquiryEmailFilingTests
         await FileAndThread(world);
 
         VerifyLoweredTimes(world, Times.Once());
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Review round 2, item 7 (unified-access-control-r2's ruling): the inquiry's NEW thread is created Private, in the create
+    // -------------------------------------------------------------------------------------
+
+    private const int PrivacyOpen = (int)Sprk.Bff.Api.Services.Communication.Membership.ThreadPrivacyState.Open;
+    private const int PrivacyPrivate = (int)Sprk.Bff.Api.Services.Communication.Membership.ThreadPrivacyState.Private;
+
+    private static int? PrivacyOf(DataverseEntity thread) =>
+        thread.GetAttributeValue<OptionSetValue>(CommunicationInternalOnlyFloor.ThreadPrivacyField)?.Value;
+
+    /// <summary>Every write the double saw that touches a thread row other than its create (an update, upsert, bulk or delete).</summary>
+    private static IEnumerable<IInvocation> ThreadWritesAfterCreate(Mock<IGenericEntityService> entities) =>
+        entities.Invocations.Where(i =>
+            !i.Method.Name.StartsWith("Retrieve", StringComparison.Ordinal)
+            && !i.Method.Name.StartsWith("Get", StringComparison.Ordinal)
+            && i.Method.Name != nameof(IGenericEntityService.CreateAsync)
+            && i.Arguments.Any(a => a is "sprk_communicationthread" or DataverseEntity { LogicalName: "sprk_communicationthread" }));
+
+    [Fact]
+    public async Task Send_CreatesTheInquirysMatterThreadPrivate_InTheCreate_AndNeverPatchesItsPrivacy_Item7()
+    {
+        var harness = new SendHarness(realThreads: true);
+
+        await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
+
+        var thread = harness.Threads.Should().ContainSingle().Subject;
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId);
+        PrivacyOf(thread).Should().Be(PrivacyPrivate,
+            "the composer defaults to External, so a follow-up posted into an Open inquiry thread would be partner-visible");
+        ThreadWritesAfterCreate(harness.Entities).Should().BeEmpty(
+            "Private is written in the SAME create, never by a follow-up PATCH, so the thread is never Open even for a moment");
+    }
+
+    [Fact]
+    public async Task Send_ANormalMatterEmail_StillCreatesItsThreadOpen_MustNotFire_Item7()
+    {
+        var harness = new SendHarness(realThreads: true);
+        var request = new SendCommunicationRequest
+        {
+            To = ["counsel@firm.example"],
+            Subject = "Hearing dates",
+            Body = "Please confirm.",
+            BodyFormat = BodyFormat.PlainText,
+            SendMode = SendMode.User,
+            Associations = [new CommunicationAssociation { EntityType = "sprk_matter", EntityId = MatterId, EntityName = "Acme v. Roe" }],
+        };
+
+        await harness.Service.SendAsync(request, harness.SignedInUser());
+
+        var thread = harness.Threads.Should().ContainSingle().Subject;
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId);
+        PrivacyOf(thread).Should().Be(PrivacyOpen, "only the inquiry send asks for a Private thread");
+    }
+
+    [Fact]
+    public async Task APostIntoTheInquirysThread_MarkedNotInternal_IsStoredInternalOnly_ThroughTheRealSendPath_Item7()
+    {
+        // The follow-up a user posts into the inquiry's thread with the composer's default (External: isInternalOnly false).
+        // The thread is the one the inquiry send created, read back as written; the floor (CommunicationService) raises the
+        // post to internal-only because the thread is not Open.
+        var harness = new SendHarness(realThreads: true);
+        await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
+        var threadId = harness.CreatedThreadId!.Value;
+
+        await harness.Service.SendAsync(
+            new SendCommunicationRequest
+            {
+                To = ["counsel@firm.example"],
+                Subject = "Re: Budget inquiry: Q3",
+                Body = "Following up on the overrun.",
+                BodyFormat = BodyFormat.PlainText,
+                SendMode = SendMode.User,
+                ThreadId = threadId,
+                IsInternalOnly = false,
+            },
+            harness.SignedInUser());
+
+        var post = harness.CommunicationRows.Should().HaveCount(2).And.Subject.Last();
+        post.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue(
+            "a post into the Private inquiry thread can never be published to partners, whatever the composer sent");
+        post.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId, "it is filed under the thread's matter");
+    }
+
+    [Fact]
+    public async Task AnExternalReadOfTheMattersThreads_ReturnsNeitherTheInquiryThreadNorItsName_Item7()
+    {
+        // The thread rows are what the inquiry send's create wrote. The impersonated thread query applies its $filter the way
+        // Dataverse would (the matter, and the Open-only clause when the read sends it).
+        var harness = new SendHarness(realThreads: true);
+        await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
+        var thread = harness.Threads.Should().ContainSingle().Subject;
+        var name = thread.GetAttributeValue<string>("sprk_name");
+        name.Should().NotBeNullOrWhiteSpace();
+
+        var external = ThreadReads(harness.Threads, callerIsExternal: true);
+        var byRegarding = await external.ReadByRegardingAsync("sprk_matter", MatterId, Reader(), CancellationToken.None);
+        var listed = await external.ListThreadsAsync(Reader(), null, null, null, CancellationToken.None);
+
+        byRegarding.Threads.Should().BeEmpty("the inquiry thread is Private");
+        byRegarding.Threads.Select(t => t.Name).Should().NotContain(name);
+        listed.Threads.Should().BeEmpty();
+        listed.Threads.Select(t => t.Name).Should().NotContain(name);
+
+        // Control: the same rows, read by an internal user, do carry the thread and its name (the double is not empty).
+        var internalRead = ThreadReads(harness.Threads, callerIsExternal: false);
+        (await internalRead.ReadByRegardingAsync("sprk_matter", MatterId, Reader(), CancellationToken.None))
+            .Threads.Select(t => t.Name).Should().Equal(name);
+        (await internalRead.ListThreadsAsync(Reader(), null, null, null, CancellationToken.None))
+            .Threads.Select(t => t.ThreadId).Should().Equal(thread.Id);
+    }
+
+    private static readonly Guid ReaderSystemUserId = Guid.Parse("17600000-0000-4000-8000-0000000000e1");
+
+    private static ClaimsPrincipal Reader() =>
+        new(new ClaimsIdentity([new Claim("oid", Guid.NewGuid().ToString())], "test"));
+
+    /// <summary>The REAL <see cref="CommunicationThreadReadService"/> over an impersonated query that answers the thread set
+    /// from <paramref name="threads"/> (as written by the create), applying the query's regarding and Open-only clauses.</summary>
+    private static CommunicationThreadReadService ThreadReads(IEnumerable<DataverseEntity> threads, bool callerIsExternal)
+    {
+        var rows = threads.ToList();
+        var impersonated = new Mock<IImpersonatedCommunicationQuery>();
+        impersonated.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string>(), ReaderSystemUserId, It.IsAny<CancellationToken>()))
+            .Returns<string, string, Guid, CancellationToken>((set, odata, _, _) =>
+            {
+                if (set != "sprk_communicationthreads")
+                    return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(Array.Empty<Dictionary<string, JsonElement>>());
+
+                var openOnly = odata.Contains(CommunicationOpenThreadGate.OpenOnlyThreadFilterClause, StringComparison.Ordinal);
+                var answer = rows
+                    .Where(t => !odata.Contains("_sprk_regardingmatter_value eq ", StringComparison.Ordinal)
+                                || odata.Contains($"_sprk_regardingmatter_value eq {t.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id}", StringComparison.Ordinal))
+                    .Where(t => !openOnly || CommunicationInternalOnlyFloor.IsConfirmedOpen(t))
+                    .Select(t => new Dictionary<string, JsonElement>
+                    {
+                        ["sprk_communicationthreadid"] = JsonSerializer.SerializeToElement(t.Id.ToString("D")),
+                        ["sprk_name"] = JsonSerializer.SerializeToElement(t.GetAttributeValue<string>("sprk_name")),
+                        ["createdon"] = JsonSerializer.SerializeToElement("2026-11-10T09:00:00Z"),
+                        ["sprk_ispinned"] = JsonSerializer.SerializeToElement(false),
+                    })
+                    .ToList();
+                return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(answer);
+            });
+
+        var callers = new Mock<ICallerSystemUserResolver>();
+        callers.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(ReaderSystemUserId.ToString("D")));
+        var identity = new Mock<ISystemUserIdentityResolver>();
+        identity.Setup(i => i.IsExternalAsync(ReaderSystemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(callerIsExternal);
+
+        return new CommunicationThreadReadService(
+            impersonated.Object,
+            new CommunicationAccessFilter(NullLogger<CommunicationAccessFilter>.Instance),
+            callers.Object,
+            identity.Object,
+            NullLogger<CommunicationThreadReadService>.Instance);
+    }
+
+    [Fact]
+    public void TheThreadOptIn_CannotBeSetFromARequestBody_Item7()
+    {
+        var optIn = typeof(SendCommunicationRequest).GetProperty(
+            "CreateThreadPrivate", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        optIn.Should().NotBeNull("task 176's private-thread opt-in");
+        optIn!.GetMethod!.IsPublic.Should().BeFalse("internal: no caller outside the BFF can set it");
+        ((bool)optIn.GetValue(InquirySend())!).Should().BeTrue("only the inquiry send sets it");
+
+        var json = """{"to":["counsel@firm.example"],"subject":"s","body":"b","createThreadPrivate":true,"CreateThreadPrivate":true}""";
+        var bound = JsonSerializer.Deserialize<SendCommunicationRequest>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        ((bool)optIn.GetValue(bound)!).Should().BeFalse("a JSON body never sets it");
+        JsonSerializer.Serialize(InquirySend(), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            .Should().NotContainEquivalentOf("createThreadPrivate");
+    }
+
+    // ── the inbound side: a counterparty reply, through the REAL filing, the REAL ThreadResolver and EmailThreadKeyStrategy ──
+
+    private static readonly Guid ExistingThreadId = Guid.Parse("17600000-0000-4000-8000-0000000000d1");
+
+    /// <summary>
+    /// A reply to the inquiry email run through the real <see cref="IncomingCommunicationProcessor.ResolveInboundFilingAsync"/>
+    /// and <see cref="IncomingCommunicationProcessor.FileAndThreadNewRecordAsync"/>, whose thread step is the REAL
+    /// <see cref="ThreadResolver"/> over the REAL <see cref="EmailThreadKeyStrategy"/>; only Dataverse is doubled. The new row
+    /// reads back with the filing it was created with. <c>existingThreadPrivacy</c> null: the reply's In-Reply-To finds
+    /// nothing, so the strategy creates a thread; otherwise it finds an earlier email (explicitly shareable) sitting in a
+    /// matter thread with that privacy, and the reply joins it.
+    /// </summary>
+    private sealed class InboundThreadWorld
+    {
+        private DataverseEntity? _replyRow;
+
+        public InboundThreadWorld(int? direction, int? existingThreadPrivacy)
+        {
+            Entities.Setup(e => e.RetrieveAsync("sprk_servicerequest", ServiceRequestId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ServiceRequest(direction, MatterId));
+            Entities.Setup(e => e.RetrieveAsync("sprk_communication", ReplyRowId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns(() => Task.FromResult(_replyRow!));
+            Entities.Setup(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+                .Returns<DataverseEntity, CancellationToken>((e, _) =>
+                {
+                    Created.Add(e);
+                    e.Id = Guid.NewGuid();
+                    return Task.FromResult(e.Id);
+                });
+
+            var communications = new Mock<ICommunicationDataverseService>();
+            if (existingThreadPrivacy is { } privacy)
+            {
+                communications.Setup(c => c.GetCommunicationByInternetMessageIdAsync("<inquiry@contoso.com>", It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new DataverseEntity("sprk_communication", EarlierInquiryEmailId));
+                Entities.Setup(e => e.RetrieveAsync("sprk_communication", EarlierInquiryEmailId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new DataverseEntity("sprk_communication", EarlierInquiryEmailId)
+                    {
+                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", ExistingThreadId),
+                        ["sprk_isinternalonly"] = false,
+                    });
+                Entities.Setup(e => e.RetrieveAsync("sprk_communicationthread", ExistingThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new DataverseEntity("sprk_communicationthread", ExistingThreadId)
+                    {
+                        [CommunicationInternalOnlyFloor.ThreadPrivacyField] = new OptionSetValue(privacy),
+                        ["sprk_threadtype"] = new OptionSetValue(100000000), // Record-Anchored
+                        ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+                    });
+            }
+
+            var resolver = new ThreadResolver(
+                [new EmailThreadKeyStrategy(communications.Object, Entities.Object)],
+                Entities.Object, new RecordOwnershipResolverDouble(), NullLogger<ThreadResolver>.Instance);
+            Processor = BudgetInquiryEmailFilingTests.Processor(
+                ReplyWorld(MatterId).Resolver(), Entities.Object, FiledToTheServiceRequest(), communications.Object, resolver);
+        }
+
+        public Mock<IGenericEntityService> Entities { get; } = new();
+
+        public List<DataverseEntity> Created { get; } = new();
+
+        public IEnumerable<DataverseEntity> CreatedThreads => Created.Where(e => e.LogicalName == "sprk_communicationthread");
+
+        public IncomingCommunicationProcessor Processor { get; }
+
+        public bool InquiryReply { get; private set; }
+
+        public async Task FileAndThreadAsync()
+        {
+            var envelope = ReplyEnvelope();
+            var filing = await Processor.ResolveInboundFilingAsync(envelope, account: null, "graph-176", CancellationToken.None);
+            InquiryReply = filing.InquiryReply;
+            _replyRow = new DataverseEntity("sprk_communication", ReplyRowId);
+            foreach (var (field, value) in filing.FilingFields!)
+                _replyRow[field] = value;
+            await Processor.FileAndThreadNewRecordAsync(
+                ReplyRowId, envelope, "graph-176", filing.Decision, filing.FilingFields, filing.InquiryReply, CancellationToken.None);
+        }
+
+        /// <summary>The thread the reply row was last stamped with.</summary>
+        public Guid? StampedThread() =>
+            ReplyRowUpdates()
+                .Select(f => f.TryGetValue("sprk_communicationthread", out var t) ? ((EntityReference)t).Id : (Guid?)null)
+                .LastOrDefault(id => id is not null);
+
+        /// <summary>Whether step 4.6b lowered the reply to partner-visible.</summary>
+        public bool WasLowered() =>
+            ReplyRowUpdates().Any(f => f.TryGetValue("sprk_isinternalonly", out var flag) && flag.Equals(false));
+
+        private IEnumerable<Dictionary<string, object>> ReplyRowUpdates() =>
+            Entities.Invocations
+                .Where(i => i.Method.Name == nameof(IGenericEntityService.UpdateAsync)
+                            && (string)i.Arguments[0] == "sprk_communication" && (Guid)i.Arguments[1] == ReplyRowId)
+                .Select(i => (Dictionary<string, object>)i.Arguments[2]);
+    }
+
+    [Fact]
+    public async Task InboundReply_ToTheInquiry_ThatCreatesAThread_CreatesItPrivate_Item7()
+    {
+        var world = new InboundThreadWorld(DirectionOutbound, existingThreadPrivacy: null);
+
+        await world.FileAndThreadAsync();
+
+        world.InquiryReply.Should().BeTrue();
+        var thread = world.CreatedThreads.Should().ContainSingle().Subject;
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId, "the reply's thread is the matter's");
+        PrivacyOf(thread).Should().Be(PrivacyPrivate, "an inquiry reply that creates its thread creates it Private, in the create");
+        ThreadWritesAfterCreate(world.Entities).Should().BeEmpty();
+        world.StampedThread().Should().Be(thread.Id);
+        world.WasLowered().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InboundReply_ToANonInquiryRequest_ThatCreatesAThread_StillCreatesItOpen_MustNotFire_Item7()
+    {
+        var world = new InboundThreadWorld(DirectionInbound, existingThreadPrivacy: null);
+
+        await world.FileAndThreadAsync();
+
+        world.InquiryReply.Should().BeFalse();
+        PrivacyOf(world.CreatedThreads.Should().ContainSingle().Subject).Should().Be(PrivacyOpen);
+    }
+
+    [Fact]
+    public async Task InboundReply_ToTheInquiry_ThatJoinsThePrivateInquiryThread_StaysInternalOnly_Item7()
+    {
+        var world = new InboundThreadWorld(DirectionOutbound, existingThreadPrivacy: PrivacyPrivate);
+
+        await world.FileAndThreadAsync();
+
+        world.CreatedThreads.Should().BeEmpty();
+        world.StampedThread().Should().Be(ExistingThreadId);
+        ThreadWritesAfterCreate(world.Entities).Should().BeEmpty();
+        world.WasLowered().Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(DirectionOutbound, false)] // the inquiry reply: the thread is untouched and the reply stays internal-only
+    [InlineData(DirectionInbound, true)]   // control: any other reply joining the same Open thread IS lowered
+    public async Task InboundReply_ThatJoinsAnExistingOpenThread_LeavesTheThreadOpen_Condition2_Item7(int direction, bool lowered)
+    {
+        // Condition 2: the opt-in is create-only. A join never downgrades or upgrades the thread it joins (no write to the
+        // thread at all); the inquiry reply stays internal-only through keepInternalOnly. The control proves the thread really
+        // reads Open and the parent is shareable, so the inquiry case is kept internal by the inquiry flag alone.
+        var world = new InboundThreadWorld(direction, existingThreadPrivacy: PrivacyOpen);
+
+        await world.FileAndThreadAsync();
+
+        world.CreatedThreads.Should().BeEmpty("the reply joins its parent's thread");
+        world.StampedThread().Should().Be(ExistingThreadId);
+        ThreadWritesAfterCreate(world.Entities).Should().BeEmpty("joining never changes the thread's privacy");
+        world.WasLowered().Should().Be(lowered);
     }
 
     private static IAssociationRung FiledToTheServiceRequest() =>
