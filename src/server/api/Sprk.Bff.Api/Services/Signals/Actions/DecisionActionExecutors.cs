@@ -88,7 +88,8 @@ public sealed record DecisionActionOutcome(
     IReadOnlyList<DecisionRecordRef> Written,
     string? ReasonCode = null,
     string? Detail = null,
-    IReadOnlyList<DecisionRecordRef>? PossiblyWrittenRecords = null)
+    IReadOnlyList<DecisionRecordRef>? PossiblyWrittenRecords = null,
+    string? Warning = null)
 {
     /// <summary>Records whose write got no clear answer (5xx, timeout, transport failure): they MAY have changed. Empty unless
     /// <see cref="DecisionActionStatus.Failed"/>.</summary>
@@ -1581,7 +1582,9 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
                 var written = new List<DecisionRecordRef>();
                 if (result.ServiceRequestId is { } request) written.Add(new DecisionRecordRef(BudgetInquiryExecutor.Table, request));
                 if (result.CommunicationId is { } communication) written.Add(new DecisionRecordRef("sprk_communication", communication));
-                return DecisionActionOutcome.Done(code, [.. written]);
+                // D-216: a sent inquiry whose .eml was not archived is still Done (the email is out), with a commit warning.
+                var done = DecisionActionOutcome.Done(code, [.. written]);
+                return string.IsNullOrWhiteSpace(result.ArchivalWarning) ? done : done with { Warning = BudgetInquiryExecutor.EmailNotArchivedWarning };
             case BudgetInquiryOutcome.NotConfirmed or BudgetInquiryOutcome.Invalid:
                 return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter,
                     Fixed("The inquiry is not complete; nothing was created or sent.", DecisionActionReasons.InvalidParameter));

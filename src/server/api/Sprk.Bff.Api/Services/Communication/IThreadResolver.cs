@@ -384,4 +384,14 @@ public sealed record ThreadResolutionRequest
     /// map and stamped with the recipient. Null on the send paths (their row carries <c>sprk_sentby</c>) and for email.
     /// </summary>
     public string? SenderChatIdentity { get; init; }
+
+    /// <summary>
+    /// Ontology task 176 (D-216; unified-access-control-r2's ruling, review round 2 item 7). True only for a budget inquiry: the
+    /// inquiry send (<see cref="Models.SendCommunicationRequest.CreateThreadPrivate"/>) and a counterparty reply to it. When the
+    /// resolver CREATES a thread, that create writes <c>sprk_privacystate</c> = Private, so the thread is never Open, not even
+    /// for a moment, and a follow-up posted with the composer's External default stays internal-only. Create-only: a JOIN never
+    /// changes the thread it joins, and the fallback ladder's default threads are unaffected. False (the default) keeps every
+    /// other create Open. Server-set only: this request is built in code and never bound from an HTTP body.
+    /// </summary>
+    public bool CreatePrivate { get; init; }
 }

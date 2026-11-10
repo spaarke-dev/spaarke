@@ -192,7 +192,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
                 ? regarding.EntityName!
-                : $"{regarding.EntityType} {regarding.EntityId}";
+                : "a Spaarke record"; // never the logical name or the id
 
             var footerText = settings.MessageTemplate
                 .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
@@ -856,6 +856,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = CommunicationDirection.Outgoing,
                     Message = envelope,
                     AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                    // Ontology task 176 (D-216): the budget inquiry's new thread is created Private.
+                    CreatePrivate = request.CreateThreadPrivate,
                 },
                 ct);
         }
@@ -2893,6 +2895,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (RegardingLookupMap.TryGetValue(primary.EntityType, out var mapping))
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
+
+            // Ontology task 176 (D-216): a server-set secondary association the caller files the row under too (the budget
+            // inquiry's matter). Written BEFORE the stamp, so the inherited Access Permission and the owner question see it.
+            foreach (var also in associations.Skip(1).Where(a => a.AlsoRegarding && a.EntityId != Guid.Empty))
+            {
+                if (RegardingLookupMap.TryGetValue(also.EntityType, out var alsoMapping))
+                    communication[alsoMapping.LookupField] = new EntityReference(also.EntityType, also.EntityId);
+            }
 
             // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
             // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
