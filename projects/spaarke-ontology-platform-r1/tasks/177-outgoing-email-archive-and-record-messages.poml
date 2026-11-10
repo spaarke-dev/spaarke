@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="177" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Every outgoing email filed to a record is archived as an .eml Document, and a record's Messages list shows every message filed to it (D-217)</title>
+    <phase>11 UAT</phase>
+    <gate>startable: D-217 recorded (owner, 2026-11-10); 176 on master (26d135bc8f)</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .cs in the shared BFF communication send path (archive rule for every sender) and the record Messages read (what an internal or external caller sees).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared communication code with visibility consequences: the read change must not show a caller any message or thread name it cannot see today.</model-tier-reason>
+    <effort>high</effort>
+    <deps>176</deps>
+    <tags>bff,email,access,testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT after 176 (2026-11-10): outgoing emails are not saved as .eml Documents and do not show on their parent records. D-217 (owner): every outgoing email (a `sprk_communication`, never the out-of-the-box Dataverse `email` activity) is saved as an .eml Document AND shows in the record's Messages. Findings: (a) archival is opt-in per request: `SendCommunicationRequest.ArchiveToSpe` (default false, `Services/Communication/Models/SendCommunicationRequest.cs` ~:77; `BulkSendRequest.cs` ~:47) is read in `CommunicationService.SendAsync`'s user path (~:2019-2106) and app-only/system path (~:2366-2445). Only the email composer (client default true) and `BudgetInquiryExecutor` (~:124) set it, so `AssignTaskNotifier` (~:578), `DecisionActionExecutors` message (~:1084), `EmailDispositionSender` (~:108), `ApExportDeliveryService` (~:550 false), the Messages reply box and general Console sends (`communicationApi.ts` ~:385 default false), the Outlook add-in (`EmailView.tsx` ~:315 false) and registration emails never archive. Dev has no outgoing archive since 2026-11-03 and no archival error was logged. (b) The record Messages list (`GET /api/communications/by-regarding/{entityType}/{id}`, `CommunicationThreadReadService.ReadByRegardingAsync` ~:341-409) reads threads whose typed regarding lookup is the record, then the messages on those threads. A thread has one anchor (`ThreadResolver.CreateThreadAsync` ~:199-231), so a message filed to the record on a thread anchored elsewhere (the budget inquiry: thread anchored to the inquiry service request, message also carries `sprk_regardingmatter`) never shows on the record. The external plane's by-regarding read (~:411 onward) already keys on the message's own lookup.</prompt>
+  <role>SPAARKE BFF engineer (communication send and read).</role>
+  <goal>(1) Every outgoing send that creates a `sprk_communication` filed to at least one typed regarding record is archived as an .eml Document (existing `ArchiveToSpeAsync`, existing container resolution, existing best-effort/non-fatal handling and warning), whatever the request's `ArchiveToSpe` says, in BOTH send paths, and bulk sends per recipient. The sender account's `ArchiveOutgoingOptIn` switch still skips it. A record-less send keeps today's opt-in behaviour. (2) `ReadByRegardingAsync` also returns messages whose OWN typed regarding lookup (the `RegardingFieldMap` field for the entity type) equals the record, grouped under their thread, when that thread is not anchored to the record; for such a thread only those messages are returned, not the thread's other messages. (3) Nothing else changes: who sees what, thread anchoring, the inbound archive, the external-plane read.</goal>
+
+  <constraints>
+    <constraint source="D-217">"Filed to a record" is decided from what was actually written on the created `sprk_communication` (any typed regarding lookup set at create, including regarding inherited from a reply's source message and the second lookup 176 adds), not from the request's `Associations` alone. Name the exact signal in the task notes. One rule, evaluated in one place shared by both send paths (no copy per path).</constraint>
+    <constraint source="D-217">Do not change the request contract: `ArchiveToSpe` stays (it still opts a record-less send in). Do not change client code beyond comments that now say the wrong thing (`communicationApi.ts` ~:141, `EmailView.tsx` ~:314). No change to `ArchiveToSpeAsync`, the container resolver or the inbound archive.</constraint>
+    <constraint source="access">The read change runs IMPERSONATED as today and every added message passes the SAME `QueryVisibleMessagesAsync` pipeline and `ICommunicationAccessFilter`. An added thread's row (name, pinned) comes from an impersonated thread read with the same active clause and, for an external caller, the same `CommunicationOpenThreadGate.OpenOnlyThreadFilterClause`: if the caller cannot read the thread row, its messages are not shown and its name never leaves Dataverse. A message with no thread is not added (record it as a known limit). Respect `MaxThreads` / `MaxRegardingScan`.</constraint>
+    <constraint source="coordination">`CommunicationThreadReadService` visibility is uac-r2's review area: their review before merge, plus one independent adversarial review. Before starting, fetch master and re-check open PRs touching `Services/Communication/CommunicationService.cs` and `CommunicationThreadReadService.cs` (`/conflict-check`).</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests; run it filtered (Communication|Archive|Thread|ByRegarding|Regarding|BudgetInquiry|AssignTask|Decision) and the full ArchTests. Measure the publish-size delta against a fresh master build (bff-hygiene). Public repo: no environment GUIDs or identity ids in code, tests, notes, commits or PR.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Map both send paths (where the communication row is created, where regarding is set or inherited, where `ArchiveToSpe` is read) and `ReadByRegardingAsync`; confirm `RegardingFieldMap` gives the same field name on `sprk_communication` as on the thread.</step>
+    <step>Write fail-first tests for every acceptance criterion.</step>
+    <step>Implement the shared archive rule and the read union.</step>
+    <step>Run the filtered BFF tests, the full ArchTests and the publish-size delta; push the branch for review (uac-r2 plus one independent adversarial review).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send, user path: a send with `ArchiveToSpe = false` whose created communication carries a regarding lookup calls the archive (an .eml Document request for that communication). Same for the app-only/system path (Assign Task notice shape). Mutation: drop the rule, and both tests fail.</criterion>
+    <criterion testable="true">Send: a reply with no `Associations` that inherits regarding from its source message is archived; a send with no regarding lookup at all and `ArchiveToSpe = false` is NOT archived; with `ArchiveToSpe = true` it is archived as today.</criterion>
+    <criterion testable="true">Send: `ArchiveOutgoingOptIn = false` on the sender account still skips the archive with today's warning; an archive failure is still non-fatal (the send succeeds with today's warning).</criterion>
+    <criterion testable="true">Bulk send: each recipient's communication filed to a record is archived.</criterion>
+    <criterion testable="true">Read: a message whose `sprk_regardingmatter` is M, on a thread anchored to another record, is returned by by-regarding for M under its thread (thread id and name), and that thread's other messages (not filed to M) are NOT returned. Messages on threads anchored to M are returned exactly as today. Mutation: remove the union, and the first assertion fails.</criterion>
+    <criterion testable="true">Read, access: an internal-only added message is not returned to an external caller; an added message on a Private thread is not returned to an external caller and the thread's name is not in the response; a thread row the impersonated read does not return contributes nothing; the same message on an anchored thread and via its own lookup appears once.</criterion>
+    <criterion testable="true">Negative: the external-plane by-regarding read, the thread list, the filtered query, inbound archiving and every existing communication test are unchanged and green.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-217, D-216)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsync user path ~:2000-2110, system path ~:2350-2450, ArchiveToSpeAsync ~:3048, reply regarding inheritance)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (ReadByRegardingAsync ~:341, QueryVisibleMessagesAsync ~:1072, external by-regarding ~:411)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (~:199-231, one anchor per thread)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (~:102 send, ~:112 send-bulk, ~:310 by-regarding, ~:747 bulk fan-out)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskNotifier.cs (~:393-441, ~:578-590)</file>
+    </files>
+  </knowledge>
+  <review>uac-r2 reviews the read change (visibility) and the diff; one independent adversarial review. Dev deploy only with the owner's go, under D-126.</review>
+</task>
