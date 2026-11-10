@@ -398,7 +398,7 @@ internal sealed class DirectMessageParticipantShares
             if (table != CommunicationTable)
             {
                 var (rowGranted, rowComplete) = await GrantContentRowAndConfirmAsync(_dataverse, _shares, table, id, owner,
-                    eligible.Where(u => !readers.Contains(u)).ToList(), communicationId, _logger, ct).ConfigureAwait(false);
+                    eligible, access, communicationId, _logger, ct).ConfigureAwait(false);
                 granted.AddRange(rowGranted.Select(user => (table, id, user)));
                 complete &= rowComplete;
                 continue;
@@ -584,17 +584,49 @@ internal sealed class DirectMessageParticipantShares
     /// caller to hold no Read before the grant, so revoking it removes only what this call may have added). The undo runs in a
     /// <c>finally</c> on its own short token (<see cref="UndoTimeout"/>), so a cancellation after a grant does not skip it; the
     /// caller's cancellation still propagates after it.</para>
+    /// <para>198 fix round K2: only a participant holding NO share on the row is granted, so the undo never removes a share held
+    /// before the call. A participant already holding Read needs nothing. A participant holding a share without Read (Write only,
+    /// for example) is not granted Read on this path at all (granting it and then never revoking it would leave Read on a row the
+    /// read-back may find Secure): logged, and the row is incomplete, so it is retried.</para>
     /// Never throws (cancellation aside).
     /// </summary>
+    /// <param name="participants">The participants who may be granted (the caller applied the Restricted bar).</param>
+    /// <param name="existingShares">The row's shares, read strictly by the caller BEFORE this call. A share read that faults is never
+    /// "no shares": the caller grants nothing and does not call this.</param>
     /// <returns>The users granted and kept, and whether the row is settled.</returns>
     internal static async Task<(IReadOnlyList<Guid> Granted, bool Complete)> GrantContentRowAndConfirmAsync(
         IGenericEntityService dataverse, IDataverseRecordShareService shares, string table, Guid rowId, Guid directTeam,
-        IReadOnlyList<Guid> users, Guid communicationId, ILogger logger, CancellationToken ct)
+        IReadOnlyCollection<Guid> participants, IReadOnlyList<DataversePrincipalAccess> existingShares, Guid communicationId,
+        ILogger logger, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(participants);
+        ArgumentNullException.ThrowIfNull(existingShares);
         var entitySet = SecureChildLineage.Children[table].EntitySet;
+        var holders = DirectUsers(existingShares);
+        var readers = existingShares
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & ReadMask) != 0)
+            .Select(s => s.Principal.Id)
+            .ToHashSet();
+        var complete = true;
+        var users = new List<Guid>();
+        foreach (var participant in participants.Distinct())
+        {
+            if (readers.Contains(participant))
+                continue;
+            if (holders.Contains(participant))
+            {
+                complete = false;
+                logger.LogWarning("{Prefix} {UserId} holds a share without Read on {Table} {RowId} (of {Communication} {Id}); Read is not " +
+                    "granted on this path and that share is never revoked here; it is retried.", LogPrefix, participant, table, rowId,
+                    CommunicationTable, communicationId);
+                continue;
+            }
+
+            users.Add(participant);
+        }
+
         var attempted = new List<Guid>();
         var granted = new List<Guid>();
-        var complete = true;
         var confirmed = false;
         try
         {

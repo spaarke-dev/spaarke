@@ -432,18 +432,14 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
             foreach (var rowId in rowIds)
             {
-                // 198 pass 2 F1: the row's shares first (a participant who already reads it is not granted again, so a mismatch
-                // below never revokes a share this call did not make), then grant-then-confirm by the row's owner id. A read
-                // fault, a grant fault, or an owner that is no longer exactly the Direct team grants nothing that stays here;
-                // the share job (SecureChildShareReconciliationJob's Direct pass) retries the message.
-                IReadOnlyList<Guid> missing;
+                // 198 pass 2 F1: the row's shares first (198 fix round K2: only a participant holding NO share on it is granted,
+                // so a mismatch below never revokes a share this call did not make), then grant-then-confirm by the row's owner id.
+                // A read fault, a grant fault, or an owner that is no longer exactly the Direct team grants nothing that stays
+                // here; the share job (SecureChildShareReconciliationJob's Direct pass) retries the message.
+                IReadOnlyList<DataversePrincipalAccess> existingShares;
                 try
                 {
-                    var readers = (await _accessGrant.GetPrincipalAccessOrThrowAsync(table, rowId, ct))
-                        .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & 1) != 0)
-                        .Select(s => s.Principal.Id)
-                        .ToHashSet();
-                    missing = participants.Where(p => !readers.Contains(p)).ToList();
+                    existingShares = await _accessGrant.GetPrincipalAccessOrThrowAsync(table, rowId, ct);
                 }
                 catch (Exception ex)
                 {
@@ -456,7 +452,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 }
 
                 var (_, complete) = await DirectMessageParticipantShares.GrantContentRowAndConfirmAsync(
-                    _entityService, _accessGrant, table, rowId, directTeam, missing, communicationId, _logger, ct);
+                    _entityService, _accessGrant, table, rowId, directTeam, participants, existingShares, communicationId, _logger, ct);
                 if (!complete)
                 {
                     _logger.LogWarning(
