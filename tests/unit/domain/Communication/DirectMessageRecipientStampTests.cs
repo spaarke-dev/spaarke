@@ -11,6 +11,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Channels;
@@ -27,15 +28,19 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// Task 054 (field-mapping-server-write-path-r1, owner 2026-11-09, option A): a Direct message carries its own two
 /// participants — <c>sprk_sentby</c> and <c>sprk_directrecipient</c> — written by the BFF in the update that files the message
 /// into a Direct thread (the thread lookup and both participants in one write). The recipient is the Direct thread's other
-/// participant: the thread's two-party list must be exactly two distinct, non-empty, enabled systemusers, one of them the
-/// sender; otherwise no recipient is stamped. Non-Direct messages never get one.
+/// participant: the thread's two-party list (its user owner and the systemusers holding a Read share on it) must be exactly
+/// two distinct, non-empty systemusers, one of them the sender, both enabled and neither an application user; otherwise no
+/// recipient is stamped. Non-Direct messages never get one.
 /// </summary>
 /// <remarks>
-/// Every case runs through a real entry point — <see cref="CommunicationService.SendAsync"/> for the send, respond and
+/// <para>Every case runs through a real entry point — <see cref="CommunicationService.SendAsync"/> for the send, respond and
 /// new-thread paths, and <see cref="IncomingMessagingJobHandler"/> over a raw ACS event for the inbound join — with the real
-/// <see cref="ThreadResolver"/>. Only the Dataverse boundary (<see cref="IGenericEntityService"/>), the Direct thread's
-/// two-party list (<see cref="IDirectThreadAccessService.GetParticipantSystemUserIdsAsync"/>), the ACS transmit and the
-/// caller's systemuser lookup are doubled.
+/// <see cref="ThreadResolver"/>. Only the Dataverse boundary (<see cref="IGenericEntityService"/>), the POA share seam
+/// (<see cref="IDataverseRecordShareService"/>), the ACS transmit and the caller's systemuser lookup are doubled.</para>
+/// <para>The thread double is the thread as stored: its owner is the <c>ownerid</c> on the row (a thread the resolver
+/// creates has none in its payload, so it is owned by the creating application user), and its shares are the share rows
+/// the test seeds plus every share granted on it during the run. The default thread has the shape
+/// <c>POST /threads/direct</c> creates: owned by one party, shared with Read to the other.</para>
 /// </remarks>
 public class DirectMessageRecipientStampTests
 {
@@ -43,6 +48,9 @@ public class DirectMessageRecipientStampTests
     private const string SenderColumn = "sprk_sentby";
     private const string ThreadLookup = "sprk_communicationthread";
     private const string UnmappedCode = "direct_message.recipient_unmapped";
+    private const string NotTwoParticipantsCode = "direct_message.recipient_not_two_participants";
+    private const string NotEligibleCode = "direct_message.recipient_participant_not_eligible";
+    private const string UnreadCode = "direct_message.recipient_participants_unread";
     private const int ThreadTypeDirect = 100000001;
     private const int ThreadTypeRecordAnchored = 100000000;
 
@@ -56,20 +64,35 @@ public class DirectMessageRecipientStampTests
     private static readonly Guid DirectThread = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid MessageId = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
+    /// <summary>The BFF's application user: the owner of every thread the resolver creates (no <c>ownerid</c> in its payload).</summary>
+    private static readonly Guid AppUser = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid ATeam = Guid.Parse("88888888-8888-8888-8888-888888888888");
+
+    private const int ReadMask = 1;
+
     private readonly Mock<IGenericEntityService> _entities = new();
     private readonly Mock<IDirectThreadAccessService> _directAccess = new();
+    private readonly Mock<IDataverseRecordShareService> _shares = new();
     private readonly RecordingLogger<ThreadResolver> _resolverLog = new();
     private readonly List<Entity> _created = new();
     private readonly List<Dictionary<string, object>> _messageUpdates = new();
     private readonly HashSet<Guid> _disabled = new();
     private Entity _messageRow = MessageRow(sentBy: Sender);
-    private Entity _threadRow = ThreadRow(ThreadTypeDirect);
+
+    // The thread as `POST /threads/direct` creates it: owned by the caller, shared with Read to the other party.
+    private Entity _threadRow = ThreadRow(ThreadTypeDirect, owner: Sender);
+    private List<DataversePrincipalAccess> _threadShares = new() { UserShare(Other, ReadMask) };
 
     public DirectMessageRecipientStampTests()
     {
         _entities
             .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => _created.Add(entity))
+            .Callback<Entity, CancellationToken>((entity, _) =>
+            {
+                _created.Add(entity);
+                if (entity.LogicalName == "sprk_communicationthread")
+                    StoreCreatedThread(entity);
+            })
             .ReturnsAsync((Entity entity, CancellationToken _) =>
                 entity.LogicalName == "sprk_communication" ? MessageId : DirectThread);
 
@@ -91,16 +114,33 @@ public class DirectMessageRecipientStampTests
             .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) => SystemUsers(q));
 
-        _directAccess
-            .Setup(a => a.GetParticipantSystemUserIdsAsync(DirectThread, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Sender, Other });
+        // The POA seam over the thread's shares as stored. Both reads answer the same rows; a share granted on the thread
+        // during the run becomes one of them.
+        _shares
+            .Setup(s => s.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", DirectThread, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _threadShares.ToList());
+        _shares
+            .Setup(s => s.GetPrincipalAccessAsync("sprk_communicationthread", DirectThread, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _threadShares.ToList());
+        _shares
+            .Setup(s => s.GrantAccessAsync(It.IsAny<string>(), DirectThread, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, DataversePrincipalRef, string, CancellationToken>((set, _, principal, _, _) =>
+            {
+                if (set == "sprk_communicationthreads")
+                    _threadShares.Add(new DataversePrincipalAccess(principal, ReadMask, DateTimeOffset.UtcNow));
+            })
+            .Returns(Task.CompletedTask);
     }
 
-    // ── Must fire: one per Direct path ─────────────────────────────────────────────────────────────────────────────────
+    // ── Must fire: the Direct paths that can reach a thread holding a real pair ────────────────────────────────────────
 
-    /// <summary>Send: a message whose ACS thread maps to an existing Direct thread (the resolver's join).</summary>
+    /// <summary>
+    /// Send JOIN into a thread created by <c>POST /threads/direct</c> (owned by one party, shared with Read to the other):
+    /// the resolver's join of an existing thread. Reachable only for such a thread; a thread the resolver itself creates
+    /// holds no pair (see the CREATE case below).
+    /// </summary>
     [Fact]
-    public async Task Send_JoiningADirectThread_FilesItWithTheOtherParticipantAsRecipient_AndTheSenderAsSentBy()
+    public async Task Send_JoiningAThreadCreatedByThreadsDirect_FilesItWithTheOtherParticipantAsRecipient_AndTheSenderAsSentBy()
     {
         await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
 
@@ -121,24 +161,28 @@ public class DirectMessageRecipientStampTests
         Recipient(filing).Should().Be(Other);
     }
 
-    /// <summary>The first message of a new Direct thread: the resolver creates a Direct thread (no regarding) for it.</summary>
+    /// <summary>
+    /// Respond into a pair thread whose owner is the OTHER party: the sender is the shared participant, and the owner is the
+    /// recipient.
+    /// </summary>
     [Fact]
-    public async Task FirstMessageOfANewDirectThread_IsFiledWithTheOtherParticipantAsRecipient()
+    public async Task Respond_IntoAPairThreadOwnedByTheOtherParty_StampsTheOwnerAsRecipient()
     {
-        await Service(new StubStrategy(ThreadKeyResolution.CreateNew)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: Other);
+        _threadShares = new() { UserShare(Sender, ReadMask) };
 
-        _created.Should().ContainSingle(e => e.LogicalName == "sprk_communicationthread")
-            .Which.GetAttributeValue<OptionSetValue>("sprk_threadtype")!.Value.Should().Be(ThreadTypeDirect);
-        SentMessageCreate().GetAttributeValue<EntityReference>(SenderColumn)!.Id.Should().Be(Sender);
+        await Service(resolver: null).SendAsync(MessageRequest() with { ThreadId = DirectThread }, Caller(), CancellationToken.None);
+
         Recipient(TheFilingWrite()).Should().Be(Other);
     }
 
     /// <summary>
-    /// Inbound join: a chat message arriving into a Direct thread. Its row has no sender, so the sender's chat identity is
-    /// mapped to a systemuser and stamped with the recipient, in the filing write.
+    /// Inbound JOIN into a thread created by <c>POST /threads/direct</c>: a chat message arriving into such a thread. Its row
+    /// has no sender, so the sender's chat identity is mapped to a systemuser and stamped with the recipient, in the filing
+    /// write. Reachable only for a thread of that shape (owned by one party, shared with Read to the other).
     /// </summary>
     [Fact]
-    public async Task InboundJoin_IntoADirectThread_StampsTheMappedSender_AndTheOtherParticipantAsRecipient()
+    public async Task InboundJoin_IntoAThreadCreatedByThreadsDirect_StampsTheMappedSender_AndTheOtherParticipantAsRecipient()
     {
         _messageRow = MessageRow(sentBy: null);
 
@@ -154,21 +198,67 @@ public class DirectMessageRecipientStampTests
 
     // ── Must not fire ──────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The first message of a new Direct thread: the resolver CREATEs a Direct thread (no regarding) for it. That thread is
+    /// owned by the BFF application user and shared to nobody, so it holds no sender/recipient pair and no recipient is
+    /// stamped (the sender stays as it is on the row).
+    /// </summary>
+    [Fact]
+    public async Task FirstMessageOfAThreadTheResolverCreates_GetsNoRecipient_BecauseTheThreadIsAppOwnedAndUnshared()
+    {
+        await Service(new StubStrategy(ThreadKeyResolution.CreateNew)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+
+        var thread = _created.Should().ContainSingle(e => e.LogicalName == "sprk_communicationthread").Which;
+        thread.GetAttributeValue<OptionSetValue>("sprk_threadtype")!.Value.Should().Be(ThreadTypeDirect);
+        thread.Contains("ownerid").Should().BeFalse("the resolver's create names no owner, so the creating application user owns it");
+        SentMessageCreate().GetAttributeValue<EntityReference>(SenderColumn)!.Id.Should().Be(Sender);
+        TheFilingWrite().Should().ContainKey(ThreadLookup, "the message is still filed into the new thread");
+        AllFilingColumns().Should().NotContain(RecipientColumn);
+    }
+
+    /// <summary>A share row without Read (mask 0: access inherited from a related record) is not a participant.</summary>
+    [Fact]
+    public async Task AZeroMaskShareRow_IsNotAParticipant_AndGetsNoRecipient()
+    {
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: Sender);
+        _threadShares = new() { UserShare(Other, 0) };
+
+        await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+
+        _messageUpdates.Should().ContainSingle("the message is still filed into the thread");
+        AllFilingColumns().Should().NotContain(RecipientColumn);
+        _resolverLog.Entries.Should().Contain(e => e.EventId.Name == NotTwoParticipantsCode && e.Level == LogLevel.Information);
+    }
+
+    /// <summary>A thread owned by an application user and shared to the sender: an application user is never a participant.</summary>
+    [Fact]
+    public async Task AThreadOwnedByAnApplicationUser_SharedToTheSender_GetsNoRecipient()
+    {
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: AppUser);
+        _threadShares = new() { UserShare(Sender, ReadMask) };
+
+        await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+
+        _messageUpdates.Should().ContainSingle("the message is still filed into the thread");
+        AllFilingColumns().Should().NotContain(RecipientColumn);
+        _resolverLog.Entries.Should().Contain(e => e.EventId.Name == NotEligibleCode && e.Level == LogLevel.Information);
+    }
+
     [Fact]
     public async Task ARecordThread_GetsNoRecipient()
     {
-        _threadRow = ThreadRow(ThreadTypeRecordAnchored, matter: Guid.NewGuid());
+        _threadRow = ThreadRow(ThreadTypeRecordAnchored, owner: Sender, matter: Guid.NewGuid());
 
         await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
 
         AllFilingColumns().Should().NotContain(RecipientColumn);
-        _directAccess.Verify(a => a.GetParticipantSystemUserIdsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _shares.Verify(s => s.GetPrincipalAccessOrThrowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task ADirectTypedThreadCarryingATypedLookup_IsARecordThread_AndGetsNoRecipient()
     {
-        _threadRow = ThreadRow(ThreadTypeDirect, matter: Guid.NewGuid());
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: Sender, matter: Guid.NewGuid());
 
         await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
 
@@ -210,28 +300,37 @@ public class DirectMessageRecipientStampTests
         AllFilingColumns().Should().NotContain(RecipientColumn);
     }
 
-    public static TheoryData<Guid[]> NotExactlyTwoParticipantsWithTheSender => new()
+    /// <summary>
+    /// (user owner, or <c>null</c> for a team owner; systemusers shared with Read; teams shared with Read) — none of them holds
+    /// exactly two distinct participants including the sender.
+    /// </summary>
+    public static TheoryData<Guid?, Guid[], Guid[]> NotExactlyTwoParticipantsWithTheSender => new()
     {
-        new[] { Sender },                 // one participant
-        new[] { Sender, Other, Third },   // three participants
-        new[] { Sender, Sender },         // two equal ids
-        new[] { Other, Third },           // two, but not the sender
-        new[] { Sender, Guid.Empty },     // an empty id
-        Array.Empty<Guid>(),              // none
+        { Sender, Array.Empty<Guid>(), Array.Empty<Guid>() },          // one participant: the owner, shared to nobody
+        { Sender, new[] { Other, Third }, Array.Empty<Guid>() },       // three participants
+        { Sender, new[] { Sender }, Array.Empty<Guid>() },             // the owner shared to itself: one distinct id
+        { Other, new[] { Third }, Array.Empty<Guid>() },               // two, but not the sender
+        { Sender, new[] { Guid.Empty }, Array.Empty<Guid>() },         // an empty id
+        { null, new[] { Sender }, Array.Empty<Guid>() },               // a team owner is not a participant
+        { Sender, Array.Empty<Guid>(), new[] { ATeam } },              // a team share is not a participant
+        { null, Array.Empty<Guid>(), Array.Empty<Guid>() },            // none
     };
 
     [Theory]
     [MemberData(nameof(NotExactlyTwoParticipantsWithTheSender))]
-    public async Task ADirectThreadWithoutExactlyTwoDistinctParticipantsIncludingTheSender_GetsNoRecipient(Guid[] participants)
+    public async Task ADirectThreadWithoutExactlyTwoDistinctParticipantsIncludingTheSender_GetsNoRecipient(
+        Guid? userOwner, Guid[] userShares, Guid[] teamShares)
     {
-        _directAccess
-            .Setup(a => a.GetParticipantSystemUserIdsAsync(DirectThread, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(participants);
+        _threadRow = ThreadRow(ThreadTypeDirect, owner: userOwner);
+        _threadShares = userShares.Select(u => UserShare(u, ReadMask))
+            .Concat(teamShares.Select(t => new DataversePrincipalAccess(DataversePrincipalRef.Team(t), ReadMask, DateTimeOffset.UtcNow)))
+            .ToList();
 
         await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
 
         _messageUpdates.Should().ContainSingle("the message is still filed into the thread");
         AllFilingColumns().Should().NotContain(RecipientColumn);
+        _resolverLog.Entries.Should().Contain(e => e.EventId.Name == NotTwoParticipantsCode && e.Level == LogLevel.Information);
     }
 
     [Fact]
@@ -243,19 +342,31 @@ public class DirectMessageRecipientStampTests
 
         _messageUpdates.Should().ContainSingle();
         AllFilingColumns().Should().NotContain(RecipientColumn);
+        _resolverLog.Entries.Should().Contain(e => e.EventId.Name == NotEligibleCode && e.Level == LogLevel.Information);
     }
 
+    /// <summary>
+    /// The share read faults (a throttle or a server error): the strict read throws, so nothing is stamped, one Warning
+    /// with its own code is logged, and the message is still filed into the thread. The soft read's empty answer is never
+    /// taken as "no shares".
+    /// </summary>
     [Fact]
-    public async Task AParticipantReadFault_StampsNothing_AndStillFilesTheMessage()
+    public async Task AShareReadFault_StampsNothing_LogsTheUnreadWarning_AndStillFilesTheMessage()
     {
-        _directAccess
-            .Setup(a => a.GetParticipantSystemUserIdsAsync(DirectThread, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("simulated Dataverse fault"));
+        _shares
+            .Setup(s => s.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", DirectThread, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated 429 from Dataverse"));
+        _shares
+            .Setup(s => s.GetPrincipalAccessAsync("sprk_communicationthread", DirectThread, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DataversePrincipalAccess>()); // what the soft read answers on the same fault
 
         await Service(Join(DirectThread)).SendAsync(MessageRequest(), Caller(), CancellationToken.None);
 
         _messageUpdates.Should().ContainSingle().Which.Should().ContainKey(ThreadLookup);
         AllFilingColumns().Should().NotContain(RecipientColumn);
+        var warnings = _resolverLog.Entries.Where(e => e.EventId.Name == UnreadCode).ToList();
+        warnings.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
+        _resolverLog.Entries.Should().NotContain(e => e.EventId.Name == NotTwoParticipantsCode);
     }
 
     [Fact]
@@ -309,7 +420,7 @@ public class DirectMessageRecipientStampTests
 
     private ThreadResolver Resolver(IThreadKeyStrategy strategy) =>
         new(new[] { strategy }, _entities.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            _resolverLog, _directAccess.Object);
+            _resolverLog, _directAccess.Object, recordShares: _shares.Object);
 
     private CommunicationService Service(IThreadKeyStrategy? resolver)
     {
@@ -342,7 +453,8 @@ public class DirectMessageRecipientStampTests
             NullLogger<CommunicationService>.Instance,
             resolver is null ? null : Resolver(resolver),
             scopeFactory: null,
-            directThreadAccess: _directAccess.Object);
+            directThreadAccess: _directAccess.Object,
+            recordShares: _shares.Object);
     }
 
     private IncomingMessagingJobHandler InboundHandler(IThreadKeyStrategy strategy)
@@ -389,17 +501,37 @@ public class DirectMessageRecipientStampTests
         return row;
     }
 
-    private static Entity ThreadRow(int threadType, Guid? matter = null)
+    /// <summary>A thread row as stored. <paramref name="owner"/> <c>null</c>: owned by a team.</summary>
+    private static Entity ThreadRow(int threadType, Guid? owner = null, Guid? matter = null)
     {
         var row = new Entity("sprk_communicationthread", DirectThread)
         {
             ["sprk_threadtype"] = new OptionSetValue(threadType),
             ["sprk_privacystate"] = new OptionSetValue(100000000),
+            ["ownerid"] = owner is { } o ? new EntityReference("systemuser", o) : new EntityReference("team", ATeam),
         };
         if (matter is { } m)
             row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
         return row;
     }
+
+    /// <summary>
+    /// A thread the run creates becomes the stored thread: its own columns, owned by the identity that created it (the
+    /// application user, unless the payload names an owner), with no share rows.
+    /// </summary>
+    private void StoreCreatedThread(Entity created)
+    {
+        var stored = new Entity("sprk_communicationthread", DirectThread);
+        foreach (var attribute in created.Attributes)
+            stored[attribute.Key] = attribute.Value;
+        if (!stored.Contains("ownerid"))
+            stored["ownerid"] = new EntityReference("systemuser", AppUser);
+        _threadRow = stored;
+        _threadShares = new();
+    }
+
+    private static DataversePrincipalAccess UserShare(Guid systemUserId, int mask) =>
+        new(DataversePrincipalRef.User(systemUserId), mask, DateTimeOffset.UtcNow);
 
     private EntityCollection SystemUsers(QueryExpression query)
     {
@@ -411,9 +543,16 @@ public class DirectMessageRecipientStampTests
                 : new EntityCollection();
         }
 
+        // The application user is enabled, and carries an applicationid; people carry none.
         var ids = query.Criteria.Conditions.Single(c => c.AttributeName == "systemuserid").Values.Cast<Guid>();
         return new EntityCollection(ids
-            .Select(id => new Entity("systemuser", id) { ["isdisabled"] = _disabled.Contains(id) })
+            .Select(id =>
+            {
+                var user = new Entity("systemuser", id) { ["isdisabled"] = _disabled.Contains(id) };
+                if (id == AppUser)
+                    user["applicationid"] = Guid.Parse("99999999-9999-9999-9999-999999999999");
+                return user;
+            })
             .ToList());
     }
 

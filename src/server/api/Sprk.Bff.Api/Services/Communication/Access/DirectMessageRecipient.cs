@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -19,10 +20,17 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// and joins a thread the join found Direct (<see cref="ThreadGrantAudience.DirectParticipants"/>: typed Direct, no typed
 /// lookup). Every other row — an email, a record-filed message, the per-user master, a record thread — gets no column from
 /// here.</para>
-/// <para><b>The recipient</b> is the thread's other participant, from the existing source of a Direct thread's two-party list
-/// (<see cref="IDirectThreadAccessService.GetParticipantSystemUserIdsAsync"/>: the thread's user owner and the users it is
-/// shared to, empty unless the thread is typed Direct). The list must be exactly two distinct, non-empty systemusers, one of
-/// them the sender, and both enabled; otherwise no recipient is stamped.</para>
+/// <para><b>The recipient</b> is the thread's other participant. The two-party list is read here (<see
+/// cref="ReadParticipantsAsync"/>): the thread's user owner and the systemusers holding a share on the thread that grants
+/// Read, empty unless the thread is typed Direct. The share read is the strict one
+/// (<see cref="IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync"/>): a read that fails stamps nothing, it is never
+/// taken as "no shares". The list must be exactly two distinct, non-empty systemusers, one of them the sender, both enabled
+/// and neither an application user; otherwise no recipient is stamped.</para>
+/// <para><b>Why its own read.</b> The stamp decides a write from the shares, so it needs the strict read; the shared reader
+/// (<see cref="IDirectThreadAccessService.GetParticipantSystemUserIdsAsync"/>) uses the soft one. This read is a deliberate
+/// duplicate of that reader's rule and converges onto it once the shared reader filters by Read and reads strictly.</para>
+/// <para><b>The thread's owner decides the pair.</b> Whoever owns the thread and whom it is shared to are what this reads;
+/// a thread whose owner changes its shares before a message is filed yields the pair as it stands at the filing.</para>
 /// <para><b>The sender</b> is the row's <c>sprk_sentby</c>, kept as it is when present. A row without one (an inbound chat
 /// message) takes the systemuser its chat identity maps to through the existing identity map
 /// (<c>systemuser.sprk_communicationuserid</c>, written by <c>AcsIdentityService</c>), and the sender is stamped with the
@@ -44,10 +52,28 @@ internal static class DirectMessageRecipient
 
     private static readonly EventId RecipientUnmappedEvent = new(5401, RecipientUnmappedEventCode);
 
+    /// <summary>Information: the Direct thread does not hold exactly two distinct participants, one of them the sender.</summary>
+    internal const string NotTwoParticipantsEventCode = "direct_message.recipient_not_two_participants";
+
+    /// <summary>Information: one of the two participants is disabled, missing, or an application user.</summary>
+    internal const string ParticipantNotEligibleEventCode = "direct_message.recipient_participant_not_eligible";
+
+    /// <summary>Warning: the message, the thread or the thread's shares could not be read.</summary>
+    internal const string ParticipantsUnreadEventCode = "direct_message.recipient_participants_unread";
+
+    private static readonly EventId NotTwoParticipantsEvent = new(5402, NotTwoParticipantsEventCode);
+    private static readonly EventId ParticipantNotEligibleEvent = new(5403, ParticipantNotEligibleEventCode);
+    private static readonly EventId ParticipantsUnreadEvent = new(5404, ParticipantsUnreadEventCode);
+
     private const string CommunicationTable = "sprk_communication";
     private const string CommunicationTypeColumn = "sprk_communicationtype";
+    private const string ThreadTable = "sprk_communicationthread";
+    private const string ThreadTypeColumn = "sprk_threadtype";
+    private const string OwnerColumn = "ownerid";
+    private const int ThreadTypeDirect = 100000001;
     private const string SystemUserTable = "systemuser";
     private const string IsDisabledColumn = "isdisabled";
+    private const string ApplicationIdColumn = "applicationid";
     private const string ChatIdentityColumn = "sprk_communicationuserid";
 
     /// <summary>No column to write alongside the thread lookup.</summary>
@@ -56,7 +82,7 @@ internal static class DirectMessageRecipient
     /// <summary>
     /// The rule on its own: the participant that is not <paramref name="sender"/>, when <paramref name="participants"/> is
     /// exactly two distinct, non-empty ids and one of them is the sender; otherwise <c>null</c>. Whether both are enabled is
-    /// checked by the caller.
+    /// checked by the caller, and so is whether either is an application user.
     /// </summary>
     internal static Guid? OtherParticipant(Guid sender, IReadOnlyList<Guid>? participants)
     {
@@ -79,7 +105,7 @@ internal static class DirectMessageRecipient
     /// the send paths, whose row already carries <c>sprk_sentby</c>.</param>
     internal static async Task<IReadOnlyDictionary<string, object>> ColumnsForDirectFilingAsync(
         IGenericEntityService entities,
-        IDirectThreadAccessService directThreadAccess,
+        IDataverseRecordShareService recordShares,
         Guid communicationId,
         ThreadAssignment assignment,
         string? senderChatIdentity,
@@ -117,17 +143,26 @@ internal static class DirectMessageRecipient
             if (stampedSender is null)
                 result[SenderColumn] = new EntityReference(SystemUserTable, senderId);
 
-            var participants = await directThreadAccess.GetParticipantSystemUserIdsAsync(assignment.ThreadId, ct);
-            if (OtherParticipant(senderId, participants) is { } recipient
-                && await BothEnabledAsync(entities, senderId, recipient, ct))
+            var participants = await ReadParticipantsAsync(entities, recordShares, assignment.ThreadId, ct);
+            if (OtherParticipant(senderId, participants) is not { } recipient)
             {
-                result[RecipientColumn] = new EntityReference(SystemUserTable, recipient);
+                logger.LogInformation(
+                    NotTwoParticipantsEvent,
+                    "{EventCode}: Direct message {CommunicationId}: thread {ThreadId} does not hold exactly two distinct " +
+                    "participants including the sender; no recipient is stamped",
+                    NotTwoParticipantsEventCode, communicationId, assignment.ThreadId);
+            }
+            else if (!await BothEnabledPeopleAsync(entities, senderId, recipient, ct))
+            {
+                logger.LogInformation(
+                    ParticipantNotEligibleEvent,
+                    "{EventCode}: Direct message {CommunicationId}: a participant of thread {ThreadId} is disabled, missing or an " +
+                    "application user; no recipient is stamped",
+                    ParticipantNotEligibleEventCode, communicationId, assignment.ThreadId);
             }
             else
             {
-                logger.LogInformation(
-                    "Direct message {CommunicationId}: thread {ThreadId} does not hold exactly two enabled participants including " +
-                    "the sender; no recipient is stamped", communicationId, assignment.ThreadId);
+                result[RecipientColumn] = new EntityReference(SystemUserTable, recipient);
             }
 
             return result;
@@ -135,11 +170,50 @@ internal static class DirectMessageRecipient
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(
+                ParticipantsUnreadEvent,
                 ex,
-                "Direct message {CommunicationId}: its participants could not be read; no recipient is stamped (thread {ThreadId})",
-                communicationId, assignment.ThreadId);
+                "{EventCode}: Direct message {CommunicationId}: its participants could not be read; no recipient is stamped " +
+                "(thread {ThreadId})",
+                ParticipantsUnreadEventCode, communicationId, assignment.ThreadId);
             return None;
         }
+    }
+
+    /// <summary>
+    /// A Direct thread's two-party list as the stamp decides from it: the thread's user owner and every systemuser holding a
+    /// share on the thread that grants Read (<see cref="RecordShareLevels.CanRead"/>; a zero-mask row is inherited access, not
+    /// a share). Empty when the thread is missing or not typed Direct. A team owner or a team share is never a participant.
+    /// The share read is strict: a failed read throws, so the caller stamps nothing.
+    /// </summary>
+    private static async Task<IReadOnlyList<Guid>> ReadParticipantsAsync(
+        IGenericEntityService entities, IDataverseRecordShareService recordShares, Guid threadId, CancellationToken ct)
+    {
+        var thread = await entities.RetrieveAsync(ThreadTable, threadId, new[] { ThreadTypeColumn, OwnerColumn }, ct);
+        if (thread is null || thread.Id == Guid.Empty
+            || thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value != ThreadTypeDirect)
+        {
+            return Array.Empty<Guid>();
+        }
+
+        var participants = new List<Guid>();
+        if (thread.GetAttributeValue<EntityReference>(OwnerColumn) is { } owner
+            && string.Equals(owner.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase))
+        {
+            participants.Add(owner.Id);
+        }
+
+        var shares = await recordShares.GetPrincipalAccessOrThrowAsync(ThreadTable, threadId, ct);
+        foreach (var share in shares)
+        {
+            if (share.Principal.Kind == DataversePrincipalKind.SystemUser
+                && RecordShareLevels.CanRead(share.AccessRightsMask)
+                && !participants.Contains(share.Principal.Id))
+            {
+                participants.Add(share.Principal.Id);
+            }
+        }
+
+        return participants;
     }
 
     /// <summary>
@@ -157,10 +231,18 @@ internal static class DirectMessageRecipient
         return rows is { Count: 1 } && rows[0].Id != Guid.Empty ? rows[0].Id : null;
     }
 
-    /// <summary><c>true</c> when both systemusers exist and read explicitly not disabled.</summary>
-    private static async Task<bool> BothEnabledAsync(IGenericEntityService entities, Guid first, Guid second, CancellationToken ct)
+    /// <summary>
+    /// <c>true</c> when both systemusers exist, read explicitly not disabled, and are people: an application user
+    /// (<c>applicationid</c> set) is never a Direct message's participant.
+    /// </summary>
+    private static async Task<bool> BothEnabledPeopleAsync(IGenericEntityService entities, Guid first, Guid second, CancellationToken ct)
     {
-        var query = new QueryExpression(SystemUserTable) { ColumnSet = new ColumnSet(IsDisabledColumn), TopCount = 3, NoLock = true };
+        var query = new QueryExpression(SystemUserTable)
+        {
+            ColumnSet = new ColumnSet(IsDisabledColumn, ApplicationIdColumn),
+            TopCount = 3,
+            NoLock = true,
+        };
         query.Criteria.AddCondition("systemuserid", ConditionOperator.In, first, second);
         var rows = (await entities.RetrieveMultipleAsync(query, ct))?.Entities;
         if (rows is null)
@@ -168,6 +250,7 @@ internal static class DirectMessageRecipient
 
         var enabled = rows
             .Where(r => r.GetAttributeValue<bool?>(IsDisabledColumn) == false)
+            .Where(r => r.GetAttributeValue<Guid?>(ApplicationIdColumn) is not { } app || app == Guid.Empty)
             .Select(r => r.Id)
             .ToHashSet();
         return enabled.Contains(first) && enabled.Contains(second);

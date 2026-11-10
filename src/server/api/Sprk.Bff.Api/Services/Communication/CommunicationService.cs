@@ -47,6 +47,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -112,8 +114,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
-        TrackingFooterGate? trackingFooterGate = null)
+        TrackingFooterGate? trackingFooterGate = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -1575,7 +1579,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 _ownership,
                 _scopeFactory,
                 _logger,
-                _directThreadAccess,
+                _recordShares,
                 communicationId,
                 threadId,
                 (alongside, token) => _genericEntityService.UpdateAsync(
