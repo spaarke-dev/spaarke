@@ -149,7 +149,10 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
         // uac-r2 198 pass 2 item 7: a share-read fault THROWS here. This list is the ACS membership reconcile's desired set
         // (DirectThreadExplicitParticipantReader → ThreadMembershipDerivationService → MembershipReconciler), so "the owner
-        // alone" on a fault would remove the other participant from the chat; the reconcile retries instead.
+        // alone" on a fault would remove the other participant from the chat. The throw fails the reconcile before it removes anyone:
+        // MembershipReconcileJob.IsRetryable retries a transient fault (an HTTP or network fault, a 429, 503, 504 or timeout, a cancelled
+        // task, a Service Bus or ACS rate-limit fault) up to the job's max attempts, and dead-letters any other fault at once. Either
+        // way no member is removed, and MembershipReconcileSweepService repairs the membership later.
         return await ReadOwnerAndSharesAsync(threadId, thread, shareFaultIsNoShares: false, ct);
     }
 
