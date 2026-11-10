@@ -555,21 +555,17 @@ public static class ExternalMessageEndpoints
         ExternalDataService.InvoiceLinksOf(CommunicationTable, row.Row);
 
     /// <summary>
-    /// Task 098: the per-message (a') term of <see cref="SecureRootsFilter"/>. Reads the predicate ONCE for every invoice the
-    /// candidates regard (none: no read). A message regarding an invoice the predicate hides, a lookup that is not a GUID, and
-    /// any invoice when no predicate is given (fail closed) are withheld; the route's own invoice
-    /// (<paramref name="authorizedParent"/>) was decided by the gate and is not asked again.
-    /// </summary>
-    /// <summary>
-    /// F3b fix round 1: per candidate (by reference) the invoices of the rows the message is filed under, up the chain
-    /// (<paramref name="read"/>, <see cref="InvoiceLinks.ParentEdgesOf"/> of a communication). <see langword="null"/> for a row whose
-    /// chain read failed. No reader: every row that names a parent is <see langword="null"/> (fail closed); a row naming none has none.
+    /// F3b fix round 1: per candidate the invoices of the rows the message is filed under, up the chain (<paramref name="read"/>,
+    /// <see cref="InvoiceLinks.ParentEdgesOf"/> of a communication). <see langword="null"/> for a row whose chain read failed. No
+    /// reader: every row that names a parent is <see langword="null"/> (fail closed); a row naming none has none. Keyed by VALUE (the
+    /// record's equality: its stamps and the row it was read from), because the read service asks the predicate with a new
+    /// <see cref="MessageRootLookups"/> built from the same row, never the instance it passed in.
     /// </summary>
     private static async Task<IReadOnlyDictionary<MessageRootLookups, IReadOnlyList<Guid>?>> AncestorInvoicesOfAsync(
         IReadOnlyCollection<MessageRootLookups> candidates, InvoiceAncestorReader? read, ILogger logger, CancellationToken ct)
     {
         var rows = candidates.ToList();
-        var result = new Dictionary<MessageRootLookups, IReadOnlyList<Guid>?>(ReferenceEqualityComparer.Instance);
+        var result = new Dictionary<MessageRootLookups, IReadOnlyList<Guid>?>();
         IReadOnlyList<IReadOnlyList<Guid>?> chains;
         if (read is not null)
         {
@@ -601,6 +597,13 @@ public static class ExternalMessageEndpoints
     /// <summary>The communication's primary key column.</summary>
     private const string MessageIdColumn = "sprk_communicationid";
 
+    /// <summary>
+    /// Task 098: the per-message (a') term of <see cref="SecureRootsFilter"/>. Reads the predicate ONCE for every invoice the
+    /// candidates regard (none: no read). A message regarding an invoice the predicate hides, a lookup that is not a GUID, and
+    /// any invoice when no predicate is given (fail closed) are withheld; the route's own invoice
+    /// (<paramref name="authorizedParent"/>) was decided by the gate and is not asked again. F3b fix round 1: with
+    /// <paramref name="ancestors"/>, the invoices of the rows each message is filed under count too.
+    /// </summary>
     private static async Task<Func<MessageRootLookups, bool>> RegardingInvoicesVisibleAsync(
         CallerPrincipal principal, IReadOnlyCollection<MessageRootLookups> candidates, (string Table, Guid Id)? authorizedParent,
         ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct,
