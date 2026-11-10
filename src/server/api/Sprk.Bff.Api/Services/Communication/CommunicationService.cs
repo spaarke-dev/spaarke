@@ -2892,6 +2892,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
 
+            // Ontology task 176 (D-216): a server-set secondary association the caller files the row under too (the budget
+            // inquiry's matter). Written BEFORE the stamp, so the inherited Access Permission and the owner question see it.
+            foreach (var also in associations.Skip(1).Where(a => a.AlsoRegarding && a.EntityId != Guid.Empty))
+            {
+                if (RegardingLookupMap.TryGetValue(also.EntityType, out var alsoMapping))
+                    communication[alsoMapping.LookupField] = new EntityReference(also.EntityType, also.EntityId);
+            }
+
             // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
             // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
             // inherited one. Four of the twelve mapped targets are child-class (analysis, invoice, event

@@ -317,7 +317,7 @@ public sealed class IncomingCommunicationProcessor
         }
 
         // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
-        var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
+        var (decision, owner, filingFields, inquiryReply) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
 
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
@@ -396,7 +396,7 @@ public sealed class IncomingCommunicationProcessor
         // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
         // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
         // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
-        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct);
+        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct, keepInternalOnly: inquiryReply);
 
         // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
         // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
@@ -675,16 +675,20 @@ public sealed class IncomingCommunicationProcessor
     /// creator (E1). A failure to build them HOLDS the email like an undeterminable filing.
     /// </returns>
     internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner,
-            Dictionary<string, object>? FilingFields)>
+            Dictionary<string, object>? FilingFields, bool InquiryReply)>
         ResolveInboundFilingAsync(
             NormalizedMessage envelope, CommunicationAccount? account, string graphMessageId, CancellationToken ct)
     {
         AssociationDecision decision;
+        bool inquiryReply;
         Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
         try
         {
             decision = await _associationResolver.EvaluateAsync(
                 envelope, new AssociationContext { Account = account }, ct);
+            // Ontology task 176 (D-216): a reply filed to an INQUIRY is filed under its matter too — before the owner is
+            // asked, so a matter that became secure owns it. A read that fails throws here and the email is HELD.
+            (decision, inquiryReply) = await FileInquiryReplyUnderItsMatterAsync(decision, graphMessageId, ct);
             ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -710,12 +714,12 @@ public sealed class IncomingCommunicationProcessor
 
         if (!owner.IsOwned)
         {
-            return (decision, owner, null);
+            return (decision, owner, null, inquiryReply);
         }
 
         try
         {
-            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct));
+            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct), inquiryReply);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -734,12 +738,83 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
+    /// Ontology task 176 (D-216): when <paramref name="decision"/> files the email to a service request that is an INQUIRY
+    /// (<c>sprk_direction</c> = Outbound, written by <c>BudgetInquiryExecutor</c>), the inquiry's matter is added to its regarding
+    /// writes, so the reply sits under the matter (its thread, its owner, its access) beside the inquiry.
+    /// </summary>
+    /// <remarks>
+    /// Fail closed, presence-aware: the request is read live; a fault (including the column being absent from the environment)
+    /// or a null row THROWS, which the caller holds as <see cref="RecordOwnerRefusal.ParentUndetermined"/> — never a row filed
+    /// to the request alone. A row read with no matter (an explicit null; the SDK omits null columns), a request that is not an
+    /// inquiry, an Ambiguous decision or a decision that already names a matter files as today. Ids only in logs.
+    /// </remarks>
+    /// <returns>The decision to file, and whether the email is a reply to an inquiry with a matter (step 4.6b keeps such a reply
+    /// internal-only).</returns>
+    private async Task<(AssociationDecision Decision, bool InquiryReply)> FileInquiryReplyUnderItsMatterAsync(
+        AssociationDecision decision, string graphMessageId, CancellationToken ct)
+    {
+        if (decision.Status == AssociationStatusCodes.Ambiguous
+            || !decision.RegardingWrites.TryGetValue(InquiryRequestLookup, out var serviceRequest)
+            || serviceRequest.Id == Guid.Empty)
+        {
+            return (decision, false);
+        }
+
+        var row = await _genericEntityService.RetrieveAsync(
+                InquiryRequestEntity, serviceRequest.Id, [InquiryDirectionColumn, InquiryMatterLookup], ct)
+            ?? throw new InvalidOperationException(
+                "The service request the email is filed to returned no row, so whether it is an inquiry with a matter is unknown.");
+
+        if (row.GetAttributeValue<OptionSetValue>(InquiryDirectionColumn)?.Value
+            != Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor.DirectionOutbound)
+        {
+            return (decision, false);
+        }
+
+        if (!row.Attributes.TryGetValue(InquiryMatterLookup, out var value)
+            || value is not EntityReference { Id: var matterId }
+            || matterId == Guid.Empty)
+        {
+            return (decision, false);
+        }
+
+        if (decision.RegardingWrites.TryGetValue(InquiryMatterLookup, out var filed))
+        {
+            if (filed.Id != matterId)
+            {
+                _logger.LogWarning(
+                    "Reply to inquiry {ServiceRequestId} is already filed to matter {FiledMatterId}, not the inquiry's matter "
+                    + "{InquiryMatterId}; its filing is kept | GraphMessageId: {GraphMessageId}",
+                    serviceRequest.Id, filed.Id, matterId, graphMessageId);
+            }
+
+            return (decision, true);
+        }
+
+        var writes = new Dictionary<string, EntityReference>(decision.RegardingWrites, StringComparer.OrdinalIgnoreCase)
+        {
+            [InquiryMatterLookup] = new EntityReference("sprk_matter", matterId),
+        };
+        _logger.LogInformation(
+            "Reply to inquiry {ServiceRequestId} is filed under its matter {MatterId} too (D-216) | GraphMessageId: {GraphMessageId}",
+            serviceRequest.Id, matterId, graphMessageId);
+        return (decision with { RegardingWrites = writes }, true);
+    }
+
+    private const string InquiryRequestEntity = "sprk_servicerequest";
+    private const string InquiryRequestLookup = "sprk_regardingservicerequest";
+    private const string InquiryMatterLookup = "sprk_regardingmatter";
+    private const string InquiryDirectionColumn = "sprk_direction";
+
+    /// <summary>
     /// Steps 4.6 and 4.6b: resolves the email's thread (best-effort, non-fatal) and then lowers
     /// <c>sprk_isinternalonly</c> (written <c>true</c> at create) where the thread and the parent allow it. <c>internal</c>
-    /// so the writer tests drive it from an envelope (task 065 fix round 3).
+    /// so the writer tests drive it from an envelope (task 065 fix round 3). Ontology task 176 (D-216): a reply to an inquiry
+    /// (<paramref name="keepInternalOnly"/>) is never lowered.
     /// </summary>
     internal async Task ResolveThreadAndShareabilityAsync(
-        Guid communicationId, NormalizedMessage envelope, string graphMessageId, CancellationToken ct)
+        Guid communicationId, NormalizedMessage envelope, string graphMessageId, CancellationToken ct,
+        bool keepInternalOnly = false)
     {
         Guid? resolvedThreadId = null;
         if (_threadResolver is not null)
@@ -774,7 +849,13 @@ public sealed class IncomingCommunicationProcessor
         // Cancellation is caught here, like MessagingIngestor does (fix round 5): the row exists, so it stays internal-only
         // (true) and processing completes. Letting it escape made the retry dedup on the Graph message id and return early,
         // and nothing would ever lower the row.
-        if (resolvedThreadId is not null)
+        if (resolvedThreadId is not null && keepInternalOnly)
+        {
+            _logger.LogInformation(
+                "Reply to an inquiry stays internal-only (D-216) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+        else if (resolvedThreadId is not null)
         {
             try
             {

@@ -99,8 +99,9 @@ public class BudgetInquiryEmailFilingTests
 
         var row = harness.Communication();
         row.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(SecureTeamId);
-        row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value
-            .Should().Be(InheritedAccessPermission.Restricted, "the matter was on the row when the stamp ran");
+        row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)
+            .Should().NotBeNull("the matter was on the row when the stamp ran")
+            .And.Subject.As<OptionSetValue>().Value.Should().Be(InheritedAccessPermission.Restricted);
         harness.Ownership.Requests.Should().Contain(c =>
             c.TargetRecordId == MatterId || c.Parents.Any(p => p.RecordId == MatterId));
     }
@@ -317,6 +318,7 @@ public class BudgetInquiryEmailFilingTests
 
         var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
 
+        result.InquiryReply.Should().BeTrue("step 4.6b keeps a reply to an inquiry internal-only");
         result.Decision.RegardingWrites.Should().ContainKey("sprk_regardingservicerequest");
         result.Decision.RegardingWrites["sprk_regardingmatter"].Id.Should().Be(matter);
         result.FilingFields.Should().NotBeNull();
@@ -363,6 +365,7 @@ public class BudgetInquiryEmailFilingTests
         var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
 
         result.Decision.RegardingWrites.Keys.Should().Equal("sprk_regardingservicerequest");
+        result.InquiryReply.Should().BeFalse();
     }
 
     [Theory]
@@ -376,6 +379,7 @@ public class BudgetInquiryEmailFilingTests
         var result = await processor.ResolveInboundFilingAsync(ReplyEnvelope(), account: null, "graph-176", CancellationToken.None);
 
         result.Decision.RegardingWrites.Keys.Should().Equal("sprk_regardingservicerequest");
+        result.InquiryReply.Should().BeFalse();
         result.FilingFields!.ContainsKey("sprk_regardingmatter").Should().BeFalse();
     }
 

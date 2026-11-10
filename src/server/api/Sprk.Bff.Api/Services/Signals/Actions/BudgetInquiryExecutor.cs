@@ -88,8 +88,9 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     /// <c>sprk_communication.sprk_regardingservicerequest</c>, so a reply links to the inquiry through the association
     /// ladder and the footer names the inquiry. Chosen over a follow-up PATCH of
     /// <c>sprk_servicerequest.sprk_regardingcommunication</c> because that is a second write that could fail AFTER the
-    /// email went out. The matter stays reachable through <c>sprk_servicerequest.sprk_regardingmatter</c> and is still the
-    /// second association (counted, not mapped). Plain text: the wizard's body is plain text.
+    /// email went out. Ontology task 176 (D-216): the matter is the second association AND is written as
+    /// <c>sprk_regardingmatter</c> (<see cref="CommunicationAssociation.AlsoRegarding"/>), so the email sits in the matter's thread
+    /// and takes its access; it is internal-only and archived as .eml. Plain text: the wizard's body is plain text.
     /// <para>Task 160 (D-181; owner 2026-10-23): the service request's <c>EntityName</c> names the RECORD, "{core name} ({core number})"
     /// with no "Budget inquiry:" prefix (the subject already says so), because it is both the footer's record reference and
     /// <c>sprk_communication.sprk_regardingrecordname</c>. When the record's name could not be read it is the inquiry's own name (its
@@ -109,6 +110,9 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             Body = lines.Count > 0 ? $"{request.Body}\n\n{string.Join("\n", lines)}" : request.Body,
             BodyFormat = BodyFormat.PlainText,
             SendMode = SendMode.User,
+            // Ontology task 176 (D-216): archived as .eml and internal-only.
+            ArchiveToSpe = true,
+            IsInternalOnly = true,
             Associations =
             [
                 new CommunicationAssociation
@@ -117,7 +121,8 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
                     EntityId = serviceRequestId,
                     EntityName = extras?.RecordLabel ?? InquiryRecordFacts.RecordLabel(request.Subject, null),
                 },
-                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId },
+                // D-216: filed under the matter too (its thread, its access), not only counted.
+                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId, AlsoRegarding = true },
             ],
         };
     }
