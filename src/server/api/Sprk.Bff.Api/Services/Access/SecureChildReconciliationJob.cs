@@ -524,7 +524,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         // Round 46 item 2: the Make Secure file backstop, after the children (each document's container derives from its
         // now-secure parents). Its writes follow the recent-changes pass.
-        var relocations =await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
+        var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
             .ConfigureAwait(false);
 
 
@@ -2277,7 +2277,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     RetriedRows = retried,
                 },
                 SecureChildShareSyncStatus.NotApplicable => new RecentChanges(
-                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried },
+                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null)
+                { RetriedRows = retried },
                 // Failed (an ambiguous Secure team) or anything else: nothing is decided, and the window stays.
                 _ => FailedRecentChanges(above.Detail ?? "the records above the changed related records could not be determined"),
             };

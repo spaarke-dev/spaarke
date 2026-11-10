@@ -187,7 +187,7 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
         var @event = ExternalDataService.BuildEventCreatePayload(
             projectId, new CreateExternalEventRequest { SprkName = "Hearing" }, team);
         var document = ExternalDataService.BuildDocumentCreatePayload(
-            ExternalDataService.DocumentParentKind.Project, projectId,new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
+            ExternalDataService.DocumentParentKind.Project, projectId, new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
 
         foreach (var payload in new[] { todo, @event, document })
         {

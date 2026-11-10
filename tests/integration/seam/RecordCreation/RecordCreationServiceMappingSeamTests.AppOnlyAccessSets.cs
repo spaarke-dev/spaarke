@@ -67,10 +67,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         var outcome = await Service().CreateAsync(
             Request("sprk_communication", new Dictionary<string, object?>
-                {
-                    ["sprk_subject"] = "Status",
-                    ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-                },
+            {
+                ["sprk_subject"] = "Status",
+                ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            },
                 mapping: true, ("sprk_matter", OrdinaryMatter)),
             AsCaller(), CancellationToken.None);
 

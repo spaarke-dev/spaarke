@@ -358,7 +358,12 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
         // The body names a reviewer and an amount: neither is read.
         var response = await host.SendAsync(Request("POST", Adjustments, new
         {
-            adjustmentId = id, method = "percent", value = 10, reason = "Volume discount", reviewer = Guid.NewGuid(), amount = 999999,
+            adjustmentId = id,
+            method = "percent",
+            value = 10,
+            reason = "Volume discount",
+            reviewer = Guid.NewGuid(),
+            amount = 999999,
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

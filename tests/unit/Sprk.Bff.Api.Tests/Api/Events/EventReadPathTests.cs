@@ -258,8 +258,11 @@ public class EventReadPathTests
 
         documented.Should().BeEquivalentTo(new Dictionary<string, int>
         {
-            ["Created"] = EventLogAction.Created, ["Updated"] = EventLogAction.Updated, ["Completed"] = EventLogAction.Completed,
-            ["Cancelled"] = EventLogAction.Cancelled, ["Deleted"] = EventLogAction.Deleted,
+            ["Created"] = EventLogAction.Created,
+            ["Updated"] = EventLogAction.Updated,
+            ["Completed"] = EventLogAction.Completed,
+            ["Cancelled"] = EventLogAction.Cancelled,
+            ["Deleted"] = EventLogAction.Deleted,
         });
     }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────

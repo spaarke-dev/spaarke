@@ -69,20 +69,20 @@ public class ExternalMessageEndpointsTests
 
     private static CallerPrincipal Ciam(
         Guid? project = null, Guid? matter = null, Guid? workAssignment = null, Guid? contactId = null) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = contactId ?? Guid.NewGuid(),
-        Email = "partner@outside.test",
-        ProjectAccess = project is { } p
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = contactId ?? Guid.NewGuid(),
+            Email = "partner@outside.test",
+            ProjectAccess = project is { } p
             ? new[] { CallerProjectAccess.FromLevel(p, ExternalAccessLevel.ViewOnly) }
             : Array.Empty<CallerProjectAccess>(),
-        MatterAccess = matter is { } m
+            MatterAccess = matter is { } m
             ? new Dictionary<Guid, AccessRights> { [m] = AccessRights.Read }
             : new Dictionary<Guid, AccessRights>(),
-        WorkAssignmentAccess = workAssignment is { } w
+            WorkAssignmentAccess = workAssignment is { } w
             ? new Dictionary<Guid, AccessRights> { [w] = AccessRights.Read }
             : new Dictionary<Guid, AccessRights>(),
-    };
+        };
 
     /// <summary>A workforce CONTACT (no systemuser) — the licence-free customer staff member.</summary>
     private static CallerPrincipal WorkforceContact(Guid? project = null, Guid? contactId = null) => new()
@@ -288,11 +288,11 @@ public class ExternalMessageEndpointsTests
     /// stamp column and root type of ANOTHER root (a matter for a project route, a project otherwise).</summary>
     private static (string RegardingField, CallerPrincipal Caller, string OtherStamp, ExternalGrantRootType OtherRoot) RouteOf(
         string root, Guid record) => root switch
-    {
-        "projects" => ("sprk_regardingproject", Ciam(project: record), "_sprk_regardingmatter_value", ExternalGrantRootType.Matter),
-        "matters" => ("sprk_regardingmatter", Ciam(matter: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
-        _ => ("sprk_regardingworkassignment", Ciam(workAssignment: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
-    };
+        {
+            "projects" => ("sprk_regardingproject", Ciam(project: record), "_sprk_regardingmatter_value", ExternalGrantRootType.Matter),
+            "matters" => ("sprk_regardingmatter", Ciam(matter: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
+            _ => ("sprk_regardingworkassignment", Ciam(workAssignment: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
+        };
 
     [Theory]
     [InlineData("projects")]
@@ -367,7 +367,7 @@ public class ExternalMessageEndpointsTests
             case "throws": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagReadThrows = true; break;
             case "fault": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagFault = System.Net.HttpStatusCode.InternalServerError; break;
             case "flag-null": _roots.AddRoot(ExternalGrantRootType.Matter, matter, isSecure: null); break;
-            // "missing": no matter record at all.
+                // "missing": no matter record at all.
         }
 
         var plain = Guid.NewGuid();

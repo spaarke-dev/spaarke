@@ -126,15 +126,15 @@ public sealed class CopilotAgentClientPreAuthorizationTests
     private static Application App(
         IEnumerable<string>? spa = null,
         IEnumerable<PreAuthorizedApplication>? preAuthorized = null) => new()
-    {
-        AppId = BffAppId,
-        Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
-        Api = new ApiApplication
         {
-            Oauth2PermissionScopes = [new PermissionScope { Id = ScopeId, Value = "user_impersonation", IsEnabled = true, Type = "User" }],
-            PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
-        },
-    };
+            AppId = BffAppId,
+            Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
+            Api = new ApiApplication
+            {
+                Oauth2PermissionScopes = [new PermissionScope { Id = ScopeId, Value = "user_impersonation", IsEnabled = true, Type = "User" }],
+                PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
+            },
+        };
 
     private static PreAuthorizedApplication Pre(string appId) => new()
     {

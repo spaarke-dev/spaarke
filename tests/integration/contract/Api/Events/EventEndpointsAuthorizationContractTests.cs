@@ -111,7 +111,8 @@ public class EventEndpointsAuthorizationContractTests
         host.Events.Verify(e => e.QueryEventsAsync(
             It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
-            It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()), Times.Never);    }
+            It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 
     [Fact]
     public async Task List_ACallerWithALinkedContact_ListsWhatIsAssignedToThatContact()
@@ -558,7 +559,10 @@ public class EventEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(CreateRequest(new
         {
-            subject = "Named", regardingRecordType = 1, regardingRecordId = matter, regardingRecordName = "MAT-100",
+            subject = "Named",
+            regardingRecordType = 1,
+            regardingRecordId = matter,
+            regardingRecordName = "MAT-100",
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);

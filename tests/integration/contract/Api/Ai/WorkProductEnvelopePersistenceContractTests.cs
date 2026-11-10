@@ -102,7 +102,8 @@ public class WorkProductEnvelopePersistenceContractTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>())
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             HostContext = new ChatHostContext("matter", HostRecordId.ToString("D")),
         };
 

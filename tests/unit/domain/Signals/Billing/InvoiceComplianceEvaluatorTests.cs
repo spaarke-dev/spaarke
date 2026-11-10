@@ -404,7 +404,8 @@ public class InvoiceComplianceEvaluatorTests
         // Reject still runs; the downgraded firm version still produces its own Flag finding.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
         var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
-            with { Consequence = (int)BillingConsequence.SuggestAdjustment };
+            with
+        { Consequence = (int)BillingConsequence.SuggestAdjustment };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
 
@@ -424,7 +425,8 @@ public class InvoiceComplianceEvaluatorTests
         // Control for the test above: a firm version with an allowed consequence displaces the client default, as ever.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
         var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
-            with { Consequence = (int)BillingConsequence.Flag };
+            with
+        { Consequence = (int)BillingConsequence.Flag };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
 
@@ -462,7 +464,8 @@ public class InvoiceComplianceEvaluatorTests
     public void AVersionWithAnInvalidBody_AndADisallowedConsequence_IsStillRefused_AndDropped_K2()
     {
         var broken = Version("CD-TIMEKEEPER", RuleType.ApprovedTimekeeper, """{"type":"ApprovedTimekeeper","extra":1}""")
-            with { Consequence = (int)BillingConsequence.Reject };
+            with
+        { Consequence = (int)BillingConsequence.Reject };
         var unlisted = Fee(0) with { Timekeeper = Unmatched(Sprk.Bff.Api.Services.Finance.Resolution.TimekeeperUnmatchedReason.NotOnRoster) };
 
         var result = Evaluate(Request(unlisted), Loaded(broken));
@@ -632,7 +635,8 @@ public class InvoiceComplianceEvaluatorTests
         // The fee line bills 700 against a rack rate of 675 less 10 percent (607.50); the E120 late fee of 150 is over 100 and over
         // 5 percent of the other lines (700 + 40 = 740, so 37.00).
         var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }, Expense(1), Expense(2) with { BilledExpenseCode = "E120", Amount = 150m })
-            with { Currency = currency };
+            with
+        { Currency = currency };
 
         var result = Evaluate(request, Loaded(discount, amountCap, percentCap));
         var byPolicy = result.Findings.ToLookup(f => f.PolicyCode);

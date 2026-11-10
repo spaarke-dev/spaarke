@@ -235,7 +235,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             _h.Store.Assign(root, id, Attorney1, attorney);
             _h.Store.Assign(root, id, "sprk_assignedtoexternal", external);
             _h.Store.Assign(root, id, "sprk_assignedlawfirm1", firm);
-        });
+        }
+        );
     }
 
     [Fact]

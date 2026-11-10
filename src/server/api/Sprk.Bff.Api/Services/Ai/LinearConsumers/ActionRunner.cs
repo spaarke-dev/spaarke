@@ -353,11 +353,11 @@ public sealed class ActionRunner : IActionRunner
         ResolvedOperand operand,
         string? knowledgeContext,
         IReadOnlyDictionary<string, string[]>? resolvedChoices) => operand.Channel switch
-    {
-        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand), knowledgeContext, resolvedChoices),
-        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand), knowledgeContext, resolvedChoices),
-        _ => BuildNoOperandPrompt(systemPrompt, knowledgeContext, resolvedChoices),
-    };
+        {
+            OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand), knowledgeContext, resolvedChoices),
+            OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand), knowledgeContext, resolvedChoices),
+            _ => BuildNoOperandPrompt(systemPrompt, knowledgeContext, resolvedChoices),
+        };
 
     /// <summary>
     /// Pre-resolves a JPS Action's <c>$choices</c> lookup/optionset references against Dataverse before

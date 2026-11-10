@@ -815,7 +815,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new System.Text.Json.Nodes.JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
         }.ToJsonString();

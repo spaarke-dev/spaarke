@@ -62,85 +62,93 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         switch (path)
         {
             case GenericPath.OutputOrchestrator:
-            {
-                var fields = new Dictionary<string, object?>(plain);
-                foreach (var (column, record) in lookups)
-                    fields[column] = record;
-                try
                 {
-                    // Master merge (#2257): a person's run writes its output mapping AS that person (playbookActsAs).
-                    await Handler(app!).UpdateAsync(
-                        table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, playbookActsAs);
-                    return new PathOutcome(null, null);
+                    var fields = new Dictionary<string, object?>(plain);
+                    foreach (var (column, record) in lookups)
+                        fields[column] = record;
+                    try
+                    {
+                        // Master merge (#2257): a person's run writes its output mapping AS that person (playbookActsAs).
+                        await Handler(app!).UpdateAsync(
+                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, playbookActsAs);
+                        return new PathOutcome(null, null);
+                    }
+                    catch (RecordOwnerUnresolvedException refused)
+                    {
+                        return new PathOutcome(refused.RefusalCode, refused.Message);
+                    }
                 }
-                catch (RecordOwnerUnresolvedException refused)
-                {
-                    return new PathOutcome(refused.RefusalCode, refused.Message);
-                }
-            }
 
             case GenericPath.PlaybookUpdate:
-            {
-                var legacy = plain.ToDictionary(p => p.Key, p => (string?)p.Value?.ToString());
-                var rendered = new List<RenderedLookup>();
-                foreach (var (column, record) in lookups)
                 {
-                    if (record is null)
-                        legacy[$"{column}@odata.bind"] = null; // a null value clears the lookup
-                    else
-                        rendered.Add(new RenderedLookup(column, record.LogicalName, record.Id.ToString()));
-                }
+                    var legacy = plain.ToDictionary(p => p.Key, p => (string?)p.Value?.ToString());
+                    var rendered = new List<RenderedLookup>();
+                    foreach (var (column, record) in lookups)
+                    {
+                        if (record is null)
+                            legacy[$"{column}@odata.bind"] = null; // a null value clears the lookup
+                        else
+                            rendered.Add(new RenderedLookup(column, record.LogicalName, record.Id.ToString()));
+                    }
 
-                try
-                {
-                    await CoreOver(app).UpdateAsync(
-                        new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered,
-                            ImpersonateSystemUserId: playbookActsAs),
-                        CancellationToken.None);
-                    return new PathOutcome(null, null);
+                    try
+                    {
+                        await CoreOver(app).UpdateAsync(
+                            new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered,
+                                ImpersonateSystemUserId: playbookActsAs),
+                            CancellationToken.None);
+                        return new PathOutcome(null, null);
+                    }
+                    catch (RecordOwnerUnresolvedException refused)
+                    {
+                        return new PathOutcome(refused.RefusalCode, refused.Message);
+                    }
                 }
-                catch (RecordOwnerUnresolvedException refused)
-                {
-                    return new PathOutcome(refused.RefusalCode, refused.Message);
-                }
-            }
 
             default:
-            {
-                lookups.Values.Should().NotContain((EntityReference?)null, "the push cannot clear a lookup");
-                var rules = new List<FieldMappingRuleDto>();
-                var values = new Dictionary<string, object?>();
-                var binds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>();
-                foreach (var (column, record) in lookups)
                 {
-                    var rule = new FieldMappingRuleDto
+                    lookups.Values.Should().NotContain((EntityReference?)null, "the push cannot clear a lookup");
+                    var rules = new List<FieldMappingRuleDto>();
+                    var values = new Dictionary<string, object?>();
+                    var binds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>();
+                    foreach (var (column, record) in lookups)
                     {
-                        SourceField = column, TargetField = column, SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
-                    };
-                    rules.Add(rule);
-                    values[column] = record!.Id;
-                    binds[rule] = new LookupBindPlan($"{column}@odata.bind", $"/{record.LogicalName}s({record.Id:D})", null);
-                }
+                        var rule = new FieldMappingRuleDto
+                        {
+                            SourceField = column,
+                            TargetField = column,
+                            SourceFieldType = "Lookup",
+                            TargetFieldType = "Lookup",
+                            Priority = 1,
+                        };
+                        rules.Add(rule);
+                        values[column] = record!.Id;
+                        binds[rule] = new LookupBindPlan($"{column}@odata.bind", $"/{record.LogicalName}s({record.Id:D})", null);
+                    }
 
-                foreach (var (column, value) in plain)
-                {
-                    rules.Add(new FieldMappingRuleDto
+                    foreach (var (column, value) in plain)
                     {
-                        SourceField = column, TargetField = column, SourceFieldType = "Text", TargetFieldType = "Text", Priority = 2,
-                    });
-                    values[column] = value;
+                        rules.Add(new FieldMappingRuleDto
+                        {
+                            SourceField = column,
+                            TargetField = column,
+                            SourceFieldType = "Text",
+                            TargetFieldType = "Text",
+                            Priority = 2,
+                        });
+                        values[column] = value;
+                    }
+
+                    var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+                Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
+                        _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
+                        NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
+                    if (failed == 0)
+                        return new PathOutcome(null, null);
+
+                    var message = errors.Should().ContainSingle().Subject.Error ?? string.Empty;
+                    return new PathOutcome(GuardCode.Match(message).Value, message);
                 }
-
-                var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
-            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
-                    _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
-                    NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
-                if (failed == 0)
-                    return new PathOutcome(null, null);
-
-                var message = errors.Should().ContainSingle().Subject.Error ?? string.Empty;
-                return new PathOutcome(GuardCode.Match(message).Value, message);
-            }
         }
     }
 
@@ -331,7 +339,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         app.Setup(a => a.RetrieveAsync("sprk_billingevent", Line, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_billingevent", Line)
             {
-                ["sprk_matter"] = MatterRef(Matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice),
+                ["sprk_matter"] = MatterRef(Matter),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice),
             });
         app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>

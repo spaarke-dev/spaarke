@@ -278,7 +278,10 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         body.Entities.ToDictionary(r => (string)r["sprk_documentname"]!, r => r["hasFile"])
             .Should().Equal(new Dictionary<string, object?>
             {
-                ["with file"] = true, ["no pointers"] = false, ["drive only"] = false, ["blank item"] = false,
+                ["with file"] = true,
+                ["no pointers"] = false,
+                ["drive only"] = false,
+                ["blank item"] = false,
             });
         body.Entities.Should().HaveCount(4, "a file-less document is still listed");
     }
@@ -549,17 +552,17 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
             case "grandparent-restricted":
                 return Doc(@case, parent: Ancestor(permission: Standard, parent: Ancestor(permission: Restricted)));
             case "four-hop-chain":
-            {
-                var p4 = Ancestor(communication: Communication(internalOnly: false, ThreadPrivacyState.Open));
-                return Doc(@case, parent: Ancestor(parent: Ancestor(parent: Ancestor(parent: p4))));
-            }
+                {
+                    var p4 = Ancestor(communication: Communication(internalOnly: false, ThreadPrivacyState.Open));
+                    return Doc(@case, parent: Ancestor(parent: Ancestor(parent: Ancestor(parent: p4))));
+                }
             case "cycle":
-            {
-                var a = Guid.NewGuid();
-                var b = Ancestor(parent: a);
-                Ancestor(id: a, parent: b);
-                return Doc(@case, parent: a);
-            }
+                {
+                    var a = Guid.NewGuid();
+                    var b = Ancestor(parent: a);
+                    Ancestor(id: a, parent: b);
+                    return Doc(@case, parent: a);
+                }
             case "visible-communication":
                 return Doc(@case, communication: Communication(internalOnly: false, ThreadPrivacyState.Open));
             case "no-link-standard":
@@ -632,17 +635,17 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
     private static IReadOnlyDictionary<string, object?> ModuleRow(
         string name, int? permission = null, Guid? parent = null, Guid? communication = null,
         string? driveId = null, string? itemId = null) => new Dictionary<string, object?>
-    {
-        ["sprk_graphdriveid"] = driveId,
-        ["sprk_graphitemid"] = itemId,
-        ["@logicalName"] = "sprk_document",
-        ["sprk_documentid"] = Guid.NewGuid(),
-        ["sprk_documentname"] = name,
-        ["sprk_project"] = new EntityReference("sprk_project", P),
-        ["sprk_accesspermission"] = permission is { } p ? new OptionSetValue(p) : null,
-        ["sprk_parentdocument"] = parent is { } d ? new EntityReference("sprk_document", d) : null,
-        ["sprk_relatedcommunication"] = communication is { } c ? new EntityReference("sprk_communication", c) : null,
-    };
+        {
+            ["sprk_graphdriveid"] = driveId,
+            ["sprk_graphitemid"] = itemId,
+            ["@logicalName"] = "sprk_document",
+            ["sprk_documentid"] = Guid.NewGuid(),
+            ["sprk_documentname"] = name,
+            ["sprk_project"] = new EntityReference("sprk_project", P),
+            ["sprk_accesspermission"] = permission is { } p ? new OptionSetValue(p) : null,
+            ["sprk_parentdocument"] = parent is { } d ? new EntityReference("sprk_document", d) : null,
+            ["sprk_relatedcommunication"] = communication is { } c ? new EntityReference("sprk_communication", c) : null,
+        };
 
     /// <summary>Dataverse omits a null attribute and every attribute the executed FetchXML did not name.</summary>
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectThroughFetch(

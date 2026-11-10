@@ -102,7 +102,7 @@ public class TargetingOnlyColumnsGuardTests
     private static string AccessFilterBody(string resolverSource)
     {
         var start = resolverSource.IndexOf(AccessFilterStart, StringComparison.Ordinal);
-        start.Should().BeGreaterThanOrEqualTo(0,"the access-conferring filter is where this guard expects it");
+        start.Should().BeGreaterThanOrEqualTo(0, "the access-conferring filter is where this guard expects it");
         var end = resolverSource.IndexOf(PeopleFilterMarker, start, StringComparison.Ordinal);
         end.Should().BeGreaterThan(start, "the people-targeting section follows the access-conferring filter");
         return resolverSource[start..end];
