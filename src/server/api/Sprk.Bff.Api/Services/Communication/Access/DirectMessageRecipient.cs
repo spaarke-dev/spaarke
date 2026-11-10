@@ -109,6 +109,15 @@ internal static class DirectMessageRecipient
     }
 
     /// <summary>
+    /// <c>true</c> when <paramref name="row"/> is filed under a record: it carries a typed regarding lookup
+    /// (<see cref="RegardingFieldMap.AllRegardingFields"/>) with a non-empty id. A Message row that does not is the only kind
+    /// that can be a Direct message — the filing stamp's test below, and the outbound send's pair routing
+    /// (<c>CommunicationService.IsOutboundDirectSend</c>, task 054a piece 2b) on the row it prepared.
+    /// </summary>
+    internal static bool CarriesATypedRegarding(Entity row) =>
+        RegardingFieldMap.AllRegardingFields.Any(f => row.GetAttributeValue<EntityReference>(f) is { } er && er.Id != Guid.Empty);
+
+    /// <summary>
     /// The columns the write that files <paramref name="communicationId"/> into the thread of <paramref name="assignment"/>
     /// carries beside the thread lookup: the recipient, and the sender when the row has none. Empty for anything that is not
     /// a Direct message, and whenever the rule does not hold. Never throws, except on cancellation.
@@ -134,7 +143,7 @@ internal static class DirectMessageRecipient
             var row = await entities.RetrieveAsync(CommunicationTable, communicationId, columns.ToArray(), ct);
             if (row is null
                 || row.GetAttributeValue<OptionSetValue>(CommunicationTypeColumn)?.Value != (int)CommunicationType.Message
-                || RegardingFieldMap.AllRegardingFields.Any(f => row.GetAttributeValue<EntityReference>(f) is { } er && er.Id != Guid.Empty))
+                || CarriesATypedRegarding(row))
             {
                 return None; // not a Message, or filed under a record: not a Direct message
             }
@@ -297,22 +306,57 @@ internal static class DirectMessageRecipient
     /// </summary>
     private static async Task<bool> BothEnabledPeopleAsync(IGenericEntityService entities, Guid first, Guid second, CancellationToken ct)
     {
+        var eligibility = await ReadEligibilityAsync(entities, new[] { first, second }, ct);
+        return eligibility[first] == ParticipantEligibility.Eligible && eligibility[second] == ParticipantEligibility.Eligible;
+    }
+
+    /// <summary>
+    /// Whether each of <paramref name="systemUserIds"/> can be a Direct message's participant, in ONE read of
+    /// <c>systemuser</c>: <see cref="ParticipantEligibility.Eligible"/> only for a row that reads explicitly not disabled and
+    /// carries no <c>applicationid</c>. The rule <see cref="BothEnabledPeopleAsync"/> applies to the pair, and the outbound
+    /// pair routing (task 054a piece 2b) to the recipient it mapped. A fault of the read propagates.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, ParticipantEligibility>> ReadEligibilityAsync(
+        IGenericEntityService entities, IReadOnlyList<Guid> systemUserIds, CancellationToken ct)
+    {
         var query = new QueryExpression(SystemUserTable)
         {
             ColumnSet = new ColumnSet(IsDisabledColumn, ApplicationIdColumn),
-            TopCount = 3,
+            TopCount = systemUserIds.Count + 1,
             NoLock = true,
         };
-        query.Criteria.AddCondition("systemuserid", ConditionOperator.In, first, second);
+        query.Criteria.AddCondition("systemuserid", ConditionOperator.In, systemUserIds.Cast<object>().ToArray());
         var rows = (await entities.RetrieveMultipleAsync(query, ct))?.Entities;
-        if (rows is null)
-            return false;
 
-        var enabled = rows
-            .Where(r => r.GetAttributeValue<bool?>(IsDisabledColumn) == false)
-            .Where(r => r.GetAttributeValue<Guid?>(ApplicationIdColumn) is not { } app || app == Guid.Empty)
-            .Select(r => r.Id)
-            .ToHashSet();
-        return enabled.Contains(first) && enabled.Contains(second);
+        var result = new Dictionary<Guid, ParticipantEligibility>();
+        foreach (var id in systemUserIds)
+        {
+            var row = rows?.FirstOrDefault(r => r.Id == id);
+            result[id] = row is null
+                ? ParticipantEligibility.Missing
+                : row.GetAttributeValue<Guid?>(ApplicationIdColumn) is { } app && app != Guid.Empty
+                    ? ParticipantEligibility.ApplicationUser
+                    : row.GetAttributeValue<bool?>(IsDisabledColumn) == false
+                        ? ParticipantEligibility.Eligible
+                        : ParticipantEligibility.Disabled;
+        }
+
+        return result;
     }
+}
+
+/// <summary>What one <c>systemuser</c> read says about a Direct message's participant (<see cref="DirectMessageRecipient.ReadEligibilityAsync"/>).</summary>
+internal enum ParticipantEligibility
+{
+    /// <summary>Read explicitly not disabled, and no <c>applicationid</c>: a person who can be a participant.</summary>
+    Eligible,
+
+    /// <summary>No row for the id.</summary>
+    Missing,
+
+    /// <summary><c>isdisabled</c> is true, or not read as false.</summary>
+    Disabled,
+
+    /// <summary>The row carries an <c>applicationid</c>: an application user, never a participant.</summary>
+    ApplicationUser,
 }

@@ -49,6 +49,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IDirectThreadAccessService? _directThreadAccess;
     // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
+    // Task 054a piece 2b: the internal-user email read (the A9 licensed-user read) the outbound Direct pair routing maps its one
+    // address with; null routes nothing (today's resolver path).
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? _contactIdentities;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -115,9 +118,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
         TrackingFooterGate? trackingFooterGate = null,
-        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? contactIdentities = null)
     {
         _recordShares = recordShares;
+        _contactIdentities = contactIdentities;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -981,10 +986,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02). Unlike the email path the
             // outbound message HAS its authoritative ACS thread id (ProviderThreadId), so the messaging key
             // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
+            // Task 054a piece 2b: an outbound Direct send is filed into its pair's Direct thread when its one recipient maps
+            // to one eligible systemuser; otherwise, and on any fault of that step, the path above runs unchanged.
             if (communicationId.HasValue)
             {
-                await ResolveOutboundMessageThreadAsync(
-                    communicationId.Value, request, sendResult.ProviderThreadId, correlationId, ct);
+                await ResolveSentMessageThreadAsync(
+                    communicationId.Value, request, preparedRecord, senderParticipant.RecordId,
+                    sendResult.ProviderThreadId, correlationId, ct);
             }
 
             // Direction-symmetric enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-02).
@@ -1490,6 +1498,186 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Echo-dedup mark failed (non-fatal) for ACS message {AcsMessageId} | CorrelationId: {CorrelationId}",
                 acsMessageId, correlationId);
         }
+    }
+
+    // ── Outbound Direct pair routing (field-mapping-server-write-path-r1 task 054a piece 2b, owner 2026-11-10, option a) ──
+
+    /// <summary>Information: an outbound Direct send was not filed through its pair's Direct thread; the reason code says why.</summary>
+    internal const string PairRoutingSkippedEventCode = "direct_message.pair_routing_skipped";
+
+    /// <summary>Warning: the recipient of an outbound Direct send could not be resolved (a read faulted); today's path ran.</summary>
+    internal const string PairRoutingUnresolvedEventCode = "direct_message.pair_routing_unresolved";
+
+    /// <summary>Warning: finding or creating the pair's Direct thread faulted; today's path ran.</summary>
+    internal const string PairThreadFailedEventCode = "direct_message.pair_thread_failed";
+
+    private static readonly EventId PairRoutingSkippedEvent = new(5406, PairRoutingSkippedEventCode);
+    private static readonly EventId PairRoutingUnresolvedEvent = new(5407, PairRoutingUnresolvedEventCode);
+    private static readonly EventId PairThreadFailedEvent = new(5408, PairThreadFailedEventCode);
+
+    /// <summary>The reason codes of <see cref="PairRoutingSkippedEventCode"/>. Never an address.</summary>
+    internal static class PairRoutingSkipReason
+    {
+        /// <summary>The Direct thread access service or the internal-user email read is not composed.</summary>
+        public const string NotConfigured = "not_configured";
+
+        /// <summary>To ∪ Cc ∪ Bcc, normalized and de-duplicated, is not exactly one address.</summary>
+        public const string NotOneAddress = "not_one_address";
+
+        /// <summary>The address maps to no enabled systemuser (an external address; a disabled user's address).</summary>
+        public const string NoInternalUser = "no_internal_user";
+
+        /// <summary>The address maps to more than one enabled systemuser.</summary>
+        public const string AmbiguousAddress = "ambiguous_address";
+
+        /// <summary>The one mapped systemuser is the sender.</summary>
+        public const string RecipientIsSender = "recipient_is_sender";
+
+        /// <summary>The one mapped systemuser reads disabled.</summary>
+        public const string RecipientDisabled = "recipient_disabled";
+
+        /// <summary>The one mapped systemuser is an application user.</summary>
+        public const string RecipientApplicationUser = "recipient_application_user";
+
+        /// <summary>The one mapped systemuser has no row at the eligibility read.</summary>
+        public const string RecipientMissing = "recipient_missing";
+    }
+
+    /// <summary>
+    /// <c>true</c> for an <b>outbound Direct send</b>: a Message send that names no <see cref="SendCommunicationRequest.ThreadId"/>
+    /// and whose prepared row is filed under no record (no typed regarding lookup:
+    /// <see cref="Access.DirectMessageRecipient.CarriesATypedRegarding"/>, the same test the Direct filing stamp makes).
+    /// </summary>
+    internal static bool IsOutboundDirectSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
+        request.CommunicationType == CommunicationType.Message
+        && !request.ThreadId.HasValue
+        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
+
+    /// <summary>
+    /// The thread step of <see cref="SendMessageAsync"/> (task 054a piece 2b). An outbound Direct send
+    /// (<see cref="IsOutboundDirectSend"/>) whose one recipient resolves (<see cref="FindDirectPairThreadAsync"/>) is filed into
+    /// the pair's Direct thread through the respond path's explicit join (<see cref="AssignExplicitThreadAsync"/>: the join, the
+    /// Direct filing stamp in the same update as the thread lookup, then the grant). Every other send, and an outbound Direct
+    /// send that does not resolve, takes <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
+    /// </summary>
+    private async Task ResolveSentMessageThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, DataverseEntity preparedRecord, Guid senderSystemUserId,
+        string? acsThreadId, string correlationId, CancellationToken ct)
+    {
+        if (IsOutboundDirectSend(request, preparedRecord)
+            && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pairThreadId)
+        {
+            await AssignExplicitThreadAsync(communicationId, pairThreadId, correlationId, ct);
+            return;
+        }
+
+        await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId, correlationId, ct);
+    }
+
+    /// <summary>
+    /// The Direct thread of the pair (sender, recipient) for an outbound Direct send, or <c>null</c> for today's path. The
+    /// recipient is resolved on the server (<see cref="ResolveDirectRecipientAsync"/>); then
+    /// <see cref="IDirectThreadAccessService.FindOrCreateDirectThreadAsync"/> answers the pair's thread. Best-effort (NFR-02):
+    /// a refusal logs one Information <see cref="PairRoutingSkippedEventCode"/> with its reason, a fault resolving the
+    /// recipient one Warning <see cref="PairRoutingUnresolvedEventCode"/>, a fault of the find-or-create one Warning
+    /// <see cref="PairThreadFailedEventCode"/>; none of them fails the send. Writes nothing itself and assigns no owner.
+    /// </summary>
+    private async Task<Guid?> FindDirectPairThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, Guid senderSystemUserId, string correlationId, CancellationToken ct)
+    {
+        if (_directThreadAccess is null || _contactIdentities is null)
+            return SkipPairRouting(PairRoutingSkipReason.NotConfigured, communicationId, correlationId);
+
+        (string? SkipReason, Guid Recipient) resolved;
+        try
+        {
+            resolved = await ResolveDirectRecipientAsync(request, senderSystemUserId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairRoutingUnresolvedEvent,
+                ex,
+                "{EventCode}: the recipient of outbound Direct message {CommunicationId} could not be resolved; filed by the " +
+                "thread resolver instead | CorrelationId: {CorrelationId}",
+                PairRoutingUnresolvedEventCode, communicationId, correlationId);
+            return null;
+        }
+
+        if (resolved.SkipReason is { } reason)
+            return SkipPairRouting(reason, communicationId, correlationId);
+
+        try
+        {
+            return await _directThreadAccess.FindOrCreateDirectThreadAsync(senderSystemUserId, resolved.Recipient, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairThreadFailedEvent,
+                ex,
+                "{EventCode}: the Direct thread of outbound Direct message {CommunicationId} could not be found or created; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadFailedEventCode, communicationId, correlationId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The recipient of an outbound Direct send, by systemuser id, or the reason there is none. To ∪ Cc ∪ Bcc, each normalized
+    /// as the participant index does (<see cref="CommunicationParticipantIndexer.NormalizeAddress"/>), empty entries dropped and
+    /// duplicates counted once, must be exactly one address. It is mapped through the existing internal-user email read (the A9
+    /// licensed-user read: <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>,
+    /// decided by <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds"/>),
+    /// which must answer exactly one enabled systemuser. From there every comparison is by id: it is not the sender, and the
+    /// Direct participant rule (<see cref="Access.DirectMessageRecipient.ReadEligibilityAsync"/>) reads it enabled and not an
+    /// application user. A read that does not complete throws.
+    /// </summary>
+    private async Task<(string? SkipReason, Guid Recipient)> ResolveDirectRecipientAsync(
+        SendCommunicationRequest request, Guid senderSystemUserId, CancellationToken ct)
+    {
+        var addresses = (request.To ?? Array.Empty<string>())
+            .Concat(request.Cc ?? Array.Empty<string>())
+            .Concat(request.Bcc ?? Array.Empty<string>())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(CommunicationParticipantIndexer.NormalizeAddress)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (addresses.Count != 1)
+            return (PairRoutingSkipReason.NotOneAddress, Guid.Empty);
+
+        var lookup = await _contactIdentities!.FindEnabledSystemUsersByEmailAsync(addresses[0], ct);
+        if (lookup.Status != Sprk.Bff.Api.Infrastructure.ExternalAccess.LookupStatus.Read)
+            throw new InvalidOperationException($"The internal-user email read did not complete ({lookup.Status}).");
+
+        var matches = Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds(lookup, addresses[0]);
+        if (matches.Count == 0)
+            return (PairRoutingSkipReason.NoInternalUser, Guid.Empty);
+        if (matches.Count > 1)
+            return (PairRoutingSkipReason.AmbiguousAddress, Guid.Empty);
+
+        var recipient = matches[0];
+        if (recipient == senderSystemUserId)
+            return (PairRoutingSkipReason.RecipientIsSender, Guid.Empty);
+
+        var eligibility = await Access.DirectMessageRecipient.ReadEligibilityAsync(_genericEntityService, new[] { recipient }, ct);
+        return eligibility[recipient] switch
+        {
+            Access.ParticipantEligibility.Eligible => (null, recipient),
+            Access.ParticipantEligibility.Disabled => (PairRoutingSkipReason.RecipientDisabled, Guid.Empty),
+            Access.ParticipantEligibility.ApplicationUser => (PairRoutingSkipReason.RecipientApplicationUser, Guid.Empty),
+            _ => (PairRoutingSkipReason.RecipientMissing, Guid.Empty),
+        };
+    }
+
+    private Guid? SkipPairRouting(string reason, Guid communicationId, string correlationId)
+    {
+        _logger.LogInformation(
+            PairRoutingSkippedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} was not filed through its pair's Direct thread ({Reason}); " +
+            "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+            PairRoutingSkippedEventCode, communicationId, reason, correlationId);
+        return null;
     }
 
     /// <summary>
