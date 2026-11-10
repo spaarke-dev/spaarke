@@ -677,18 +677,34 @@ public class DirectThreadAccessServiceTests
 
     /// <summary>The content rows of <paramref name="table"/>: the read answers with the rows whose owner team and message
     /// lookup match the query's conditions, as Dataverse would.</summary>
-    private void ContentRows(string table, string messageLookup, params (Guid Id, Guid OwnerTeam)[] rows) =>
+    private void ContentRows(string table, string messageLookup, params (Guid Id, Guid OwnerTeam)[] rows)
+    {
+        foreach (var row in rows)
+            _contentOwners[row.Id] = row.OwnerTeam;
         _entityService
             .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
             {
                 object? Value(string attribute) =>
                     q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == attribute && c.Operator == ConditionOperator.Equal)?.Values.Single();
+
+                // 198 pass 2 (F1): a read of one row by its id answers its CURRENT owner (the owner read-back after a grant).
+                if (Value(table + "id") is Guid byId)
+                {
+                    return new EntityCollection(rows.Where(r => r.Id == byId)
+                        .Select(r => new Entity(table) { Id = r.Id, ["owningteam"] = new EntityReference("team", _contentOwners[r.Id]) })
+                        .ToList());
+                }
+
                 return new EntityCollection(rows
-                    .Where(r => Equals(Value("owningteam"), r.OwnerTeam) && Equals(Value(messageLookup), CommunicationId))
+                    .Where(r => Equals(Value("owningteam"), _contentOwners[r.Id]) && Equals(Value(messageLookup), CommunicationId))
                     .Select(r => new Entity(table) { Id = r.Id })
                     .ToList());
             });
+    }
+
+    /// <summary>198 pass 2 (F1): each content row's current owner team (a test re-owns one mid-grant).</summary>
+    private readonly Dictionary<Guid, Guid> _contentOwners = new();
 
     /// <summary>A Direct thread owned by <see cref="Caller"/> and shared to <see cref="Other"/>; a Direct-team-owned
     /// message with one content row per table owned by the Direct team, and one attachment owned by another team.</summary>
@@ -708,6 +724,13 @@ public class DirectThreadAccessServiceTests
         ContentRows("sprk_communicationparticipant", "sprk_communication", (ParticipantRowId, DirectTeamId));
         ContentRows("sprk_emailreviewlog", "sprk_communication", (ReviewLogRowId, DirectTeamId));
         ContentRows("sprk_document", "sprk_relatedcommunication", (DocumentRowId, DirectTeamId));
+        // 198 pass 2 (F1): the content rows' own shares (none unless a test says otherwise), read strictly before a grant.
+        foreach (var table in new[] { "sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_document" })
+        {
+            _accessGrant
+                .Setup(g => g.GetPrincipalAccessOrThrowAsync(table, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Shares());
+        }
     }
 
     private void VerifyGrant(string entitySet, Guid rowId, Guid user) =>
@@ -866,6 +889,53 @@ public class DirectThreadAccessServiceTests
         await act.Should().NotThrowAsync();
         VerifyGrant("sprk_communicationattachments", AttachmentRowId, Other);
         VerifyGrant("sprk_documents", DocumentRowId, Caller);
+    }
+
+    [Fact(DisplayName = "198 pass 2 F1 must-fire (live): a content row re-owned during its grant has THIS call's grant revoked; a share held before is kept")]
+    public async Task F1_Live_AContentRowReownedDuringItsGrant_HasThisCallsGrantRevoked_AndAPriorShareKept()
+    {
+        DirectTeamMessageWorld();
+        // Caller already reads the attachment (e.g. an earlier run); only Other is granted here.
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationattachment", AttachmentRowId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Caller));
+        // A filing into a Secure record lands between the listing and the grant's read-back: the row now has another owner.
+        _accessGrant
+            .Setup(g => g.GrantAccessAsync("sprk_communicationattachments", AttachmentRowId, It.IsAny<DataversePrincipalRef>(), "ReadAccess", It.IsAny<CancellationToken>()))
+            .Callback(() => _contentOwners[AttachmentRowId] = OtherTeamId)
+            .Returns(Task.CompletedTask);
+        var log = new CapturingLogger<DirectThreadAccessService>();
+
+        await DirectTeamSut(logger: log).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.RevokeAccessAsync("sprk_communicationattachments", AttachmentRowId, User(Other), It.IsAny<CancellationToken>()), Times.Once);
+        _accessGrant.Verify(
+            g => g.RevokeAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(Caller), It.IsAny<CancellationToken>()), Times.Never,
+            "a share Caller held before this call is not this call's to revoke");
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communicationattachments", AttachmentRowId, User(Caller), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "Caller already reads it");
+        VerifyGrant("sprk_documents", DocumentRowId, Caller);
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("retries", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "198 pass 2 F1 must-not-fire (live): content rows whose owner is unchanged are granted and nothing is revoked")]
+    public async Task F1_Live_AnUnchangedContentRowOwner_IsGranted_AndNothingIsRevoked()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        foreach (var user in new[] { Caller, Other })
+        {
+            VerifyGrant("sprk_communicationattachments", AttachmentRowId, user);
+            VerifyGrant("sprk_documents", DocumentRowId, user);
+        }
+
+        _accessGrant.Verify(
+            g => g.RevokeAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact(DisplayName = "198 C must-not-fire: an external participant is not granted when whether the message is Restricted cannot be decided")]

@@ -964,4 +964,87 @@ public class DirectMessageParticipantSharesTests
         outcome.Complete.Should().BeTrue();
         _shares.WriteLog.Should().BeEmpty();
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Pass 2, F1: a content row re-owned between its listing and its grant keeps no participant Read
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The message's attachment is re-owned to <paramref name="team"/> right after its first grant lands (a filing into a
+    /// Secure or Restricted record in between).</summary>
+    private Guid ReownAttachmentOnItsFirstGrant(IReadOnlyList<(string Table, Guid Id)> rows, Guid team)
+    {
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        _shares.AfterGrant = (_, id, _) =>
+        {
+            if (id == attachment)
+                _world.MoveOwner("sprk_communicationattachment", attachment, DataversePrincipalRef.Team(team));
+        };
+        return attachment;
+    }
+
+    [Theory(DisplayName = "198 pass 2 F1 must-fire: a content row re-owned during its grant keeps no participant Read, and the message is retried")]
+    [InlineData("secure")]
+    [InlineData("restricted")]
+    public async Task F1_Reconcile_AContentRowReownedDuringItsGrant_KeepsNoRead_AndIsRetried(string target)
+    {
+        var (message, rows) = DirectMessage();
+        var attachment = ReownAttachmentOnItsFirstGrant(rows,
+            target == "secure" ? SecureChildShareWorld.SecureTeam : SecureChildShareWorld.RestrictedContentTeam);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeFalse("its owner is no longer the Direct team");
+        Holds("sprk_communicationattachment", attachment, Other).Should().BeFalse();
+        outcome.Complete.Should().BeFalse("a mismatch is retried, never success");
+        outcome.Granted.Should().NotContain(g => g.RowId == attachment);
+        foreach (var (table, id) in rows.Where(r => r.Id != attachment))
+            Holds(table, id, Caller).Should().BeTrue($"{table} is still the Direct team's");
+    }
+
+    [Fact(DisplayName = "198 pass 2 F1 must-fire (job): a content row re-owned to Secure mid-loop keeps no Read, the run is not Ok, the next run settles")]
+    public async Task F1_Job_AContentRowReownedToSecureMidLoop_KeepsNoRead_AndTheRunIsRetried()
+    {
+        var (_, rows) = DirectMessage();
+        var attachment = ReownAttachmentOnItsFirstGrant(rows, SecureChildShareWorld.SecureTeam);
+        var job = Job();
+
+        var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+        _shares.AfterGrant = null;
+        var second = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        first.Success.Should().BeFalse("the job reports the mismatch so the message is retried");
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeFalse();
+        Holds("sprk_communicationattachment", attachment, Other).Should().BeFalse();
+        second.Success.Should().BeTrue(second.ErrorMessage);
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeFalse("the row is no longer listed as the Direct team's");
+    }
+
+    [Fact(DisplayName = "198 pass 2 F1 must-fire: a content row whose owner cannot be read back after its grant keeps no Read, and is retried")]
+    public async Task F1_Reconcile_AnUnreadableContentRowOwner_KeepsNoRead_AndIsRetried()
+    {
+        var (message, rows) = DirectMessage();
+        var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
+        _world.TransientRowReadFaultsOf("sprk_communicationattachment", attachment, _ => true);
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        _world.TransientRowReadFaultsFired("sprk_communicationattachment", attachment).Should().BeGreaterThan(0);
+        Holds("sprk_communicationattachment", attachment, Caller).Should().BeFalse("unknown is never success");
+        Holds("sprk_communicationattachment", attachment, Other).Should().BeFalse();
+        outcome.Complete.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "198 pass 2 F1 must-not-fire: content rows whose owner is unchanged are granted, nothing is revoked, and it is complete")]
+    public async Task F1_Reconcile_AnUnchangedContentRowOwner_IsGranted_AndComplete()
+    {
+        var (message, rows) = DirectMessage();
+
+        var outcome = await Reconciler198().AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue();
+        foreach (var (table, id) in rows)
+        foreach (var user in new[] { Caller, Other })
+            Holds(table, id, user).Should().BeTrue($"{table}");
+        Revokes().Should().Be(0);
+    }
 }

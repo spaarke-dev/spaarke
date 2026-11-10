@@ -157,8 +157,13 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
             _shares[key] = (existing | Mask(accessRightsCsv), NextInstant());
         });
 
+        // uac-r2 task 198 pass 2 (F1): a change landing right after a grant (e.g. a filing re-owning the row in between).
+        AfterGrant?.Invoke(entitySetName, recordId, principal);
         return Task.CompletedTask;
     }
+
+    /// <summary>uac-r2 task 198 pass 2 (F1): runs right after each grant is applied (entity set, record, principal).</summary>
+    public Action<string, Guid, DataversePrincipalRef>? AfterGrant { get; set; }
 
     public Task ModifyAccessAsync(
         string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
