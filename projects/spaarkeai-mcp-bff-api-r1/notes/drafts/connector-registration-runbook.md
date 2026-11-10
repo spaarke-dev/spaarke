@@ -42,14 +42,14 @@
 2. Open https://dev.teams.microsoft.com › Tools › **OAuth client registration** › Register client.
 3. Fill in:
    - Name: `Spaarke Copilot Connector – dev`
-   - Base URL: `https://spaarke-bff-dev.azurewebsites.net`
+   - Base URL: `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` (the full MCP URL; changed 2026-11-10 after the host-only registration failed in (c) with "The requested resource does not exist")
    - Restrict usage by org: My organization only (home tenant)
    - Restrict usage by app: Any Teams app
    - Client ID: from (a) step 2
    - Client secret: the Value from step 1
    - Authorization endpoint and token endpoint: from the table above
    - Refresh endpoint: the token endpoint
-   - Scope: `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation`
+   - Scope: `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation offline_access`
    - PKCE: on, if offered
 4. Save. Record the **OAuth client registration ID** (base64 of `{tenantId}##{guid}`; the connector needs it in step (c)) and the secret's expiry date. The portal does **not** show a redirect URI.
 5. Back in Entra, add `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` to the connector app on the **Web** platform (confidential client). If T5's sign-in fails with `AADSTS50011`, the error names the redirect actually used; add that one instead.
