@@ -63,7 +63,7 @@ public class TodoRegardingBuilderTests
     {
         var builder = CreateBuilder();
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            null!, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+            null!, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentNullException>()
             .WithParameterName("todoEntity");
     }
@@ -74,7 +74,7 @@ public class TodoRegardingBuilderTests
         var builder = CreateBuilder();
         var entity = new Entity("sprk_event"); // NOT sprk_todo
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+            entity, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>()
             .WithParameterName("todoEntity")
             .WithMessage("*sprk_todo*");
@@ -86,7 +86,7 @@ public class TodoRegardingBuilderTests
         var builder = CreateBuilder();
         var entity = new Entity("sprk_todo");
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", Guid.Empty, "Acme", CancellationToken.None);
+            entity, "sprk_matter", Guid.Empty, "Acme", ct: CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>()
             .WithParameterName("regardingId");
     }
@@ -97,7 +97,7 @@ public class TodoRegardingBuilderTests
         var builder = CreateBuilder();
         var entity = new Entity("sprk_todo");
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_unknownentity", Guid.NewGuid(), "Anything", CancellationToken.None);
+            entity, "sprk_unknownentity", Guid.NewGuid(), "Anything", ct: CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>()
             .WithParameterName("regardingEntityName")
             .WithMessage("*not a supported sprk_todo regarding parent*");
@@ -127,7 +127,7 @@ public class TodoRegardingBuilderTests
 
         // Act
         await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", matterId, "Acme Litigation", CancellationToken.None);
+            entity, "sprk_matter", matterId, "Acme Litigation", ct: CancellationToken.None);
 
         // Assert — specific lookup
         var lookupRef = entity["sprk_regardingmatter"].Should().BeOfType<EntityReference>().Subject;
@@ -164,7 +164,7 @@ public class TodoRegardingBuilderTests
 
         // Act
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+            entity, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -183,7 +183,7 @@ public class TodoRegardingBuilderTests
 
         // Act
         var act = async () => await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+            entity, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
 
         // Assert — multi-write into the same lookup is still rejected to keep callers honest
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -203,7 +203,7 @@ public class TodoRegardingBuilderTests
 
         // Act
         await builder.ApplyResolverFieldsAsync(
-            entity, "sprk_matter", matterId, "Acme", CancellationToken.None);
+            entity, "sprk_matter", matterId, "Acme", ct: CancellationToken.None);
 
         // Assert — specific lookup + 3 of 4 resolver fields populated; type left unset
         entity.Attributes.Should().ContainKey("sprk_regardingmatter");
@@ -227,7 +227,7 @@ public class TodoRegardingBuilderTests
         var id = Guid.NewGuid();
 
         // Act
-        await builder.ApplyResolverFieldsAsync(entity, "sprk_matter", id, "Acme", CancellationToken.None);
+        await builder.ApplyResolverFieldsAsync(entity, "sprk_matter", id, "Acme", ct: CancellationToken.None);
 
         // Assert — URL starts with /main.aspx (relative); no scheme, no hostname, no tenant guid
         var url = entity["sprk_regardingrecordurl"].Should().BeOfType<string>().Subject;
@@ -264,7 +264,7 @@ public class TodoRegardingBuilderTests
 
         // Act
         await builder.ApplyResolverFieldsAsync(
-            entity, parentEntityName, parentId, "Display", CancellationToken.None);
+            entity, parentEntityName, parentId, "Display", ct: CancellationToken.None);
 
         // Assert — correct specific lookup is populated
         entity.Attributes.Should().ContainKey(expectedLookupAttribute);
@@ -291,11 +291,11 @@ public class TodoRegardingBuilderTests
             _commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
 
         var first = new Entity("sprk_todo");
-        var act = async () => await builder.ApplyResolverFieldsAsync(first, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+        var act = async () => await builder.ApplyResolverFieldsAsync(first, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
         await act.Should().ThrowAsync<TimeoutException>("a fault is not an answer; the caller does not create the to-do");
 
         var second = new Entity("sprk_todo");
-        await builder.ApplyResolverFieldsAsync(second, "sprk_matter", Guid.NewGuid(), "Acme", CancellationToken.None);
+        await builder.ApplyResolverFieldsAsync(second, "sprk_matter", Guid.NewGuid(), "Acme", ct: CancellationToken.None);
 
         second["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId,
             "the fault was not cached as \"no row\": the healthy read types the pair");
@@ -316,11 +316,11 @@ public class TodoRegardingBuilderTests
             _commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
 
         var first = new Entity("sprk_todo");
-        await builder.ApplyResolverFieldsAsync(first, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        await builder.ApplyResolverFieldsAsync(first, "sprk_communication", Guid.NewGuid(), "Mail", ct: CancellationToken.None);
         var second = new Entity("sprk_todo");
-        await builder.ApplyResolverFieldsAsync(second, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        await builder.ApplyResolverFieldsAsync(second, "sprk_communication", Guid.NewGuid(), "Mail", ct: CancellationToken.None);
         var third = new Entity("sprk_todo");
-        await builder.ApplyResolverFieldsAsync(third, "sprk_communication", Guid.NewGuid(), "Mail", CancellationToken.None);
+        await builder.ApplyResolverFieldsAsync(third, "sprk_communication", Guid.NewGuid(), "Mail", ct: CancellationToken.None);
 
         first.Attributes.Should().NotContainKey("sprk_regardingrecordtype", "no row: untyped");
         second["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(recordTypeId, "the row appeared: the miss was not remembered");
@@ -339,10 +339,10 @@ public class TodoRegardingBuilderTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
         var builder = CreateBuilder();
 
-        var act = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", cts.Token);
+        var act = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        var again = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", cts.Token);
+        var again = async () => await builder.ApplyResolverFieldsAsync(new Entity("sprk_todo"), "sprk_matter", Guid.NewGuid(), "Acme", ct: cts.Token);
         await again.Should().ThrowAsync<OperationCanceledException>("a cancelled read is asked again, never answered from the cache");
     }
 }

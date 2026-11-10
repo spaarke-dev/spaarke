@@ -224,6 +224,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public async Task FieldMappingPush_AnInvoiceGivenASecondCoreRecord_IsRefusedByCodeOnly_AndNothingIsWritten()
     {
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, new StampWorld().Restamper, [ProjectRule],
             new Dictionary<string, object?> { ["sprk_project"] = Project },
             "sprk_invoice", [Invoice], Caller, NullLogger.Instance, CancellationToken.None,
@@ -252,6 +253,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         };
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [rule], new Dictionary<string, object?> { ["sprk_regardingmatter"] = Matter },
             "sprk_event", [Event], Caller, NullLogger.Instance, CancellationToken.None,
             appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);

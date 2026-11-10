@@ -324,7 +324,6 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
           dataService={dataService}
           onComplete={onComplete}
           resolveSpeContainerId={resolveSpeContainerId}
-          resolveUserBuDefaults={resolveUserBuDefaults}
           tenantId={tenantId}
           initialFormValues={projectValues}
           initialFileRefs={initialFileRefs}

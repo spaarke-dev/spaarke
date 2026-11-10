@@ -63,6 +63,16 @@ public abstract record CustomerBusinessUnitOutcome
     /// </summary>
     public sealed record WrongParent(Guid BusinessUnitId, Guid? ParentId, Guid RootBusinessUnitId) : CustomerBusinessUnitOutcome;
 
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name IS a reserved unit (the Secure Record unit): its id equals the id
+    /// Dataverse resolves for <paramref name="ReservedUnitName"/>. Dataverse matches names without case or accents, so a
+    /// name that differs from the reserved one only that way lands on it. No user was placed in it by this call;
+    /// <paramref name="CreatedByThisCall"/>: this call created it (fresh stamp — the name collides with a reserved name, and
+    /// the unit is empty).
+    /// </summary>
+    public sealed record IsReservedUnit(Guid BusinessUnitId, string ReservedUnitName, bool CreatedByThisCall = false)
+        : CustomerBusinessUnitOutcome;
+
     /// <summary>A read or the create failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
     public sealed record Failure(string Diagnostic) : CustomerBusinessUnitOutcome;
 }
@@ -128,10 +138,14 @@ public interface IDataverseAppUserCreator
     /// <summary>
     /// T259 (ISS-010, INCOMING-145 §6 T1): finds the business unit named <paramref name="name"/> directly under the root,
     /// or creates it there. Read-then-write: an ambiguous name or a unit of that name under another parent writes nothing.
+    /// The found unit's ID is compared with the units Dataverse resolves for <paramref name="reservedUnitNames"/> — never the
+    /// names in code (Dataverse matches names without case or accents) — on the found, ambiguous AND just-created unit; a
+    /// match is <see cref="CustomerBusinessUnitOutcome.IsReservedUnit"/> and places no user. Any read fault is a Failure.
     /// </summary>
     Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
         string environmentUrl,
         string tenantId,
         string name,
+        IReadOnlyCollection<string> reservedUnitNames,
         CancellationToken cancellationToken);
 }

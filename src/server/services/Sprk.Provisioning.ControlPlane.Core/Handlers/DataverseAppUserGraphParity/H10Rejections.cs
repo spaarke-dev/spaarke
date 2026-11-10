@@ -168,6 +168,13 @@ public static class H10Rejections
     /// </summary>
     public const string CustomerBusinessUnitWrongParent = "h10-customer-bu-wrong-parent";
 
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name is the Secure Record unit (same business-unit id): Dataverse
+    /// matches names without case or accents, so a name that differs only that way lands on it. H10 never places the BFF's
+    /// users there; the run needs a different customer name (QuarantineRequired — nothing was written).
+    /// </summary>
+    public const string CustomerBusinessUnitIsReserved = "h10-customer-bu-is-reserved";
+
     /// <summary>Reading or creating the customer's business unit failed (Resumable — find-then-create is idempotent).</summary>
     public const string CustomerBusinessUnitFailed = "h10-customer-bu-failed";
 

@@ -132,6 +132,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 }
 
                 var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                     _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
                     NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
                 if (failed == 0)

@@ -781,6 +781,10 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
   const [checkedIds, setCheckedIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [batchToolId, setBatchToolId] = React.useState<string | null>(null);
   const [capConfirmPending, setCapConfirmPending] = React.useState<readonly string[] | null>(null);
+  // The confirm Dialog stays mounted and closes with open={false}: a modal Dialog unmounted while open leaves the
+  // editor behind it aria-hidden for good (#2658). The last count keeps its text steady while it closes.
+  const capConfirmCount = React.useRef(0);
+  if (capConfirmPending) capConfirmCount.current = capConfirmPending.length;
 
   const toggleChecked = React.useCallback((threadId: string): void => {
     setCheckedIds(prev => {
@@ -1166,36 +1170,37 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
       </div>
       {/* Task 041 (FR-11) — soft-cap confirm. Fires only on Run when the selection exceeds
           BATCH_NOTE_TOOL_SOFT_CAP; the "select all" click itself never confirms (only Run does). */}
-      {capConfirmPending ? (
-        <Dialog open onOpenChange={(_e, data) => (!data.open ? handleCapConfirmCancel() : undefined)}>
-          <DialogSurface data-testid="compose-comment-gutter-batch-cap-confirm">
-            <DialogBody>
-              <DialogTitle>Run on {capConfirmPending.length} notes?</DialogTitle>
-              <DialogContent>
-                <Text className={styles.capConfirmBody}>
-                  {`${capConfirmPending.length} notes — this will run sequentially and may take a while.`}
-                </Text>
-              </DialogContent>
-              <DialogActions>
-                <Button
-                  appearance="secondary"
-                  onClick={handleCapConfirmCancel}
-                  data-testid="compose-comment-gutter-batch-cap-confirm-cancel"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  appearance="primary"
-                  onClick={handleCapConfirmContinue}
-                  data-testid="compose-comment-gutter-batch-cap-confirm-continue"
-                >
-                  Run anyway
-                </Button>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-      ) : null}
+      <Dialog
+        open={capConfirmPending !== null}
+        onOpenChange={(_e, data) => (!data.open ? handleCapConfirmCancel() : undefined)}
+      >
+        <DialogSurface data-testid="compose-comment-gutter-batch-cap-confirm">
+          <DialogBody>
+            <DialogTitle>Run on {capConfirmCount.current} notes?</DialogTitle>
+            <DialogContent>
+              <Text className={styles.capConfirmBody}>
+                {`${capConfirmCount.current} notes — this will run sequentially and may take a while.`}
+              </Text>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                onClick={handleCapConfirmCancel}
+                data-testid="compose-comment-gutter-batch-cap-confirm-cancel"
+              >
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={handleCapConfirmContinue}
+                data-testid="compose-comment-gutter-batch-cap-confirm-continue"
+              >
+                Run anyway
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </>
   );
 }

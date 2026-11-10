@@ -752,11 +752,11 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed()
+    public async Task ATeamOwnedSource_WhenTheSecureTeamIsSetUpButMissing_CopiesNothing_FailClosed()
     {
-        // Review pass 3: with no Secure Record owner team to compare against, the source's team owner cannot be told
-        // not to be it.
-        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        // Review pass 3, task 022 fix round 6: the Secure Record business unit exists but holds no named owner team, so the
+        // source's team owner cannot be told not to be it.
+        _world.ShareWorld = () => SecureChildShareWorld.Standard().Remove("team", SecureChildShareWorld.SecureTeam);
         var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
         var id = EventOwnedByThePersonUnder(source);
 
@@ -764,6 +764,34 @@ public sealed class RecordRepairModeTests
 
         NothingSecretWasWritten();
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task ATeamOwnedUnflaggedSource_WithNoSecureRecordSetUp_IsCopied()
+    {
+        // Task 022 fix round 6: an environment with no Secure Record business unit has no team that can own a secure record,
+        // so an unflagged team-owned source is ordinary.
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Ordinary Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Values).OfType<string>().Should().Contain("Ordinary Client");
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task AFlaggedSource_WithNoSecureRecordSetUp_IsStillNotCopied()
+    {
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: true, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
     }
 
     [Fact]
@@ -1046,6 +1074,34 @@ public sealed class RecordRepairModeTests
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_assignedlawfirm1",
             "an Assigned outside-counsel value is a Collaborate grant (AssignedAccessMaterializer)");
         Field(outcome, RecordRepairPart.Mapping, "sprk_assignedlawfirm1").ReasonCode.Should().Be(RecordRepairReason.MappedValueAssignsAccess);
+    }
+
+    /// <summary>
+    /// Task 032b-1 (review): an invoice's display copies (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>) left the
+    /// access registry, so Repair's never-map list names them itself, with their own reason: Repair never re-fills a display
+    /// copy (the create alone sets it). Asked directly: an invoice row is refused before the mapping step today (#1911), which
+    /// would mask the list.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_assignedtoattorney1")]
+    [InlineData("sprk_assignedtoattorney2")]
+    [InlineData("sprk_assignedtoparalegal1")]
+    [InlineData("sprk_assignedtoparalegal2")]
+    public void AnInvoiceDisplayCopy_IsNeverMappedByRepair_WithItsOwnReason(string column)
+    {
+        _world.ColumnsRepairNeverMaps("sprk_invoice").Should().Contain(column, RecordRepairReason.MappedValueIsDisplayCopy);
+    }
+
+    [Fact]
+    public void ADisplayCopyName_OnAnotherTable_OrAPlainInvoiceColumn_IsNotADisplayCopy_MustNotFire()
+    {
+        var invoice = _world.ColumnsRepairNeverMaps("sprk_invoice");
+        invoice.Should().NotContainKeys("sprk_clientreference", "sprk_assignedto1", "sprk_assignedto2");
+
+        var eventColumns = _world.ColumnsRepairNeverMaps("sprk_event");
+        eventColumns.Should().NotContainKey("sprk_assignedtoattorney1");
+        eventColumns.Should().Contain("sprk_assignedattorney1", RecordRepairReason.MappedValueAssignsAccess,
+            "the registry's columns keep their own reason");
     }
 
     [Fact]
@@ -1347,6 +1403,9 @@ internal sealed class RepairWorld
     public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
 
     public Task<RecordRepairOutcome> RepairAsync(string table, Guid id) => Service().RepairAsync(table, id, CancellationToken.None);
+
+    /// <summary>Task 032b-1 seam: Repair's never-map list for a table, asked directly (no row, no profile).</summary>
+    public IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table) => Service().ColumnsRepairNeverMaps(table);
 
     // ── Rows ────────────────────────────────────────────────────────────────────────────────────────────────────
 

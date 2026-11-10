@@ -1279,7 +1279,7 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
         payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
         payload["sprk_regardingrecordid"] = core.Id.ToString("D");
         if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
-        if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
+        if (core.RecordTypeRefId is { } typeRef) payload[$"{OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(Table)}@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
         return null;
     }
 

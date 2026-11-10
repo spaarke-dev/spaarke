@@ -587,6 +587,17 @@ public sealed class SecureRecordSetupProcedure
 
         // S1 + §6 T2 — the unit, exactly one, a DIRECT child of the root (a sibling of the customer's unit).
         var units = await dv.FindBusinessUnitsByNameAsync(t, set.BusinessUnitName, ct).ConfigureAwait(false);
+        var customerAmongUnits = units.FirstOrDefault(u => u.Id == request.CustomerBusinessUnitId);
+        if (units.Count > 1 && customerAmongUnits is not null)
+        {
+            // Two units answer the Secure Record name and one is the customer's: report the real cause, not "rename one".
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit,
+                $"Dataverse finds {units.Count} business units for the Secure Record name '{set.BusinessUnitName}' " +
+                $"({Ids(units.Select(u => u.Id))}), and one is the customer's own unit ({customerAmongUnits.Id}, " +
+                $"'{customerAmongUnits.Name}', recorded by H10): Dataverse matches business-unit names without case or " +
+                "accents, so the customer's display name collides with the Secure Record name. Renaming a unit or moving its " +
+                "users is an owner decision. Nothing was written.");
+        }
         if (units.Count > 1)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.BusinessUnitAmbiguous,
@@ -594,6 +605,21 @@ public sealed class SecureRecordSetupProcedure
                 "refuses an ambiguous Secure Record unit (task 144); rename or remove the extra one. Nothing was written.");
         }
         var unit = units.Count == 1 ? units[0] : null;
+
+        // S1 — by ID, never by name in code: Dataverse's `name eq` ignores case AND accents, so on a stamp where H10 created
+        // the customer's unit under a name that differs from the Secure Record name only that way, the lookup above finds
+        // the CUSTOMER's unit. H10's own id check cannot catch this (the Secure Record unit did not exist yet when it ran):
+        // this is the backstop for that case — keep it alongside H10's. S2 would refuse too, but naming the wrong cause.
+        if (unit is not null && unit.Id == request.CustomerBusinessUnitId)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit,
+                $"The business unit Dataverse finds for the Secure Record name '{set.BusinessUnitName}' is the customer's own " +
+                $"unit ({unit.Id}, '{unit.Name}', recorded by H10): Dataverse matches business-unit names without case or " +
+                "accents, so the customer's display name collides with the Secure Record name. The customer's unit holds the " +
+                "BFF's users and can never be the Secure Record unit; renaming a unit or moving its users is an owner " +
+                "decision. Nothing was written.");
+        }
+
         if (unit is not null && unit.ParentId != root.Id)
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitWrongParent,
