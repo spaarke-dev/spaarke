@@ -191,7 +191,9 @@ public sealed class BillingRuleDraftSeamTests
         // Refused, not dropped: the 99-hour cap (schema) and the rate rule with a parameter its type lacks; plus the model's own entry.
         var marker = rig.Store.Row(ProcedureEntity.VersionEntity, rig.Target.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn);
         rig.Store.Row(ProcedureEntity.VersionEntity, rig.Target.Version).GetAttributeValue<bool>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
-        using var list = JsonDocument.Parse(marker);
+        // Fix round 2 (F2): the column holds the envelope naming the drafted-from file; the list is inside it.
+        RuleSetService.ParseStoredNotConverted(marker).DraftedFromFileId.Should().NotBeNull();
+        using var list = JsonDocument.Parse(RuleSetService.ParseStoredNotConverted(marker).ListText!);
         var entries = list.RootElement.EnumerateArray().ToList();
         entries.Select(e => e.GetProperty("text").GetString()).Should().BeEquivalentTo(
             "9.3 Staff sensibly.",

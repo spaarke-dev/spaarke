@@ -343,7 +343,7 @@ public class RateCardImportService
                     request.Caller, request.CallerBearerToken, StoredFilePurpose.ProcedureSource,
                     new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), SourceFileName(request.Name),
                     XlsxMimeType, content, ct,
-                    parentStillAccepts: token => ProcedureService.ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, token));
+                    parentStillAccepts: token => ProcedureService.RecheckDraftAfterNewFileAsync(_entities, versionId, _logger, token));
             }
 
             if (!stored.IsCreated)

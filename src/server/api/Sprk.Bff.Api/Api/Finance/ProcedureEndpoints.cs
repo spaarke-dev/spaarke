@@ -422,7 +422,7 @@ public static class ProcedureEndpoints
                 http.User, TokenHelper.ExtractBearerTokenOrNull(http), StoredFilePurpose.ProcedureSource,
                 new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), fileName,
                 RuleSetService.MimeTypeOf(fileName), content, ct,
-                parentStillAccepts: token => procedures.ResetDraftedStateIfDraftAsync(versionId, token));
+                parentStillAccepts: token => procedures.RecheckDraftAfterNewFileAsync(versionId, token));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

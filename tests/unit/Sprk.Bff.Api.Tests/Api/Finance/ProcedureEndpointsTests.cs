@@ -80,6 +80,7 @@ public sealed class ProcedureEndpointsTests
         BillingAdminAuthorization.WriteRuleSetPrivilege, BillingAdminAuthorization.CreatePolicyVersionPrivilege,
         BillingAdminAuthorization.WritePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyPrivilege,
         BillingAdminAuthorization.CreatePolicyPrivilege, // task 116: the /draft route (DraftRules)
+        BillingAdminAuthorization.DeletePolicyPrivilege, BillingAdminAuthorization.DeletePolicyVersionPrivilege, // 116 fix round 2: /draft removes earlier drafts
     };
 
     internal sealed class Host : IAsyncDisposable
@@ -607,6 +608,7 @@ public sealed class ProcedureEndpointsTests
         host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Done(new ProcedureVersionView(VersionId, 1, "Draft", null, null, null)));
         host.Service.Setup(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        host.Service.Setup(s => s.RecheckDraftAfterNewFileAsync(VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
     }
 
     /// <summary>A request body that throws the server's 413 on its first read (what Kestrel does past the route's body cap).</summary>
@@ -630,10 +632,12 @@ public sealed class ProcedureEndpointsTests
     private static StoredFileStatus Status(Host host, Guid id) =>
         (StoredFileStatus)host.Files.Dataverse.Rows[id].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value;
 
-    [Theory(DisplayName = "116 must-fire: /draft needs every DraftRules privilege (the rule set marker and Create on both policy tables)")]
+    [Theory(DisplayName = "116 must-fire: /draft needs every DraftRules privilege (the rule set marker and Create on both policy tables) and, fix round 2, Delete on both policy tables")]
     [InlineData(BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData(BillingAdminAuthorization.CreatePolicyPrivilege)]
     [InlineData(BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
+    [InlineData(BillingAdminAuthorization.DeletePolicyPrivilege)]
+    [InlineData(BillingAdminAuthorization.DeletePolicyVersionPrivilege)]
     public async Task Draft_WithoutADraftRulesPrivilege_Is403_AndReachesNothing(string missing)
     {
         await using var host = await Host.StartAsync();
@@ -642,7 +646,25 @@ public sealed class ProcedureEndpointsTests
         var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.VerifyNothingReached();
+        host.VerifyNothingReached(); // nothing read, nothing removed, nothing queued
+    }
+
+    [Fact(DisplayName = "116 fix 2 must-fire: /draft asks Delete on both policy tables as the caller, right after the Create checks")]
+    public async Task Draft_AsksDeleteOnBothPolicyTables_AsTheCaller_AfterTheCreateChecks()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "with Create and Delete on both tables the route proceeds");
+        var asked = host.Probe.Calls.Where(c => c.HasToken).Select(c => c.Privilege).ToList();
+        asked.Should().ContainInOrder(
+            BillingAdminAuthorization.CreatePolicyPrivilege, BillingAdminAuthorization.CreatePolicyVersionPrivilege,
+            BillingAdminAuthorization.DeletePolicyPrivilege, BillingAdminAuthorization.DeletePolicyVersionPrivilege);
     }
 
     [Fact(DisplayName = "116 must-not-fire: /draft with Write on the Procedure and the DraftRules privileges queues the version's job (202, Location = the rule set read)")]
@@ -946,11 +968,17 @@ public sealed class ProcedureEndpointsTests
                 order.Add(host.Files.Gateway.StorageCalls == 0 ? "reset-before-staging" : "reset-after-staging");
                 return true;
             });
+        host.Service.Setup(s => s.RecheckDraftAfterNewFileAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add(host.Files.Gateway.StorageCalls == 0 ? "recheck-before-staging" : "recheck-after-staging");
+                return true;
+            });
 
         var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        order.Should().Equal("reset-before-staging", "reset-after-staging");
+        order.Should().Equal("reset-before-staging", "recheck-after-staging");
     }
 
     [Fact(DisplayName = "116 fix 1 (A2) must-fire: PUT /file whose drafted-state reset fails is 500 and stages and stores nothing")]
@@ -978,8 +1006,9 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync();
         TheVersionIsADraft(host);
-        host.Service.SetupSequence(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true)    // before staging: still a Draft
+        host.Service.Setup(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);   // before staging: still a Draft
+        host.Service.Setup(s => s.RecheckDraftAfterNewFileAsync(VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);  // once the new file is Servable: published meanwhile
         var earlier = Guid.NewGuid();
         host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);

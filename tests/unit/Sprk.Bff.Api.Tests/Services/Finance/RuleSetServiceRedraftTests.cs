@@ -102,8 +102,8 @@ public sealed class RuleSetServiceRedraftTests
 
     // ── A2: the reset ────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "116 fix 1 (A2): resetting a drafted Draft writes the marker No FIRST, then clears the list")]
-    public async Task Reset_ADraftedDraft_MarkerNoFirst_ThenTheListCleared()
+    [Fact(DisplayName = "116 fix 2 (K): the first reset of a drafted Draft writes ONLY the marker No; the list stays (hidden under No)")]
+    public async Task Reset_ADraftedDraft_WritesOnlyTheMarkerNo()
     {
         var h = new Harness();
         var d = h.DraftVersion(drafted: true, notConvertedList: "[]");
@@ -113,10 +113,43 @@ public sealed class RuleSetServiceRedraftTests
 
         draft.Should().BeTrue();
         h.Writes.Select(w => (w.Entity, string.Join(",", w.Fields.Keys))).Should().Equal(
+            (ProcedureEntity.VersionEntity, RuleSetService.VersionDraftedColumn));
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeFalse();
+        Version(h, d.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn).Should().Be("[]");
+    }
+
+    [Fact(DisplayName = "116 fix 2: the re-check once the new file is Servable writes the marker No FIRST (a run marked it meanwhile), then clears the list")]
+    public async Task Recheck_ADraftedDraft_MarkerNoFirst_ThenTheListCleared()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion(drafted: true, notConvertedList: "[]");
+        h.Writes.Clear();
+
+        var draft = await ProcedureService.RecheckDraftAfterNewFileAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None);
+
+        draft.Should().BeTrue();
+        h.Writes.Select(w => (w.Entity, string.Join(",", w.Fields.Keys))).Should().Equal(
             (ProcedureEntity.VersionEntity, RuleSetService.VersionDraftedColumn),
             (ProcedureEntity.VersionEntity, RuleSetService.VersionNotConvertedListColumn));
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeFalse();
-        Version(h, d.Version).Contains(RuleSetService.VersionNotConvertedListColumn).Should().BeFalse();
+        Version(h, d.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn).Should().Be(RuleSetService.ClearedNotConverted);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (K) must-fire: a version published between the first reset and the re-check keeps its list; the re-check refuses and writes nothing")]
+    public async Task Recheck_AVersionPublishedAfterTheFirstReset_KeepsItsList()
+    {
+        var h = new Harness();
+        const string List = """[{"text":"Staff sensibly.","reason":"Nothing to check."}]""";
+        var d = h.DraftVersion(drafted: true, notConvertedList: List);
+
+        (await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None)).Should().BeTrue();
+        Version(h, d.Version)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive); // a publish lands
+        h.Writes.Clear();
+        var stillDraft = await ProcedureService.RecheckDraftAfterNewFileAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None);
+
+        stillDraft.Should().BeFalse();
+        h.Writes.Should().BeEmpty();
+        Version(h, d.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn).Should().Be(List, "the published version's list survives");
     }
 
     [Theory(DisplayName = "116 fix 1 (A2) must-not-fire: a never-drafted Draft is not written; a version that is not a Draft is refused and not written")]
@@ -137,8 +170,10 @@ public sealed class RuleSetServiceRedraftTests
         h.Writes.Clear();
 
         var draft = await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None);
+        var recheck = await ProcedureService.RecheckDraftAfterNewFileAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None);
 
         draft.Should().Be(expectedDraft);
+        recheck.Should().Be(expectedDraft);
         h.Writes.Should().BeEmpty();
     }
 
@@ -243,7 +278,7 @@ public sealed class RuleSetServiceRedraftTests
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().NotBe(true);
         Version(h, d.Version).Contains(RuleSetService.VersionNotConvertedListColumn).Should().BeFalse();
         h.Writes.Where(w => w.Entity == ProcedureEntity.VersionEntity).Select(w => (w.Fields.Keys.Single(), w.Fields.Values.Single())).Should().Equal(
-            (RuleSetService.VersionNotConvertedListColumn, (object)"[]"),
+            (RuleSetService.VersionNotConvertedListColumn, (object)RuleSetService.StoredNotConvertedOf(d.File, "[]")),
             (RuleSetService.VersionDraftedColumn, true),
             (RuleSetService.VersionDraftedColumn, false),
             (RuleSetService.VersionNotConvertedListColumn, DBNull.Value));
@@ -257,6 +292,168 @@ public sealed class RuleSetServiceRedraftTests
         var d = h.DraftVersion();
 
         var outcome = await h.Service().AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
+    }
+
+    // ── Fix round 2 (F2): "drafted" is the marker Yes AND the list's drafted-from file is the version's one Servable source file ──
+
+    private static string StoredList(Harness h, Guid version) => Version(h, version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn);
+
+    /// <summary>After a fault point: the version reads as not drafted with the NEW file, and a retry drafts that file and is marked for it.</summary>
+    private static async Task TheRetryDraftsTheNewFile(Harness h, RuleSetService service, Guid version, Guid replacement)
+    {
+        var found = await service.GetDraftSourceAsync(version, CancellationToken.None);
+        found.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        found.Value!.AlreadyDrafted.Should().BeFalse("a Yes for a replaced file is stale: the version can be drafted again (/draft does not answer 409)");
+        found.Value.FileId.Should().Be(replacement);
+
+        (await service.RemoveUntouchedDraftsAsync(version, replacement, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var retry = await service.AddDraftsAsync(version, replacement, new[] { Cap(12) }, None, CallerOid, CancellationToken.None);
+
+        retry.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        Version(h, version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
+        RuleSetService.ParseStoredNotConverted(StoredList(h, version)).DraftedFromFileId.Should().Be(replacement);
+        h.Rows["sprk_policy"].Should().ContainSingle("the earlier file's drafts are cleared; only the retry's rule remains");
+        (await service.GetDraftSourceAsync(version, CancellationToken.None)).Value!.AlreadyDrafted.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2) must-fire: the re-read after the marker faults: handled as changed (marker taken back, 503 source_changed); the new file is drafted on retry")]
+    public async Task FaultPoint_TheCheckAfterTheMarkerThrows_IsChanged_AndTheRetryDraftsTheNewFile()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        var replacement = Guid.Empty;
+        var storedFileReads = 0;
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName == StoredFileSchema.Entity && ++storedFileReads == 2)
+            {
+                h.AfterQuery = null;
+                replacement = ReplaceFile(h, d.Version, d.File); // the upload lands; the run's re-read then faults
+                throw new InvalidOperationException("simulated Dataverse 503");
+            }
+        };
+
+        var outcome = await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(503);
+        outcome.ErrorCode.Should().Be(RuleSetService.CodeSourceChanged);
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().NotBe(true, "the marker is taken back");
+        await TheRetryDraftsTheNewFile(h, service, d.Version, replacement);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2) must-fire: the take-back write fails (swallowed): the Yes stays for the OLD file, reads as not drafted, and the retry drafts the new file")]
+    public async Task FaultPoint_TheTakeBackFails_TheStaleYesIsNotDrafted_AndTheRetryDraftsTheNewFile()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        var replacement = Guid.Empty;
+        var storedFileReads = 0;
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName != StoredFileSchema.Entity)
+            {
+                return;
+            }
+
+            if (++storedFileReads == 1)
+            {
+                replacement = ReplaceFile(h, d.Version, d.File); // lands right after the run's first check
+            }
+            else if (storedFileReads == 2)
+            {
+                h.AfterQuery = null;
+                h.FailUpdateFor = e => e == ProcedureEntity.VersionEntity; // the re-read after the marker saw it; the take-back's writes fail
+            }
+        };
+
+        var outcome = await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None);
+        h.FailUpdateFor = null;
+
+        outcome.ErrorCode.Should().Be(RuleSetService.CodeSourceChanged);
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue("the take-back did not land");
+        RuleSetService.ParseStoredNotConverted(StoredList(h, d.Version)).DraftedFromFileId.Should().Be(d.File);
+        await TheRetryDraftsTheNewFile(h, service, d.Version, replacement);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2) must-fire: the host stops after the marker and the upload's re-check saw No: the stale Yes is not drafted, and the retry drafts the new file")]
+    public async Task FaultPoint_StoppedAfterTheMarker_TheStaleYesIsNotDrafted_AndTheRetryDraftsTheNewFile()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        (await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        // The upload flipped its new file Servable while the run had passed its first check; its resets saw No and wrote nothing; the run's
+        // marker landed and the host stopped before the re-read.
+        var replacement = ReplaceFile(h, d.Version, d.File);
+
+        (await service.GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted.Should().BeNull("the rule set read hides a stale Yes's list");
+        await TheRetryDraftsTheNewFile(h, service, d.Version, replacement);
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2) must-not-fire: a list with no file id (the earlier bare-list shape) under Yes is drafted as before, whatever the files are now")]
+    public async Task Legacy_ABareListUnderYes_IsDraftedAsBefore()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion(drafted: true, notConvertedList: """[{"text":"Staff sensibly.","reason":"Nothing to check."}]""");
+        ReplaceFile(h, d.Version, d.File);
+        var service = h.Service();
+
+        (await service.GetDraftSourceAsync(d.Version, CancellationToken.None)).Value!.AlreadyDrafted.Should().BeTrue();
+        (await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None)).ErrorCode
+            .Should().Be(RuleSetService.CodeAlreadyDrafted);
+        (await service.GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted!.ToJsonString().Should().Contain("Staff sensibly.");
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2): the run writes the list as an envelope naming its file; the rule set read returns the bare list (client contract unchanged)")]
+    public async Task AddDrafts_WritesTheEnvelope_AndTheReadReturnsTheBareList()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+
+        await h.Service().AddDraftsAsync(d.Version, d.File, new[] { Increment() }, new[] { new NotConvertedClause("Staff sensibly.", null, "Nothing to check.") },
+            CallerOid, CancellationToken.None);
+
+        var stored = RuleSetService.ParseStoredNotConverted(StoredList(h, d.Version));
+        stored.IsEnvelope.Should().BeTrue();
+        stored.DraftedFromFileId.Should().Be(d.File);
+        var shown = (await h.Service().GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted!;
+        shown.Should().BeOfType<System.Text.Json.Nodes.JsonArray>("the client reads the list, never the envelope");
+        shown.AsArray().Single()!["text"]!.GetValue<string>().Should().Be("Staff sensibly.");
+    }
+
+    [Fact(DisplayName = "116 fix 2 (F2) must-fire: an envelope that names no file (the re-check's clear) under Yes is not drafted")]
+    public async Task ClearedEnvelopeUnderYes_IsNotDrafted()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion(drafted: true, notConvertedList: RuleSetService.ClearedNotConverted);
+
+        (await h.Service().GetDraftSourceAsync(d.Version, CancellationToken.None)).Value!.AlreadyDrafted.Should().BeFalse();
+        (await h.Service().GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "116 fix 2 must-fire: the marker is written on CancellationToken.None: a run cancelled after its list is written still marks the version")]
+    public async Task AddDrafts_CancelledAfterTheList_StillWritesTheMarker()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        using var cts = new CancellationTokenSource();
+        h.FailUpdateFor = e =>
+        {
+            if (e == ProcedureEntity.VersionEntity)
+            {
+                cts.Cancel(); // the request goes away while the list is written
+            }
+
+            return false;
+        };
+
+        var outcome = await h.Service().AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, cts.Token);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();

@@ -286,6 +286,17 @@ public class RuleSetService
     /// highest-numbered version.</summary>
     internal const string VersionNotConvertedListColumn = "sprk_notconvertedlist";
 
+    /// <summary>
+    /// Fix round 2 (F2): the server-internal shape of <see cref="VersionNotConvertedListColumn"/> a run writes when it knows the file it drafted
+    /// from: <c>{"draftedFromFileId": "&lt;Stored File id&gt;", "notConverted": [ ... ]}</c>. It is written FIRST, so the drafted-from file is
+    /// on the row before the marker is. The client contract (<see cref="RuleSetDetail.NotConverted"/>) is still the bare list: every reader
+    /// unwraps it (<see cref="ParseStoredNotConverted"/>). A bare list (the earlier shape) carries no file id.
+    /// </summary>
+    internal const string EnvelopeFileIdProperty = "draftedFromFileId";
+
+    /// <summary>The list inside the envelope (<see cref="EnvelopeFileIdProperty"/>).</summary>
+    internal const string EnvelopeListProperty = "notConverted";
+
     internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
     internal const string CodeSystemRule = "ruleset.system_rule";
     internal const string CodePublishInProgress = "ruleset.publish_in_progress";
@@ -496,6 +507,8 @@ public class RuleSetService
     /// columns are pinned (the version's Procedure is re-checked on the row, so a query that lost its filter cannot answer for another
     /// Procedure). Fix round 1: the list is returned only under the drafted marker (Yes): a run writes the list first and the marker last, so a
     /// list without the marker is a run that has not finished (or a reset in progress), and the client contract says null until a run finishes.
+    /// Fix round 2 (F2): "finished" is <see cref="IsDraftedAsync"/> (a Yes whose envelope names a file that is no longer the version's one
+    /// Servable source file is a stale Yes, so null), and the list returned is the envelope's list, never the envelope.
     /// </summary>
     private async Task<string?> LatestVersionNotConvertedAsync(Guid procedureId, CancellationToken ct)
     {
@@ -509,10 +522,93 @@ public class RuleSetService
         query.Orders.Add(new OrderExpression(ProcedureEntity.VersionNumberColumn, OrderType.Descending));
         var latest = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
             .FirstOrDefault(v => v.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id == procedureId);
-        return latest?.GetAttributeValue<bool?>(VersionDraftedColumn) == true
-            ? latest.GetAttributeValue<string>(VersionNotConvertedListColumn)
+        return latest is not null && await IsDraftedAsync(latest, ct)
+            ? ParseStoredNotConverted(latest.GetAttributeValue<string>(VersionNotConvertedListColumn)).ListText
             : null;
     }
+
+    /// <summary>
+    /// Fix round 2 (F2): what <see cref="VersionNotConvertedListColumn"/> holds. <see cref="StoredNotConverted.IsEnvelope"/> is true for the
+    /// envelope (<see cref="EnvelopeFileIdProperty"/> present), whose <see cref="StoredNotConverted.DraftedFromFileId"/> is the file the run
+    /// drafted from (null when it cannot be read as a Guid) and whose <see cref="StoredNotConverted.ListText"/> is its list. Anything else that is
+    /// not blank is the earlier bare-list shape: no file id, the text itself is the list. Blank is no list at all.
+    /// </summary>
+    internal readonly record struct StoredNotConverted(bool IsEnvelope, Guid? DraftedFromFileId, string? ListText);
+
+    /// <inheritdoc cref="StoredNotConverted"/>
+    internal static StoredNotConverted ParseStoredNotConverted(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new StoredNotConverted(false, null, null);
+        }
+
+        try
+        {
+            if (JsonNode.Parse(text) is JsonObject envelope && envelope.ContainsKey(EnvelopeFileIdProperty))
+            {
+                Guid? fileId = envelope[EnvelopeFileIdProperty] is JsonValue value && value.TryGetValue<string>(out var raw)
+                    && Guid.TryParse(raw, out var parsed) && parsed != Guid.Empty
+                        ? parsed
+                        : null;
+                return new StoredNotConverted(true, fileId, envelope[EnvelopeListProperty]?.ToJsonString());
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON: the earlier shape's text, returned as it is (the read shows it as a string).
+        }
+
+        return new StoredNotConverted(false, null, text);
+    }
+
+    /// <summary>
+    /// Fix round 2 (F2): whether <paramref name="version"/> (read with <see cref="VersionDraftedColumn"/> and
+    /// <see cref="VersionNotConvertedListColumn"/>) is drafted. Only an explicit Yes can be (No or empty is not). Under a Yes:
+    /// <list type="bullet">
+    /// <item>an envelope is drafted only while the file it names is still the version's ONE Servable source file. A Yes left behind for a file
+    /// that has since been replaced (a take-back that failed, a host that stopped after the marker) is stale: not drafted, so the next
+    /// <c>/draft</c> or retry drafts the current file;</item>
+    /// <item>an envelope that names no file (<see cref="ClearedNotConverted"/>, what the version-file route's re-check writes) is not drafted;</item>
+    /// <item>a list with no envelope (the earlier bare list, or no list at all) is drafted, as before.</item>
+    /// </list>
+    /// </summary>
+    private async Task<bool> IsDraftedAsync(Entity version, CancellationToken ct)
+    {
+        if (version.GetAttributeValue<bool?>(VersionDraftedColumn) != true)
+        {
+            return false;
+        }
+
+        var stored = ParseStoredNotConverted(version.GetAttributeValue<string>(VersionNotConvertedListColumn));
+        if (!stored.IsEnvelope)
+        {
+            return true;
+        }
+
+        return stored.DraftedFromFileId is { } fileId && await IsTheSourceFileAsync(version.Id, fileId, ct);
+    }
+
+    /// <summary>
+    /// Fix round 2: the list value the version-file route's re-check writes to clear a version's list (<c>ProcedureService</c>): an envelope
+    /// that names no file and holds no list. Unlike an empty column it can never read as drafted, so a drafting run that lands its marker
+    /// after the clear (it wrote its list before the clear) leaves a version that is drafted again, not one stuck as drafted.
+    /// </summary>
+    internal static readonly string ClearedNotConverted = new JsonObject { [EnvelopeFileIdProperty] = null }.ToJsonString();
+
+    /// <summary>
+    /// Fix round 2 (F2): the value a run writes to <see cref="VersionNotConvertedListColumn"/>: the envelope naming
+    /// <paramref name="draftedFromFileId"/> around <paramref name="listJson"/>, or the bare list when the run does not know its file
+    /// (<see cref="Guid.Empty"/>, the overload without a file id).
+    /// </summary>
+    internal static string StoredNotConvertedOf(Guid draftedFromFileId, string listJson) =>
+        draftedFromFileId == Guid.Empty
+            ? listJson
+            : new JsonObject
+            {
+                [EnvelopeFileIdProperty] = draftedFromFileId.ToString("D"),
+                [EnvelopeListProperty] = JsonNode.Parse(listJson),
+            }.ToJsonString();
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // Drafting (task 075): the job reads the source, then adds Proposed rules through the same validation and row shape as an edit
@@ -543,8 +639,9 @@ public class RuleSetService
             return refusal;
         }
 
-        // Fix round 1 (K4): a finished run is decided before the source file, so a drafted version answers 409 already-drafted (and the job
-        // a no-op) whatever its files are now. A new file resets the marker (owner ruling 2026-11-10), so this never hides a redraft.
+        // Fix round 1 (K4): a finished run is decided before the source file is chosen, so a drafted version answers 409 already-drafted (and
+        // the job a no-op). Fix round 2 (F2): "drafted" already includes "its run drafted the version's current file" for a list that names
+        // its file, so a Yes left for a replaced file falls through to the source check below and is drafted again.
         if (target.AlreadyDrafted)
         {
             return RuleSetOutcome<DraftSource>.Done(new DraftSource(
@@ -578,6 +675,7 @@ public class RuleSetService
     internal static readonly string[] DraftVersionColumns =
     {
         ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionStatusColumn, VersionDraftedColumn,
+        VersionNotConvertedListColumn, // fix round 2 (F2): the drafted-from file id is inside the list's envelope
     };
 
     /// <summary>The columns of a Procedure a drafting read takes (task 116): its Area and its Status.</summary>
@@ -646,8 +744,9 @@ public class RuleSetService
                 StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed."));
         }
 
-        // EB-D-211: only an explicit Yes is "drafted"; No or empty (never written) is not.
-        var drafted = version.GetAttributeValue<bool?>(VersionDraftedColumn) == true;
+        // EB-D-211: only an explicit Yes is "drafted"; No or empty (never written) is not. Fix round 2 (F2): and a Yes counts only while the
+        // file its run drafted from is still the version's one Servable source file (IsDraftedAsync); a stale Yes is redrafted.
+        var drafted = await IsDraftedAsync(version, ct);
         return new DraftTarget<T>(procedureId, set, drafted, null);
     }
 
@@ -1080,16 +1179,36 @@ public class RuleSetService
                 return await SourceChangedAsync(ruleSetId, procedureVersionId, markerWritten: false);
             }
 
-            var json = BuildNotConvertedJson(listed);
+            // Fix round 2 (F2): the list carries the file this run drafted from (the envelope), so a marker that outlives a replace of that file
+            // reads as not drafted (IsDraftedAsync) even when the take-back below never lands.
+            var json = StoredNotConvertedOf(draftedFromFileId, BuildNotConvertedJson(listed));
             await _entities.UpdateAsync(
                 ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = json }, ct);
-            await _entities.UpdateAsync(
-                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = true }, ct);
 
-            // A replace that began after the check above made its new file Servable after it reset the marker; this re-read catches it.
-            if (draftedFromFileId != Guid.Empty && !await IsTheSourceFileAsync(procedureVersionId, draftedFromFileId, CancellationToken.None))
+            // Fix round 2: the marker and everything after it run on CancellationToken.None, so a cancelled run never stops between a written
+            // marker and the check that may have to take it back.
+            await _entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = true }, CancellationToken.None);
+
+            // A replace that began after the check above made its new file Servable after it reset the marker; this re-read catches it. A fault
+            // in the re-read counts as "changed" (fix round 2): the marker is taken back and the run is retried.
+            if (draftedFromFileId != Guid.Empty)
             {
-                return await SourceChangedAsync(ruleSetId, procedureVersionId, markerWritten: true);
+                bool unchanged;
+                try
+                {
+                    unchanged = await IsTheSourceFileAsync(procedureVersionId, draftedFromFileId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Procedure Version {ProcedureVersionId}: the source file could not be re-read after the marker; handled as changed", procedureVersionId);
+                    unchanged = false;
+                }
+
+                if (!unchanged)
+                {
+                    return await SourceChangedAsync(ruleSetId, procedureVersionId, markerWritten: true);
+                }
             }
 
             _logger.LogInformation(

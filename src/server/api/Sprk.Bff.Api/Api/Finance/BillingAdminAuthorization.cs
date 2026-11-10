@@ -44,6 +44,11 @@ public static class BillingAdminAuthorization
     public const string WritePolicyPrivilege = "prvWritesprk_Policy";
     public const string CreatePolicyPrivilege = "prvCreatesprk_Policy";
 
+    /// <summary>Task 116 fix round 2: a redraft removes the version's earlier drafts (<c>RuleSetService.RemoveUntouchedDraftsAsync</c>), so <see
+    /// cref="DraftProcedureVersion"/> asks the caller's Delete on both policy tables.</summary>
+    public const string DeletePolicyPrivilege = "prvDeletesprk_Policy";
+    public const string DeletePolicyVersionPrivilege = "prvDeletesprk_PolicyVersion";
+
     private const string Source = "billing admin";
 
     private static FinanceAuthorizationCheck Check(string privilege, string entitySet) =>
@@ -222,13 +227,19 @@ public static class BillingAdminAuthorization
     /// <summary>
     /// Start drafting a Procedure Version's rules (task 116, model 5.3): <see cref="DraftRules"/> (the billing-admin marker plus Create on both
     /// policy tables) AND the caller's own Write on the route's Procedure. An unreadable route id yields no check, which the filter denies.
+    /// Fix round 2: also the caller's Delete on both policy tables, asked the same way and right after the Create checks: a drafting run removes
+    /// this version's earlier drafts, including ones made from a replaced file that an administrator edited, accepted or rejected.
     /// </summary>
     public static FinanceAuthorizationTargets DraftProcedureVersion(EndpointFilterInvocationContext context)
     {
         var record = FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "write");
         return record.Checks.Count == 0
             ? record // no id, no check: the filter denies
-            : FinanceAuthorizationTargets.Authorize(record.Checks.Concat(DraftRules().Checks).ToArray());
+            : FinanceAuthorizationTargets.Authorize(record.Checks
+                .Concat(DraftRules().Checks)
+                .Append(Check(DeletePolicyPrivilege, "sprk_policies"))
+                .Append(Check(DeletePolicyVersionPrivilege, "sprk_policyversions"))
+                .ToArray());
     }
 
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>

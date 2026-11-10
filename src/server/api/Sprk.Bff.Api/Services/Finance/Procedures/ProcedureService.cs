@@ -1150,23 +1150,43 @@ public class ProcedureService
 
     /// <summary>
     /// Task 116 fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): re-reads the version and answers whether it is still a Draft
-    /// (a missing status is not). When it is a Draft that a drafting run has marked drafted, the drafted state is reset first: the marker
-    /// <c>sprk_notconverted</c> = No, THEN the list <c>sprk_notconvertedlist</c> cleared, so a reader that trusts the list only under a Yes
-    /// never sees a list without its run. A version that is not drafted is not written. A fault throws (the caller refuses the upload).
-    /// The version-file route calls it before the new file is staged and again once the new file is Servable (<see
-    /// cref="Files.StoredFileService.ReplaceForCallerAsync"/>'s re-check, which also catches a run that marked the version meanwhile).
+    /// (a missing status is not). When it is a Draft that a drafting run has marked drafted, the marker <c>sprk_notconverted</c> is set No. A
+    /// version that is not drafted is not written. A fault throws (the caller refuses the upload). The version-file route calls it before the
+    /// new file is staged.
+    /// <para>Fix round 2: this first reset writes ONLY the marker. The list stays until <see cref="RecheckDraftAfterNewFileAsync(Guid,
+    /// CancellationToken)"/> has seen the version still a Draft once the new file is Servable, so a publish that lands between the two keeps
+    /// its version's list. A list under No is never shown (the rule set read shows it only for a drafted version).</para>
     /// </summary>
     public virtual Task<bool> ResetDraftedStateIfDraftAsync(Guid versionId, CancellationToken ct) =>
         ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, ct);
 
     /// <inheritdoc cref="ResetDraftedStateIfDraftAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam, as <see cref="RecheckDraftAfterNewFileAsync(IGenericEntityService, Guid, ILogger, CancellationToken)"/>.</remarks>
+    internal static Task<bool> ResetDraftedStateIfDraftAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: false, ct);
+
+    /// <summary>
+    /// Task 116 fix round 2: the re-check once the new file is Servable (<see cref="Files.StoredFileService.ReplaceForCallerAsync"/>'s
+    /// <c>parentStillAccepts</c>). Re-reads the version and answers whether it is still a Draft (a missing status is not; nothing is written
+    /// then). For a Draft: the marker No if a run marked it meanwhile, THEN the list cleared, written as
+    /// <see cref="RuleSetService.ClearedNotConverted"/> (an envelope that names no file, so a run that lands its marker after this clear
+    /// leaves a version that reads as not drafted). Nothing is written for a version with neither. A fault throws (the replace withdraws the
+    /// new file).
+    /// </summary>
+    public virtual Task<bool> RecheckDraftAfterNewFileAsync(Guid versionId, CancellationToken ct) =>
+        RecheckDraftAfterNewFileAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="RecheckDraftAfterNewFileAsync(Guid, CancellationToken)"/>
     /// <remarks>Static over the entity seam so the rate-card import's replace (<see cref="RateCardImportService"/>) re-checks through the same
     /// method without holding this service.</remarks>
-    internal static async Task<bool> ResetDraftedStateIfDraftAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct)
+    internal static Task<bool> RecheckDraftAfterNewFileAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: true, ct);
+
+    private static async Task<bool> ResetDraftedStateAsync(IGenericEntityService entities, Guid versionId, ILogger logger, bool clearList, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.VersionEntity)
         {
-            ColumnSet = new ColumnSet(ProcedureEntity.VersionStatusColumn, RuleSetService.VersionDraftedColumn),
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionStatusColumn, RuleSetService.VersionDraftedColumn, RuleSetService.VersionNotConvertedListColumn),
             TopCount = 1,
         };
         query.Criteria.AddCondition("sprk_procedureversionid", ConditionOperator.Equal, versionId);
@@ -1180,9 +1200,15 @@ public class ProcedureService
         {
             await entities.UpdateAsync(
                 ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionDraftedColumn] = false }, ct);
+            logger.LogInformation("Procedure Version {ProcedureVersionId}: drafted marker reset for a new source file", versionId);
+        }
+
+        if (clearList && version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn) is { Length: > 0 } list
+            && !string.Equals(list, RuleSetService.ClearedNotConverted, StringComparison.Ordinal))
+        {
             await entities.UpdateAsync(
-                ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionNotConvertedListColumn] = DBNull.Value }, ct);
-            logger.LogInformation("Procedure Version {ProcedureVersionId}: drafted state reset for a new source file", versionId);
+                ProcedureEntity.VersionEntity, versionId,
+                new Dictionary<string, object> { [RuleSetService.VersionNotConvertedListColumn] = RuleSetService.ClearedNotConverted }, ct);
         }
 
         return true;
