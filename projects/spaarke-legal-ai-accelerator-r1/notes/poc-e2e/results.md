@@ -522,3 +522,11 @@ Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build
     interface directly (Harvey for Word Edit mode and playbooks; Harvey custom agents in Word, September 2026;
     Legora Word add-in with native tracked changes). Microsoft's Legal agent in Word and Anthropic's Claude for Word
     are built the same way. A Copilot declarative agent cannot do this.
+- **Clarification (2026-11-09): what we found impossible earlier.** It was that an add-in **can't drive Copilot**:
+  there's no documented interface to open the Copilot pane or run the Legal plugin with a playbook
+  (`solution-strategy.md`; Word add-in design §5.1). The other finding (L26) was about **Harvey inside Copilot**:
+  one MCP tool plus thin skills, with no editing. Harvey's and Legora's in-place redlines come from their own add-in
+  panes, which bypass Copilot and use their own AI; that is possible. Leaving the add-in out of R1 was a scope
+  decision (owner, 2026-11-02), not a technical limit. Spaarke's own in-place route is **Compose** (Spaarke AI
+  writes redline suggestions into the live editor as tracked changes; `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
+  The Spaarke Word add-in (`spaarkeai-word-add-in-r1`) is save and context only today.
