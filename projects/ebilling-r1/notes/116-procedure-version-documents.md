@@ -64,7 +64,7 @@ Code and script references still to clear (task 116's remaining work): ~~`RateCa
 **Known limits and open items.**
 - Two concurrent uploads to one version can leave two Servable files. Drafting and publish then refuse (422 / 400) until the next upload.
 - A PUT to `/file` that is not multipart is answered 415 by routing, before authentication. That is ASP.NET's `Accepts` matcher; it reveals nothing beyond the route's existence.
-- `RecordOwnershipResolver.cs:1809`, the citation entry `("sprk_ruleset", "sprk_sourcedocument")`, is uac-r2's code, and so are its tests (`SecureChildLineageTests`) and the `SecureChildLineage.cs` comment. They are not changed here and go to uac-r2.
+- `RecordOwnershipResolver.cs:1809`, the citation entry `("sprk_ruleset", "sprk_sourcedocument")`, is uac-r2's code, and so are its tests (`SecureChildLineageTests`) and the `SecureChildLineage.cs` comment. They are not changed here and go to uac-r2. (Removed in fix round 2, item 10.)
 - `grep ProcedureLibraryContainerId src/server` also finds `RecordContainerResolver.DocumentPointer.cs:65`, a list of configuration keys, not a read by the import.
 
 ## Not done yet
@@ -154,3 +154,44 @@ Fail-before was proved by reverting each fix in place (the new API kept, its beh
 - Two concurrent uploads can still leave two Servable files (unchanged from part 2).
 
 **Verification (fix round 1, HEAD before this notes commit `b70e038bd5`).** BFF build: 0 errors, 0 warnings. Full ArchTests: 2200/2200 (no ledger change). Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling): 7949 passed, 4 skipped, 0 failed, first run. Pester (forms script, 5.7.1): 6/6. RuleReview not touched (A4 makes the server match `ruleSetApi.ts`'s existing contract), so no Jest run.
+
+## Fix round 2 (2026-11-10, after the re-check and the access-control review of fix round 1)
+
+Not deployed; no Dataverse call of any kind. Commits are listed in the hand-off report.
+
+**What "drafted" means now (replaces the fix round 1 description).** `sprk_notconvertedlist` holds an envelope, `{"draftedFromFileId": "<stored file id>", "notConverted": [...]}`, written by the drafting run (server-internal; the rule set read still returns the bare list, so the client contract is unchanged). A version is drafted when `sprk_notconverted` is Yes AND the envelope's file is the version's one Servable source file. A list without a file id (the bare-list shape written before this round) under Yes is drafted as before. The re-check's clear writes an envelope naming no file, which is never drafted.
+
+| State | `sprk_notconverted` | `sprk_notconvertedlist` | Drafted? |
+|---|---|---|---|
+| Never drafted | No / empty | empty | no |
+| Run died after the list | No / empty | envelope (file F) | no; the retry compensates and overwrites |
+| Drafted from F, F still the one Servable file | Yes | envelope (file F) | yes: `/draft` 409, the job is a no-op |
+| Drafted from F, F replaced (take-back never landed) | Yes | envelope (file F) | no: redraftable; the rule set read hides the list |
+| Replace confirmed (re-check) | No | envelope (no file) | no |
+| Earlier shape | Yes | bare list | yes, as before |
+
+| Item | Fix | Tests (fail-before) |
+|---|---|---|
+| 1 F2 stale marker | The list carries the drafted-from file (`RuleSetService.StoredNotConvertedOf` / `ParseStoredNotConverted`); `IsDraftedAsync` applies the rule above in the draft target (`LoadDraftTargetAsync`), the draft source (`GetDraftSourceAsync`, so `/draft`'s 409 and the job's redelivery check) and the rule set read (A4). The marker is written on `CancellationToken.None`; a fault in the re-read after it is handled as changed (marker taken back on `None`, 503 `ruleset.source_changed`). | Fault points: the re-read after the marker throws; the take-back fails; the host stops after the marker. Each ends redraftable and the retry drafts the new file and is marked for it. The marker lands although the run was cancelled after its list. A cleared envelope under Yes is not drafted. Must-not-fire: a bare list under Yes is drafted as before; the run writes the envelope and the read returns the bare list. 5 must-fire failed before (the stale-Yes rule, the `None` marker and the fault handling reverted in place). |
+| 2 R1 /draft and Delete | `BillingAdminAuthorization.DraftProcedureVersion` also asks the caller's `prvDeletesprk_Policy` and `prvDeletesprk_PolicyVersion` (same probe, as the caller), right after the Create checks. POML criterion refined. | Without either Delete: 403, nothing read, removed or queued (two theory cases). With both: 202 and the four questions asked in order. 3 failed before. |
+| 3 R2 validate before the reset | `StoredFileService.PrecheckUpload` (the row's name and type rules with the server-derived media type, the size column, a configured store; no read or write). `PutVersionFile` calls it after the size checks and before the reset; its refusals map as the store's (400, 413, 503). | A name the store refuses (`folder/`): 400 and the reset never called. An unconfigured store: 503 and the reset never called. Both failed before (the reset ran first). |
+| 4 First reset keeps the list | `ResetDraftedStateIfDraftAsync` writes only the marker No. `RecheckDraftAfterNewFileAsync` (the `parentStillAccepts` re-check of both the version route and the rate-card import) writes No if needed and clears the list only when the version is still a Draft. | The first reset writes only No. A version published between the reset and the re-check keeps its list; the re-check refuses and writes nothing. The re-check of a still-Draft version writes No, then the cleared envelope. 2 failed before. |
+| 5 Handler wiring | Tests only. | The run hands the source file id to `RemoveUntouchedDraftsAsync` and `AddDraftsAsync` (failed with `Guid.Empty` at the two calls). A 503 `ruleset.source_changed` on a non-final delivery is `Failed` (retried), not `Poisoned` (failed with the transient threshold moved above 503). 2 failed before. |
+| 6 Timing parity | Both version routes ask the caller's rights on the version (the id as given) before they read the version, and act on the 404 after, like the other callers of the equalized probe. | An unknown version on PUT `/file` and on `/draft`: one rights question each, then 404. Failed before (no question for an unknown id). |
+| 7 Flip on `None` | `FlipToServableAsync`'s status update runs on `CancellationToken.None`. | The client cancels as the flip commits: the replace still withdraws the earlier file, one Servable file. Failed before (the cancelled flip threw and left two Servable files). |
+| 8 Superseded discriminator | `sprk_storedfile` records no time it became Servable (its columns are `createdon` and `versionnumber`; `modifiedon` moves on every later status write), so nothing to compare against without a new column. Left as a known limit (below). | None (no change). |
+| 9 Rate-card import order | Before: a caller with the table privileges and Write on the version's Procedure but no Read or Write on the version was answered by the workbook validation, the firm check, the roster, the owner and the row writes before the first version-rights question, which was inside the file store's upload. Now `RequireWriteOnTheVersionsProcedure` asks the caller's rights on the version as the user for every id, then reads the version's Procedure: an unknown version, one with no Procedure and one the caller cannot read are the same 404 `procedure.version_not_found`; Read without Write 403; then the Procedure Write check and the handler. | Unknown and unreadable versions: same status and body, both asked. Read without Write: 403, the service never reached. Must-not-fire: a readable version the service refuses still gets its 400. 2 failed before. Three existing tests were adjusted to the test host's new admin default (the version now has a Procedure the admin can write): the two "unknown rights" tests clear that grant before faulting it, and the publish "version with no Procedure" test names an unknown version. |
+| 10 Citation clean-up | `("sprk_ruleset", "sprk_sourcedocument")` removed from `RecordOwnershipResolver.CitationLookups`; the `SecureChildLineage` comment and the legacy-set test cases removed; `ParentLineage.cs` untouched. | The citation set has no rule set entry (failed before). |
+| 11 | Notes only (below). | — |
+
+Fail-before was proved by putting the previous code back in place (or reverting the single change for the handler and the marker) and running the new tests: 11 failed in the first group (items 1, 2, 4, 7) and 8 in the second (items 3, 5, 6, 9, 10); the must-not-fire tests passed both ways.
+
+**Known limits (fix round 2).**
+- Item 3 residual: the store can still fault after the reset (a staging or Dataverse fault). The version is then undrafted with its old file; drafting again works.
+- Item 8: the superseded-draft rule compares against the current file's `createdon`, not the time it became Servable. A file created before a draft but made Servable after it would make that draft read as made from the current file and be kept. No column records the Servable time; adding one is out of scope.
+- Item 11: a `source_changed` retry that lands while the version briefly holds two Servable files (between a replace's flip and its withdraw of the earlier file) gets 422 `ruleset.source_missing` and is Poisoned. The admin can trigger drafting again.
+- `/draft` now needs Delete on the two policy tables; a caller without it is refused 403. Whether the shipped security configuration grants it is an owner item (not changed here).
+- `grep sprk_sourcedocument src/server tests` still finds non-Stored-File uses outside this task's code: `RecordRepairModeTests.cs:1184` and `:1620` (a matter field in a repair fixture) and a guard fixture string in `SubmissionSourceEmailLinkNotFilingGuardTests.cs:272`. They are not this task's and are left as they are.
+- The route ledger's prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs`) still lists DraftRules() only; it was not changed (the ledger follows moved code only). The main session decides whether to add the two Delete checks there.
+
+**Verification (fix round 2, `f4c3b538cc`).** BFF build: 0 errors, 0 warnings. Full ArchTests: 2200/2200 (no ledger change). Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling, SecureChildLineage, RecordOwnership): 9452 passed, 4 skipped, 0 failed, first run. RuleReview not touched (the rule set read still returns the bare list), so no Jest run.
