@@ -12,9 +12,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Spike **DA-1**: specialist declarative agents in Word (agent mode) for **NDA Review** and **Legal Hold Review** (no POML tasks; pre-pipeline spike). Owner asked (2026-11-09): spike both; refresh DA research to 2026-11-09 (done); thoroughly review the existing Spaarke AI agent (done) |
-| **Step** | Prep 3 of 4. Done: research note, inventory, script draft, both instruction texts. **Now:** fill `notes/poc-e2e/da-spike-script.md` §S1 "Agent setup" and revise tests per the research |
-| **Status** | in-progress (Claude-side prep); then blocked on owner running the spike in the tenant |
-| **Next Action** | Edit `da-spike-script.md`: S1 = Agent Builder steps for two agents (knowledge = the **Markdown masters** `Legal Knowledge/<Type>/Playbook master/*.md`, NOT the four-column Word copies, because tables are dropped); add Architecture B (one agent "Spaarke Legal Review" with two **agent skills**, NDA + Legal Hold, uploaded as skill zips in Agent Builder) as tests B-1..B-3; add research tests (table drop, Word Agent applies DA findings as tracked changes, Legal plugin coexistence, duplicate answers #16869). Then commit + push, then report the plan to the owner |
+| **Step** | Prep done: research note, inventory, `da-spike-script.md` complete (S1 = Architecture A two agents + B one agent with two skills; tests LH-1..6, N-1..7, B-1..3, R-1, FD-1, CM-1), skills in `notes/poc-e2e/da-spike/skills/` (zips also in owner OneDrive `Documents/Cowork/Test/POC-DA1/skills/`) |
+| **Status** | blocked on owner running the spike in the tenant |
+| **Next Action** | When the owner reports results/screenshots (`OneDrive Documents/Cowork/Test/POC-DA1/screens/`): score N-1/N-3/B-1 against `answer-key/answer-key.md`, LH-1/LH-4/B-2 against `answer-key/legal-hold-answer-key.md`; record "Spike DA-1" in `results.md` |
 
 ### Files modified this session (uncommitted unless noted)
 - `notes/poc-e2e/da-spike-script.md` — spike script draft (LH-1..6, N-1..7, FD-1, CM-1); §S1 placeholder. **Uncommitted**

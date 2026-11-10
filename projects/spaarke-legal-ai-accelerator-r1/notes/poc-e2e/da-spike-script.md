@@ -1,6 +1,6 @@
 # Declarative-agent spike (DA-1): owner script
 
-About 60 minutes in Word desktop, **agent mode**. Question: can a specialist declarative agent give a consistent,
+About 90 minutes (20 to build, 70 to test) in Word desktop, **agent mode**. Question: can a specialist declarative agent give a consistent,
 complete playbook review in Word, for a contract (**NDA Review**) and a non-contract (**Legal Hold Review**)?
 Background: `results.md` Act 7 (Word chat mode vs agent mode; owner's review protocol). Answer keys: `answer-key/`
 (Claude scores; don't open them).
@@ -17,8 +17,58 @@ I'm an in-house lawyer at Acme Company. Mark results as drafts for attorney revi
 
 Restore your protocol instruction after the spike (S9).
 
-### S1. The two agents
-SETUP — see "Agent setup" below (filled in after the research refresh and the review of the existing Spaarke AI agent).
+### S1. Build the agents (about 20 minutes)
+We test two ways to build the same thing:
+- **Architecture A:** two specialist agents, one per document type. Each has its own instructions and its playbook as
+  knowledge.
+- **Architecture B:** one agent with two **agent skills**. Each skill holds its own instructions and its playbook.
+  The agent picks the skill from the document.
+
+Build both in **Agent Builder**: in Microsoft 365 Copilot, go to *Agents › Create agent* and open the **Configure**
+tab. Share every agent as **Only you**. Don't change the existing Spaarke AI agent.
+
+**Why Markdown playbooks:** a declarative agent reads Word documents and SharePoint knowledge as plain text, and
+**tables are dropped**. The four-column Word playbook is all table. So for knowledge, use the Markdown **master**
+(`Legal Knowledge/<Type>/Playbook master/*.md`), not the Word copy.
+
+**A1. Spaarke NDA Review**
+
+| Field | Value |
+|---|---|
+| Name | `Spaarke NDA Review` |
+| Description | `Reviews a mutual NDA open in Word against Acme's NDA playbook (24 topics).` |
+| Instructions | Paste all of `notes/poc-e2e/da-spike/nda-review.instructions.md` (5,390 characters; the limit is 8,000) |
+| Knowledge | SharePoint: paste the link to the **file** `Legal Knowledge/NDA/Playbook master/Spaarke NDA – Mutual v1.2.md` (not the folder). If offered, turn on **Only use specified sources**. Web search: off |
+| Starters | `Review this NDA.` · `Which playbook and version are you using? List all its topics with their Topic IDs.` |
+
+**A2. Spaarke Legal Hold Review**
+
+| Field | Value |
+|---|---|
+| Name | `Spaarke Legal Hold Review` |
+| Description | `Reviews a draft legal hold notice to employee custodians against Acme's legal hold playbook (13 topics).` |
+| Instructions | Paste all of `notes/poc-e2e/da-spike/legal-hold-review.instructions.md` (4,466 characters) |
+| Knowledge | SharePoint: the **file** `Legal Knowledge/Legal Hold Notice/Playbook master/Spaarke Legal Hold Notice – Employee Custodians v1.0.md`. **Only use specified sources** on if offered. Web search: off |
+| Starters | `Review this legal hold notice.` · `Which playbook and version are you using? List all its topics.` |
+
+**B1. Spaarke Legal Review (one agent, two skills)**
+
+| Field | Value |
+|---|---|
+| Name | `Spaarke Legal Review` |
+| Description | `Reviews an NDA or a legal hold notice open in Word against Acme's playbook for that document type.` |
+| Instructions | The text block below |
+| Knowledge | None. Web search: off |
+| Skills | *Add skill* › upload `spaarke-nda-review.zip`, then `spaarke-legal-hold-review.zip` (OneDrive `Documents/Cowork/Test/POC-DA1/skills/`; sources in `notes/poc-e2e/da-spike/skills/`). Each zip holds `SKILL.md` and `references/playbook.md`, the Markdown master |
+| Starters | `Review this document.` · `Which skills do you have?` |
+
+```
+You are Spaarke Legal Review, a reviewer for Acme Company's Legal department. Work out the type of the open document from its content. For a mutual NDA, use the spaarke-nda-review skill. For a legal hold notice to employee custodians, use the spaarke-legal-hold-review skill. Follow the skill exactly, including its output format, and say on the first line which skill you used. If no skill fits, say what the document appears to be and that no Spaarke playbook covers it yet; do not review it. Results are drafts for attorney review, not legal advice. Do not edit the document unless the user asks for edits in a separate request.
+```
+
+The skill versions print their own verification codes, `NDAR-1109-B` and `LHR-1109-B`. The **-A** codes come from
+the Architecture A agents, so you can always tell which one answered. If Agent Builder shows no *Add skill* option,
+take a screenshot (`B-no-skills.png`), skip B-1 to B-3, and run the rest.
 
 ## Rules for every test
 - **Agent mode** (not chat mode). Start a **new chat** for each test.
@@ -26,13 +76,15 @@ SETUP — see "Agent setup" below (filled in after the research refresh and the 
 - Screenshots to OneDrive `Documents/Cowork/Test/POC-DA1/screens/` with the names given.
 - Both agents print a verification code in their header (`NDAR-…` / `LHR-…`). If it's missing, the agent's
   instructions were not applied: note it.
+- If an answer appears **twice** in the pane (a known issue for declarative agents in Word), note it once in the
+  results; it isn't a fault in our agent.
 
 ## Legal Hold Review (LH)
 
 | Test | Do | Capture | Question |
 |---|---|---|---|
 | LH-1 | Open `POC Workspace/Matters/Harbor Point Logistics/Harbor Point – Legal Hold Notice (draft A).docx`. Type `@Spaarke Legal Hold Review` › *Review this.* Attach nothing; select nothing | `LH-1-*.png` (header, every table row, conclusion) | Does the agent see the whole document and rate all 13 topics? |
-| LH-2 | Same document, new chat, **Ctrl+A** first, then the same prompt | `LH-2-*.png` | Any difference from LH-1 (selection vs whole document)? |
+| LH-2 | Same document, new chat, **Ctrl+A** first, then the same prompt | `LH-2-*.png` | Any difference from LH-1? (Microsoft says an agent reads the whole document by default, so there should be none) |
 | LH-3 | New chat, same document: *Which playbook and version are you using? List all its topics.* | `LH-3.png` | Does the agent read the whole playbook from its knowledge (13 topics), or fragments? |
 | LH-4 | Open draft B (`… (draft B).docx`), new chat, same prompt as LH-1 | `LH-4-*.png` | False alarms (expected: only one topic not Acceptable) |
 | LH-5 | Draft A again, new chat, LH-1, then: *Apply the Example Text for the escalated topics as tracked changes.* | `LH-5-*.png`; then close **without saving** | Can Word edit after the agent's review, in the same chat? Tracked changes or direct edits? |
@@ -49,6 +101,20 @@ SETUP — see "Agent setup" below (filled in after the research refresh and the 
 | N-5 | In the **same chat** as N-4, after Microsoft's review: `@Spaarke NDA Review` › *Assess the same document with your method.* | `N-5-*.png` | Can Microsoft's flow and our agent work in one chat? Do they agree? |
 | N-6 | Brightwater, new chat: N-1, then *Apply edits with comments for the RED topics.* | `N-6-*.png`; close **without saving** | Tracked changes with comments after the agent's review? |
 | N-7 | Draft A legal hold notice, new chat, `@Spaarke NDA Review` › *Review this.* | `N-7.png` | Wrong-type guard |
+
+## One agent with skills (B)
+
+| Test | Do | Capture | Question |
+|---|---|---|---|
+| B-1 | Brightwater NDA, new chat, `@Spaarke Legal Review` › *Review this document.* | `B-1-*.png` (first line, header, every row, conclusion) | Did it pick the NDA skill from the document alone (code `NDAR-1109-B`, 24 rows)? |
+| B-2 | Legal hold draft A, new chat, same prompt | `B-2-*.png` | Did it pick the legal hold skill (`LHR-1109-B`, 13 rows)? |
+| B-3 | Open `Legal Knowledge/NDA/Spaarke NDA – Mutual v1.2.docx` (a playbook, not an NDA), new chat, same prompt | `B-3.png` | Does it decline, or mistake the playbook for an NDA? |
+
+## Research checks (R)
+
+| Test | Do | Capture | Question |
+|---|---|---|---|
+| R-1 | Keep `Spaarke NDA – Mutual v1.2.docx` open (the four-column table). New chat, `@Spaarke NDA Review` › *Quote the Instructions cell for topic nda.residuals in the open document.* | `R-1.png` | Can an agent read a table in the open document? (Research says tables are dropped) |
 
 ## Optional
 - **FD-1 (front door):** `@Spaarke AI` › *I need to review a legal document.* Does the existing agent ask for the
@@ -74,3 +140,8 @@ Restore your protocol custom instruction.
 | N-5 (both in one chat?) | |
 | N-6 (tracked changes with comments?) | |
 | N-7 (wrong-type guard) | |
+| B-1 / B-2 (right skill picked? complete?) | |
+| B-3 (declines a non-NDA?) | |
+| R-1 (table read?) | |
+| Duplicate answers seen? | |
+| Building: anything that didn't match S1 | |
