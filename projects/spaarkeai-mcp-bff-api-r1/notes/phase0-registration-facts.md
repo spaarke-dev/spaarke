@@ -38,6 +38,10 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 ## (c) Copilot connector "Spaarke" — pending (owner)
 
 - Gate checked 2026-11-09: an anonymous `POST /mcp/legal-operations` (initialize, with the MCP Accept header) on the dev BFF returns `401`, `WWW-Authenticate: Bearer`. The spike is live and auth is enforced.
+- **Blocked 2026-11-09:** the admin center form ("Connect to MCP server": Authentication type OAuth 2.0, Reference ID = the (b) registration ID) answers **Authorize** with "The requested resource does not exist." The ID was pasted correctly and the type was OAuth 2.0. It still failed after the owner added `offline_access` to the registration scope. At that point the registration's Base URL was still host-only.
+  - **The click never reached our server.** Over the 4 hours covering the attempts, the dev BFF's Application Insights (`spe-insights-dev-67e2xz`, unsampled: rows = itemCount) shows no request to `/mcp/*` or `/.well-known/*` apart from the agent's own probes; the rest was the app, `/healthz` and always-on `GET /`. So the failure is Microsoft's lookup of the registration. The missing RFC 9728 protected-resource metadata on the spike is not the cause at this step.
+  - **Discovery change on hold.** Serving that metadata needs a new anonymous route, a Permanent `AnonymousByDesign` waiver in the route-auth ledger (which conflicts with the uac-r2 spike condition) and a deploy. It is not built.
+  - **Next checks, in order:** (1) Base URL = the full MCP endpoint URL; (2) wait 10–15 minutes after saving; (3) delete and re-create the Dev Portal registration with Base URL = MCP URL from the start; (4) Microsoft support / Q&A.
 
 - Connector ID / date: _tbd_
 
