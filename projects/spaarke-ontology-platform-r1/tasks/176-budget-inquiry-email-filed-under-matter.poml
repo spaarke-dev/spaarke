@@ -4,7 +4,7 @@
     <title>The budget inquiry email and its replies are filed under the inquiry AND the matter, internal-only, in the matter's thread, and archived as .eml (D-216)</title>
     <phase>11 UAT</phase>
     <gate>startable: D-216 and its internal-only ruling recorded; uac-r2 agreed the access design (2026-11-10)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes .cs in the BFF communication send and inbound paths; decides a communication's filing, owner, thread, archive and external visibility (access-sensitive).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -30,6 +30,13 @@
     <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests; run filtered (Communication|BudgetInquiry|Inquiry|Thread|Incoming|CoreAncestor|RecordOwnership) and the full ArchTests. Measure the publish-size delta against a fresh master build (bff-hygiene). Public repo: no environment GUIDs or identity ids in code, tests, notes, commits or PR.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step>Map the send path (Build, MapAssociationFieldsAsync, StampAsync order, ArchiveToSpe, thread resolution) and the reply path (TrackingTokenRung, ResolveInboundFilingAsync); confirm how an inquiry service request is identified.</step>
+    <step>Write fail-first tests for every acceptance criterion.</step>
+    <step>Implement the send switch, the archive, the matter thread and the reply rule; any change to uac-r2's files comes as its own commit for their review.</step>
+    <step>Run the filtered BFF tests, the full ArchTests and the publish-size delta; push the branch for review (uac-r2 plus one independent adversarial review).</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">Send: the created `sprk_communication` carries `sprk_regardingservicerequest` = the inquiry, `sprk_regardingmatter` = the matter, `sprk_isinternalonly = true`, the matter's thread, and `sprk_regardingrecordid` = the service request (the footer token still names the inquiry). Assert on the real entity passed to create, not on a mock's echo.</criterion>
     <criterion testable="true">Send: the matter lookup is on the entity when `StampAsync` runs. A test with a SECURE matter shows the inherited access permission and the owner the resolver picks are the matter's (Secure-team-owned). Mutation: set the matter lookup after the stamp, and the test fails.</criterion>
@@ -54,4 +61,12 @@
     </files>
   </knowledge>
   <review>uac-r2 reviews the diff (filing, owner, thread and visibility), plus one independent adversarial review. Dev deploy only with the owner's go, through uac-r2's deploy session.</review>
+
+  <completion date="2026-11-10" pr="2655">
+    <summary>Branch task/ontology-176-inquiry-email-filing, b07158ce51..bbeb1cfcd3: fail-first tests; RecordContainerResolver sole-root release of a held service request (uac-r2 option A, F-176-1) plus the ArchTest guard that keeps the 8 release columns unsecured; the send (matter before the stamp, internal-only, ArchiveToSpe, matter thread created Private in the create); the inbound reply (matter, internal-only, Private thread, service request kept as primary, provenance); the archive warning surfaced as inquiry_email_not_archived; the Console reply puts the message primary first so the footer signs the inquiry.</summary>
+    <acceptance>All 8 criteria pass. AC5 deviation, ruled by uac-r2: a matter key MISSING from a successful read counts as an explicit null (the SDK omits empty columns; a column that does not exist faults the read), so only a fault or a null row holds the reply. Behaviour change named in the PR: a reply to ANY service request is held when that read faults.</acceptance>
+    <review>One independent adversarial review (opus) of 045856ad10: no over-share, fail-open or ordering defect; fix-now items 1-4 and 6 fixed in round 2; its K7 led to the Private thread. uac-r2 approved the resolver, round 2 and round 3 (R3-1 stamp derivation test; R3-2 Console forward-and-reply fix).</review>
+    <gates>BFF build 0 warnings; filtered BFF tests 6067/0 (round 2) and 707/0 (round 3); ArchTests 1978/1978; jest DecisionWizard 179 + 7, EmailWorkspace 43/43; tsc clean. Publish size +8,028 bytes against the base at 045856ad10 (fresh master a0e1b4ab7c, same zip tool); rounds 2-3 add small logic only and were not re-measured.</gates>
+    <known-limits>K5 Outbound direction only identifies an inquiry (over-restricts). K8 Outlook add-in save path: DI-147 #2653. K9 no backfill of earlier inquiry emails (dev: the owner's UAT email).</known-limits>
+  </completion>
 </task>
