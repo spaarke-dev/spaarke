@@ -44,8 +44,8 @@ internal delegate Task<IReadOnlyList<IReadOnlyList<Guid>?>> InvoiceAncestorReade
 /// <para><b>Descendants (ebilling-r1 task 130-0b F3b).</b> A row that has no invoice link of its own but is filed UNDER an
 /// invoice-linked row (an analysis output under its analysis, an event log under its event, a file version under its document, an
 /// attachment or email artifact under its document, ...) is decided by its parent's invoice links, and a child document by EVERY invoice
-/// link up its <c>sprk_parentdocument</c> chain (the same bound as the task 188 narrowing, <see cref="ExternalDocumentNarrowing.MaxHops"/>).
-/// The edge set is derived from the filing edges (<see cref="Descendants"/>, <see cref="BuildDescendants"/>), never listed by hand: a
+/// link up its <c>sprk_parentdocument</c> chain, bounded by <see cref="MaxWalkHops"/> (its own bound, EB-D-215; the task 188 narrowing
+/// keeps <see cref="ExternalDocumentNarrowing.MaxHops"/>, and the two are independent). The edge set is derived from the filing edges (<see cref="Descendants"/>, <see cref="BuildDescendants"/>), never listed by hand: a
 /// table with no invoice link of its own, not a root and not in the invoice family, that has a Filing edge to an invoice-linked child
 /// table (or to another descendant). A cycle, a chain past the bound, a parent that does not come back, an unreadable parent link and an
 /// unreadable parent column each make the row undecidable (<see cref="RowInvoiceLinks.ChainUndecidable"/>, and
@@ -67,6 +67,14 @@ internal delegate Task<IReadOnlyList<IReadOnlyList<Guid>?>> InvoiceAncestorReade
 /// </remarks>
 internal static class InvoiceLinks
 {
+    /// <summary>
+    /// EB-D-215 (owner 2026-11-10, conditions from uac-r2): the most parent hops the invoice walk takes up from a row, on both
+    /// planes (<see cref="ReadRowInvoiceLinksAsync"/> and the REST <see cref="ReadAncestorInvoiceLinksAsync"/>). Only hops between
+    /// child rows count: a core record above a chain is never walked. A row whose chain needs a hop past this bound is undecidable
+    /// (hidden, and logged once). Independent of the task 188 narrowing's <see cref="ExternalDocumentNarrowing.MaxHops"/>.
+    /// </summary>
+    internal const int MaxWalkHops = 5;
+
     /// <summary>How a table that links to an invoice is read: its entity set and id column (null when unknown: the read throws), its
     /// invoice link columns (logical names), and whether it is a ROOT (uac-r2 ruling 2026-11-08: a root is decided by its grant and is never
     /// hidden by an invoice link; its invoice link is shown only when that invoice is visible, otherwise blanked). A child row is hidden.</summary>
@@ -242,7 +250,7 @@ internal static class InvoiceLinks
     /// The invoices each row of <paramref name="rowIds"/> (rows of <paramref name="table"/>) links to, through every invoice link column,
     /// read BY ID through <paramref name="query"/> in one read per chunk of <see cref="CommunicationOpenThreadGate.ChunkSize"/>. F3b: for a
     /// descendant (<see cref="Descendants"/>) the list also carries the invoices of the rows it hangs from (its parent chain, bounded by
-    /// <see cref="ExternalDocumentNarrowing.MaxHops"/>). An empty list: the row links to no invoice.
+    /// <see cref="MaxWalkHops"/>). An empty list: the row links to no invoice.
     /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> in the list: a link that cannot be decided (the row did not come back, a
     /// link is not a GUID, or the chain is undecidable: <see cref="ReadRowInvoiceLinksAsync"/>). A failed read THROWS, as does a table
     /// with no invoice link or no known read shape.
@@ -255,8 +263,7 @@ internal static class InvoiceLinks
     /// <summary>
     /// <see cref="ReadLinkedInvoicesAsync"/> with the chain verdict kept apart (F3b): per row, the invoices it decides on and whether
     /// the chain it hangs from was undecidable. The walk: hop 0 is the row (its own links and its parent edges); each following hop is one
-    /// batched read per parent table over the distinct parents not yet in hand, up to <see cref="ExternalDocumentNarrowing.MaxHops"/>
-    /// hops, as the 188 narrowing walks a document. A parent column absent from a row, a parent link that is not a GUID, a parent that
+    /// batched read per parent table over the distinct parents not yet in hand, up to <see cref="MaxWalkHops"/> hops. A parent column absent from a row, a parent link that is not a GUID, a parent that
     /// does not come back, a parent already on THIS row's path (a cycle) and a parent needed past the bound each make the row
     /// undecidable. Two edges to the same parent (a diamond) are not a cycle. A failed read THROWS.
     /// </summary>
@@ -439,7 +446,7 @@ internal static class InvoiceLinks
                     continue;
                 if (parent == ExternalDocumentNarrowing.UnreadableLink
                     || pending.Path.Contains((edge.ParentTable, parent.Value), TableIdComparer.Instance)
-                    || hop >= ExternalDocumentNarrowing.MaxHops)
+                    || hop >= MaxWalkHops)
                 {
                     walk.Undecidable = true; // an unreadable column or link, a cycle, or a chain past the bound
                     continue;

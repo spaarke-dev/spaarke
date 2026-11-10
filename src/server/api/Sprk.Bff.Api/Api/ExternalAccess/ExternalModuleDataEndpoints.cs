@@ -439,7 +439,7 @@ public static class ExternalModuleDataEndpoints
             if (InvoiceLinkedChildAttributes(module).Any() && scoped.Count > 0)
             {
                 // F3b: a child document is decided by EVERY invoice link up its parent document chain too (one batched read per hop,
-                // the task 188 bound). A chain that cannot be decided carries the unreadable link, so the row is hidden; a chain read
+                // InvoiceLinks.MaxWalkHops). A chain that cannot be decided carries the unreadable link, so the row is hidden; a chain read
                 // that fails does the same and the response says truncated. No reader wired: a row that has a parent is undecidable.
                 // F3b fix round 1: every parent edge of the table (a document's parent document and its related communication, event,
                 // to-do, agreement and service request), each projected by the rule attributes above (FetchXML omits a null attribute).

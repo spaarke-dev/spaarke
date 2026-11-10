@@ -320,7 +320,7 @@ internal static class ServiceRequestParityCase
 internal static class InvoiceLinkedFamilyCase
 {
     /// <summary>The hop bound the invoice walk reads (<see cref="InvoiceLinks"/>); every bound test builds its chain from this.</summary>
-    public static int WalkBound => ExternalDocumentNarrowing.MaxHops;
+    public static int WalkBound => InvoiceLinks.MaxWalkHops;
 
     /// <summary>Each family: "child-parent".</summary>
     public static TheoryData<string> Keys => new()

@@ -128,11 +128,15 @@ public sealed class ExternalInvoiceLinkedDescendantRouteTests : IClassFixture<Ex
         Names(body).Should().Equal("Own only");
     }
 
-    [Theory(DisplayName = "F3b REST list (hop bound): three ancestors are decided by the one at the top; a fourth makes the chain undecidable (hidden, even for the caller's own firm's invoice)")]
-    [InlineData(3, true, false)]   // top is another firm's: hidden
-    [InlineData(3, false, true)]   // top is the caller's own firm's: shown
-    [InlineData(4, false, false)]  // past the bound: hidden although the invoice at the top is visible
-    public async Task List_TheChainIsBoundedAtThreeHops(int ancestors, bool topIsOtherFirms, bool shown)
+    /// <summary>EB-D-215: a document's PARENT DOCUMENT chain is also walked by the task 188 narrowing, which keeps its own bound
+    /// (<see cref="ExternalDocumentNarrowing.MaxHops"/>, 3) and hides a document whose chain needs a hop past it. So on the document
+    /// routes a parent-document chain is bounded by the narrowing, below the invoice walk's <see cref="InvoiceLinks.MaxWalkHops"/>.
+    /// The invoice walk's own bound is pinned on the to-do routes (<c>ExternalInvoiceLinkedFamilyRouteTests</c>).</summary>
+    [Theory(DisplayName = "F3b REST list (hop bound): a parent-document chain as long as the narrowing's bound is decided by its top; one more is hidden by the narrowing (its own bound), even for the caller's own firm's invoice")]
+    [InlineData(ExternalDocumentNarrowing.MaxHops, true, false)]      // top is another firm's: hidden
+    [InlineData(ExternalDocumentNarrowing.MaxHops, false, true)]      // top is the caller's own firm's: shown
+    [InlineData(ExternalDocumentNarrowing.MaxHops + 1, false, false)] // past the narrowing's bound: hidden although the invoice at the top is visible
+    public async Task List_TheParentDocumentChainIsBoundedByTheNarrowing(int ancestors, bool topIsOtherFirms, bool shown)
     {
         Child("Chained", ChainOf(ancestors, topIsOtherFirms ? _other : _own));
         Child("Parentless");
@@ -374,13 +378,16 @@ public sealed class ExternalInvoiceLinkedDescendantRouteTests : IClassFixture<Ex
         body.Entities.Should().OnlyContain(r => !r.ContainsKey("sprk_parentdocument"), "the parent is read to decide the row, never returned unasked");
     }
 
-    [Fact(DisplayName = "F3b module fetch (hop bound): a chain of four ancestors is hidden, of three is decided by its top")]
-    public async Task ModuleFetch_TheChainIsBoundedAtThreeHops()
+    [Fact(DisplayName = "F3b module fetch (hop bound): a parent-document chain one ancestor past the narrowing's bound is hidden; one at that bound is decided by its top")]
+    public async Task ModuleFetch_TheParentDocumentChainIsBoundedByTheNarrowing()
     {
+        // As List_TheParentDocumentChainIsBoundedByTheNarrowing: the narrowing's own bound applies to a parent-document chain.
         var (body, _) = await RunDocumentsFetchAsync(
-            Row("Three, own", ChainOf(3, _own)), Row("Three, other", ChainOf(3, _other)), Row("Four, own", ChainOf(4, _own)));
+            Row("At the bound, own", ChainOf(ExternalDocumentNarrowing.MaxHops, _own)),
+            Row("At the bound, other", ChainOf(ExternalDocumentNarrowing.MaxHops, _other)),
+            Row("Past the bound, own", ChainOf(ExternalDocumentNarrowing.MaxHops + 1, _own)));
 
-        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Three, own");
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("At the bound, own");
     }
 
     [Fact(DisplayName = "F3b module fetch (fault): a chain read that fails drops the rows that have a parent and says truncated; a parentless row stays")]

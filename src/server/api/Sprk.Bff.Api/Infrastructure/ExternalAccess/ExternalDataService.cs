@@ -558,7 +558,7 @@ public class ExternalDataService
     /// <summary>
     /// ebilling-r1 task 130-0b F3b: the list's documents as DTOs, each carrying the invoice links of its own row AND of every row it is
     /// filed under, up the chain (<see cref="ReadAncestorLinksOfRowsAsync"/>: its parent document, and since fix round 1 its related
-    /// communication, event, to-do, agreement and service request; one batched read per hop, the task 188 bound), so the page's invoice
+    /// communication, event, to-do, agreement and service request; one batched read per hop, <see cref="InvoiceLinks.MaxWalkHops"/>), so the page's invoice
     /// decision (<see cref="HideInvoiceLinkedRowsAsync{T}"/>) hides a document of another firm's invoice work. A chain that cannot be
     /// decided carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, so the row is hidden. A chain read that FAILS drops the rows
     /// that have a parent (fail closed) and says so (<c>Dropped</c>), so the list is flagged truncated. A document with no parent causes
@@ -582,7 +582,7 @@ public class ExternalDataService
     /// <summary>
     /// ebilling-r1 task 130-0b F3b fix round 1: for each Web API row of <paramref name="table"/> a REST list has ALREADY read (by
     /// position), the invoices of every row it is filed under, up the chain (<see cref="InvoiceLinks.ReadAncestorInvoiceLinksAsync"/>:
-    /// every parent edge of the table, <see cref="InvoiceLinks.FirstParentsOf"/>; one batched read per hop, the task 188 bound). The
+    /// every parent edge of the table, <see cref="InvoiceLinks.FirstParentsOf"/>; one batched read per hop, <see cref="InvoiceLinks.MaxWalkHops"/>). The
     /// read's <c>$select</c> must carry <see cref="InvoiceLinks.ParentValueColumnsOf"/> (<see cref="WithInvoiceLinkColumns"/> adds them):
     /// a parent column the row does not carry is undecidable, never "no parent". Per row: an empty list (no parent: no read), the
     /// ancestors' invoices (with <see cref="ExternalDocumentNarrowing.UnreadableLink"/> when the chain cannot be decided), or

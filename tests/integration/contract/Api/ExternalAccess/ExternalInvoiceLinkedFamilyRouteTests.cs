@@ -30,7 +30,7 @@ public sealed class ExternalInvoiceLinkedFamilyRouteTests : IClassFixture<Extern
 
     /// <summary>The hop bound the invoice walk reads (<see cref="InvoiceLinks"/>). Every bound test builds its chain from this, so a change
     /// to the walk's constant is one line here.</summary>
-    private static int WalkBound => ExternalDocumentNarrowing.MaxHops;
+    private static int WalkBound => InvoiceLinks.MaxWalkHops;
 
     private readonly ExternalMultiRootDocumentRouteTests.Fixture _fixture;
     private readonly InvoiceWorld _world = new();

@@ -203,8 +203,12 @@ public sealed class InvoiceLinkedDescendantsTests
         rebuilt.Keys.Order(StringComparer.Ordinal).Should().Equal(before);
     }
 
-    [Fact(DisplayName = "F3b the document is decided by its parent chain: the descendants of the document use the same bound as the 188 narrowing")]
-    public void TheBound_IsTheNarrowingsBound() => ExternalDocumentNarrowing.MaxHops.Should().Be(3);
+    [Fact(DisplayName = "EB-D-215 pin: the invoice walk has its own bound (5); the task 188 narrowing keeps 3")]
+    public void TheWalkBound_IsItsOwn()
+    {
+        InvoiceLinks.MaxWalkHops.Should().Be(5);
+        ExternalDocumentNarrowing.MaxHops.Should().Be(3);
+    }
 
     // ── Part 2: the walk ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -297,21 +301,53 @@ public sealed class InvoiceLinkedDescendantsTests
         store.Reads.Select(r => r.Set).Should().Equal(InvoiceLinks.Descendants[table].EntitySet, InvoiceLinks.Tables[parentTable].EntitySet);
     }
 
-    [Fact(DisplayName = "F3b walk: a child document is decided by EVERY invoice link up its chain (own, parent, grandparent, great-grandparent)")]
+    [Fact(DisplayName = "F3b walk: a child document is decided by EVERY invoice link up its chain (its own, and each ancestor's up to the bound)")]
     public async Task AChildDocument_IsDecidedByEveryLinkUpItsChain()
     {
-        var (a, b, c, d) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var store = new Store();
-        var great = store.Row("sprk_document", ("_sprk_invoice_value", d));
-        var grand = store.Row("sprk_document", ("_sprk_relatedinvoice_value", c), ("_sprk_parentdocument_value", great));
-        var parent = store.Row("sprk_document", ("_sprk_invoice_value", b), ("_sprk_parentdocument_value", grand));
-        var child = store.Row("sprk_document", ("_sprk_invoice_value", a), ("_sprk_parentdocument_value", parent));
+        // The top of a chain of exactly the bound, then one document per hop down to the child; each links to its own invoice,
+        // alternating the two link columns.
+        var invoices = Enumerable.Range(0, InvoiceLinks.MaxWalkHops + 1).Select(_ => Guid.NewGuid()).ToList();
+        Guid? above = null;
+        for (var i = 0; i <= InvoiceLinks.MaxWalkHops; i++)
+        {
+            var link = i % 2 == 0 ? "_sprk_invoice_value" : "_sprk_relatedinvoice_value";
+            above = above is { } a
+                ? store.Row("sprk_document", (link, invoices[i]), ("_sprk_parentdocument_value", a))
+                : store.Row("sprk_document", (link, invoices[i]));
+        }
 
+        var child = above!.Value;
         var result = await WalkAsync(store, "sprk_document", child);
 
         result[child].ChainUndecidable.Should().BeFalse("a chain of exactly the bound is decidable");
-        result[child].Invoices.Should().BeEquivalentTo(new[] { a, b, c, d });
-        store.Reads.Should().HaveCount(4, "one batched read per hop level");
+        result[child].Invoices.Should().BeEquivalentTo(invoices);
+        store.Reads.Should().HaveCount(InvoiceLinks.MaxWalkHops + 1, "one batched read per hop level");
+    }
+
+    [Fact(DisplayName = "EB-D-215 pin: the two bounds are independent - the invoice walk decides a 4- and a 5-hop document chain that the narrowing stops at its third hop")]
+    public async Task TheTwoBounds_AreIndependent()
+    {
+        var invoice = Guid.NewGuid();
+        var store = new Store();
+        Guid ChainOf(int hops)
+        {
+            var current = store.Row("sprk_document", ("_sprk_invoice_value", invoice));
+            for (var i = 0; i < hops; i++)
+                current = store.Row("sprk_document", ("_sprk_parentdocument_value", current));
+            return current;
+        }
+
+        var (three, four, five) = (ChainOf(3), ChainOf(4), ChainOf(5));
+
+        var walked = await WalkAsync(store, "sprk_document", three, four, five);
+        var narrowed = await ExternalDocumentNarrowing.ReadAndDecideAsync(new[] { three, four, five }, store.Query, CancellationToken.None);
+
+        Decided(walked[four], invoice);
+        Decided(walked[five], invoice);
+        narrowed.ReasonFor(three).Should().Be(DocumentNarrowingReason.Visible, "three hops are within the narrowing's bound");
+        narrowed.ReasonFor(four).Should().Be(DocumentNarrowingReason.ChainTooLong, "the narrowing still stops at its third hop");
+        narrowed.ReasonFor(five).Should().Be(DocumentNarrowingReason.ChainTooLong);
     }
 
     [Fact(DisplayName = "F3b walk: a chain one hop past the bound is undecidable, and says so in the list")]
@@ -319,7 +355,7 @@ public sealed class InvoiceLinkedDescendantsTests
     {
         var store = new Store();
         var rows = new List<Guid> { store.Row("sprk_document") };
-        for (var i = 0; i < ExternalDocumentNarrowing.MaxHops + 1; i++)
+        for (var i = 0; i < InvoiceLinks.MaxWalkHops + 1; i++)
             rows.Add(store.Row("sprk_document", ("_sprk_parentdocument_value", rows[^1])));
 
         var result = await WalkAsync(store, "sprk_document", rows[^1]);
@@ -535,27 +571,26 @@ public sealed class InvoiceLinkedDescendantsTests
         result[mixed].Invoices.Should().Contain(ExternalDocumentNarrowing.UnreadableLink);
     }
 
-    [Fact(DisplayName = "F3b fix round 1 walk: the bound counts from the row: a to-do three hops under a linked event is decided, four is undecidable; a self-edge cycle is undecidable")]
+    [Fact(DisplayName = "F3b fix round 1 walk: the bound counts from the row: a to-do as many hops under a linked event as the bound is decided, one more is undecidable; a self-edge cycle is undecidable")]
     public async Task TheBound_CountsFromTheRow_AndASelfEdgeCycleIsUndecidable()
     {
         var invoice = Guid.NewGuid();
         var store = new Store();
-        var top = store.Row("sprk_event", ("_sprk_regardinginvoice_value", invoice));
-        Guid Under(Guid parent) => store.Row("sprk_event", ("_sprk_regardingevent_value", parent));
-        var e2 = Under(top);
-        var e1 = Under(e2);
-        var e0 = Under(e1);
-        var three = store.Row("sprk_todo", ("_sprk_regardingevent_value", e1)); // todo -> e1 -> e2 -> top
-        var four = store.Row("sprk_todo", ("_sprk_regardingevent_value", e0)); // todo -> e0 -> e1 -> e2 -> top
+        // events[0] is the linked top; events[i] regards events[i - 1].
+        var events = new List<Guid> { store.Row("sprk_event", ("_sprk_regardinginvoice_value", invoice)) };
+        for (var i = 1; i <= InvoiceLinks.MaxWalkHops; i++)
+            events.Add(store.Row("sprk_event", ("_sprk_regardingevent_value", events[^1])));
+        var atTheBound = store.Row("sprk_todo", ("_sprk_regardingevent_value", events[InvoiceLinks.MaxWalkHops - 1]));
+        var pastTheBound = store.Row("sprk_todo", ("_sprk_regardingevent_value", events[InvoiceLinks.MaxWalkHops]));
         var (cycleA, cycleB) = (store.Row("sprk_event"), store.Row("sprk_event"));
         store.Set("sprk_event", cycleA, "_sprk_regardingevent_value", cycleB);
         store.Set("sprk_event", cycleB, "_sprk_regardingevent_value", cycleA);
 
-        var result = await WalkAsync(store, "sprk_todo", three, four);
+        var result = await WalkAsync(store, "sprk_todo", atTheBound, pastTheBound);
         var cycle = await WalkAsync(store, "sprk_event", cycleA);
 
-        Decided(result[three], invoice);
-        result[four].ChainUndecidable.Should().BeTrue("a fourth hop is past the bound");
+        Decided(result[atTheBound], invoice);
+        result[pastTheBound].ChainUndecidable.Should().BeTrue("one hop more is past the bound");
         cycle[cycleA].ChainUndecidable.Should().BeTrue("an event regarding an event regarding the first is a cycle");
     }
 
@@ -692,13 +727,13 @@ public sealed class InvoiceLinkedDescendantsTests
             return current;
         }
 
-        var underHidden = Chain(hiddenTop, 3);
-        var underVisible = Chain(visibleTop, 3);
-        var tooLong = Chain(visibleTop, 4);
+        var underHidden = Chain(hiddenTop, InvoiceLinks.MaxWalkHops);
+        var underVisible = Chain(visibleTop, InvoiceLinks.MaxWalkHops);
+        var tooLong = Chain(visibleTop, InvoiceLinks.MaxWalkHops + 1);
 
         var hidden = await HideAsync(world, world.NewFamilyCaller(), "sprk_document", underHidden, underVisible, tooLong);
 
-        hidden.Should().BeEquivalentTo(new[] { underHidden, tooLong }, "the third hop decides; a fourth is past the bound and fails closed");
+        hidden.Should().BeEquivalentTo(new[] { underHidden, tooLong }, "the hop at the bound decides; one more is past the bound and fails closed");
     }
 
     [Fact(DisplayName = "F3b seam: a cycle hides only the cyclic row (a per-row fault with known firms); its sibling is shown")]
