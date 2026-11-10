@@ -172,7 +172,7 @@ public class SecureChildOwnershipWriterTests
             World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
             FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice));
 
-        var (_, owner, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
+        var (_, owner, _, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
 
         owner.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
     }
@@ -193,7 +193,7 @@ public class SecureChildOwnershipWriterTests
             World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
             FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice), communications.Object);
 
-        var (_, owner, filing) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-4", CancellationToken.None);
+        var (_, owner, filing, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-4", CancellationToken.None);
         await processor.CreateCommunicationRecordAsync(
             new Microsoft.Graph.Models.Message { Subject = "Invoice 1042", InternetMessageId = "<m-146@vendor.example>" },
             "intake@contoso.com", "graph-4", owner, filing, CancellationToken.None);

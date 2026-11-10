@@ -490,10 +490,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         public List<Guid> Sent { get; } = new();
 
-        public override Task<Guid?> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+        public override Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
         {
             Sent.Add(serviceRequestId);
-            return Task.FromResult<Guid?>(Guid.NewGuid());
+            return Task.FromResult(new InquirySendResult(Guid.NewGuid()));
         }
     }
 
