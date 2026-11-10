@@ -1,7 +1,7 @@
 # reuse-governance-tightening-r1 — Design
 
 > **Status**: Design draft for owner review. Do **not** run `/design-to-spec` or `/project-pipeline` until the owner has answered the Open Questions (§11).
-> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-14 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds.
+> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-16 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds.
 > **Created**: 2026-11-10 (recreated; the 2026-09-02 draft was lost: it was in no worktree and never committed).
 > **Sources**: the owner's 2026-11-10 evaluation of an external "Claude Code Quality Recommendations" document (items B1, B2, B4, B7, B8); the Sept 2026 owner decision recorded in auto-memory `project_reuse-governance-tightening-r1.md` (the only surviving summary of the lost draft); the current repo at `d64a45071b`.
 > **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `[Obsolete]` attributes and `Directory.Build.props`; no new surface), SpaarkeAi (N), root CLAUDE.md (N, unless OQ-7 is answered "yes").
@@ -389,8 +389,8 @@ Do not re-adopt these without new evidence.
 | OQ-12 | 5(c): cloud routine or GitHub Action? | **Decided 2026-11-10**: Claude Code scheduled cloud routine, opening a draft PR only; plus the CI watchdog (§7.3). |
 | OQ-13 | 5(e): does the superseded-API list need approval? | **Decided 2026-11-10**: no. A supersession named in an ADR or merged design is a fact; ambiguous wording is listed as "not marked, and why" (§7.5). |
 | OQ-14 | 5(f): go/no-go thresholds for the language-server trial. | **Decided 2026-11-10**: common-practice thresholds in §7.6, fixed before the trial runs. |
-| OQ-15 | 5(e): when `CS0618` is re-armed, a fresh count may show framework or NuGet obsoletions hidden behind the suppression (the last count is from 2026-08-15). Fix them within this project, or list them with reasons and file them? | Fix those that take under an hour each; file the rest, with the suppression narrowed to their diagnostic IDs only. |
-| OQ-16 | 5(c): the cloud routine needs a cloud environment connected to the GitHub repo. Does one exist, or is creating it part of this project? | Creating it is the owner's one-time setup step; the task supplies the exact steps. |
+| OQ-15 | 5(e): when `CS0618` is re-armed, a fresh count may show framework or NuGet obsoletions hidden behind the suppression (the last count is from 2026-08-15). Fix them within this project, or list them with reasons and file them? | **Decided 2026-11-10**: fix those that take under an hour each; file the rest, with the suppression narrowed to their diagnostic IDs only. |
+| OQ-16 | 5(c): the cloud routine needs a cloud environment connected to the GitHub repo. Does one exist, or is creating it part of this project? | **Decided 2026-11-10**: creating it is the owner's one-time setup step; the task supplies the exact steps. |
 
 ## 12. Out of scope / future
 
