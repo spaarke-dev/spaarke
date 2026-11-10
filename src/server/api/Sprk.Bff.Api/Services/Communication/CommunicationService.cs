@@ -1373,6 +1373,37 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// Ontology task 177 (D-217, owner 2026-11-10): THE archive decision for an outgoing email, shared by both send paths
+    /// (<see cref="SendAsync"/>'s shared-mailbox path and <see cref="SendAsUserAsync"/>). The .eml is archived when the request
+    /// asks for it (<see cref="SendCommunicationRequest.ArchiveToSpe"/>, which still opts a record-less send in), or when the
+    /// CREATED <c>sprk_communication</c> is filed to a record (<see cref="IsFiledToRecord"/>).
+    /// <para>Filing is read from the row that was written, never from <c>Associations</c> alone, so a reply that inherited its
+    /// source's regarding, a post into a record's thread and the second lookup task 176 adds all count. Pass <c>null</c> when
+    /// the create failed: nothing was written, so only the request flag decides (today's warning follows).</para>
+    /// <para>A system-mail or server-only send is never archived by this rule: both are defined as not archived (the guards
+    /// at the top of <see cref="SendAsync"/> refuse <c>ArchiveToSpe</c> on them), because an archive would store the secret
+    /// system mail keeps out of storage, or copy a server send's attachments into a container the unit can read.</para>
+    /// <para>The sender account's <c>ArchiveOutgoingOptIn</c> switch is applied by the callers after this decision, unchanged.</para>
+    /// </summary>
+    internal static bool ShouldArchiveOutgoing(SendCommunicationRequest request, DataverseEntity? createdCommunication)
+    {
+        if (request.ArchiveToSpe)
+            return true;
+        if (request.SystemMail is not null || request.ServerSend is not null)
+            return false;
+        return createdCommunication is not null && IsFiledToRecord(createdCommunication);
+    }
+
+    /// <summary>
+    /// Whether a <c>sprk_communication</c> row carries at least one typed regarding lookup (D-217's "filed to a record"): any
+    /// column of the one shared regarding vocabulary, <see cref="Engine.RegardingFieldMap.AllRegardingFields"/>, holding a
+    /// non-empty reference.
+    /// </summary>
+    internal static bool IsFiledToRecord(DataverseEntity communication) =>
+        Engine.RegardingFieldMap.AllRegardingFields.Any(field =>
+            communication.GetAttributeValue<EntityReference>(field) is { Id: var id } && id != Guid.Empty);
+
+    /// <summary>
     /// Creates an outbound <c>sprk_communication</c> prepared before the send (task 146 r1), stamping the send time.
     /// Best-effort at its call sites, as the record step always was: the message has already been sent.
     /// </summary>
@@ -2018,12 +2049,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
 
-            // Step 6: Archive to SPE if requested (best-effort)
+            // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
             // Check ArchiveOutgoingOptIn on the sender's CommunicationAccount (default true if not set)
+            var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (request.ArchiveToSpe && senderResult.Email is not null)
+            if (archive && senderResult.Email is not null)
             {
                 try
                 {
@@ -2042,14 +2074,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
-            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
                 _logger.LogInformation(
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for sender {SenderEmail} | CorrelationId: {CorrelationId}",
                     senderResult.Email, correlationId);
             }
-            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 // Build a partial response for .eml generation (before archival fields are known)
                 var partialResponse = new SendCommunicationResponse
@@ -2099,7 +2131,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     }
                 }
             }
-            else if (request.ArchiveToSpe && !communicationId.HasValue)
+            else if (archive && !communicationId.HasValue)
             {
                 archivalWarning = "Email sent successfully but archival skipped: Dataverse communication record was not created.";
                 _logger.LogWarning(
@@ -2360,12 +2392,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
 
-            // Step 6: Archive to SPE if requested (best-effort)
+            // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
             // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
+            var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (request.ArchiveToSpe && request.FromMailbox is not null)
+            if (archive && request.FromMailbox is not null)
             {
                 try
                 {
@@ -2384,14 +2417,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
-            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
                 _logger.LogInformation(
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for user sender {UserEmail} | CorrelationId: {CorrelationId}",
                     userEmail, correlationId);
             }
-            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 var partialResponse = new SendCommunicationResponse
                 {
@@ -2439,7 +2472,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     }
                 }
             }
-            else if (request.ArchiveToSpe && !communicationId.HasValue)
+            else if (archive && !communicationId.HasValue)
             {
                 archivalWarning = "Email sent successfully but archival skipped: Dataverse communication record was not created.";
                 _logger.LogWarning(
