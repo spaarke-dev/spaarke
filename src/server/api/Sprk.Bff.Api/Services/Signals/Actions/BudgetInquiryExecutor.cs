@@ -39,14 +39,23 @@ public enum BudgetInquiryOutcome
 }
 
 /// <summary>The executor's answer. <see cref="ServiceRequestId"/> is set whenever a row was written, even when the send failed.</summary>
+/// <param name="ArchivalWarning">Ontology task 176 (D-216): set on a <see cref="BudgetInquiryOutcome.Sent"/> inquiry whose email was sent
+/// but NOT archived as .eml (the communication core's <c>ArchivalWarning</c>, for example the matter's container could not be
+/// resolved). Server-side text: it can carry an exception message, so it is logged by id and never shown to the caller.</param>
 public sealed record BudgetInquiryResult(
     BudgetInquiryOutcome Outcome,
     Guid? ServiceRequestId = null,
     Guid? CommunicationId = null,
-    string? Error = null)
+    string? Error = null,
+    string? ArchivalWarning = null)
 {
     public bool Succeeded => Outcome == BudgetInquiryOutcome.Sent;
 }
+
+/// <summary>What <see cref="InquiryEmailSender.SendAsync"/> hands back: the tracked communication and the core's archival warning.</summary>
+/// <param name="CommunicationId">The <c>sprk_communication</c> id when the core tracked one.</param>
+/// <param name="ArchivalWarning">The core's <c>ArchivalWarning</c>: the email went out but the .eml was not archived (D-216).</param>
+public sealed record InquirySendResult(Guid? CommunicationId, string? ArchivalWarning = null);
 
 /// <summary>
 /// The inquiry email send: <see cref="CommunicationService.SendAsync"/> as the signed-in user (OBO), the same core
@@ -58,15 +67,16 @@ public sealed record BudgetInquiryResult(
 public class InquiryEmailSender(CommunicationService communication, IHttpContextAccessor http, InquiryRecordFacts? facts = null)
 {
     /// <summary>Sends the inquiry email, associated with the matter and the service request. Throws on failure.</summary>
-    /// <returns>The <c>sprk_communication</c> id when the core tracked one.</returns>
-    public virtual async Task<Guid?> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+    /// <returns>The <c>sprk_communication</c> id when the core tracked one, and the core's archival warning (D-216: the send is
+    /// archived as .eml, and an archive that failed must not vanish).</returns>
+    public virtual async Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
     {
         var context = http.HttpContext
             ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
 
         var send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
         var response = await communication.SendAsync(send, context, ct).ConfigureAwait(false);
-        return response.CommunicationId;
+        return new InquirySendResult(response.CommunicationId, response.ArchivalWarning);
     }
 
     /// <summary>
@@ -148,6 +158,9 @@ public sealed class BudgetInquiryExecutor(
     ILogger<BudgetInquiryExecutor> logger)
 {
     public const string ActionCode = "send-budget-inquiry";
+
+    /// <summary>Commit warning (D-216): the inquiry email went out but was not archived as .eml. A fixed code; the client words it.</summary>
+    internal const string EmailNotArchivedWarning = "inquiry_email_not_archived";
     internal const string Table = "sprk_servicerequest";
     /// <summary>sprk_servicerequest.sprk_direction: Outbound (task 001).</summary>
     internal const int DirectionOutbound = 100000001;
@@ -312,8 +325,18 @@ public sealed class BudgetInquiryExecutor(
         // cancellable: a cancelled caller must not leave an email that may or may not have gone out and no id to list.
         try
         {
-            var communicationId = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
-            return new(BudgetInquiryOutcome.Sent, serviceRequestId, communicationId);
+            var sent = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(sent.ArchivalWarning))
+            {
+                // D-216: the email is meant to be archived as .eml. The send stands (it is out), but a missing archive is never silent.
+                // Ids only: the warning text can carry an exception message, and the core already logged the exception itself.
+                logger.LogWarning(
+                    "Budget inquiry email sent but not archived | ServiceRequestId: {ServiceRequestId}, CommunicationId: {CommunicationId}",
+                    serviceRequestId, sent.CommunicationId);
+            }
+
+            return new(BudgetInquiryOutcome.Sent, serviceRequestId, sent.CommunicationId,
+                ArchivalWarning: string.IsNullOrWhiteSpace(sent.ArchivalWarning) ? null : sent.ArchivalWarning);
         }
         catch (Exception ex)
         {

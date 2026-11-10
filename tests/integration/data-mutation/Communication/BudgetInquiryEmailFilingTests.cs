@@ -46,6 +46,8 @@ public class BudgetInquiryEmailFilingTests
     private static readonly Guid ServiceRequestId = Guid.Parse("17600000-0000-4000-8000-000000000001");
     private static readonly Guid MatterId = Guid.Parse("17600000-0000-4000-8000-000000000002");
     private static readonly Guid OtherMatterId = Guid.Parse("17600000-0000-4000-8000-000000000003");
+    /// <summary>A matter the ownership double treats as SECURE (task 176 review 2, F2): the double answers Secure for this id only.</summary>
+    private static readonly Guid SecureMatterId = Guid.Parse("17600000-0000-4000-8000-000000000004");
     private static readonly Guid SecureTeamId = Guid.Parse("17600000-0000-4000-8000-0000000000aa");
 
     private const int DirectionOutbound = 100000001;
@@ -55,11 +57,11 @@ public class BudgetInquiryEmailFilingTests
     // Send — the inquiry email as InquiryEmailSender.Build hands it to the communication core
     // =====================================================================================
 
-    private static BudgetInquiryRequest Inquiry() =>
-        new(MatterId, ["counsel@firm.example"], "Budget inquiry: Q3", "Please explain the overrun.", Confirmed: true);
+    private static BudgetInquiryRequest Inquiry(Guid? matterId = null) =>
+        new(matterId ?? MatterId, ["counsel@firm.example"], "Budget inquiry: Q3", "Please explain the overrun.", Confirmed: true);
 
-    private static SendCommunicationRequest InquirySend() =>
-        InquiryEmailSender.Build(Inquiry(), ServiceRequestId, new InquiryEmailExtras("Acme v. Roe (MAT-000176)", []));
+    private static SendCommunicationRequest InquirySend(Guid? matterId = null) =>
+        InquiryEmailSender.Build(Inquiry(matterId), ServiceRequestId, new InquiryEmailExtras("Acme v. Roe (MAT-000176)", []));
 
     [Fact]
     public void Build_AsksForTheArchive_AndForInternalOnly()
@@ -93,17 +95,58 @@ public class BudgetInquiryEmailFilingTests
         // Preflight refuses a secure owner today, so this is the core's own guarantee: the matter is ON the entity when the
         // FR-26 stamp runs, so the inherited Access Permission comes from it, and the owner question names it. Setting the
         // matter after the stamp (the mutation) leaves the row without the matter's Restricted value.
-        var harness = new SendHarness(matterAccessPermission: InheritedAccessPermission.Restricted, secureMatter: true);
+        // Task 176 review 2 (F2): the ownership double answers Secure for SecureMatterId ONLY, so the Secure team below is the
+        // answer to "this inquiry's matter is the secure one", not an echo of whatever matter the send named.
+        var harness = new SendHarness(
+            matterId: SecureMatterId, matterAccessPermission: InheritedAccessPermission.Restricted, secureMatterId: SecureMatterId);
 
-        await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
+        await harness.Service.SendAsync(InquirySend(SecureMatterId), harness.SignedInUser());
 
         var row = harness.Communication();
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(SecureMatterId);
         row.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(SecureTeamId);
         row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)
             .Should().NotBeNull("the matter was on the row when the stamp ran")
             .And.Subject.As<OptionSetValue>().Value.Should().Be(InheritedAccessPermission.Restricted);
-        harness.Ownership.Requests.Should().Contain(c =>
-            c.TargetRecordId == MatterId || c.Parents.Any(p => p.RecordId == MatterId));
+        harness.Ownership.Requests.Should().Contain(c => c.Parents.Any(p => p.RecordId == SecureMatterId));
+    }
+
+    [Fact]
+    public async Task Send_UnderANonSecureMatter_IsNotSecureOwned_AndTakesTheOrdinaryInheritedAccess()
+    {
+        // The negative of the test above. The world HOLDS a secure matter (Restricted) and the double knows it, but the inquiry is
+        // under a different, ordinary matter (Limited): the row is owned by the ordinary team and carries the ordinary matter's
+        // value. A double or a stamp that answered Secure/Restricted for any matter would fail here.
+        var harness = new SendHarness(
+            matterId: MatterId, matterAccessPermission: InheritedAccessPermission.Limited, secureMatterId: SecureMatterId);
+
+        await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
+
+        var row = harness.Communication();
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId);
+        var owner = row.GetAttributeValue<EntityReference>("ownerid")!.Id;
+        owner.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "an ordinary matter's inquiry is owned by the ordinary team");
+        owner.Should().NotBe(SecureTeamId);
+        row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)
+            .Should().NotBeNull().And.Subject.As<OptionSetValue>().Value.Should().Be(
+                InheritedAccessPermission.Limited, "the ordinary matter's own value, not the secure matter's Restricted");
+        harness.Ownership.Requests.Should().Contain(c => c.Parents.Any(p => p.RecordId == MatterId));
+        harness.Ownership.Requests.Should().NotContain(c => c.Parents.Any(p => p.RecordId == SecureMatterId),
+            "the secure matter is not an input to this inquiry's decisions");
+    }
+
+    [Fact]
+    public async Task Sender_CarriesTheCoresArchivalWarning_WhenTheArchiveFails_Task176Review2()
+    {
+        // The harness has no archive store, so the core's archive step fails AFTER the send (as when the matter's container cannot be
+        // resolved). The sender must hand the core's warning on with the communication id, not return the id alone.
+        var harness = new SendHarness();
+        var sender = new InquiryEmailSender(harness.Service, new HttpContextAccessor { HttpContext = harness.SignedInUser() });
+
+        var sent = await sender.SendAsync(Inquiry(), ServiceRequestId, CancellationToken.None);
+
+        sent.CommunicationId.Should().Be(harness.CommunicationId);
+        sent.ArchivalWarning.Should().NotBeNullOrWhiteSpace().And.Contain("archival failed");
     }
 
     [Fact]
@@ -147,71 +190,64 @@ public class BudgetInquiryEmailFilingTests
     }
 
     [Fact]
-    public async Task Send_TheNewThreadIsAnchoredToTheMatter_ThroughTheRegardingPriorityOrder()
+    public async Task Send_TheNewThreadIsAnchoredToTheMatter_ThroughTheSendPathsThreadStep_AndTheRealEmailThreadKey()
     {
-        // Decision 2: the find-or-create anchor (the first typed lookup in RegardingFieldMap order — the matter) is "the
-        // matter's thread". The REAL ThreadResolver reads the row the REAL send wrote.
-        var harness = new SendHarness();
+        // Decision 2: the find-or-create anchor (the first typed lookup in RegardingFieldMap order - the matter) is "the matter's
+        // thread". Task 176 review 2 (F2): driven through the REAL send path's thread step (CommunicationService ->
+        // ResolveOutboundThreadAsync -> ThreadResolver) with the REAL EmailThreadKeyStrategy, not a stubbed strategy: the thread
+        // is created from the communication row the send itself wrote, and the row is stamped with it.
+        var harness = new SendHarness(realThreads: true);
+
         await harness.Service.SendAsync(InquirySend(), harness.SignedInUser());
-        var written = harness.Communication();
-        var communicationId = Guid.NewGuid();
-        written.Id = communicationId;
 
-        var entities = new Mock<IGenericEntityService>();
-        entities.Setup(e => e.RetrieveAsync("sprk_communication", communicationId,
-                It.Is<string[]>(c => c.Contains("sprk_regardingrecordid")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(written);
-        var threads = new List<DataverseEntity>();
-        entities.Setup(e => e.CreateAsync(It.Is<DataverseEntity>(x => x.LogicalName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((x, _) => threads.Add(x))
-            .ReturnsAsync(Guid.NewGuid());
-        var resolver = new ThreadResolver(
-            [new CreateNewStrategy()], entities.Object, new RecordOwnershipResolverDouble(), NullLogger<ThreadResolver>.Instance);
-
-        await resolver.ResolveAndAssignThreadAsync(new ThreadResolutionRequest
-        {
-            CommunicationId = communicationId,
-            ChannelType = CommunicationType.Email,
-            Direction = CommunicationDirection.Outgoing,
-            Message = new NormalizedMessage { Direction = CommunicationDirection.Outgoing, Subject = "Budget inquiry: Q3" },
-        }, CancellationToken.None);
-
-        var thread = threads.Should().ContainSingle().Subject;
+        var thread = harness.Threads.Should().ContainSingle("the send placed the email in a thread (the sweep is not needed)").Subject;
         thread.GetAttributeValue<EntityReference>("sprk_regardingmatter").Should().NotBeNull("the matter outranks the service request")
             .And.Subject.As<EntityReference>().Id.Should().Be(MatterId);
-        thread.Contains("sprk_regardingservicerequest").Should().BeFalse();
+        thread.Contains("sprk_regardingservicerequest").Should().BeFalse("the thread is the matter's, not the inquiry's");
+        thread.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString());
+
+        var stamp = harness.ThreadAssignments.Should().ContainSingle("the communication row is stamped with its thread").Subject;
+        stamp.CommunicationId.Should().Be(harness.CommunicationId);
+        stamp.ThreadId.Should().Be(harness.CreatedThreadId!.Value);
     }
 
-    private sealed class CreateNewStrategy : IThreadKeyStrategy
-    {
-        public CommunicationType SupportedType => CommunicationType.Email;
-
-        public Task<ThreadKeyResolution> ResolveAsync(ThreadResolutionRequest request, CancellationToken ct) =>
-            Task.FromResult(ThreadKeyResolution.CreateNew);
-
-        public Task OnThreadCreatedAsync(Guid threadId, ThreadResolutionRequest request, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    /// <summary>The real send over a REAL <see cref="CoreAncestorResolver"/> (in-memory filing world) and an owner double.</summary>
+    /// <summary>The real send over a REAL <see cref="CoreAncestorResolver"/> (in-memory filing world) and an owner double. With
+    /// <c>realThreads</c> the send path's thread step runs the REAL <see cref="ThreadResolver"/> over the REAL
+    /// <see cref="EmailThreadKeyStrategy"/> (only Dataverse is doubled).</summary>
     private sealed class SendHarness
     {
         private readonly List<DataverseEntity> _created = new();
         private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
 
-        public SendHarness(int? matterAccessPermission = null, bool secureMatter = false)
+        public SendHarness(
+            Guid? matterId = null, int? matterAccessPermission = null, Guid? secureMatterId = null, bool realThreads = false)
         {
-            _world.OrdinaryRoot("sprk_matter", MatterId);
+            var matter = matterId ?? MatterId;
+            _world.OrdinaryRoot("sprk_matter", matter);
             if (matterAccessPermission is { } level)
-                _world.Set("sprk_matter", MatterId, InheritedAccessPermission.Column, new OptionSetValue(level));
+                _world.Set("sprk_matter", matter, InheritedAccessPermission.Column, new OptionSetValue(level));
 
-            Ownership = new RecordOwnershipResolverDouble
+            if (secureMatterId is { } secure)
             {
-                AnswerFor = secureMatter
-                    ? ctx => ctx.TargetRecordId == MatterId || ctx.Parents.Any(p => p.RecordId == MatterId)
+                // The secure matter the double knows. When the inquiry is under another matter it is only a distractor in the world.
+                if (secure != matter)
+                {
+                    _world.OrdinaryRoot("sprk_matter", secure);
+                    _world.Set("sprk_matter", secure, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+                }
+
+                // Keyed on the ONE secure matter id (review 2, F2): any other matter gets the ordinary answer.
+                Ownership = new RecordOwnershipResolverDouble
+                {
+                    AnswerFor = ctx => ctx.TargetRecordId == secure || ctx.Parents.Any(p => p.RecordId == secure)
                         ? RecordOwnerResolution.Owned(SecureTeamId) with { IsSecureOwner = true }
-                        : null
-                    : null,
-            };
+                        : null,
+                };
+            }
+            else
+            {
+                Ownership = new RecordOwnershipResolverDouble();
+            }
 
             var options = new CommunicationOptions
             {
@@ -227,22 +263,61 @@ public class BudgetInquiryEmailFilingTests
 
             var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
             entities.Setup(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
-                .Callback<DataverseEntity, CancellationToken>((e, _) => _created.Add(e))
-                .ReturnsAsync(Guid.NewGuid);
+                .Returns<DataverseEntity, CancellationToken>((e, _) =>
+                {
+                    _created.Add(e);
+                    var id = e.LogicalName switch
+                    {
+                        "sprk_communication" => CommunicationId,
+                        "sprk_communicationthread" => (CreatedThreadId = Guid.NewGuid()).Value,
+                        _ => Guid.NewGuid(),
+                    };
+                    e.Id = id;
+                    return Task.FromResult(id);
+                });
+            entities.Setup(e => e.UpdateAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+                {
+                    if (fields.TryGetValue("sprk_communicationthread", out var t) && t is EntityReference thread)
+                        ThreadAssignments.Add((id, thread.Id));
+                })
+                .Returns(Task.CompletedTask);
+            // The thread step reads the communication row the send wrote (its regarding lookups) to anchor the thread.
+            entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns(() => Task.FromResult(Communication()));
             var communications = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
 
             var dispatcher = new CommunicationChannelDispatcher(
                 new ICommunicationChannelSender[] { new AcceptingSender() }, Array.Empty<ICommunicationArchiver>());
 
+            IThreadResolver? threadResolver = realThreads
+                ? new ThreadResolver(
+                    [new EmailThreadKeyStrategy(communications.Object, entities.Object)],
+                    entities.Object, Ownership, NullLogger<ThreadResolver>.Instance)
+                : null;
+
             Service = new CommunicationService(
                 dispatcher, validator, communications.Object, entities.Object, Mock.Of<IDocumentDataverseService>(),
                 accountService: null!, jobSubmissionService: null!, Mock.Of<ICommunicationEnrichmentService>(),
-                Options.Create(options), Ancestors(), Ownership, NullLogger<CommunicationService>.Instance);
+                Options.Create(options), Ancestors(), Ownership, NullLogger<CommunicationService>.Instance,
+                threadResolver: threadResolver);
         }
 
         public CommunicationService Service { get; }
 
         public RecordOwnershipResolverDouble Ownership { get; }
+
+        /// <summary>The id the created <c>sprk_communication</c> row gets (the create answers it).</summary>
+        public Guid CommunicationId { get; } = Guid.Parse("17600000-0000-4000-8000-0000000000c1");
+
+        /// <summary>The id of the thread the thread step created (null until one is).</summary>
+        public Guid? CreatedThreadId { get; private set; }
+
+        /// <summary>Every <c>sprk_communicationthread</c> row created.</summary>
+        public IEnumerable<DataverseEntity> Threads => _created.Where(e => e.LogicalName == "sprk_communicationthread");
+
+        /// <summary>Every thread stamp written to a communication (communication id, thread id).</summary>
+        public List<(Guid CommunicationId, Guid ThreadId)> ThreadAssignments { get; } = new();
 
         public DataverseEntity Communication() =>
             _created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
