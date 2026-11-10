@@ -569,8 +569,8 @@ Ontology ruling D-215 (commit `33b44037dd`) amends D-169 for Direct 1:1 messages
 - **K-E-1 (cost):** a team-owned gate record's write reads the communication once more (plus the team row). A re-file of a communication with gate records reads it once more. When one of those records is team-owned, the team row and the Direct lookup (cached) are read too.
 - **K-E-2 (retry):** no scheduled retry for the gate-record step (above). A Direct record whose unfile read-back failed stays with the filed record's team and its shares until the next re-file or grant.
 - **K-E-3 (other-team leftovers):** with the Direct branch on, the leftover revoke spares the pair audience for ANY communication with a valid stamped pair, including a user-owned Direct message from before fm 054a. That only narrows what is revoked, to the two participants who read the message now.
-- **K-E-4 (job):** the Direct share job (`DirectMessageParticipantShares` job pass) does not mirror gate records. A message moved to Direct by fm piece 3 / 054c without a re-file or grant keeps its gate records as they were until one of those happens.
-- **K-E-5 (race at write):** a filing that lands between the writer's owner decision and the create of a Direct-team-owned record is not re-checked at write (D-169's at-write re-own covers user-owned records only). The next re-file's filing pass handles it.
+- **K-E-4 (job), narrowed by pass 2 N2 (§7.6):** the Direct share job now mirrors gate records after a pass that GRANTS a participant on the message. A message moved to Direct by fm piece 3 / 054c whose participants already hold their message shares (nothing granted) keeps its gate records as they were until a re-file or a grant.
+- K-E-5 is retired: fixed by pass 2 N1 (§7.6).
 - **K-E-6 (other-team record of a Direct message):** a gate record owned by any non-Secure team other than the Direct team (before piece 3 the resolver answers the Direct unit's default team) is re-owned to the Direct team when its message is Direct-team-owned.
 - **K-E-7 (invalid pair on filing):** filing a Direct record whose pair is invalid keeps nobody and revokes every share (D-169 behaviour, fail closed). Condition 2's "an invalid pair grants and revokes nothing" is applied to the unfiled and unfile paths. **Needs ontology's confirmation.**
 - **K-E-8 (composition):** without the lookup or the configuration, no Direct branch runs (D-169 as before). The host injects both (pinned).
@@ -579,6 +579,51 @@ Ontology ruling D-215 (commit `33b44037dd`) amends D-169 for Direct 1:1 messages
 - The writer call site (`DecisionRecordWriter.CreateAsync` → `ShareTeamOwnedAtWriteAsync`) is new surface outside `GateDecisionRecordSharing.cs`. It is needed because a Direct message's gate record is team-owned at write, and so never reached `ShareAtWriteAsync`.
 - The reconciler order: the gate step moved from the start to the end of the communication block in `AfterRefileCoreAsync`. D-169's own re-own runs later than before, after the Restricted bar and the Direct participant step.
 - K-E-7.
+
+### §7.6 Pass 2 (second adversarial review; ontology's Part E review N1–N4; fm's item 7)
+
+Base `40ce373fa2`. Every item: a fail-first test commit, then the fix commit.
+
+**Ontology-reviewed range (F3, item 6, N1–N4):** `2b9fac1496` `7f0dabb679` (F3), `3eecb538fd` `04558bd2e0` (item 6), `5a8a83d6c8` `c8b0dbdd81` `fdff00d4e7` (N1/N4, N3), `a13d100f97` `474e4814f6` (N2).
+**The rest:** `3477fa1ebe` `e595824ba5` (F1), `ccacaf7541` `cd3402bea1` (F2), `590d656679` (item 4 pins), `9f3b44f8c4` `35ff8f15c9` (item 7).
+
+| Item | Before | After | Fail-first |
+|---|---|---|---|
+| **F1** content rows re-check the owner | a Direct content row was granted with no owner check; a row re-owned to Secure (or Restricted) mid-grant kept the participants' Read | **grant-then-confirm** (`DirectMessageParticipantShares.GrantContentRowAndConfirmAsync`, used by the job, the re-file step and the live grant): grant the missing participants, read the owner back by id, and on a mismatch or an unreadable owner revoke THIS call's grants and report incomplete (retried). The live path reads the row's shares strictly first, so it never revokes a share it did not make | 5 fail / 2 pass |
+| **F2** carry cap | the bar and the decide phase could push the carry past `MaxCarriedRows`; the job then held the watermark and `Take(1000)` dropped rows silently; the sweep cursor passed them | every path into the carry goes through one helper within the cap (`AccessPermissionCarryCap`, init-only, default 1000). A row that does not fit is counted (`carryOverflow`; `restrictedBar.left` for the bar) and logged as a count. The sweep cursor stays before the first such row of its window; any other such row sets `ResweepNeeded`, and the job restarts the sweep (now if complete, else at its end). Decide-phase overflow still holds the watermark; bar-left rows never do | 3 fail (+1 control passes) |
+| **F3** read-back keeps prior shares | `GrantAndConfirmAsync` revoked every principal on a rejected read-back, including one that held Read before | it reads the record's shares strictly first and grants (and so can revoke) only the missing ones; a read fault writes nothing (ShareFailed) | 4/4 fail |
+| **Item 4** projection pins | none | the reconciler's three listing reads (changed, carried by id, sweep) pinned: `sprk_document` asks for `sprk_accesspermission` + `sprk_accessinheritance`; `sprk_communication` asks for `sprk_accesspermission`, and a parentless Restricted message is barred from its own listed value (R3). Controls: documents without the record column; a communication table without the column; a parentless Standard message | must-fire by mutation (below) |
+| **Item 6** the gate step always runs | a cancellation or fault in the Part D / Part C steps skipped `ReownAfterFilingAsync` | Part D and Part C are wrapped in try/finally; the gate step (own catch-and-log) runs in the finally, still last | 1/1 fail |
+| **N1** at-write filed race | K-E-5 | a Direct-team-owned gate record of a message filed meanwhile is re-owned at write as a filing would (`ReownFiledAtWriteAsync` → `ReownAsync(keepAudience: true)`); another team's record, or an unknown Direct check, writes nothing (logged) | 3 of the N1/N3/N4 set |
+| **N2** the job mirrors | K-E-4 | after the Direct pass grants a participant on the MESSAGE, `GateDecisionRecordSharing.MirrorCommunicationSharesAsync(messageId)` runs (never throws); a pass that grants nothing does not run it. §11: no new registration (singleton in `SignalsModule`) | 1 fail / 1 pass |
+| **N3** mirror revokes leftovers | the Direct mirror granted the audience but left other users' shares | `RevokeOutsideAudienceAsync`: strict share read, then (only while the owner is exactly the Direct team) revoke every user outside the audience; any fault revokes nothing | in the set |
+| **N4** communication not found | silent | ShareFailed "the communication could not be read" | in the set |
+| **Item 7** (fm) zero-mask participants | `GetSharedSystemUserIdsAsync` counted every systemuser POA row on the thread, zero-mask (inherited) included, and the soft read answered empty on a fault | only rows with the Read bit count; the read is strict. `GetParticipantSystemUserIdsAsync` (the ACS membership reconcile's desired set) now THROWS on a fault: before, "the owner alone" made `MembershipReconciler` remove the other participant from the chat (a second F). The grant path keeps fault = no shares (fail closed); find-or-create skips an unreadable candidate, as before | 4 fail / 4 pass |
+
+N1/N3/N4 fail-first: 4 fail, 3 pass (the controls).
+
+**Item 4 must-fire, by mutation** (source restored with `git checkout` after each): (1) `InheritedAccessPermission.Column` dropped from the walk's extra columns → both must-fire pins failed (and the document control, which also pins the value). (2) `AccessInheritance.Column` dropped from the walk's extra columns AND from `ColumnSetAsync`'s append → the document must-fire pin failed; the controls passed.
+
+**Judgment calls:**
+- **F1 grant-then-confirm, not check-then-grant.** A check before the grant cannot see a re-own that lands between the check and the grant. With the confirm after the grant, a re-own after the read-back lands after the grant too, so the re-owning path (the Secure synchronizer keeps children equal to their root's share set; the Restricted bar) sees the grant and removes it. Residual: an undo revoke that fails is logged as an Error and left to the owning path's reconcile. The message row itself still uses R5's check-then-grant (`OwnerUnchangedAsync`); noticed, not changed (outside F1).
+- **F2 cap vs watermark.** Not losing rows is preferred, without holding the watermark for bar rows (the §7.3 livelock). **Limit:** a lost row outside the sweep window is found by the next full sweep pass, not necessarily the next run; under a sustained load above the caps the sweep keeps restarting (each run still capped). A full carry can also displace a previously carried row (candidates are decided in table/id order); it is then lost, counted, and found by the restarted sweep. Decide-phase overflow holds the watermark as before (pre-existing; a carry that stays over the cap holds it while it does).
+- **Item 7 scope.** Only `GetSharedSystemUserIdsAsync`, `ReadOwnerAndSharesAsync` (a `shareFaultIsNoShares` flag), its two callers and `FindExistingAsync`'s loop were changed (lines 31, 138–184, 477, 627–655, 678–686 of the fix commit). fm's stamp reader is not touched.
+
+**The Secure-row exception (stated).** The Restricted bar REMOVES external users' shares from Secure-owned communications under a Restricted root. It uses the same predicate as `RestrictedExternalShareRemover` (`InternalShareEndpoints.IsBarredOnRestricted`): Restricted wins over the last-reader rule. This is an explicit, intended exception to "these paths never modify Secure rows": it only removes, never grants.
+
+**K-R2-5 (coordinator wording).** Rows on fm 054c's manual-review list (no valid pair) stay with their current owner until stamped; the anchor grantees' Read follows from that unchanged ownership, not from a missed revoke. Nothing is newly exposed. The deploy order above bounds it to the review list.
+
+**Deploy order (binding):** fm 054a piece-2 BFF stamp → 054c dry run, owner go, apply → 198 deploy. fm 054c stamps only when the Direct thread yields exactly 2 distinct enabled systemusers and one of them is `sprk_sentby`; under the writer invariant, an unfile without a valid pair leaves the owner unchanged.
+
+**Counts** (base `40ce373fa2` → after):
+
+| Run | Before | After |
+|---|---|---|
+| Brief filter (§7.3) | 2938 | 2964/2964 (+26) |
+| The same plus `MembershipReconcile` | 2952 | 2978/2978 |
+| `GateDecisionRecord` + `Services.Signals` + `DecisionRecordWriter` | 676 | 688/688 (+12) |
+| `tests/Spaarke.ArchTests` (full) | 2119 | 2119/2119 (the census holds with the new revoke and assign call sites) |
+| BFF build (full rebuild, `--no-incremental`) | 0 warnings | 0 warnings, 0 errors |
 
 ## Open questions
 
