@@ -44,6 +44,20 @@ For each message moved to the Direct team:
 - That environment needs the Direct role first (198 Part A, `Set-CustomerOwnerTeams.ps1` Direct mode; a live step under UAC-r2's owner go).
 - Piece 3 must never reach an environment where the 198 job is not running.
 
+**Assign invariant (UAC-r2, 2026-11-09; binding on piece 3 and on the unfile path):**
+- A message is assigned to the Direct team ONLY when it carries a valid stamped pair: exactly two distinct, non-empty systemusers, one of them `sprk_sentby`.
+- A message without a valid pair stays with its current owner until a stamp makes the pair valid. That includes 054c's manual-review rows.
+- This project's writer is the one server-side owner of that assign, so the guard lives there.
+- Must-fire tests: the piece-3 move with an empty recipient leaves the owner unchanged; the unfile back to the Direct team with an empty recipient leaves the owner unchanged.
+- 198 R2 (`task/uac-198-direct-share-side`, `740df14540..3e8a492908`) reads the pair with explicit selects. Any pair that is not valid is a settled no-op for it: it grants nothing and revokes nothing. A disabled participant is not granted; the other one still is.
+
+**Deploy order for legacy Direct messages (agreed with UAC-r2 on 2026-11-09; binding on both sides; each live step needs the owner's go in its own session):**
+1. The piece-2 BFF stamp deploys first.
+2. Then 054c: dry run, the owner's go, apply. It stamps only where the thread yields exactly 2 distinct enabled systemusers, one of them `sprk_sentby`; every other row is listed for manual review.
+3. Then 198 deploys.
+
+The rows on the review list stay with their current owner until someone stamps them; the assign invariant above keeps them out of the Direct team.
+
 **Participants after 198 R2:** the reconcile takes the pair from {`sprk_sentby`, `sprk_directrecipient`}.
 - It needs exactly 2 distinct, non-empty systemusers; otherwise it grants and revokes nothing.
 - A missing recipient is terminal until a repair or 054c's backfill stamps it, which bumps `modifiedon`.
