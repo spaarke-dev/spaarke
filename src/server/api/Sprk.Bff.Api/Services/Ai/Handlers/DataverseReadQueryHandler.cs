@@ -450,8 +450,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             }
 
             // ebilling-r1 task 098 ((a')): an invoice-family row whose invoice the predicate hides (or cannot decide) is
-            // hidden. One hide-only app-only call for the page (its own batched reads); a fault throws into the error result
-            // below (no rows). A row without a readable id is hidden.
+            // hidden. One hide-only app-only call for the page (its own batched reads). A fault in the decision hides the asked rows
+            // (F3b: the family path never throws for a fault); only firms that cannot be read throw, into the error result below (no
+            // rows). A row without a readable id is hidden.
             IReadOnlySet<Guid>? hiddenInvoiceRows = null;
             if (guardInvoices &&
                 response.Body is { } invoiceBody && invoiceBody.TryGetProperty("value", out var invoiceValue) &&

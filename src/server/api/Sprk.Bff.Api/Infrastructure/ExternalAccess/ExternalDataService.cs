@@ -556,111 +556,148 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// ebilling-r1 task 130-0b F3b: the list's documents as DTOs, each carrying the invoice links of its own row AND of every ancestor on
-    /// its <c>sprk_parentdocument</c> chain (<see cref="InvoiceLinks.ReadAncestorInvoiceLinksAsync"/>: one batched read per hop, the
-    /// task 188 bound), so the page's invoice decision (<see cref="HideInvoiceLinkedRowsAsync{T}"/>) hides a child of another firm's
-    /// document. A chain that cannot be decided (a cycle, past the bound, a parent that does not come back, an unreadable link) carries
-    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, so the row is hidden. A chain read that FAILS drops the rows that have a
-    /// parent (fail closed) and says so (<c>Dropped</c>), so the list is flagged truncated. A document with no parent causes no read.
+    /// ebilling-r1 task 130-0b F3b: the list's documents as DTOs, each carrying the invoice links of its own row AND of every row it is
+    /// filed under, up the chain (<see cref="ReadAncestorLinksOfRowsAsync"/>: its parent document, and since fix round 1 its related
+    /// communication, event, to-do, agreement and service request; one batched read per hop, the task 188 bound), so the page's invoice
+    /// decision (<see cref="HideInvoiceLinkedRowsAsync{T}"/>) hides a document of another firm's invoice work. A chain that cannot be
+    /// decided carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, so the row is hidden. A chain read that FAILS drops the rows
+    /// that have a parent (fail closed) and says so (<c>Dropped</c>), so the list is flagged truncated. A document with no parent causes
+    /// no read.
     /// </summary>
     private async Task<(List<ExternalDocumentDto> Documents, bool Dropped)> MapDocumentsWithAncestorLinksAsync(
         IReadOnlyList<DocumentRow> rows, CancellationToken ct)
     {
-        var parentOf = new Dictionary<DocumentRow, Guid>(ReferenceEqualityComparer.Instance);
-        foreach (var row in rows)
-        {
-            // A row whose columns were not kept (no Extra) is undecidable: its parent reads as unreadable.
-            var parent = row.Extra is null
-                ? ExternalDocumentNarrowing.UnreadableLink
-                : ExternalInvoiceVisibility.LinkOf(row.Extra, ExternalDocumentNarrowing.ParentDocumentValue);
-            if (parent is { } parentId)
-                parentOf[row] = parentId;
-        }
-
-        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains = new Dictionary<Guid, InvoiceLinks.RowInvoiceLinks>();
-        var readFailed = false;
-        if (parentOf.Count > 0)
-        {
-            try
-            {
-                chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
-                    DocumentTable, parentOf.Select(kv => (DocumentIdOf(kv.Key), kv.Value)).ToList(), QueryRowsOrThrowAsync, ct)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "[EXT-DATA] documents: the parent chain of {Count} document(s) could not be read; they are dropped (fail closed).", parentOf.Count);
-                readFailed = true;
-            }
-        }
-
-        var documents = new List<ExternalDocumentDto>();
-        foreach (var row in rows)
-        {
-            if (!parentOf.ContainsKey(row))
-            {
-                documents.Add(MapDocument(row));
-                continue;
-            }
-
-            if (readFailed)
-                continue;
-            var ancestors = chains.TryGetValue(DocumentIdOf(row), out var chain)
-                ? chain.Invoices
-                : new[] { ExternalDocumentNarrowing.UnreadableLink }; // no answer for this row: undecidable
-            documents.Add(MapDocument(row, ancestors));
-        }
-
+        // A row whose columns were not kept (no Extra) is undecidable: its parents read as unreadable.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            DocumentTable, rows.Select(row => (DocumentIdOf(row), (IReadOnlyDictionary<string, JsonElement>?)row.Extra)).ToList(), ct)
+            .ConfigureAwait(false);
+        var documents = rows
+            .Select((row, i) => (row, links: ancestors[i]))
+            .Where(r => r.links is not null)
+            .Select(r => MapDocument(r.row, r.links))
+            .ToList();
         return (documents, documents.Count < rows.Count);
     }
 
     /// <summary>
-    /// ebilling-r1 task 130-0b F3b: the invoice links of the document chain ABOVE the document <paramref name="documentId"/> (whose
-    /// Web API <paramref name="row"/> the caller already read, with <see cref="ExternalDocumentNarrowing.ParentDocumentValue"/>), for the
-    /// single-document routes and the module fetch: the same walk and bound as the list. No parent: no links, no read. A row that was
-    /// not read, a parent column that is absent or not a GUID, a cycle, a chain past the bound and a parent that does not come back are
-    /// undecidable (<see cref="InvoiceLinks.RowInvoiceLinks.ChainUndecidable"/>). A failed read THROWS
-    /// <see cref="DataverseUnavailableException"/> (the route answers "could not decide", never a refusal).
+    /// ebilling-r1 task 130-0b F3b fix round 1: for each Web API row of <paramref name="table"/> a REST list has ALREADY read (by
+    /// position), the invoices of every row it is filed under, up the chain (<see cref="InvoiceLinks.ReadAncestorInvoiceLinksAsync"/>:
+    /// every parent edge of the table, <see cref="InvoiceLinks.FirstParentsOf"/>; one batched read per hop, the task 188 bound). The
+    /// read's <c>$select</c> must carry <see cref="InvoiceLinks.ParentValueColumnsOf"/> (<see cref="WithInvoiceLinkColumns"/> adds them):
+    /// a parent column the row does not carry is undecidable, never "no parent". Per row: an empty list (no parent: no read), the
+    /// ancestors' invoices (with <see cref="ExternalDocumentNarrowing.UnreadableLink"/> when the chain cannot be decided), or
+    /// <see langword="null"/> when the chain read FAILED and the row has a parent: the caller drops that row and flags the list
+    /// truncated (fail closed). A table with no parent edge gives every row an empty list and reads nothing.
     /// </summary>
-    internal async Task<InvoiceLinks.RowInvoiceLinks> ReadDocumentAncestorLinksAsync(
-        Guid documentId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct)
+    internal async Task<IReadOnlyList<IReadOnlyList<Guid>?>> ReadAncestorLinksOfRowsAsync(
+        string table, IReadOnlyList<(Guid Id, IReadOnlyDictionary<string, JsonElement>? Row)> rows, CancellationToken ct)
     {
-        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
-        if (row is null)
-            return undecidable;
-        if (ExternalInvoiceVisibility.LinkOf(row, ExternalDocumentNarrowing.ParentDocumentValue) is not { } parent)
-            return new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+        var firsts = rows.Select(r => InvoiceLinks.FirstParentsOf(table, r.Id, r.Row)).ToList();
+        static IReadOnlyList<Guid> NoParent() => Array.Empty<Guid>();
+        if (firsts.All(f => f.Count == 0))
+            return rows.Select(_ => (IReadOnlyList<Guid>?)NoParent()).ToList();
 
-        var chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
-            DocumentTable, new[] { (documentId, parent) }, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
-        return chains.TryGetValue(documentId, out var chain) ? chain : undecidable;
+        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains;
+        try
+        {
+            // A row id that is not a GUID (Guid.Empty) is never walked: it reads as undecidable below.
+            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+                table, firsts.SelectMany(f => f).Where(f => f.Row != Guid.Empty).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] {Table}: the filing chain of {Count} row(s) could not be read; they are dropped (fail closed).",
+                table, firsts.Count(f => f.Count > 0));
+            return firsts.Select(f => f.Count == 0 ? NoParent() : null).ToList();
+        }
+
+        return rows.Select((r, i) => firsts[i].Count == 0
+                ? NoParent()
+                : chains.TryGetValue(r.Id, out var chain)
+                    ? chain.Invoices
+                    : new[] { ExternalDocumentNarrowing.UnreadableLink }) // no answer for this row: undecidable
+            .ToList();
     }
 
     /// <summary>
-    /// F3b: <see cref="ReadDocumentAncestorLinksAsync"/> for the rows of a FetchXML (module) page, keyed by position: each row's
-    /// <c>sprk_parentdocument</c> attribute decides. Same answers; a failed read says <c>Failed</c> and no row has a chain verdict.
+    /// ebilling-r1 task 130-0b F3b: the invoice links of the rows ABOVE the document <paramref name="documentId"/> (whose Web API
+    /// <paramref name="row"/> the caller already read with every parent column, <see cref="InvoiceLinks.ParentValueColumnsOf"/>), for the
+    /// single-document routes: the same walk and bound as the list (<see cref="ReadRowAncestorLinksAsync"/>).
+    /// </summary>
+    internal Task<InvoiceLinks.RowInvoiceLinks> ReadDocumentAncestorLinksAsync(
+        Guid documentId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct) =>
+        ReadRowAncestorLinksAsync(DocumentTable, documentId, row, ct);
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b fix round 1: the invoice links of the rows ABOVE ONE row of <paramref name="table"/> whose Web API
+    /// <paramref name="row"/> the caller already read (with <see cref="InvoiceLinks.ParentValueColumnsOf"/>), for a single-record route:
+    /// every parent edge, the list's walk and bound. No parent: no links, no read. A row that was not read, a parent column that is
+    /// absent or not a GUID, a cycle, a chain past the bound and a parent that does not come back are undecidable
+    /// (<see cref="InvoiceLinks.RowInvoiceLinks.ChainUndecidable"/>). A failed read THROWS <see cref="DataverseUnavailableException"/>
+    /// (the route answers "could not decide", never a refusal).
+    /// </summary>
+    internal async Task<InvoiceLinks.RowInvoiceLinks> ReadRowAncestorLinksAsync(
+        string table, Guid rowId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct)
+    {
+        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+        if (row is null || rowId == Guid.Empty)
+            return undecidable;
+        var firsts = InvoiceLinks.FirstParentsOf(table, rowId, row);
+        if (firsts.Count == 0)
+            return new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+
+        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains;
+        try
+        {
+            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(table, firsts, QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataverseUnavailableException($"The filing chain of a {table} row could not be read.", ex);
+        }
+
+        return chains.TryGetValue(rowId, out var chain) ? chain : undecidable;
+    }
+
+    /// <summary>
+    /// F3b: <see cref="ReadRowAncestorLinksAsync"/> for the rows of a FetchXML (module) page of <paramref name="table"/>, keyed by
+    /// position: each row's parent edge attributes (<see cref="InvoiceLinks.ParentEdgesOf"/>, logical names) decide. FetchXML omits a
+    /// null attribute, so an absent attribute is "no parent" HERE: the module fetch therefore always projects every parent attribute
+    /// (<c>ExternalModuleDataEndpoints</c>' rule attributes; F3b fix round 1, K1). Same answers; a failed read says <c>Failed</c> and
+    /// every row that has a parent is undecidable.
     /// </summary>
     internal async Task<(IReadOnlyList<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ReadModuleDocumentAncestorLinksAsync(
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
+        string table, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
     {
         var none = new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
         var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
         var chains = rows.Select(_ => none).ToArray();
-        var asked = new List<(int Index, Guid Row, Guid Parent)>();
+        var asked = new List<(int Index, Guid Row, string Column, Guid Parent)>();
         for (var i = 0; i < rows.Count; i++)
         {
-            if (!rows[i].TryGetValue(ExternalDocumentNarrowing.ParentDocumentAttribute, out var raw) || raw is null)
-                continue; // FetchXML omits a null attribute: no parent
-            var parent = ExternalModuleDescriptor.TryGetAttributeId(rows[i], ExternalDocumentNarrowing.ParentDocumentAttribute, out var parentId)
-                ? parentId
-                : ExternalDocumentNarrowing.UnreadableLink;
             var id = ExternalModuleDescriptor.TryGetAttributeId(rows[i], idAttribute, out var rowId) ? rowId : Guid.NewGuid();
-            asked.Add((i, id, parent));
+            foreach (var edge in InvoiceLinks.ParentEdgesOf(table))
+            {
+                if (!rows[i].TryGetValue(edge.Column, out var raw) || raw is null)
+                    continue; // FetchXML omits a null attribute: no parent through this edge
+                var parent = ExternalModuleDescriptor.TryGetAttributeId(rows[i], edge.Column, out var parentId)
+                    ? parentId
+                    : ExternalDocumentNarrowing.UnreadableLink;
+                asked.Add((i, id, edge.Column, parent));
+            }
         }
 
         if (asked.Count == 0)
@@ -668,8 +705,8 @@ public class ExternalDataService
         try
         {
             var read = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
-                DocumentTable, asked.Select(a => (a.Row, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
-            foreach (var (index, row, _) in asked)
+                table, asked.Select(a => (a.Row, a.Column, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct).ConfigureAwait(false);
+            foreach (var (index, row, _, _) in asked)
                 chains[index] = read.TryGetValue(row, out var chain) ? chain : undecidable;
             return (chains, false);
         }
@@ -680,16 +717,19 @@ public class ExternalDataService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[EXT-DATA] module documents: the parent chain of {Count} document(s) could not be read; they are dropped (fail closed).", asked.Count);
-            foreach (var (index, _, _) in asked)
+                "[EXT-DATA] module {Table}: the filing chain of {Count} row(s) could not be read; they are dropped (fail closed).",
+                table, asked.Select(a => a.Index).Distinct().Count());
+            foreach (var (index, _, _, _) in asked)
                 chains[index] = undecidable;
             return (chains, true);
         }
     }
 
     /// <summary>A document row's id (<see cref="Guid.Empty"/> when it did not come back as a GUID: never visible).</summary>
-    private static Guid DocumentIdOf(DocumentRow row) =>
-        Guid.TryParse(row.SprkDocumentid, out var id) ? id : Guid.Empty;
+    private static Guid DocumentIdOf(DocumentRow row) => RowIdOf(row.SprkDocumentid);
+
+    /// <summary>A row id read as text (<see cref="Guid.Empty"/> when it is not a GUID: never walked, so undecidable).</summary>
+    private static Guid RowIdOf(string? id) => Guid.TryParse(id, out var parsed) ? parsed : Guid.Empty;
 
     /// <summary>
     /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
@@ -1141,6 +1181,7 @@ public class ExternalDataService
             .Concat(InvoiceLinks.Tables.TryGetValue(DocumentTable, out var invoiceLinked)
                 ? invoiceLinked.ValueColumns
                 : Array.Empty<string>()) // task 130-0 fix round 1: a document follows its invoice
+            .Concat(InvoiceLinks.ParentValueColumnsOf(DocumentTable)) // F3b fix round 1: and the invoices of every row it is filed under
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -1519,8 +1560,10 @@ public class ExternalDataService
     /// <summary>The recent-grants read: the rows, and whether it was cut short or failed (never silent).</summary>
     public sealed record RecentGrantsRead(IReadOnlyList<RecentGrant> Grants, bool Truncated);
 
-    /// <summary>One service request the caller requested: its id, name and requester.</summary>
-    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy);
+    /// <summary>One service request the caller requested: its id, name and requester. F3b fix round 1 (F2): and the invoices it links to
+    /// (<see cref="InvoiceLinksOf(string, IReadOnlyDictionary{string, JsonElement})"/>, read from the same row); <see langword="null"/>
+    /// means they were not read, which the feed decides as a link it cannot read (the request is not reported).</summary>
+    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy, IReadOnlyList<Guid>? InvoiceLinks = null);
 
     /// <summary>The caller's service requests, and whether the read was cut short or failed.</summary>
     public sealed record RequestedServiceRequestsRead(IReadOnlyList<RequestedServiceRequest> Requests, bool Truncated);
@@ -1640,14 +1683,15 @@ public class ExternalDataService
 
         var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
             "sprk_servicerequests", "_sprk_requestedby_value", ids,
-            "sprk_servicerequestid,sprk_name,_sprk_requestedby_value", "createdon desc", ct);
+            WithInvoiceLinkColumns("sprk_servicerequestid,sprk_name,_sprk_requestedby_value", ServiceRequestTable), "createdon desc", ct);
 
         var requests = read.Rows
             .Where(r => GuidValue(r, "sprk_servicerequestid") is not null && GuidValue(r, "_sprk_requestedby_value") is not null)
             .Select(r => new RequestedServiceRequest(
                 GuidValue(r, "sprk_servicerequestid")!.Value,
                 r.TryGetValue("sprk_name", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null,
-                GuidValue(r, "_sprk_requestedby_value")!.Value))
+                GuidValue(r, "_sprk_requestedby_value")!.Value,
+                InvoiceLinksOf(ServiceRequestTable, r))) // F3b fix round 1 (F2): the feed follows the request's invoice
             .ToList();
 
         return new RequestedServiceRequestsRead(requests, read.Truncated);
@@ -1933,10 +1977,18 @@ public class ExternalDataService
                 read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
         }
 
+        // F3b fix round 1: a to-do follows the invoices of every row it is filed under (its event, document, communication, analysis,
+        // agreement or service request, up the chain); a chain read that fails drops the to-dos that have a parent and says truncated.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            TodoTable, readable.Select(r => (RowIdOf(r.SprkTodoid), (IReadOnlyDictionary<string, JsonElement>?)r.Extra)).ToList(), ct);
+        var todos = readable.Select((r, i) => (Row: r, Links: ancestors[i])).Where(r => r.Links is not null)
+            .Select(r => MapTodo(r.Row, r.Links)).ToList();
+
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
-            Value = readable.Select(MapTodo).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = todos,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
+                        || todos.Count < readable.Count,
         };
     }
 
@@ -2011,10 +2063,18 @@ public class ExternalDataService
                 read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
         }
 
+        // F3b fix round 1: an event follows the invoices of every row it is filed under (an event, a document, a communication ...,
+        // up the chain); a chain read that fails drops the events that have a parent and says truncated.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            EventTable, readable.Select(r => (RowIdOf(r.SprkEventid), (IReadOnlyDictionary<string, JsonElement>?)r.Extra)).ToList(), ct);
+        var events = readable.Select((r, i) => (Row: r, Links: ancestors[i])).Where(r => r.Links is not null)
+            .Select(r => MapEvent(r.Row, r.Links)).ToList();
+
         return new ExternalCollectionResponse<ExternalEventDto>
         {
-            Value = readable.Select(MapEvent).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = events,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
+                        || events.Count < readable.Count,
         };
     }
 
@@ -2212,12 +2272,18 @@ public class ExternalDataService
     /// Task 130-0 fix round 1: <paramref name="select"/> plus the invoice link columns of <paramref name="table"/> it does not already
     /// name (<see cref="InvoiceLinks.LinkedTable.ValueColumns"/>), so a list read always carries what the invoice filter reads.
     /// </summary>
+    /// <remarks>F3b fix round 1: and the parent edge columns of <paramref name="table"/> (<see cref="InvoiceLinks.ParentValueColumnsOf"/>),
+    /// so the rows can be put to the ancestor walk (<see cref="ReadAncestorLinksOfRowsAsync"/>), where a column that was not read is
+    /// undecidable, never "no parent".</remarks>
     internal static string WithInvoiceLinkColumns(string select, string table)
     {
-        if (!InvoiceLinks.Tables.TryGetValue(table, out var linked))
+        var columns = (InvoiceLinks.Tables.TryGetValue(table, out var linked) ? linked.ValueColumns : Array.Empty<string>())
+            .Concat(InvoiceLinks.ParentValueColumnsOf(table))
+            .ToList();
+        if (columns.Count == 0)
             return select;
         var present = select.Split(',').ToHashSet(StringComparer.Ordinal);
-        return string.Concat(linked.ValueColumns.Where(c => !present.Contains(c)).Select(c => "," + c).Prepend(select));
+        return string.Concat(columns.Distinct(StringComparer.Ordinal).Where(c => !present.Contains(c)).Select(c => "," + c).Prepend(select));
     }
 
     /// <summary>
@@ -3600,7 +3666,17 @@ public class ExternalDataService
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(
             BuildDeleteTargetUrl(GetApiUrl(), kind, id), ct);
-        return row is null ? null : ParseDeleteTarget(kind, row);
+        if (row is null)
+            return null;
+        var target = ParseDeleteTarget(kind, row);
+        // F3b fix round 1: a write follows the invoices of every row the target is filed under too (its event, document,
+        // communication ..., up the chain). A chain that cannot be decided carries the unreadable link (refused); a chain read that
+        // fails throws DataverseUnavailableException (the route's 503).
+        var table = GetDeletableBinding(kind).EntityLogicalName;
+        var ancestors = await ReadRowAncestorLinksAsync(table, id, row, ct).ConfigureAwait(false);
+        return ancestors.Invoices.Count == 0 || target.InvoiceLinks is null
+            ? target
+            : target with { InvoiceLinks = target.InvoiceLinks.Concat(ancestors.Invoices).Distinct().ToList() };
     }
 
     /// <summary>The single-row read <see cref="GetDeleteTargetAsync"/> sends: both stamps and every parent lookup. Pure.</summary>
@@ -3611,6 +3687,7 @@ public class ExternalDataService
         var columns = new[] { CreatedByPersonValueAttribute, CreatedByContactValueAttribute }
             .Concat(binding.Parents.Select(p => p.LookupValueAttribute))
             .Concat(InvoiceLinks.LinkColumnsOf(binding.EntityLogicalName).Select(c => $"_{c}_value"))
+            .Concat(InvoiceLinks.ParentValueColumnsOf(binding.EntityLogicalName)) // F3b fix round 1: the rows it is filed under
             .Distinct(StringComparer.Ordinal);
         return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
     }
@@ -4391,7 +4468,7 @@ public class ExternalDataService
             : InvoiceLinksOf(DocumentTable, r.Extra).Concat(ancestorLinks).Distinct().ToList(),
     };
 
-    private static ExternalTodoDto MapTodo(TodoRow r) => new()
+    private static ExternalTodoDto MapTodo(TodoRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkTodoid = r.SprkTodoid ?? "",
         SprkName = r.SprkName ?? "",
@@ -4410,10 +4487,11 @@ public class ExternalDataService
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
-        InvoiceLinks = InvoiceLinksOf(TodoTable, r.Extra), // task 130-0 fix round 1; never serialized
+        // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
+        InvoiceLinks = InvoiceLinksOf(TodoTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };
 
-    private static ExternalEventDto MapEvent(EventRow r) => new()
+    private static ExternalEventDto MapEvent(EventRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkEventid = r.SprkEventid ?? "",
         SprkName = r.SprkName ?? "",
@@ -4425,7 +4503,8 @@ public class ExternalDataService
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
-        InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra), // task 130-0 fix round 1; never serialized
+        // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
+        InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };
 
     private static ExternalContactDto MapContact(ContactRow r) => new()

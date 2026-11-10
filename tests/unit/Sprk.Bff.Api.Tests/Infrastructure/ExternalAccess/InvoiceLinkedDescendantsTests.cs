@@ -340,9 +340,10 @@ public sealed class InvoiceLinkedDescendantsTests
         var top = store.Row("sprk_document", ("_sprk_invoice_value", invoice));
         var (rowA, rowB, rowC, rowD) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
 
+        const string Parent = "sprk_parentdocument";
         var result = await InvoiceLinks.ReadAncestorInvoiceLinksAsync("sprk_document", new[]
         {
-            (rowA, top), (rowB, ExternalDocumentNarrowing.UnreadableLink), (rowC, rowC), (rowD, Guid.NewGuid()),
+            (rowA, Parent, top), (rowB, Parent, ExternalDocumentNarrowing.UnreadableLink), (rowC, Parent, rowC), (rowD, Parent, Guid.NewGuid()),
         }, store.Query, CancellationToken.None);
 
         Decided(result[rowA], invoice);

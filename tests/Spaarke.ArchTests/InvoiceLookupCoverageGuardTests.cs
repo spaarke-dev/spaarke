@@ -18,8 +18,12 @@ namespace Spaarke.ArchTests;
 /// or line link).</para>
 /// <para><b>Excluded.</b> <see cref="Exclusions"/>: a lookup that is no invoice link a caller reads rows by, each with its reason. The
 /// ratchet: an exclusion for a lookup that no longer exists, or that has become decided, fails, so the list only shrinks.</para>
-/// <para><b>Controls.</b> <see cref="Unclassified"/> is pure; a synthetic unlisted lookup MUST be reported (must fire), and the
-/// real lookups with the real classification MUST NOT (must not fire).</para>
+/// <para><b>Controls.</b> <see cref="Unclassified"/> and <see cref="MissingFromEntityFiles"/> are pure; a synthetic unlisted lookup and a
+/// relationship lookup dropped from the entity attributes MUST be reported (must fire), and the real lookups with the real classification
+/// MUST NOT (must not fire).</para>
+/// <para><b>Limit.</b> "Decided" proves REGISTRY MEMBERSHIP only: the column is listed by <see cref="InvoiceLinks"/> or the invoice family.
+/// It does not prove that every read path applies the rule to that table; that is held by the behaviour tests of each plane
+/// (<c>InvoiceLinkedDescendantsTests</c>, <c>ExternalInvoiceLinkedDescendantRouteTests</c> and the route and handler tests).</para>
 /// </remarks>
 public class InvoiceLookupCoverageGuardTests
 {
@@ -31,11 +35,11 @@ public class InvoiceLookupCoverageGuardTests
         ["sprk_externalrecordaccess.sprk_invoice"] =
             "the access grant row (who may open the invoice): read by the access engine, never returned to a caller as content",
         ["contact.sprk_invoice"] =
-            "a customer-record reference on the contact (the invoice the contact is the vendor contact of): not an invoice-linked row of the invoice",
+            "no writer in src; live count 0 (per RecordContainerResolver.cs:1938); re-decide when a writer is added",
         ["sprk_organization.sprk_invoice"] =
-            "a customer-record reference on the organization: not an invoice-linked row of the invoice",
+            "no writer in src; live count 0 (per RecordContainerResolver.cs:1938); re-decide when a writer is added",
         ["sprk_invoice.sprk_supersedesinvoice"] =
-            "the invoice's own self reference: the row is the invoice, decided by the invoice rule itself, and the superseded invoice is read only through its own decision",
+            "the invoice's link to the invoice it supersedes: the row is itself an invoice, decided by the invoice rule, and each invoice is decided on its own",
     };
 
     private static string SolutionRoot => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster");
@@ -111,11 +115,26 @@ public class InvoiceLookupCoverageGuardTests
     [Fact(DisplayName = "K-a: every relationship's lookup is a lookup attribute in its entity's Entity.xml (the scan is not stale)")]
     public void EveryRelationshipLookup_IsALookupAttributeInEntityXml()
     {
-        var attributes = LookupAttributesInEntityFiles();
-
-        var missing = LookupsToInvoice().Where(l => !attributes.Contains(l)).Select(l => $"{l.Table}.{l.Column}").ToList();
+        var missing = MissingFromEntityFiles(LookupsToInvoice(), LookupAttributesInEntityFiles());
 
         Assert.True(missing.Count == 0, "Relationship lookups with no lookup attribute in Entity.xml: " + string.Join(", ", missing));
+    }
+
+    /// <summary>The relationship lookups with no lookup attribute in the entity files (pure, for the stale-scan control).</summary>
+    internal static IReadOnlyList<string> MissingFromEntityFiles(
+        IEnumerable<(string Table, string Column)> lookups, IReadOnlySet<(string Table, string Column)> attributes) =>
+        lookups.Where(l => !attributes.Contains(l)).Select(l => $"{l.Table}.{l.Column}").ToList();
+
+    [Fact(DisplayName = "K-a stale-scan control must fire: a relationship lookup whose Entity.xml attribute is dropped is reported; the real set is not")]
+    public void Control_StaleScan_MustFire_WhenAnEntityLookupIsDropped()
+    {
+        var lookups = LookupsToInvoice();
+        var attributes = LookupAttributesInEntityFiles();
+        var dropped = lookups.First(l => l.Table == "sprk_todo" && l.Column == "sprk_regardinginvoice");
+        var withoutOne = attributes.Where(a => a != dropped).ToHashSet();
+
+        Assert.Equal(new[] { "sprk_todo.sprk_regardinginvoice" }, MissingFromEntityFiles(lookups, withoutOne));
+        Assert.Empty(MissingFromEntityFiles(lookups, attributes));
     }
 
     [Fact(DisplayName = "K-a ratchet: every exclusion names a real lookup that the rule does not decide")]

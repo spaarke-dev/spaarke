@@ -6,12 +6,22 @@ using Sprk.Bff.Api.Services.Dataverse;
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
-/// ebilling-r1 task 130-0b F3b: the invoice links of the parent document chain above each row of a FetchXML (module) page, by position
-/// (<see cref="ExternalDataService.ReadModuleDocumentAncestorLinksAsync"/>). <c>Failed</c>: the chain read failed, so every row that has a
+/// ebilling-r1 task 130-0b F3b: the invoice links of the rows above each row of a FetchXML (module) page of <c>table</c>, by position,
+/// through every parent edge of the table (the document's parent document and, since fix round 1, its related rows;
+/// <see cref="ExternalDataService.ReadModuleDocumentAncestorLinksAsync"/>). <c>Failed</c>: the chain read failed, so every row that has a
 /// parent is undecidable.
 /// </summary>
 internal delegate Task<(IReadOnlyList<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ModuleDocumentChainReader(
-    IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct);
+    string table, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct);
+
+/// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1: the invoices of the rows above each Web API row of <c>table</c> that a REST read has already
+/// read, by position (<see cref="ExternalDataService.ReadAncestorLinksOfRowsAsync"/>): an empty list (no parent), the ancestors'
+/// invoices (with <see cref="ExternalDocumentNarrowing.UnreadableLink"/> when undecidable), or <see langword="null"/> when the chain read
+/// failed for a row that has a parent (the caller withholds it and says truncated).
+/// </summary>
+internal delegate Task<IReadOnlyList<IReadOnlyList<Guid>?>> InvoiceAncestorReader(
+    string table, IReadOnlyList<(Guid Id, IReadOnlyDictionary<string, JsonElement>? Row)> rows, CancellationToken ct);
 
 /// <summary>
 /// ebilling-r1 task 130-0b (design.md:414, uac-r2 ruling 2026-11-08): the ONE answer to "which invoices does a row of table T link to",
@@ -164,10 +174,16 @@ internal static class InvoiceLinks
     /// <summary>
     /// F3b: the descendant tables, derived from <paramref name="edges"/> (a parameter so the guard can seed an edge). (1) The document's
     /// parent chain: the Filing edge <c>sprk_document.sprk_parentdocument → sprk_document</c>
-    /// (<see cref="ExternalDocumentNarrowing.ParentDocumentAttribute"/>, the chain the task 188 narrowing walks). (2) Every PLAIN table (no
-    /// invoice link of its own, not in the invoice family, not a core record) with a Filing edge to an invoice-linked child table
+    /// (<see cref="ExternalDocumentNarrowing.ParentDocumentAttribute"/>, the chain the task 188 narrowing walks), listed first. (2) Every
+    /// PLAIN table (not in the invoice family, not a core record) with a Filing edge to an invoice-linked child table
     /// (<paramref name="tables"/>: not a root, not in the family) or to another descendant, followed to a fixed point. An edge to a root
     /// is not followed (a root is decided by its grant). The registry decides which tables these are; nothing here names one.
+    /// <para>F3b fix round 1: the walk is per ROW, not per table. A table with invoice links of its own (a to-do, an event, a document,
+    /// a communication, an analysis ...) is plain too, so its rows also follow their filing edges: a row whose own invoice column is
+    /// null but which is filed under an invoice-linked row (an analysis on a document, a to-do on an event, an archived email
+    /// document on its communication, a row on a service request) takes that row's invoices. A row's decision is the union of its
+    /// own links and its ancestors' (<see cref="ShapeOf"/>). A self edge (an event regarding an event) is followed like any other;
+    /// the walk's path check makes a cycle undecidable.</para>
     /// </summary>
     internal static IReadOnlyDictionary<string, DescendantTable> BuildDescendants(
         IEnumerable<RecordFamilyEdges.Edge> edges, IReadOnlyDictionary<string, SecureChildLineage.Table> lineage,
@@ -183,8 +199,8 @@ internal static class InvoiceLinks
         bool IsDecidedChild(string table) =>
             tables.TryGetValue(table, out var linked) && !linked.IsRoot && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table);
         bool IsPlain(string table) =>
-            !tables.ContainsKey(table) && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table)
-            && !RecordFamilyEdges.CoreTables.Contains(table);
+            !ExternalInvoiceVisibility.IsInvoiceFamilyTable(table) && !RecordFamilyEdges.CoreTables.Contains(table)
+            && !(tables.TryGetValue(table, out var linked) && linked.IsRoot);
         bool Add(string child, string column, string parent)
         {
             if (!parents.TryGetValue(child, out var list))
@@ -205,7 +221,7 @@ internal static class InvoiceLinks
         for (var changed = true; changed;)
         {
             changed = false;
-            foreach (var edge in all.Where(e => IsPlain(e.ChildTable) && !Same(e.ChildTable, e.ParentTable)
+            foreach (var edge in all.Where(e => IsPlain(e.ChildTable)
                          && (IsDecidedChild(e.ParentTable) || parents.ContainsKey(e.ParentTable))))
             {
                 changed |= Add(edge.ChildTable, edge.LookupColumn, edge.ParentTable);
@@ -265,35 +281,70 @@ internal static class InvoiceLinks
         return walks.ToDictionary(kv => kv.Key, kv => kv.Value.Result());
     }
 
+    /// <summary>F3b fix round 1: the parent edges of <paramref name="table"/> (<see cref="Descendants"/>); empty when it has none.</summary>
+    internal static IReadOnlyList<ParentEdge> ParentEdgesOf(string? table) =>
+        table is not null && Descendants.TryGetValue(table, out var descendant) ? descendant.Parents : Array.Empty<ParentEdge>();
+
+    /// <summary>F3b fix round 1: the Web API value columns (<c>_col_value</c>) of the parent edges of <paramref name="table"/>. A REST read
+    /// whose rows are put to <see cref="ReadAncestorInvoiceLinksAsync"/> selects every one of them.</summary>
+    internal static IReadOnlyList<string> ParentValueColumnsOf(string? table) => ParentEdgesOf(table).Select(e => e.ValueColumn).ToArray();
+
+    /// <summary>
+    /// F3b fix round 1: the first parents (hop 1) a Web API <paramref name="row"/> of <paramref name="table"/> carries, one entry per
+    /// parent edge that is set, for <see cref="ReadAncestorInvoiceLinksAsync"/>. An explicit null is "not filed there" (no entry). A
+    /// column the row does not carry was not read and a value that is not a GUID cannot be read: each gives an entry whose parent is
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (the row is undecidable). A row that was not read (null) gives one such
+    /// entry per edge. A table with no parent edge gives none.
+    /// </summary>
+    internal static IReadOnlyList<(Guid Row, string Column, Guid Parent)> FirstParentsOf(
+        string table, Guid rowId, IReadOnlyDictionary<string, JsonElement>? row)
+    {
+        var firsts = new List<(Guid, string, Guid)>();
+        foreach (var edge in ParentEdgesOf(table))
+        {
+            var parent = row is null ? ExternalDocumentNarrowing.UnreadableLink : ExternalInvoiceVisibility.LinkOf(row, edge.ValueColumn);
+            if (parent is { } id)
+                firsts.Add((rowId, edge.Column, id));
+        }
+
+        return firsts;
+    }
+
     /// <summary>
     /// The ancestors' invoice links for rows the caller has ALREADY read (F3b, the REST plane): <paramref name="parents"/> are the rows'
-    /// first parents (hop 1) with each row's id. Same walk, same bound, same undecidable cases as
-    /// <see cref="ReadRowInvoiceLinksAsync"/>; the rows' own links are not read here. Only a table with exactly ONE parent edge (the
-    /// document's parent document) can be given its first parent as one id; any other table is refused. A failed read THROWS.
+    /// first parents (hop 1), one entry per (row, parent edge column, parent id), as <see cref="FirstParentsOf"/> reads them. Same walk,
+    /// same bound, same undecidable cases as <see cref="ReadRowInvoiceLinksAsync"/>; the rows' own links are not read here. F3b fix
+    /// round 1: a table with several parent edges (a document's parent document and its related communication, event, to-do,
+    /// agreement and service request; a to-do's or an event's regarding rows ...) gives one entry per edge that is set, and the row's
+    /// answer is the union over all of them; any one edge that is undecidable makes the row undecidable. An entry whose column is not
+    /// a parent edge of <paramref name="table"/> is refused (it would be followed as the wrong table). A failed read THROWS.
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, RowInvoiceLinks>> ReadAncestorInvoiceLinksAsync(
-        string table, IReadOnlyCollection<(Guid Row, Guid Parent)> parents, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+        string table, IReadOnlyCollection<(Guid Row, string Column, Guid Parent)> parents, CommunicationOpenThreadGate.RowQuery query,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(parents);
         ArgumentNullException.ThrowIfNull(query);
-        if (table is null || ShapeOf(table) is not { } shape || shape.Parents.Count != 1)
-            throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table with exactly one parent edge.");
+        if (table is null || ShapeOf(table) is not { } shape || shape.Parents.Count == 0)
+            throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table with a parent edge.");
 
         var walks = new Dictionary<Guid, RowWalk>();
         var known = new Dictionary<(string Table, Guid Id), IReadOnlyDictionary<string, JsonElement>?>();
         var level = new List<Pending>();
-        foreach (var (row, parent) in parents.Where(p => p.Row != Guid.Empty).Distinct())
+        foreach (var (row, column, parent) in parents.Where(p => p.Row != Guid.Empty).Distinct())
         {
+            var edge = shape.Parents.FirstOrDefault(e => string.Equals(e.Column, column, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentOutOfRangeException(nameof(parents), column, $"Not a parent edge of {table}.");
             var walk = walks.TryGetValue(row, out var existing) ? existing : walks[row] = new RowWalk();
             // An unreadable parent link, or a row that is its own parent, cannot be decided.
-            if (parent == ExternalDocumentNarrowing.UnreadableLink || parent == Guid.Empty || parent == row)
+            if (parent == ExternalDocumentNarrowing.UnreadableLink || parent == Guid.Empty
+                || (parent == row && string.Equals(edge.ParentTable, table, StringComparison.OrdinalIgnoreCase)))
             {
                 walk.Undecidable = true;
                 continue;
             }
 
-            foreach (var edge in shape.Parents)
-                level.Add(new Pending(row, edge.ParentTable, parent, new[] { (table, row), (edge.ParentTable, parent) }));
+            level.Add(new Pending(row, edge.ParentTable, parent, new[] { (table, row), (edge.ParentTable, parent) }));
         }
 
         for (var hop = 1; level.Count > 0; hop++)

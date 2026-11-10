@@ -561,6 +561,9 @@ public sealed class CommunicationThreadReadService
             .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.Tables.TryGetValue(CommunicationTable, out var invoiceLinked)
                 ? invoiceLinked.ValueColumns
                 : Array.Empty<string>())
+            // F3b fix round 1: and every parent edge column, so the external filter can follow the invoices of the rows a message is
+            // filed under (its thread, the event, analysis or service request it regards); a column not read is undecidable.
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.ParentValueColumnsOf(CommunicationTable))
             .Distinct();
         var columns = new List<string> { PkField };
         if (includeContent)

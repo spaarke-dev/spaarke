@@ -222,9 +222,10 @@ public static class ExternalModuleDataEndpoints
         new(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
 
     private static async Task<(List<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ReadChainsAsync(
-        ModuleDocumentChainReader read, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
+        ModuleDocumentChainReader read, string table, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute,
+        CancellationToken ct)
     {
-        var (chains, failed) = await read(rows, idAttribute, ct).ConfigureAwait(false);
+        var (chains, failed) = await read(table, rows, idAttribute, ct).ConfigureAwait(false);
         // A reader that answers the wrong number of rows decides nothing: every row is undecidable (fail closed).
         return chains.Count == rows.Count
             ? (chains.ToList(), failed)
@@ -372,6 +373,7 @@ public static class ExternalModuleDataEndpoints
                 .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
                 .Concat(InvoiceLinkedChildAttributes(module)) // task 130-0 fix round 1: the invoices a child row belongs to
+                .Concat(InvoiceAncestorAttributes(module)) // F3b fix round 1 (K1): the rows it is filed under, whatever the narrowing projects
                 .Concat(ExternalInvoiceReviewDetail.RequiredAttributes(module.RecordEntity)) // 082c-2 fix round 3 (U1): the status the review detail is judged on
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -439,19 +441,23 @@ public static class ExternalModuleDataEndpoints
                 // F3b: a child document is decided by EVERY invoice link up its parent document chain too (one batched read per hop,
                 // the task 188 bound). A chain that cannot be decided carries the unreadable link, so the row is hidden; a chain read
                 // that fails does the same and the response says truncated. No reader wired: a row that has a parent is undecidable.
+                // F3b fix round 1: every parent edge of the table (a document's parent document and its related communication, event,
+                // to-do, agreement and service request), each projected by the rule attributes above (FetchXML omits a null attribute).
                 var chains = Enumerable.Repeat(NoAncestors, scoped.Count).ToList();
                 var chainReadFailed = false;
-                if (InvoiceLinks.Descendants.TryGetValue(module.RecordEntity, out var chained) && chained.Parents.Count == 1)
+                if (InvoiceLinks.Descendants.TryGetValue(module.RecordEntity, out var chained))
                 {
                     if (readDocumentChains is not null)
                     {
                         (chains, chainReadFailed) = await ReadChainsAsync(
-                            readDocumentChains, scoped, InvoiceLinks.Tables[module.RecordEntity].IdColumn, ct).ConfigureAwait(false);
+                            readDocumentChains, module.RecordEntity, scoped, InvoiceLinks.Tables[module.RecordEntity].IdColumn, ct)
+                            .ConfigureAwait(false);
                     }
                     else
                     {
-                        chains = scoped.Select(row =>
-                            row.TryGetValue(chained.Parents[0].Column, out var raw) && raw is not null ? NoAncestorsUndecidable : NoAncestors).ToList();
+                        chains = scoped.Select(row => chained.Parents.Any(edge => row.TryGetValue(edge.Column, out var raw) && raw is not null)
+                            ? NoAncestorsUndecidable
+                            : NoAncestors).ToList();
                         chainReadFailed = chains.Any(chain => chain.ChainUndecidable);
                     }
                 }
@@ -541,6 +547,17 @@ public static class ExternalModuleDataEndpoints
     /// (a root is never hidden by an invoice link; its link is redacted instead) and none for the invoice family (decided by the
     /// invoice predicate itself, <see cref="HideInvoiceRowsAsync"/>).
     /// </summary>
+    /// <summary>
+    /// F3b fix round 1 (K1): the parent edge attributes of a module whose table is decided through its parent edges too
+    /// (<see cref="InvoiceLinks.Descendants"/>), projected server-side on every fetch. FetchXML omits a null attribute, so the chain
+    /// reader reads an absent one as "no parent": without this projection a fetch that did not name a parent column (or a module
+    /// whose narrowing projects only some of them) would decide a child of another firm's invoice work as unfiled.
+    /// </summary>
+    internal static IReadOnlyList<string> InvoiceAncestorAttributes(ExternalModuleDescriptor module) =>
+        InvoiceLinkedChildAttributes(module).Count > 0
+            ? InvoiceLinks.ParentEdgesOf(module.RecordEntity).Select(edge => edge.Column).ToArray()
+            : Array.Empty<string>();
+
     private static IReadOnlyList<string> InvoiceLinkedChildAttributes(ExternalModuleDescriptor module) =>
         InvoiceLinks.HasInvoiceLink(module.RecordEntity)
         && !InvoiceLinks.IsRootWithInvoiceLink(module.RecordEntity)
