@@ -162,6 +162,9 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// <summary>ebilling-r1 task 164a-1: the invoice line, whose generic create alone is refused (its own refusal words).</summary>
     internal const string InvoiceLineTable = "sprk_billingevent";
 
+    /// <summary>ebilling-r1 DEF-061 fix round 1: the Procedure Version, created and published only by <c>ProcedureService</c> (its own refusal words).</summary>
+    internal const string ProcedureVersionTable = "sprk_procedureversion";
+
     /// <summary>ebilling-r1 task 096b (EB-D-201): the invoice, created only by the submission operation (the Create Invoice wizard).</summary>
     internal const string InvoiceTable = "sprk_invoice";
 
@@ -187,6 +190,11 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
               "lines are created only by Spaarke's e-billing services, when an invoice is read or a line is added in its review. " +
               $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
               "valid; add the line from the invoice's review instead."
+            : string.Equals(tablename, ProcedureVersionTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. Procedure " +
+              "versions are created and published only from the Procedure's versions page. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; create the version from the Procedure's versions page instead."
             : $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
               "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
               $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +

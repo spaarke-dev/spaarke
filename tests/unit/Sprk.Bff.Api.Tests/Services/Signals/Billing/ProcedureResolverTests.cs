@@ -1115,30 +1115,41 @@ public sealed class ProcedureResolverTests
         resolution.RulesOn(Apr15).Procedures.Should().ContainSingle("control: v2 is chosen once it is in force");
     }
 
-    [Theory(DisplayName = "DEF-061: an Active or Superseded version WITHOUT the stamp did not open a window (the backfill stamps it): the Procedure is not applicable on any date; stamped (control) it is chosen")]
+    [Theory(DisplayName = "DEF-061 fix round 1 (ontology F1): status is evidence: an Active or Superseded version opened a window with OR without the stamp, so no ordering between the backfill and a BFF deploy is needed")]
     [InlineData(ProcedureEntity.VersionStatusActive, false)]
     [InlineData(ProcedureEntity.VersionStatusSuperseded, false)]
     [InlineData(ProcedureEntity.VersionStatusActive, true)]
     [InlineData(ProcedureEntity.VersionStatusSuperseded, true)]
-    public async Task AnActiveOrSupersededVersion_OpenedAWindow_OnlyWithTheStamp(int status, bool stamped)
+    public async Task AnActiveOrSupersededVersion_OpenedAWindow_WithOrWithoutTheStamp(int status, bool stamped)
     {
         var procedure = AddProcedure("Published before the stamp", ProcedureAppliesTo.AllRecords);
         var version = AddVersion(procedure, 1, Jan1, status == ProcedureEntity.VersionStatusActive ? null : Apr1, status, stamped: stamped);
-        AddRuleVersion(AddProcedureRule(procedure, "OLD-PUBLISH"), version, Jan1); // a Published policy version does not stand in for the stamp on an Active or Superseded row
+        AddRuleVersion(AddProcedureRule(procedure, "OLD-PUBLISH"), version, Jan1);
         var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
         var onDate = resolution.RulesOn(Feb15);
 
-        if (stamped)
-        {
-            onDate.Rules.Select(r => r.Version.PolicyCode).Should().Equal("OLD-PUBLISH");
-        }
-        else
-        {
-            onDate.Rules.Should().BeEmpty();
-            onDate.Gaps.Should().BeEmpty();
-            onDate.Procedures.Should().BeEmpty("no version of the Procedure opened a window, so it is not applicable on any date");
-        }
+        onDate.Rules.Select(r => r.Version.PolicyCode).Should().Equal("OLD-PUBLISH");
+        onDate.Gaps.Should().BeEmpty();
+        // The first-opened date (F2-d) is the version's own effective-from, stamped or not: work dated before it is "not applicable".
+        resolution.RulesOn(new DateOnly(2025, 12, 1)).Procedures.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "DEF-061 fix round 1: a Draft never opened a window, stamp or not (a Draft retired unpublished must not hold work as a gap)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADraft_NeverOpenedAWindow_WithOrWithoutAStamp(bool stamped)
+    {
+        var procedure = AddProcedure("Dated draft", ProcedureAppliesTo.AllRecords);
+        var draft = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusDraft, stamped: stamped);
+        AddRuleVersion(AddProcedureRule(procedure, "DRAFT-RULE"), draft, Jan1);
+        AddVersion(procedure, 2, Apr1, null);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var inWindow = resolution.RulesOn(Feb15);
+
+        inWindow.Gaps.Should().BeEmpty("a Draft opened nothing, so the dates it was drafted for are not a gap");
+        inWindow.Procedures.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "DEF-061 fallback: a Retired version with NO stamp (published before the column) keeps the policy-version evidence: opened with a Published policy version under it, not opened without one")]
@@ -1165,17 +1176,23 @@ public sealed class ProcedureResolverTests
         }
     }
 
-    [Theory(DisplayName = "DEF-061: OpenedAWindow is 'has an effective-from AND the stamp'; only a Retired version with no stamp is rescued by a Published policy version")]
+    [Theory(DisplayName = "DEF-061 fix round 1: OpenedAWindow is 'has an effective-from AND (Active or Superseded, or a non-Draft with the stamp, or Retired with a Published policy version)'")]
     [InlineData(ProcedureEntity.VersionStatusActive, true, true, false, true)]
     [InlineData(ProcedureEntity.VersionStatusSuperseded, true, true, false, true)]
     [InlineData(ProcedureEntity.VersionStatusRetired, true, true, false, true)]
     [InlineData(ProcedureEntity.VersionStatusRetired, true, true, true, true)]
-    [InlineData(ProcedureEntity.VersionStatusActive, true, false, true, false)]
-    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, false, true, false)]
-    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, false, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, false, true, true)]
     [InlineData(ProcedureEntity.VersionStatusRetired, true, false, true, true)]
     [InlineData(ProcedureEntity.VersionStatusRetired, true, false, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, true, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, true, true, false)]
     [InlineData(ProcedureEntity.VersionStatusActive, false, true, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusActive, false, false, false, false)]
     [InlineData(ProcedureEntity.VersionStatusRetired, false, true, true, false)]
     public void OpenedAWindow_IsTheEffectiveFromAndTheStamp(int status, bool hasFrom, bool hasStamp, bool hasPublishedPolicyVersion, bool expected)
     {

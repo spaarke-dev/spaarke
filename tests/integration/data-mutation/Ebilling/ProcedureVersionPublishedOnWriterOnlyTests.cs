@@ -105,6 +105,9 @@ public class ProcedureVersionPublishedOnWriterOnlyTests
         rule.GenericCreateRefused.Should().BeTrue("a Procedure Version is created by ProcedureService alone; registering the stamp must not open a generic create");
         rule.CreatedOnlyByItsWriter.Should().BeFalse("its other columns are as they were: only the stamp is refused");
         DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(Version).Should().BeTrue("the chat create tool refuses it too");
+        DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage(Version)
+            .Should().Contain("Procedure versions are created and published only from the Procedure's versions page")
+            .And.NotContain("signal").And.NotContain("decision");
         rule.TableServerOwnedColumns.Should().BeEmpty();
         RecordTableRules.All.Where(r => r.WriterOnlyColumns.Count > 0).Select(r => r.Table).Should().BeEquivalentTo(["sprk_invoice", Version]);
         RecordTableRules.Get("sprk_invoice").WriterOnlyColumns.Should().BeEquivalentTo([ApExportService.BatchLookup], "the AP claim is still the invoice's only");
@@ -220,7 +223,8 @@ public class ProcedureVersionPublishedOnWriterOnlyTests
         var outcome = await world.RepairAsync(Version, id);
 
         outcome.Status.Should().Be(RecordRepairStatus.Skipped);
-        outcome.ReasonCode.Should().Be(RecordRepairReason.TableAppendOnly);
+        outcome.ReasonCode.Should().Be(RecordRepairReason.TableUnsupported, "the neutral reason it had before it was registered; it is not append-only");
+        outcome.ReasonCode.Should().NotBe(RecordRepairReason.TableAppendOnly);
         world.UpdateCalls.Should().Be(0);
         world.Directory.RecordQueries.Should().BeEmpty("the row is not even read");
         world.Directory.Row(Version, id).Attributes.Should().NotContainKey(Stamp);

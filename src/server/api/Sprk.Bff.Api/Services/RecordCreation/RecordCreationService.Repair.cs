@@ -51,12 +51,19 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// Review F1-f / UAC-r2: tables Repair never touches. Repair's own set, NOT the registry's ownership exception: Create's
     /// step 7 reads <see cref="RecordTableRule.OwnershipException"/> and refuses an unfiled create with it, so a registry
-    /// entry would change Create. DEF-061: and <c>sprk_procedureversion</c>, which is in the registry only for its writer-only publish stamp
-    /// (<see cref="RecordTableRule.WriterOnlyColumns"/>): a Procedure Version is created, owned and changed by <c>ProcedureService</c>, so
-    /// registering it must not make Repair read, map into or re-own it (it was "table not supported" before the entry).
+    /// entry would change Create.
     /// </summary>
     private static readonly IReadOnlySet<string> AppendOnlyTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord", "sprk_procedureversion" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
+
+    /// <summary>
+    /// DEF-061 fix round 1: <c>sprk_procedureversion</c> is in the registry only for its writer-only publish stamp
+    /// (<see cref="RecordTableRule.WriterOnlyColumns"/>). A Procedure Version is created, owned and changed by <c>ProcedureService</c>, so
+    /// registering it must not make Repair read, map into or re-own it: it stays exactly what it was before the entry, a table this service
+    /// does not create (<see cref="RecordRepairReason.TableUnsupported"/>, neutral wording; not "append-only", which it is not).
+    /// </summary>
+    private static readonly IReadOnlySet<string> NotCreatedHereTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_procedureversion" };
 
     /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
     internal const string RepairSourceUnreadableWarning =
@@ -88,7 +95,7 @@ internal sealed partial class RecordCreationService
         }
 
         var rule = TableRules(table);
-        if (rule is null)
+        if (rule is null || NotCreatedHereTables.Contains(table))
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is not one this service creates; not repaired", table, id);
             return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableUnsupported);

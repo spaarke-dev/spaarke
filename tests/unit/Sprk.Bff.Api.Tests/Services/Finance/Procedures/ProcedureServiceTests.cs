@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
@@ -1107,6 +1108,49 @@ public sealed class ProcedureServiceTests
         StampOf(w, active).Should().Be(stamped, "retiring a published version leaves its stamp");
         w.H.Transactions.SelectMany(t => t.OfType<UpdateRequest>()).Should().NotContain(u => u.Target.Contains(ProcedureEntity.VersionPublishedOnColumn));
         w.H.Writes.Should().NotContain(x => x.Fields.ContainsKey(ProcedureEntity.VersionPublishedOnColumn));
+
+        // Creating a version (copy-forward from a stamped, published predecessor) does not carry the stamp into the new Draft.
+        var c = new World();
+        var cp = c.Procedure();
+        c.RuleSetOf(cp);
+        var predecessor = c.Version(cp, 1, ProcedureEntity.VersionStatusActive, Jan1, publishedOn: stamped);
+        var created = await c.Service().CreateVersionAsync(cp, Mar1, null, CallerOid, c.TypeOf(cp), default);
+
+        created.Kind.Should().Be(RuleSetOutcomeKind.Done, created.Detail);
+        StampOf(c, created.Value!.Version.Id).Should().BeNull("a new Draft is not published: it carries no stamp, whatever its predecessor has");
+        StampOf(c, predecessor).Should().Be(stamped);
+        c.H.Rows[ProcedureEntity.VersionEntity].Count(r => r.Contains(ProcedureEntity.VersionPublishedOnColumn)).Should().Be(1);
+    }
+
+    [Theory(DisplayName = "DEF-061 fix round 1: the Procedure's scope lock and the resolver's OpenedAWindow are one definition: they agree on every status, stamp and published-rule combination")]
+    [InlineData(ProcedureEntity.VersionStatusActive, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, false, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, false, true)] // a stamped rate-card-only (or rule-less) version, retired: locked, as the resolver's gap says
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, false, true, true)] // retired before the stamp existed: the policy-version fallback
+    [InlineData(ProcedureEntity.VersionStatusRetired, false, false, false)] // a Draft retired unpublished
+    [InlineData(ProcedureEntity.VersionStatusDraft, false, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, true, false)]
+    public async Task TheScopeLock_AndTheResolversOpenedAWindow_Agree(int status, bool stamped, bool publishedRule, bool expected)
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, status, Jan1, publishedOn: stamped ? new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc) : null);
+        if (publishedRule) w.Rule(set, "BILL-A", v1, published: true);
+
+        var outcome = await w.Service().UpdateAsync(p, Update(appliesTo: "Firm", firm: FirmId), default);
+
+        var locked = outcome.ErrorCode == "procedure.scope_locked";
+        var resolver = new ProcedureVersionRow(v1, p, 1, status, Jan1, null, stamped ? new DateTime(2027, 1, 2, 3, 4, 5, DateTimeKind.Utc) : null)
+            .OpenedAWindow(publishedRule ? new HashSet<Guid> { v1 } : new HashSet<Guid>());
+        locked.Should().Be(expected);
+        resolver.Should().Be(expected);
+        locked.Should().Be(resolver, "the lock and the resolver cannot drift: both ask ProcedureEntity.VersionWasPublished");
     }
 
     [Theory]

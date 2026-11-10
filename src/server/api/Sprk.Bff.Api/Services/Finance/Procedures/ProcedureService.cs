@@ -57,6 +57,21 @@ public static class ProcedureEntity
     public const int VersionStatusSuperseded = 100000002;
     public const int VersionStatusRetired = 100000003;
 
+    /// <summary>
+    /// The ONE definition of "this version was published, so it was in force" (ontology-r1 D-203 (5a), (9), DEF-061 fix round 1), asked by
+    /// <c>ProcedureVersionRow.OpenedAWindow</c> (which also needs an effective-from) and by <c>ProcedureService.ScopeLockedAsync</c>, so the
+    /// resolver and the scope lock cannot drift. Status is evidence: publish is the only path to Active and Superseded only comes from Active,
+    /// so an Active or Superseded version was published whether or not it carries the stamp. The stamp (<see cref="VersionPublishedOnColumn"/>)
+    /// closes the one gap status leaves: a Retired version that WAS published, as opposed to a Draft retired unpublished. A Draft never counts,
+    /// stamp or not. For a Retired version with no stamp (retired before the column existed, and not backfilled) the earlier evidence
+    /// remains: at least one Published policy version under it (<paramref name="hasPublishedRules"/>); its known limits (a version published
+    /// with no rule, or a rate-card-only one) apply to those rows only.
+    /// </summary>
+    internal static bool VersionWasPublished(int status, bool hasPublishStamp, bool hasPublishedRules) =>
+        status is VersionStatusActive or VersionStatusSuperseded
+        || (hasPublishStamp && status != VersionStatusDraft)
+        || (status == VersionStatusRetired && hasPublishedRules);
+
     // sprk_storedfile (088)
     public const string StoredFileProcedureVersionColumn = "sprk_procedureversion";
     public const string StoredFilePurposeColumn = "sprk_purpose";
@@ -1124,22 +1139,26 @@ public class ProcedureService
     }
 
     /// <summary>
-    /// I-P4: whether a version has been in force, which locks Applies to and Firm. Active and Superseded versions were; a Retired one was when
-    /// it put a rule in force (its publish marked policy versions under it Published), and a Draft retired without publishing never was.
-    /// Known limits: a version published with no rule and then retired does not lock (it governed nothing, so nothing depends on its scope);
-    /// and a RATE-CARD-ONLY version (085) that was in force and then Retired without being superseded reads as never opened, so it does not
-    /// lock the Procedure's scope either. That is rare (ending a rate-card-only Procedure outright) and fails open. A Published card is not
-    /// used as evidence: a card can be Published while its version is still a Draft, so a Draft retired without ever being published would
-    /// then lock the scope (ontology-r1 ruling (c), 085 fix round 2). The durable fix is a server-written publish stamp on the version (the
-    /// publish-stamp deferral, filed separately).
+    /// I-P4: whether a version has been in force, which locks Applies to and Firm. It is the resolver's own question, so both ask
+    /// <see cref="ProcedureEntity.VersionWasPublished"/> (DEF-061 fix round 1): Active and Superseded versions were, a Retired one was when it
+    /// carries the publish stamp (this includes a rate-card-only version, or one published with no rule), and a Draft never was.
+    /// Known limits, for a Retired version published BEFORE the stamp existed and not backfilled (the backfill leaves Retired rows alone): it
+    /// is read from the earlier evidence, a Published policy version under it (its publish marked them Published). A version published with
+    /// no rule and then retired does not lock (it governed nothing, so nothing depends on its scope), and a rate-card-only one (085) retired
+    /// without being superseded reads as never opened, so it does not lock the scope either; that fails open. A Published card is not used as
+    /// evidence: a card can be Published while its version is still a Draft, so a Draft retired without ever being published would then lock
+    /// the scope (ontology-r1 ruling (c), 085 fix round 2).
     /// </summary>
     private async Task<bool> ScopeLockedAsync(IReadOnlyList<VersionRow> versions, CancellationToken ct)
     {
-        if (versions.Any(v => v.Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded))
+        static bool Stamped(VersionRow v) => v.Row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn) is not null;
+
+        if (versions.Any(v => ProcedureEntity.VersionWasPublished(v.Status, Stamped(v), hasPublishedRules: false)))
         {
             return true;
         }
 
+        // Only a Retired version with no stamp is left undecided: it needs the policy-version evidence.
         var retired = versions.Where(v => v.Status == ProcedureEntity.VersionStatusRetired).Select(v => (object)v.Id).ToArray();
         if (retired.Length == 0)
         {
@@ -1149,8 +1168,10 @@ public class ProcedureService
         var query = new QueryExpression(RuleSetService.VersionEntity) { ColumnSet = new ColumnSet(RuleSetService.ProcedureVersionColumn), TopCount = 1 };
         query.Criteria.AddCondition(RuleSetService.ProcedureVersionColumn, ConditionOperator.In, retired);
         query.Criteria.AddCondition(RuleSetService.PublishStateColumn, ConditionOperator.Equal, RuleSetService.PublishStatePublished);
-        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
-            r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id));
+        var withPublishedRules = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
+            .Select(r => r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id)
+            .OfType<Guid>().ToHashSet();
+        return versions.Any(v => ProcedureEntity.VersionWasPublished(v.Status, Stamped(v), withPublishedRules.Contains(v.Id)));
     }
 
     private async Task<bool> VersionNumberTakenAsync(Guid procedureId, int number, CancellationToken ct)

@@ -1333,33 +1333,33 @@ internal sealed record ProcedureRow(Guid Id, string Name, ProcedureAppliesTo App
 
 /// <param name="PublishedOn">
 /// <c>sprk_publishedon</c> (DEF-061): the instant <c>ProcedureService.PublishVersionAsync</c> published the version; <c>null</c> on a Draft and on
-/// a version published before the column existed (the backfill stamps Active and Superseded ones).
+/// a version published before the column existed (the backfill stamps Active and Superseded ones). Required (no default): a caller that has
+/// not read the column must say so with an explicit <c>null</c>, never by omission.
 /// </param>
-internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number, int Status, DateOnly? From, DateOnly? To, DateTime? PublishedOn = null)
+internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number, int Status, DateOnly? From, DateOnly? To, DateTime? PublishedOn)
 {
     /// <summary>Active or Superseded with an effective-from: in force for its own window (model 3.1).</summary>
     public bool IsInForce => Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded && From is not null;
 
     /// <summary>
-    /// The version opened a window at its effective-from (ontology-r1 D-203 (5a), (9); DEF-061): it has an effective-from AND the server's publish
-    /// stamp (<see cref="PublishedOn"/>), whatever its status now. A Draft has no stamp, so a Draft retired unpublished never opened one (publish
-    /// refuses a Draft whose dates overlap, so a discarded Draft dated early must not hold work as a gap). A Retired version is never in force,
-    /// but a window it had is not "before the first version" either: work in it is a gap.
+    /// The version opened a window at its effective-from (ontology-r1 D-203 (5a), (9); DEF-061 fix round 1): it has an effective-from AND was
+    /// published (<see cref="ProcedureEntity.VersionWasPublished"/>, the one definition shared with the Procedure's scope lock). A Draft never
+    /// counts, stamp or not (publish refuses a Draft whose dates overlap, so a discarded Draft dated early must not hold work as a gap). A
+    /// Retired version is never in force, but a window it had is not "before the first version" either: work in it is a gap.
     /// </summary>
     /// <remarks>
-    /// <para><b>Fallback for a Retired version with no stamp</b> (published before the column existed; the backfill leaves Retired versions
-    /// alone because a Retired row cannot tell a published version from a retired Draft): the earlier evidence, at least one Published policy
-    /// version under it (<paramref name="versionsWithPublishedRules"/>). Publish marks the version's Accepted rules Published in the same
-    /// transaction that makes it Active (<c>ProcedureService.PublishVersionAsync</c>, the only path to Active), so such a version that had rules
-    /// has a Published policy version. The known limits of that evidence stay for these rows only: a version published with NO Accepted rule, or
-    /// a rate-card-only one (085), that was then retired.</para>
-    /// <para><b>An Active or Superseded version with no stamp did not open a window</b>: it is a version published before the column existed
-    /// that the backfill has not stamped yet. Run the backfill before the BFF carrying this change is deployed (notes/def-061).</para>
+    /// <para><b>Status is evidence.</b> Publish is the only path to Active and Superseded only comes from Active, so an Active or Superseded
+    /// version opened a window with or without the stamp; there is no ordering constraint between the backfill and a BFF deploy.</para>
+    /// <para><b>The stamp (<see cref="PublishedOn"/>) closes the one gap status leaves:</b> a Retired version that was published, as opposed
+    /// to a Draft retired unpublished. A Retired version with no stamp (retired before the column existed; the backfill leaves Retired rows
+    /// alone for the same reason) falls back to the earlier evidence, at least one Published policy version under it
+    /// (<paramref name="versionsWithPublishedRules"/>; publish marks the version's Accepted rules Published in the transaction that makes it
+    /// Active). The known limits of that evidence apply to those rows only: a version published with NO Accepted rule, or a rate-card-only one
+    /// (085), that was then retired.</para>
     /// </remarks>
     public bool OpenedAWindow(IReadOnlySet<Guid> versionsWithPublishedRules) =>
         From is not null
-        && (PublishedOn is not null
-            || Status == ProcedureEntity.VersionStatusRetired && versionsWithPublishedRules.Contains(Id));
+        && ProcedureEntity.VersionWasPublished(Status, PublishedOn is not null, versionsWithPublishedRules.Contains(Id));
 
     /// <summary>Half-open [from, to); a null <c>to</c> is open-ended.</summary>
     public bool Contains(DateOnly date) => From is { } from && from <= date && (To is not { } to || date < to);

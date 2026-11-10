@@ -6,9 +6,11 @@
 .DESCRIPTION
     WHY. Whether a Retired Procedure Version ever opened a window (ontology-r1 D-203 (5a)/(9)) was inferred from a Published policy version
     under it, which misses a version that governed only rate cards. ProcedureService.PublishVersionAsync now stamps this column with the
-    server's UTC now in the write that makes the version Active; "opened a window" is "has an effective-from AND this stamp". The resolver
-    (ProcedureResolver, ProcedureVersionRow.OpenedAWindow) falls back to the old policy-version evidence only for a RETIRED version whose stamp
-    is empty.
+    server's UTC now in the write that makes the version Active. "Opened a window" is "has an effective-from AND was published", where status
+    is evidence (Active and Superseded versions were published, with or without the stamp) and the stamp closes the one gap status leaves: a
+    RETIRED version that was published, as opposed to a Draft retired unpublished. The resolver (ProcedureVersionRow.OpenedAWindow) and the
+    Procedure's scope lock share that one definition (ProcedureEntity.VersionWasPublished). A RETIRED version whose stamp is empty falls back
+    to the old policy-version evidence.
 
     THE COLUMN. sprk_procedureversion.sprk_publishedon, Date and Time, user local (an instant: stored UTC and shown in each viewer's zone; a
     time-zone-independent column would store a wall-clock literal, which is wrong for a moment in time), optional, no default, NOT
@@ -19,10 +21,13 @@
       -WhatIf             read only: reports what a plain run (or, with -Backfill, a backfill) would do. Safe to run against dev at any time.
       (no switch)         creates the column if absent (skips it if present) and publishes sprk_procedureversion (entity-scoped, only when this
                           run wrote metadata). A second run writes nothing, publishes nothing.
-      -Verify             read only, exit 0 = pass, 1 = a gap (each named): the column exists, is Date and Time, user local, optional, AND no
-                          Active or Superseded version is left without a stamp (the deploy gate for the BFF build that reads it).
+      -Verify             read only, exit 0 = pass, 1 = a gap (each named): the column exists, is Date and Time, user local, optional, no
+                          Active or Superseded version is left without a stamp, AND the operator can be shown to have read every version
+                          (organization-depth Read on the table; otherwise "cannot confirm every version was read"). Reports the rows read
+                          per status.
       -Backfill           stamps every Active and Superseded version whose stamp is empty. Retired versions are NEVER touched (see below);
-                          Drafts have nothing to stamp. Combine with -WhatIf for the counts.
+                          Drafts have nothing to stamp. Combine with -WhatIf for the counts. Same readability check and per-status report as
+                          -Verify, and it stops (exit 1, nothing written) when it fails.
 
     BACKFILL RULE (the stamp's VALUE is informational; only "not empty" decides anything). For each Active or Superseded version with an
     empty stamp, in order of evidence:
@@ -39,8 +44,9 @@
     discarded unpublished. Stamping both would make every discarded Draft hold work as a gap (D-203 (9)). The resolver keeps the policy-version
     evidence for them.
 
-    ORDER (binding): column (plain run) -> -Backfill -> -Verify exits 0 -> then deploy the BFF build that carries the resolver change. Until
-    the backfill, an Active or Superseded version with an empty stamp did not open a window to the new resolver.
+    ORDER: column (plain run) first, then the BFF build may be deployed at any time after it (status is evidence, so an Active or Superseded
+    version with an empty stamp still opened a window). -Backfill then makes the stamp complete, so that a version retired LATER keeps its
+    evidence; -Verify exits 0 once it has.
 
     A same-name column of another type STOPS the script with exit code 2 and an ESCALATION message (nothing is altered). Auth: the operator's
     own az CLI identity. Publish is entity-scoped (PublishXml for sprk_procedureversion), never the tenant-wide publish.
@@ -138,6 +144,54 @@ function Get-VersionRows([bool]$HasColumn) {
     return , $rows
 }
 
+# A Dataverse timestamp as the UTC instant it names. Invoke-RestMethod in PowerShell 7 already hands a JSON date back as a [datetime]:
+# re-parsing it would shift it by the operator's offset (and under en-GB swap day and month, or throw part way through a run). A string
+# (an older host) is read with the invariant culture and taken as UTC. Pinned by tests/scripts/Deploy-EbillingProcedureVersionPublishedOn.Tests.ps1.
+function ConvertTo-UtcInstant($Value) {
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+    return [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]'AssumeUniversal,AdjustToUniversal')
+}
+
+# Start of the day of an effective-from, as a UTC instant (the fallback evidence). The column is date-only: Invoke-RestMethod hands it back as a
+# [datetime] (or a 'yyyy-MM-dd' string on an older host). Building the text "$value`T00:00:00Z" from a [datetime] would use the operator's culture.
+function ConvertTo-StartOfDayUtc($Value) {
+    if ($Value -is [datetime]) { return [datetime]::SpecifyKind($Value.Date, [System.DateTimeKind]::Utc) }
+    return [datetime]::ParseExact(([string]$Value).Substring(0, 10), 'yyyy-MM-dd', [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]'AssumeUniversal,AdjustToUniversal')
+}
+
+# The operator's best Read depth on the table: 'Global' (organization) is the only depth that shows the operator can read EVERY version.
+# $null when it cannot be read. The script reads as the operator, and a row outside the operator's depth is not returned, not masked, so a
+# count taken at a lower depth would be silently short.
+function Get-OperatorReadDepth {
+    $who = Invoke-Dv -Path 'WhoAmI'
+    $priv = Invoke-Dv -Path "privileges?`$select=privilegeid&`$filter=name eq 'prvRead$Table'"
+    $privilegeId = @($priv.value)[0].privilegeid
+    if (-not $privilegeId) { return $null }
+    $held = Invoke-Dv -Path "systemusers($($who.UserId))/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()"
+    $rank = @{ Basic = 1; Local = 2; Deep = 3; Global = 4 }
+    $best = $null
+    foreach ($p in @($held.RolePrivileges)) {
+        if (([string]$p.PrivilegeId).ToLowerInvariant() -ne ([string]$privilegeId).ToLowerInvariant()) { continue }
+        $depth = [string]$p.Depth
+        if ($rank.ContainsKey($depth) -and (-not $best -or $rank[$depth] -gt $rank[$best])) { $best = $depth }
+    }
+    return $best
+}
+
+# $null when the operator is shown to read every version; otherwise the reason it cannot be confirmed (exit 1).
+function Get-ReadabilityGap {
+    try { $depth = Get-OperatorReadDepth } catch { return "cannot confirm every version was read: the operator's Read privilege on $Table could not be checked ($($_.Exception.Message))" }
+    if ($depth -eq 'Global') { return $null }
+    $shown = if ($depth) { $depth } else { 'none found' }
+    return "cannot confirm every version was read: the operator's Read depth on $Table is '$shown', not organization (Global). Run as an operator whose role reads the whole table (for example System Administrator); a count taken at a lower depth would be short."
+}
+
+# The rows read, per status (the operator's check that the counts are the table's).
+function Write-RowsRead($plan) {
+    Write-Host ("rows read: {0}  (Draft {1}, Active {2}, Superseded {3}, Retired {4}{5})" -f $plan.Total, $plan.Draft, $plan.Active, $plan.Superseded, $plan.RetiredLeft,
+        $(if ($plan.Masked -gt 0) { ", status unreadable $($plan.Masked)" } else { '' }))
+}
+
 # The publish evidence of one version: the earliest audit row that set sprk_status to Active, or $null. Best effort (see the BACKFILL RULE).
 $script:AuditUsable = $true
 function Get-PublishAuditTime([string]$Id) {
@@ -153,7 +207,7 @@ function Get-PublishAuditTime([string]$Id) {
         if (-not $a.changedata) { continue }
         try { $change = $a.changedata | ConvertFrom-Json } catch { continue }
         foreach ($c in @($change.changedAttributes)) {
-            if ($c.logicalName -eq 'sprk_status' -and ("$($c.newValue)" -match "(^|\D)$StatusActive(\D|$)")) { return [datetime]::Parse($a.createdon).ToUniversalTime() }
+            if ($c.logicalName -eq 'sprk_status' -and ("$($c.newValue)" -match "(^|\D)$StatusActive(\D|$)")) { return ConvertTo-UtcInstant $a.createdon }
         }
     }
     return $null
@@ -190,8 +244,10 @@ if ($Verify) {
         $gaps = Get-ColumnGaps $shape
         if ($gaps.Count -eq 0) {
             $plan = Get-StampPlan (Get-VersionRows $true) $true
+            Write-RowsRead $plan
+            if ($readGap = Get-ReadabilityGap) { $gaps.Add($readGap) }
             if ($plan.Masked -gt 0) { $gaps.Add("$($plan.Masked) version(s) read with an empty status (masked by field security for this operator); the backfill state cannot be told") }
-            if ($plan.ToStamp.Count -gt 0) { $gaps.Add("$($plan.ToStamp.Count) Active or Superseded version(s) have no $Column; run -Backfill before the BFF build that reads it is deployed") }
+            if ($plan.ToStamp.Count -gt 0) { $gaps.Add("$($plan.ToStamp.Count) Active or Superseded version(s) have no $Column; run -Backfill (a version retired later would otherwise lose its evidence)") }
             if ($plan.NoFrom -gt 0) { Write-Host "  note: $($plan.NoFrom) Active or Superseded version(s) have no effective-from (they never opened a window; not a gap)" -ForegroundColor Yellow }
             if ($shape.Secured) { Write-Host "  note: $Column is field-secured here; the BFF application user must read it through a profile, or a masked read reads as 'not published'" -ForegroundColor Yellow }
         }
@@ -222,6 +278,8 @@ if ($Backfill) {
         }
 
         $plan = Get-StampPlan (Get-VersionRows $hasColumn) $hasColumn
+        Write-RowsRead $plan
+        if ($readGap = Get-ReadabilityGap) { throw "$readGap. Nothing was written." }
         if ($plan.Masked -gt 0) {
             throw "$($plan.Masked) of $($plan.Total) version(s) read with an empty status: this operator cannot read the secured status column, so which versions to stamp cannot be told. Nothing was written."
         }
@@ -231,7 +289,7 @@ if ($Backfill) {
             $evidence = 'effective-from'
             $stamp = Get-PublishAuditTime $r.sprk_procedureversionid
             if ($stamp) { $evidence = 'audit (status -> Active)'; $byAudit++ }
-            else { $stamp = [datetime]::Parse("$($r.sprk_effectivefrom)T00:00:00Z", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal); $byFrom++ }
+            else { $stamp = ConvertTo-StartOfDayUtc $r.sprk_effectivefrom; $byFrom++ }
             $iso = $stamp.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
             $label = if ([int]$r.sprk_status -eq $StatusActive) { 'Active' } else { 'Superseded' }
             if ($DryRun) {
@@ -255,7 +313,9 @@ if ($Backfill) {
         Write-Host ("  Draft (nothing to stamp)         : {0}" -f $plan.Draft)
         Write-Host ("Active/Superseded already stamped  : {0}" -f $plan.AlreadyStamped)
         Write-Host ("Active/Superseded with no from     : {0} (reported, not stamped)" -f $plan.NoFrom)
-        Write-Host ("{0} : {1}  (audit evidence {2}, effective-from {3})" -f $(if ($DryRun) { 'would stamp                        ' } else { 'stamped                            ' }), $(if ($DryRun) { $plan.ToStamp.Count } else { $written }), $byAudit, $byFrom)
+        Write-Host ("{0} : {1}" -f $(if ($DryRun) { 'would stamp                        ' } else { 'stamped                            ' }), $(if ($DryRun) { $plan.ToStamp.Count } else { $written }))
+        Write-Host ("  by audit evidence (status -> Active) : {0}" -f $byAudit)
+        Write-Host ("  by the effective-from fallback       : {0}" -f $byFrom)
         if ($DryRun) { Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan }
         exit 0
     }

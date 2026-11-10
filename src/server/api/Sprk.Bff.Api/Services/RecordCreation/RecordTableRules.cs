@@ -356,11 +356,13 @@ internal static partial class RecordTableRules
             GenericCreateOnlyRefused = true,
         },
         // ebilling-r1 DEF-061 (owner-approved schema change, 2026-11-09): the Procedure Version's publish stamp. Only ProcedureService.PublishVersionAsync
-        // writes it, and the resolver reads "this version opened a window" from it, so no generic writer (a field-mapping rule, an AI output mapping,
-        // the Update Record node, a repair pass, the chat update tool) sets, moves or clears it: a user-set stamp would make a never-published Draft
-        // hold work as a gap, and a cleared one would hide a published version's window. Registered for those two columns only: a Procedure Version is
-        // created by ProcedureService alone, so the generic create stays refused (GenericCreateOnlyRefused: the same record_creation.table_unsupported an
-        // unregistered table gets), and every other column of it is exactly as it was.
+        // writes it, and the resolver reads "this version opened a window" from it, so no generic writer that asks InheritedAccessPermission.RefuseAppOnlyWrite
+        // (a field-mapping rule, an AI output mapping, the Update Record node, the record-creation mapping) sets, moves or clears it: a user-set stamp
+        // would make a never-published Draft hold work as a gap, and a cleared one would hide a published version's window. Registered for those two
+        // columns only, and every other column of the table is exactly as it was. A Procedure Version is created by ProcedureService alone, so the generic
+        // create is refused (GenericCreateOnlyRefused): RecordCreationService answers record_creation.table_unsupported, the same as for an unregistered
+        // table, and the chat create tool answers in its own words (DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage). Repair
+        // skips the table (RecordCreationService.AppendOnlyTables) because it has no generic owner to repair.
         new RecordTableRule
         {
             Table = "sprk_procedureversion",
