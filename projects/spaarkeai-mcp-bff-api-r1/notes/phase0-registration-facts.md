@@ -42,6 +42,11 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
   - **The click never reached our server.** Over the 4 hours covering the attempts, the dev BFF's Application Insights (`spe-insights-dev-67e2xz`, unsampled: rows = itemCount) shows no request to `/mcp/*` or `/.well-known/*` apart from the agent's own probes; the rest was the app, `/healthz` and always-on `GET /`. So the failure is Microsoft's lookup of the registration. The missing RFC 9728 protected-resource metadata on the spike is not the cause at this step.
   - **Discovery change on hold.** Serving that metadata needs a new anonymous route, a Permanent `AnonymousByDesign` waiver in the route-auth ledger (which conflicts with the uac-r2 spike condition) and a deploy. It is not built.
   - **Next checks, in order:** (1) Base URL = the full MCP endpoint URL; (2) wait 10–15 minutes after saving; (3) delete and re-create the Dev Portal registration with Base URL = MCP URL from the start; (4) Microsoft support / Q&A.
+  - **Research 2026-11-09** (researcher memory `federated-connector-reference-id-not-exist-2026-11-09.md`): the error is undocumented, with no public report of it. The setup meets every documented requirement.
+    - **Refuted:** the admin center expecting an Agents Toolkit registration; licence or Frontier (a missing licence hides the form rather than failing the lookup); DCR.
+    - **Plausible but unproven:** base URL (the Dev Portal treats it as a prefix, so host-only should pass); propagation; a stale registration after an edit.
+    - **Ranked steps:** (1) a **fresh** registration with Base URL = MCP URL, the ID copied with the portal's copy button, retried in a new InPrivate window after 15 minutes; (2) the same Global Admin creates both the registration and the connector, holding the AI Administrator role; (3) no trailing spaces in the registration's Client ID or secret; (4) a Microsoft support case with the admin center's failing network request (dev tools) and the fact that no request reached the BFF.
+    - **Rejected:** the agent's "try Entra SSO as a diagnostic" — A10 forbids that connector option and it issues tokens of a different shape; it needs an owner decision first.
 
 - Connector ID / date: _tbd_
 

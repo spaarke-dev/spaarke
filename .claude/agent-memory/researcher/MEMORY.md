@@ -2,6 +2,7 @@
 - [SPE container permission user identity (2026-10-19)](spe-container-permission-user-identity-2026-10-19.md) — grantedToV2.user id/email/UPN in AdditionalData (SDK v5); guest email-vs-UPN undocumented
 - [SPE inactive container auto-delete (2026-10-16)](spe-container-inactive-autodelete-2026-10-16.md) — 24h auto-delete documented; customProperties PATCH/permission/upload activates; only H8 calls /activate
 - [atk oauth/register minimal project (2026-10-28)](atk-oauth-register-minimal-project-2026-10-28.md) — yaml-only project works; appId any non-empty GUID; scopes comma-split; idempotent only via env-file configurationId; verified to token step
+- [Connector "requested resource does not exist" (2026-11-09)](federated-connector-reference-id-not-exist-2026-11-09.md) — admin-center MCP form error undocumented; no Learn/Q&A hit; steps + candidate verdicts
 - [Entra publisher verification (2026-10-14)](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only; PGA ID + MFA + App Admin
 - [B2B guest vs multi-tenant (2026-10-13)](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust off by default
 - [B2B guest home-tenant (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim; tid=resource tenant; bind at invite
