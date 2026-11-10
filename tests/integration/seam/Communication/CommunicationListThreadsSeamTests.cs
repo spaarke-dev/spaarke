@@ -145,6 +145,25 @@ public class CommunicationListThreadsSeamTests
         select.Should().Contain(ThreadRegardingColumns());
     }
 
+    // Fix round 3g: the single read behind the send route's thread anchor (ReadVisibleThreadRegardingAsync) is pinned on its own, with the
+    // same expected set as the list: a column it does not select reaches ResolveRegardingFromRow as ABSENT, which is an unknown anchor.
+    [Fact]
+    public async Task ReadVisibleThreadRegardingAsync_EveryRegardingColumn_IsSelected()
+    {
+        string? threadQuery = null;
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => threadQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        var target = await Sut().ReadVisibleThreadRegardingAsync(Guid.NewGuid(), Caller(), CancellationToken.None);
+
+        target.Should().BeNull("a thread the caller cannot see (no row) has no anchor");
+        threadQuery.Should().NotBeNull();
+        var select = threadQuery!.Split("$select=")[1].Split('&')[0].Split(',');
+        select.Should().Contain(ThreadRegardingColumns());
+        select.Should().NotContain("_sprk_regardingreportcard_value", "that column is not on sprk_communicationthread");
+    }
+
     [Fact]
     public async Task ListThreadsAsync_ARowThatDidNotCarryARegardingColumn_IsWithheld_NotListedAsRecordLess()
     {

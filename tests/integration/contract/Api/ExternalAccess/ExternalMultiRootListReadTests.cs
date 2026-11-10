@@ -652,6 +652,10 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         var invoices = Registry().FindByEntity("sprk_invoice")!;
         invoices.AdditionalRootLookups.Should().BeEmpty();
         invoices.RootRuleAttributes.Should().Contain(new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment" });
+        // Fix round 3g (census): ExternalMessageEndpoints.RightsThroughParents reads these three from the gate's row; the row is an SDK row,
+        // which omits an unset attribute, so the rights are read only where the projection is pinned (here and in
+        // ExternalLookupAbsentColumnReadTests). The rights are a union: an unread parent adds no rights.
+        invoices.RootRuleAttributes.Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalMessageEndpoints.InvoiceWorkAssignmentColumn);
         invoices.RootRuleAttributes.Count(a => a == "sprk_regardingworkassignment").Should().Be(1);
         var workAssignment = Guid.NewGuid();
         invoices.RootLinks(new Dictionary<string, object?> { ["sprk_regardingworkassignment"] = workAssignment })

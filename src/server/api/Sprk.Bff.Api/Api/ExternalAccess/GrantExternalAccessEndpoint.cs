@@ -882,6 +882,17 @@ public static class GrantExternalAccessEndpoint
             ? await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct)
             : Array.Empty<ExternalGrantRow>();
 
+        // Fix round 3g: every later decision on these rows turns on who issued them - whether a change takes a contact-issued
+        // row over, and whether a contact grantor may touch it. A row that did not carry the issuer column leaves that
+        // unknown, so nothing is written: the refusal a flag read that failed already gives (503, retryable).
+        if (existing.Any(row => !row.IssuerRead))
+        {
+            logger.LogError(
+                "[EXT-GRANT] Refused: a row of {Key} did not carry the issuer column, so who issued it cannot be told. " +
+                "Nothing was granted.", grantee.Key);
+            return GrantCheck.Refused(GrantPolicyDecision.Unreadable, requestedLevel);
+        }
+
         // (3a) Task 140 — a CONTACT issuer never touches access somebody else gave (no proxy revocation or extension):
         // any active row on the key that the caller did not issue — a systemuser's, the Assigned-To rule's, another
         // contact's, or a legacy row with no issuer — refuses, and nothing is changed. On the caller's OWN row any LOWER

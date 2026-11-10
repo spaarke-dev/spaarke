@@ -637,16 +637,16 @@ Shared helpers (`ExternalMultiRootRule.cs:100-123`, no new type or service): `Un
 | `ExternalInvoiceVisibility.LinkOf` (`:1134`) and `IsSet` (`:889`) | invoice source document, communication, submission and attachment links | invoice visibility (source documents, submissions, stored files) | no link | `ExternalDocumentNarrowing.UnreadableLink`, the existing "undecidable" value (the invoice is hidden); an absent column counts as set |
 | `ExternalDocumentNarrowing.JsonLink` (`:214`) | related communication and parent document links | assistant-plane document narrowing | no link | `UnreadableLink` |
 | `ExternalCallerCommunicationGuard.LinkOf` (`:242`) | the source links of an analysis, and communication and attachment ids | assistant-plane source-document decision | no link | `UnreadableLink` (the row is undecidable and hidden) |
-| `NoAccessListReader.ParseRows` (`:810`, from `QueryChunkAsync` `:789`) | `RowSelect` (subject and object columns of a deny entry) | the deny-list veto over an external caller's accessible set | an entry read without a column enforced less | a row that lacks any `RowSelect` column fails the chunk closed (the existing `NoAccessListResult.FailClosed`) |
+| `NoAccessListReader.ParseRows` (`:810`, from `QueryChunkAsync` `:789`) | `RowSelect` (subject and object columns of a deny entry) | the deny-list veto over an external caller's accessible set | an entry read without a column is not applied as written | a row that lacks any `RowSelect` column fails the chunk closed (the existing `NoAccessListResult.FailClosed`) |
 | `CommunicationThreadReadService.RootStamp` (`:525`) | the three root stamps of a message | message and thread visibility (`RootsOf` `:507`) | not filed | `"malformed"`, which the existing filter withholds |
 
 ### Census B: already closed before this round (verified, no change)
 
 `DocumentRow` (`ExternalDataService.cs:147`, round 3b: records which root links were read); `DocumentRootLinks.Raw` (3b); `ExternalMultiRootRule.LiveParentsOf`, Web API overload (3c); `InvoiceLinksOf` (`:2011`, round 3); `GetDocumentParentAndNameAsync` (`:996`, 3c: an absent parent id is "not under the record"); `OrganizationReferenceRow` (`ExternalParticipationService.cs:1420`, `EveryLookupReturned` `:1455`, task 051, also what `InvoiceSubmissionService.LinkOf` `:2062` consumes); `GetNonSecureRootsAsync` (`:2745`: an asked root with no row or no boolean flag counts as secure and the read is not `Complete`); `CommunicationThreadReadService.ReadVisibleCommunicationAsync` (`:1321`: an absent thread id is empty, not in the open-thread set, so the message is hidden).
 
-### Census C: reads that only add a match, a right or a grant
+### Census C: positive-only reads (a match, a right or a grant is added only when the column is present)
 
-These reads only add a match, a right or a grant from a column that is present. `AssignedAccessStore.cs` (ledger row, `LinkCandidateRow`, `ReadRootAsync`: assigned-access grants); `CommunicationThreadReadService` `BuildParticipantClauseAsync` (`:1028`, a positive filter), `LoadAttachmentsAsync` (attachments of already-authorised messages) and `ParseMessageRow` (an absent thread id is empty and so hidden; an absent author never matches "own"); `ContactIdentityStore.cs` (`FindSystemUsersLinkingAsync` `:1726`, `ParseSystemUserRow` `:1481`: an absent contact link is unlinked, fewer bindings); `ExternalDataService.GetInvoiceParentsAsync` (`:1267`), `GetRecentGrantsAsync` (`:1395`), `GetServiceRequestRequesterAsync` (`:1030`), `GetServiceRequestRequesterAndStateAsync` (`:1076`), `GetServiceRequestsRequestedByAsync` (`:1477`) (a requester or parent match grants only to the matching party); `ExternalGrantRow` (`ExternalGrantLifecycle.cs:80`), `ExternalAccessRow` (`ExternalParticipationService.cs:2185`), `ContactOrgRow` (`:2214`), `ColleagueMembershipRow` (`:2240`) (grant and membership derivation).
+These reads add a match, a right or a grant only when the column is present (positive-only: an absent column adds nothing). Round 3g moved `ExternalGrantRow` out of this list (see "Fix round 3g"). `AssignedAccessStore.cs` (ledger row, `LinkCandidateRow`, `ReadRootAsync`: assigned-access grants); `CommunicationThreadReadService` `BuildParticipantClauseAsync` (`:1028`, a positive filter), `LoadAttachmentsAsync` (attachments of already-authorised messages) and `ParseMessageRow` (an absent thread id is empty and so hidden; an absent author never matches "own"); `ContactIdentityStore.cs` (`FindSystemUsersLinkingAsync` `:1726`, `ParseSystemUserRow` `:1481`: an absent contact link adds no binding; positive-only); `ExternalDataService.GetInvoiceParentsAsync` (`:1267`), `GetRecentGrantsAsync` (`:1395`), `GetServiceRequestRequesterAsync` (`:1030`), `GetServiceRequestRequesterAndStateAsync` (`:1076`), `GetServiceRequestsRequestedByAsync` (`:1477`) (a requester or parent match adds a match only when the column is present); `ExternalGrantRow` (`ExternalGrantLifecycle.cs`; reclassified in round 3g, now fail-closed per consumer, no longer positive-only), `ExternalAccessRow` (`ExternalParticipationService.cs:2185`), `ContactOrgRow` (`:2214`), `ColleagueMembershipRow` (`:2240`) (grant and membership derivation).
 
 ### Census D: not an access decision (the decision each one sits beside)
 
@@ -673,7 +673,7 @@ These reads only add a match, a right or a grant from a column that is present. 
 - `TodoRow` and `EventRow` (`ExternalDataService.cs:196`, `:251`): changed. Each root stamp's setter records that the column was read; `RootStamps()` returns `UnreadableLookup` for one that was not. The creator stamps (`sprk_createdbyperson`, `sprk_createdbycontact`) read as unmatched when unread, so the row is not "created by" anyone. The effect is per row: a list withholds that row, a single read or write is refused, no path gives a 500. Must-fire and must-not-fire tests for each (below).
 - `DocumentRow` (3b) and `OrganizationReferenceRow` (051): already track presence; unchanged.
 - `NoAccessEntryRow`: its list fails the chunk closed (`ParseRows`).
-- `ExternalGrantRow`, `ExternalAccessRow`, `ContactOrgRow`, `ColleagueMembershipRow`, assigned-access ledger rows, `AccessLinkRow`, `ContactRow`, the provisioning, unsecure and owner rows, `DueGrant`: reviewed (Census C and D); an absent column there cannot widen access.
+- `ExternalAccessRow`, `ContactOrgRow`, `ColleagueMembershipRow`, assigned-access ledger rows, `AccessLinkRow`, `ContactRow`, the provisioning, unsecure and owner rows, `DueGrant`: reviewed (Census C and D); positive-only or not an access decision, so an absent column adds nothing. `ExternalGrantRow` was in this line until round 3g, which changed it (it now records which lookups were read).
 - `ContactOrganizationRow` (`ExternalOrganizationMembership.cs:168`): reported below.
 
 ### Callers and selects pinned (Web API)
@@ -688,7 +688,7 @@ How it recognises a site (line comments stripped) in `Infrastructure/ExternalAcc
 
 Ratchet: each group is in `ReviewedSites` with its exact count, a category (`FailsClosed`, `ProjectedAndPinned`, `PositiveOnly`, `NotAnAccessDecision`, `KnownOpen`) and a one-line reason (51 entries in round 3d, 54 after round 3e). An unreviewed group, a changed count, a stale entry and a changed number of `KnownOpen` entries (`KnownOpenSites`, 4 in round 3d, 0 after round 3e) each fail.
 
-What it misses (covered by the unit and contract tests above): a column name that reaches the call through a variable, a parameter or a data table rather than a literal or constant (for example the column arrays of `ExternalCallerCommunicationGuard` and the registry's attribute lists); a helper that re-implements `LinkOf` under another name; a file outside the scope list; and whether a reviewed site stays correct after its code changes inside a counted group (it fixes where reads are, not what they do).
+What it misses (covered by the unit and contract tests above): a column name that reaches the call through a variable, a parameter or a data table rather than a literal or constant (for example the column arrays of `ExternalCallerCommunicationGuard` and the registry's attribute lists); a choice column such as `sprk_accesspermission` (it is not a `_..._value` lookup, so it is outside the guard; the select and projection pins and the unit and route tests of fix round 3f cover it); a helper that re-implements `LinkOf` under another name; a file outside the scope list; and whether a reviewed site stays correct after its code changes inside a counted group (it fixes where reads are, not what they do).
 
 Controls: an unreviewed read is caught; each spelling of a lookup read is caught (`Control_EachSpellingOfALookupRead_IsCaught`); a reviewed site passes; a changed count is caught; sanctioned and unrelated code is not a site; a comment is not a site; the enclosing member is the method.
 
@@ -745,7 +745,7 @@ The same rule as round 3d (a column the row does not carry was not read; an expl
 ### Deny entries (`NoAccessEnforcementStore.cs`)
 
 - `EntryFrom` requires every column of `EntryRequiredColumns` (the entry select plus `statecode` and `_modifiedby_value`); `ReadOwnerAsync` selects `OwnerSelect` and `OwnerFrom` requires both owner columns. A row missing one throws an `InvalidOperationException` naming the column. An explicit null is an empty value, as before.
-- No new rule: the enforcer already records an entry it cannot read as `entry-unreadable` (`NoAccessShareEnforcer.cs:294`) and an owner it cannot read as `residual-access-unverifiable` (`:1301`, `:1308`); `NoAccessShareReconciliationJob.cs:116-196` counts an incomplete entry and reports the run as an error, so the entry is retried on the next run. Nothing in this path can remove less than before because of an absent column; the removal for that entry is simply reported as not done.
+- No new rule: the enforcer already records an entry it cannot read as `entry-unreadable` (`NoAccessShareEnforcer.cs:294`) and an owner it cannot read as `residual-access-unverifiable` (`:1301`, `:1308`); `NoAccessShareReconciliationJob.cs:116-196` counts an incomplete entry and reports the run as an error, so the entry is retried on the next run. An absent column changes nothing in this path except that the entry is reported as not done and retried.
 - Pins: `EntrySelect` contains every required column; `OwnerSelect` contains both owner columns.
 
 ### Thread regarding columns (`CommunicationThreadReadService.cs`)
@@ -884,3 +884,108 @@ uac-r2 ruled: one separate agent (F3b), after this branch tip, does the four nam
 The read_query refusal and the R1 note are new surface inside an existing handler: (1) existing — the handler's validation-error answer and its warnings list, reused; (2) extension — both are added to those, no new endpoint, service or registration; (3) cost of doing nothing — a filter on a blanked column answers what the blanking withholds, and a short page reads as "no further matches".
 
 **Publish-size delta:** not measured: source-only, no package.
+
+## Fix round 3g: the grant row, the guard keys and the census additions
+
+The same rule as rounds 3d to 3f, applied to the last typed row of the class: a Web API (JSON) row that does not carry a selected column was not read, and says nothing about the value; an explicit JSON `null` is "not filed". At each site the existing fail-closed value or path is used; no response code or shape changed.
+
+### What changed
+
+1. `ExternalGrantRow` (`ExternalGrantLifecycle.cs:80`) records, in the setter of each of its seven lookups (contact, organization, project, matter, work assignment, system-user issuer, contact issuer), that the column was read. New `[JsonIgnore]` members: `ContactRead`, `OrganizationRead`, `KeyLookupsRead` (the five columns that name a grant), `IssuerRead` (the contact-issuer column), `AllLookupsRead`. `DeriveKey` (`:680`) returns null when `KeyLookupsRead` is false (`:682`), which is the existing "no derivable key" answer. `RowSelect` and `ListingSelect` are now `internal const` so the pin can read them.
+2. Revoke, expiry and removal consumers treat an unread lookup as undecidable and retry (table below). List and derivation consumers treat the row as one that names nothing.
+3. The guard (`ExternalLookupAbsentReadGuardTests`) is re-keyed with real member names and repo-relative paths; the `ExternalGrantRow` entry is reclassified; reasons are worded neutrally; the stated misses name choice columns.
+4. Census additions (below) and pins.
+
+### Item 1: consumers of `ExternalGrantRow` lookups
+
+Decision kinds: **retry** is a revoke, expiry or removal path where an unread lookup is undecidable (not completed, refused or faulted, so it is attempted again); **ignore** is a filter or derivation where the row names nothing.
+
+| Consumer (file:line) | Reads | Before, on an absent column | After, on an absent column | Kind | Test |
+|---|---|---|---|---|---|
+| `ExternalGrantLifecycle.DeriveKey` (`ExternalGrantLifecycle.cs:680`, guard `:682`) | the five key lookups | read as "not filed": a key built from what was present | null (no key) | retry (see its callers) | `ExternalGrantRowPresenceTests.ARowMissingAKeyColumn_...` (5 cases) |
+| `ExternalGrantRevocationService` revoke (`:144`, `NoGrantKey` log `:152`) | key | a key from partial lookups | `NoGrantKey` refusal; nothing deactivated | retry | `Revoke_OfARowThatDidNotCarryARootColumn_...` |
+| `ExternalGrantRevocationService.RemovePersonOrganizationGrantPermissionsAsync` (`:333`, then `:344`) | key of each organization grant | an organization grant without a root was "not an organization grant" and skipped | `failed++`; cleanup not completed | retry | `PersonOrganizationGrantSpeCleanupTests.AnOrganizationGrantRowWithoutARootColumn_...` and its explicit-null control |
+| `ExternalGrantRevocationService.ResolveStillEntitledContactsAsync` (`:618`) | contact, organization | a row without a contact was read as an organization grant (or none) | returns null: no permission is kept on the strength of another grant | retry (fail closed) | `Revoke_AContactGrant_WhenAnotherRowOfTheRootDidNotCarryItsContactColumn_...` and its explicit-null control |
+| `ExternalPersonRemovalService.RevokeGrantsAsync` (`:438`; `DeriveKey` `:450`) | key | a row naming no record was ended by its id | added to `notCompleted`; not ended | retry | `PersonAccessAdministrationTests.Remove_AGrantRowThatDidNotCarryARootColumn_...`; control: `Remove_AGrantRowThatNamesNoRecord_...` (explicit null) |
+| `ExternalAccessRemovalSweep.FindCandidatesAsync` (`:358`) | contact | a grant without a contact was skipped | `ScanFailed` with the row id; no contact decided | retry | `RemovalSweepTests.AGrantRowThatDidNotCarryTheContactColumn_...` and its control |
+| `ContactGrantorAuthorizationFilter.EvaluateRevokerAsync` (`:255`; `DeriveKey` `:274`) | issuer, key | "somebody else's" (the uniform 404) | 503 `RevokeFailedReasonCode`, nothing changed | retry | `Revoke_WhenTheRowDidNotCarryTheIssuerColumn_...` |
+| `ContactGrantEndpoints.RevokeAsync` (`:649`, then `:628`) | issuer of every active row | an unread row was neither mine nor others' and was left | 503 `RevokeFailedReasonCode`, nothing changed | retry | `Revoke_WhenAnotherRowOfTheGrantDidNotCarryTheIssuerColumn_...` |
+| `SetRecordShareExpiryEndpoint` (`:195`) | key, issuer | an unread share was skipped and left at its old date | 500 `ShareUnidentifiableReasonCode`, nothing changed | retry | `RecordShareExpiryTests.SetShareExpiry_WhenAShareDidNotCarryALookupColumn_...` (3 columns) and the control |
+| `GrantExternalAccessEndpoint.CheckGrantAsync` (`:888`) | issuer of the existing rows | read as an issuer that is not the caller | `GrantCheck.Refused(Unreadable)`, mapped to the 503 the endpoint already gives for an unreadable policy; nothing written | retry | `ContactGrantAuthorizationTests.Grant_WhenAnExistingRowDidNotCarryTheIssuerColumn_...` |
+| `ExternalGrantLifecycle.ReadContactHeldGrantsAsync` (`:1073`), callers `ExternalAccessReconciliationJob.cs:890` and `ContactGrantEndpoints.cs:467` | contact, organization | counted without the firm-state check | throws `InvalidOperationException`, which both callers already take as a read that could not be completed (the job leaves the row unchanged; the grant answers 503) | retry | `ExternalGrantRowPresenceTests.ReadContactHeldGrants_...` (2 cases and a control) |
+| `DelegationRuleFilter` (`:460`) | key | key from partial lookups | `DeriveKey` null: the existing 403 deny | ignore (grants nothing) | covered through `DeriveKey` |
+| `ContactGrantEndpoints.ListAsync` (`:545`) | issuer, contact | positive-only: a row without them never matched the caller | stated: `IssuerRead && ContactRead` | ignore | `ContactGrantAuthorizationTests.List_DoesNotShowARowThatDidNotCarryItsIssuerOrContactColumn` |
+| `RecordGrantsEndpoint` (`:137`, `:147`) | contact, organization | listed as a grant to nobody | withheld and logged (the row without an id is withheld the same way) | ignore | `RecordGrantsEndpointTests.GetRecordGrants_WithholdsARowThatDidNotCarryItsContactOrOrganizationColumn` |
+
+Not lookup readers (checked, no change): `ExternalAccessReconciliationJob.Effective`, `LatestConferring`, `Unknown` (`:918-956`) and `AssignedAccessMaterializer.IsModified`, `Conferring` (`:1952-1963`) read only the access level, the expiry and the state code. The FetchXML grant scan of `ExternalAccessReconciliationJob` is an SDK read with a pinned projection (Census E).
+
+Select pin: `ExternalGrantRowPresenceTests.RowSelect_AndListingSelect_ReturnEveryLookupColumnOfTheRow` reflects over the row's `_..._value` columns and asserts both selects contain each; `TheRowsLookupColumns_AreTheSevenTheSelectsMustReturn` pins the list itself, so a new lookup on the row is a new column to select until reviewed.
+
+### Item 2: guard re-key
+
+`ReviewedSites` keys are now `repo/relative/path/File.cs::Type.Member`, and the member is the declared name of the method, property or field (found by brace matching and by the `=>` or `=` that opens an expression body or initialiser), so a read in an expression-bodied member is keyed to that member. All 54 keys changed from `File.cs::Member` to `src/server/api/Sprk.Bff.Api/<path>/File.cs::Member`. The total is unchanged (54 groups, 121 sites, no count changed). Keys whose member name changed:
+
+| Old key (file::member) | New member |
+|---|---|
+| `CommunicationThreadReadService.cs::CommunicationThreadReadService.static` | `CommunicationThreadReadService.ResolveRegardingFromRow` |
+| `ExternalAccessReconciliationJob.cs::ExternalAccessReconciliationJob` | `ExternalAccessReconciliationJob.RootOf` |
+| `ExternalAccessReconciliationJob.cs::ExternalAccessReconciliationJob.static` | `ExternalAccessReconciliationJob.Aliased` |
+| `ExternalCallerCommunicationGuard.cs::ExternalCallerCommunicationGuard` | `ExternalCallerCommunicationGuard.ThreadIdOf` |
+| `ExternalMultiRootRule.cs::ExternalMultiRootRule` | `ExternalMultiRootRule.LiveParentsOf` |
+| `GrantExpiryReminderJob.cs::GrantExpiryReminderJob.DueGrant` | `GrantExpiryReminderJob.DueGrant.Aliased` |
+| `SecureRecordIsolationCensus.cs::SecureRecordIsolationCensus` | `SecureRecordIsolationCensus.OptionalGuid` |
+
+Other changes to `ReviewedSites`: the `ExternalGrantLifecycle.cs::ExternalGrantRow` entry (11 sites, count unchanged) moved from `PositiveOnly` to `FailsClosed` with a new reason; 19 reasons were reworded (item 4). Controls: the existing controls pass unchanged (`Control_AnUnreviewedRead_IsCaught`, `Control_EachSpellingOfALookupRead_IsCaught`, `Control_AReviewedSite_Passes`, `Control_AChangedCount_IsCaught`, the sanctioned, comment and enclosing-member controls). New: `Control_AnExpressionBodiedMember_KeysToItsOwnName` (must fire: an expression-bodied method, property and property initialiser each key to their own name, not to their type), `Control_AnExpressionBody_DoesNotLeakIntoTheNextMember` (must not fire) and `Control_TheKeyIsTheRepoRelativePath_NotTheFileName`. The full ArchTests run grew by 13 tests (2208 to 2221).
+
+### Item 3: census additions
+
+- `ExternalMessageEndpoints.RightsThroughParents` (`:730`): reads `sprk_matter`, `sprk_project` and `InvoiceWorkAssignmentColumn` from the record gate's row (an SDK row, which omits an unset attribute) and unions the rights of the present ones. Positive-only: an absent parent adds no right; the readable decision was made by the gate on the same row before this runs. The projection is pinned: `invoices.RootRuleAttributes` contains all three (`ExternalMultiRootListReadTests`, extended this round to name the constant) and every module's gate read asks for its `RootRuleAttributes` (`ExternalLookupAbsentColumnReadTests`). No change needed.
+- `CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync` (`:132`, thread lookup `:151`): a communication whose row did not carry the thread lookup is left out of the visible set (the same as an explicit null), and the flag must read exactly `false`. Fails closed. The select names `MessageThreadLookupValue` (`:141`). New test class `CommunicationOpenThreadGateAbsentLookupTests` (absent hidden, explicit null hidden, set and Open visible with the select pinned).
+- Variable-named reads (the guard cannot see them; each one in scope with its classification):
+
+| Read | Where | Classification |
+|---|---|---|
+| column arrays of `ExternalCallerCommunicationGuard` (the regarding and thread columns) | `Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs` | reviewed in rounds 3d and 3e (Census A); selects pinned by the 3e tests |
+| registry lookup attribute lists (`LiveParentLookupsOf`, `LinkColumnsOf`, `RootRuleAttributes`) | `ExternalModuleRegistry.cs`, `ExternalMultiRootRule.cs` | read through `LookupOf` / `LiveParentsOf` (fail closed); projections pinned (Census E) |
+| `ExternalMultiRootRule.LookupOf`, `StampOf`, `UnreadableLookup` | `ExternalMultiRootRule.cs` | the sanctioned fail-closed helpers themselves |
+| readers that take the column name as a parameter (the `GuidValue` / `TryGuid` / `GuidOf` helpers and `LookupValueAttribute`-style readers) | `ExternalDataService.cs`, `ExternalAccessReconciliationJob.cs`, `ExternalParticipationService.cs`, `ExternalMultiRootRule.cs` | the helper bodies are the unit under review; each call site that passes a literal or a lookup constant is a guard site, and a call site that passes a variable is reviewed by hand against the Census A to E tables above |
+
+### Item 4: neutral wording
+
+Every guard reason and notes line that read "fewer grants", "fewer bindings", "enforced less" or described what an absent column "cannot widen" now states what the code does: "adds a match only when the column is present" or "positive-only: an absent column adds nothing". The repo is public: reasons and notes state only what the code does on an absent column, and describe no way to gain access, no identity names, no role memberships and no privilege maps. Census C, the typed-rows list, the 3e deny-list line and 19 guard reasons were reworded.
+
+### Item 5: pin
+
+`CommunicationListThreadsSeamTests.ReadVisibleThreadRegardingAsync_EveryRegardingColumn_IsSelected`: the select of `CommunicationThreadReadService.ReadVisibleThreadRegardingAsync` contains every `ThreadRegardingFields` column (it drives the real read and inspects the query it sent).
+
+### Item 6: the stated misses
+
+"What it misses" now also says that choice columns such as `sprk_accesspermission` are outside the guard (it recognises `_..._value` lookups and SDK reference reads) and are covered by the select and projection pins and the unit and route tests of round 3f. The same sentence is in the guard's header documentation.
+
+### Tests (fix round 3g)
+
+- New `ExternalGrantRowPresenceTests` (row presence by column, `DeriveKey`, the select pins, `ReadContactHeldGrantsAsync` fault and control) and `CommunicationOpenThreadGateAbsentLookupTests`.
+- Added to the existing harnesses (must fire with a control for explicit null or all columns present): `RevokeGrantOverlapAndOwnContainerTests` (3 + 1 control), `PersonOrganizationGrantSpeCleanupTests` (1 + 1), `PersonAccessAdministrationTests` (1, with the existing recordless case as its control), `RemovalSweepTests` (1 + 1), `ContactGrantAuthorizationTests` (3 cases + the list theory), `RecordShareExpiryTests` (3-case theory + 1 control), `RecordGrantsEndpointTests` (2-case theory).
+- A column the read did not return is modelled, per double, as the JSON the Web API would send: `GrantTable.OmittedGrantColumns` (shared assigned-access table), `RemovalSweepWorld.OmitGrantContactColumn`, `ContactGrantAuthorizationTests` per-row omission (`SeedReadWithout`), and rows deserialised from JSON in the other harnesses.
+
+### Test doubles changed (rows that now return every grant lookup as an explicit null when unset)
+
+A first run of the grant, revoke and expiry classes found failures in doubles that built `ExternalGrantRow` with only some lookups: `GrantLifecycleCharacterizationTests` (`FakeGrantTable.Seed`, `FromPayload`, the `DeriveKey` test), `AssignedAccessTestDoubles.GrantTable` (`Seed`, create), `ContactGrantAuthorizationTests` (`Seed`, `SeedOrganization`; the create path already set every lookup), `DelegationRuleTestFixture.SeedGrantRow`, `PersonOrganizationGrantSpeCleanupTests.OrganizationGrant`, `RecordGrantsEndpointTests.Row`, `RecordShareExpiryTests` (`Seed`), `RevokeGrantOverlapAndOwnContainerTests` (`Add`), `SpeRevokeMatcherTests` (the single-grant row and the two organization rows), and one JSON literal in `ExternalAccessContractTests.PostSetRecordShareExpiry_WithAnActiveShare_...`. Doubles that serialise a typed row to JSON (`GrantorCeilingTests`, the table's queries) already return an explicit null for an unset lookup and needed no change.
+
+### Counts (fix round 3g)
+
+- BFF build (`dotnet build src/server/api/Sprk.Bff.Api/`): 0 errors, 0 warnings.
+- `Spaarke.ArchTests` (full): 2221 passed, 0 failed, 0 skipped (2208 before this round).
+- Filtered run of `Sprk.Bff.Api.Tests` (External, MultiRoot, LiveParent, Communication, Document, Invoice, UnifiedAccess, Finance, Issue963, NoAccess, Todo, Event, Grant, Revok, Expir): 21591 total, 21521 passed, 12 skipped, 58 failed. The machine was under heavy load from other sessions (the run took 39 minutes). The failures that carried a message were client or host timeouts (`HttpRequestException: Error while copying content to a stream`, 1 to 5 minutes each); none is in a class this round changed behaviour for. The 42 classes the 58 belong to were rerun together: 847 total, 847 passed, 0 failed. (A first attempt of this run was cut short by a `Select-Object -First` on its own output; the numbers above are from the complete second run.)
+- Targeted run of every class this round touched or added to (`ExternalGrantRowPresence`, `RevokeGrantOverlap`, `PersonOrganizationGrantSpeCleanup`, `PersonAccessAdministration`, `RemovalSweepTests`, `ContactGrantAuthorization`, `RecordShareExpiry`, `RecordGrantsEndpoint`, `ExternalAccessContractTests`, `GrantPolicyContract`, `CommunicationOpenThreadGateAbsentLookup`, `ExternalMultiRootListReadTests`): all passed (284 plus 183, run after the last edit to each).
+- Fail-before (item 1): the nine production files below were restored to `c5c30a9fc4` (`ExternalGrantLifecycle.cs`, `ExternalGrantRevocationService.cs`, `ExternalPersonRemovalService.cs`, `ExternalAccessRemovalSweep.cs`, `ContactGrantorAuthorizationFilter.cs`, `ContactGrantEndpoints.cs`, `SetRecordShareExpiryEndpoint.cs`, `RecordGrantsEndpoint.cs`, `GrantExternalAccessEndpoint.cs`). The restored row got a compile stub only (`internal` selects and five `*Read` members that return true, which is what the old row amounted to). The 34 new item-1 tests were run: 23 failed, 11 passed. Failed: `DeriveKey` for each of the five key columns (5), the two issuer-column presence cases and the assigned-lookup case (3), `ReadContactHeldGrants` (2), the person-organization cleanup (1), person removal (1), the removal sweep (1), the overlap fail-closed case (1), the NoGrantKey refusal (1), the contact revoke at the filter and at the endpoint (2), the contact grant check (1), the share expiry (3: project, organization, issuer), the record grants listing (2). Passed in both states: the explicit-null and all-columns-present controls, the two contact-list cases (that consumer is positive-only, so its behaviour did not change), and the `RowSelect` and `ListingSelect` pins (the selects were already complete, so those pins hold the line rather than fail before). The nine files were then restored from the commit; each matches the saved copy by SHA-256 (the `ExternalGrantLifecycle.cs` hash is `DF46BE2ABA7D17FAFD55122C5DC9B3F7F3766DCC58C0592E254DC16C4A2B361A`), and the 34 tests pass again.
+
+### Class status after 3g
+
+Closed: every Web API (JSON) row type in the external-access surface now records or reads presence for the lookups its decisions depend on, and every site the guard recognises is reviewed with an exact count; `KnownOpenSites` is 0. An absent selected column is unreadable or malformed at each of them, never "none".
+
+Known limits:
+- Choice columns are outside the guard (it keys on `_..._value` lookups and SDK reference reads). `sprk_accesspermission` is covered by the select and projection pins and the round 3f tests; a new choice column read needs the same review by hand.
+- Variable-named reads (a column name reaching a read through a variable, parameter or data table) are not seen by the guard; the list is in "Item 3" and each is covered by its own select or projection pin.
+- `ChildAccessPermissionReconciler` (`Services/Access/ChildAccessPermissionReconciler.cs`) is owned by another project's branch; it is neither edited nor guarded here. Its document reads are SDK rows with a pinned projection (round 3f).
+- The guard fixes where reads are, not what they do: a change inside a counted group is checked by the tests named in the notes, not by the guard.

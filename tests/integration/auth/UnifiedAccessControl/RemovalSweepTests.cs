@@ -51,7 +51,7 @@ public class RemovalSweepTests
     private RemovalSweepWorld World { get; set; } = null!;
 
     private async Task<JobRunResult> RunAsync(bool? linkWrites, bool? sweepWrites, int? cap = null, bool looseScan = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool omitGrantContactColumn = false)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://own.crm.dynamics.com" };
         if (linkWrites is { } l) settings["IdentityLink:Reconciliation:WritesEnabled"] = l ? "true" : "false";
@@ -59,7 +59,7 @@ public class RemovalSweepTests
         if (cap is { } c) settings[ExternalAccessRemovalSweep.MaxContactsPerRunConfigKey] = c.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
-        World = new RemovalSweepWorld(_h.Grants, _h.Identities) { LooseCandidateScan = looseScan };
+        World = new RemovalSweepWorld(_h.Grants, _h.Identities) { LooseCandidateScan = looseScan, OmitGrantContactColumn = omitGrantContactColumn };
         var services = new ServiceCollection();
         services.AddSingleton(IdentityBindingTestKit.Binder(_h.Identities));
         services.AddSingleton<DataverseWebApiClient>(World);
@@ -316,6 +316,36 @@ public class RemovalSweepTests
         result.Success.Should().BeFalse("a skipped contact makes the run partial, never a silent ok");
     }
 
+    // ── Fix round 3g: a grant row that did not carry the contact column is an incomplete scan, never "no contact" ──
+
+    [Fact]
+    public async Task AGrantRowThatDidNotCarryTheContactColumn_FailsTheScan_AndDecidesNoContact()
+    {
+        var (contact, _) = Person(stateCode: 0);
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        var grant = GrantOnMatter(contact);
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: true, omitGrantContactColumn: true);
+
+        Sweep(result).GetProperty("scanFailed").GetBoolean().Should().BeTrue("a row naming no readable contact is not 'a grant with no contact'");
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue("no contact was decided, so nothing was revoked");
+        _h.Grants.WriteCount.Should().Be(0);
+        result.Success.Should().BeFalse("a failed scan is never a silent 'nothing to remove'");
+    }
+
+    [Fact]
+    public async Task TheSameScanWithTheContactColumnReturned_FindsTheContact_AndRevokes()
+    {
+        var (contact, _) = Person(stateCode: 0);
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        var grant = GrantOnMatter(contact);
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: true);
+
+        Sweep(result).GetProperty("scanFailed").GetBoolean().Should().BeFalse();
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeFalse();
+    }
+
     // ── Incomplete cleanup, from live state ────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -554,6 +584,9 @@ internal sealed class RemovalSweepWorld : DataverseWebApiClient
 
     public bool LooseCandidateScan { get; set; }
 
+    /// <summary>Fix round 3g: the candidate grant read returns each row WITHOUT its contact column (a column the read did not return).</summary>
+    public bool OmitGrantContactColumn { get; set; }
+
     /// <summary>Grant-row updates sent before the first removed-marker write (the order the removal must keep).</summary>
     public int GrantUpdatesBeforeMarker { get; private set; }
 
@@ -574,7 +607,9 @@ internal sealed class RemovalSweepWorld : DataverseWebApiClient
             var rows = _grants.Rows
                 .Where(r => r.IsActive && r.ContactId is { } id && _identities.Contacts.TryGetValue(id, out var c)
                             && (LooseCandidateScan || c.StateCode == 1 || c.RemovedOn is not null))
-                .Select(r => new Dictionary<string, object?> { ["sprk_externalrecordaccessid"] = r.Id, ["_sprk_contact_value"] = r.ContactId })
+                .Select(r => OmitGrantContactColumn
+                    ? new Dictionary<string, object?> { ["sprk_externalrecordaccessid"] = r.Id }
+                    : new Dictionary<string, object?> { ["sprk_externalrecordaccessid"] = r.Id, ["_sprk_contact_value"] = r.ContactId })
                 .ToList();
             return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
         }

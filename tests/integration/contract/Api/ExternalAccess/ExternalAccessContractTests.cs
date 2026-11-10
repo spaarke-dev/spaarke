@@ -718,7 +718,7 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     {
         var shareId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         _fixture.Dataverse.ContactQueryResult =
-            $$"""[{"sprk_externalrecordaccessid":"{{shareId}}","_sprk_contact_value":"{{GranteeContactId}}","statecode":0}]""";
+            $$"""[{"sprk_externalrecordaccessid":"{{shareId}}","_sprk_contact_value":"{{GranteeContactId}}","_sprk_organization_value":null,"_sprk_project_value":"{{ProjectA}}","_sprk_matter_value":null,"_sprk_workassignment_value":null,"_sprk_grantedby_value":null,"_sprk_grantedbycontact_value":null,"statecode":0}]""";
         var expiry = FixtureToday.AddDays(91);
         using var client = _fixture.CreateAdminClient();
 
