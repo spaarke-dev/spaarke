@@ -2560,9 +2560,14 @@ public sealed class FirmFindingsProjectionTests
     [Fact(DisplayName = "130d K3: a Duplicate rejection reads byte-identically whether its detail is withheld or in scope (reasonCode and description)")]
     public async Task Rejected_ADuplicate_HasOneUniformReason_WithheldOrNot()
     {
-        async Task<FirmOutcome> Project(bool withheld)
+        async Task<FirmOutcome> Project(bool withheld, string? signalText = null)
         {
             var world = new World();
+            if (signalText is not null)
+            {
+                world.AddRejectionSignal(VersionA, null, signalText); // the writer's Signal for this finding
+            }
+
             // The writer's real difference between the two: a withheld group stores its values without text; an in-scope one stores them with it.
             world.AddRejectedSubmission(RejectedDocument(
                 Stored("Duplicate", VersionA, null, withheld: withheld, reason: BillingReasonCodes.DuplicateInvoiceNumber,
@@ -2573,6 +2578,8 @@ public sealed class FirmFindingsProjectionTests
 
         var hidden = await Project(withheld: true);
         var shown = await Project(withheld: false);
+        // F-1: only the in-scope Signal carries firm-reason text; a Duplicate never takes the override, so the outcomes still match.
+        var shownWithText = await Project(withheld: false, signalText: "A Signal-written explanation that must not replace the Duplicate text.");
 
         var expected = "This invoice number has already been used with this client. Please check it or contact the client.";
         foreach (var outcome in new[] { hidden, shown })
@@ -2591,5 +2598,61 @@ public sealed class FirmFindingsProjectionTests
         hidden.Degraded.Should().Be(shown.Degraded);
         hidden.Items.Count.Should().Be(shown.Items.Count);
         JsonSerializer.Serialize(hidden, WebJson).Should().Be(JsonSerializer.Serialize(shown, WebJson));
+        JsonSerializer.Serialize(hidden, WebJson).Should().Be(JsonSerializer.Serialize(shownWithText, WebJson));
+    }
+
+    [Fact(DisplayName = "130d F-1: a Duplicate whose Signal carries firm-reason text still shows exactly the table text; a non-Duplicate rejection takes the override")]
+    public async Task Rejected_ADuplicate_NeverTakesTheOverride_ANonDuplicateDoes()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("Duplicate", VersionA, null, reason: BillingReasonCodes.DuplicateInvoiceNumber),
+            Stored("ApprovedRate", VersionB, 1, reason: BillingReasonCodes.RateAboveApproved)));
+        world.AddRejectionSignal(VersionA, null, "Override text for the Duplicate.");
+        world.AddRejectionSignal(VersionB, 1, "Override text for the rate.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        var rate = outcome.Items.Single(i => i.ReasonCode == BillingReasonCodes.RateAboveApproved);
+        var duplicate = outcome.Items.Single(i => i.ReasonCode == BillingReasonCodes.DuplicateInvoiceNumber);
+        rate.FirmReasons.Should().Equal(["Override text for the rate."]);
+        duplicate.FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.DuplicateInvoiceNumber]]);
+    }
+
+    private const string DirtyReason = "Your\u202E rate\u0000 is\u200F too\u2066 high\u007F\u0085\t.\r\n";
+
+    [Fact(DisplayName = "130d K-b: control and bidi characters are stripped from a rejection finding's firm reason; control-only text falls back to the table")]
+    public async Task Rejected_TheFirmReason_HasControlAndBidiCharactersStripped_AndControlOnlyFallsBack()
+    {
+        var world = TwoFindingsWorld();
+        world.AddRejectionSignal(VersionA, 2, DirtyReason);                       // the rate finding
+        world.AddRejectionSignal(VersionB, null, "\u0001\u202E\u2069\u200F  \u0085"); // the required-data finding: nothing printable
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal(["Your rate is too high."]);
+        outcome.Items[1].FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.RequiredFieldMissing]]);
+        outcome.Items.SelectMany(i => i.FirmReasons).Should().OnlyContain(t => !Regex.IsMatch(t, "[ --‎‏‪-‮⁦-⁩]"));
+    }
+
+    [Fact(DisplayName = "130d K-b: control and bidi characters are stripped from an invoice item's firm reason, which is now capped; control-only text is omitted")]
+    public async Task AnInvoiceItem_FirmReason_HasControlAndBidiCharactersStripped_Capped_AndControlOnlyIsOmitted()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, DirtyReason);
+        world.AddReducedWithCitation(2, "Reason.", VersionA, "\u0001\u202E\u2069 \u0085");
+        world.AddReducedWithCitation(3, "Reason.", VersionA, new string('z', 199) + "\U0001F600" + new string('y', 100));
+
+        var items = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items;
+
+        items.Should().HaveCount(3);
+        var texts = items.SelectMany(i => i.FirmReasons).ToList();
+        texts.Should().Contain("Your rate is too high.");
+        items.Count(i => i.FirmReasons.Count == 0).Should().Be(1, "the control-only text is omitted, never substituted");
+        var cut = texts.Single(t => t.StartsWith("zzzz", StringComparison.Ordinal));
+        cut.Should().EndWith("...");
+        cut.Length.Should().BeLessThanOrEqualTo(FirmRejectionFindings.MaxValueTextLength + 3);
+        Regex.IsMatch(cut, "[\\uD800-\\uDFFF]").Should().BeFalse();
     }
 }

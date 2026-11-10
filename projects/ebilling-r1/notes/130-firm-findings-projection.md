@@ -344,7 +344,7 @@ Branch `task/ebilling-130c` from `task/ebilling-130b-fix1` at `ecf694a8d1`. Clos
 
 ### The JSON shape consumed (field names only)
 
-Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required, never shown), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
+Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required; shown from 130d as the item's `reasonCode`, the document's own top-level code never), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
 
 ### Rules as built
 
@@ -369,7 +369,7 @@ Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId
 2. The rule type is validated but not projected: it is a category of an internal rule, and the owner ruling publishes the rule only as the firm flag allows.
 3. `rejects` true is the definition of a rejection finding (073's stored decision), not "every stored finding". A firm is not shown flagged findings that did not reject.
 4. A Blocked outcome projects no finding even though its submission status is Rejected.
-5. The firm reason is read from Signals (the only stored home of `sprk_firmreason`), not composed from the reason code; `reasonCode` is validated and never shown, because no firm-text composer for it exists.
+5. The firm reason is read from Signals (the only stored home of `sprk_firmreason`), not composed from the reason code; `reasonCode` is validated and (130c) never shown, because no firm-text composer for it exists. Superseded by 130d: it is shown, with the table text.
 
 ### Component justification (CLAUDE.md section 11)
 
@@ -517,10 +517,10 @@ Ten codes across six types, matching uac-r2's count: ApprovedRate: `approved_rat
 | `expense_rule.code_not_reimbursable` | An expense was billed under a code that is not reimbursable. |
 | `expense_rule.amount_over_cap` | An expense amount is higher than the maximum allowed for that expense. |
 | `invoice_age.too_old` | The invoice is dated further in the past than the billing guidelines allow. |
-| `core_record_window.before_open` | A billed date falls before the matter or project was opened. |
-| `core_record_window.after_close` | A billed date falls after the matter or project was closed. |
-| `core_record_window.core_record_closed` | The matter or project this invoice is billed against is closed. |
-| `core_record_window.closed_to_billing` | The matter or project this invoice is billed against is closed to new billing. |
+| `core_record_window.before_open` | A billed date falls before the matter, project or work assignment was opened. |
+| `core_record_window.after_close` | A billed date falls after the matter, project or work assignment was closed. |
+| `core_record_window.core_record_closed` | The matter, project or work assignment this invoice is billed against is closed. |
+| `core_record_window.closed_to_billing` | The matter, project or work assignment this invoice is billed against is closed to new billing. |
 | `duplicate.invoice_number` | This invoice number has already been used with this client. Please check it or contact the client. |
 | `required_data.missing_field` | A required invoice field is missing. |
 | (no entry, fail closed) | This invoice did not meet a billing rule. |
@@ -576,7 +576,7 @@ For a rejection finding the writer is no longer needed to give the firm a reason
   - The rule editor (rule review / publish endpoints and page) to author and bound the text; the clause-reading side is untouched.
   - The projection needs no change: it already prefers a non-blank Signal text (130d), which is what makes option 3 an override of the table.
   - Schema script + SpaarkeMaster source for the column.
-- **Tests (option 3):** a `SignalWriterTests` case that a request with `FirmReason` writes `sprk_firmreason` and a request without writes none (the create payload has no such key, so existing Signals are unchanged); a mapper test that the primary reason's rule text reaches the request, a blank one is omitted, and a withheld Duplicate carries none; a plan round-trip test (serialize, parse, equal; an old plan without the member parses to none); a publish/copy test per version-column list that the column survives; a guard that the written text is never derived from `FactValues` (no token expansion, no values); and a projection test that a written text beats the table (already covered by 130d's override test).
+- **Tests (option 3):** a `SignalWriterTests` case that a request with `FirmReason` writes `sprk_firmreason` and a request without writes none (the create payload has no such key, so existing Signals are unchanged); a mapper test that the primary reason's rule text reaches the request and a blank one is omitted; a Duplicate rejection never takes the override (130d fix round 2: its description is the one table text, so the same wording is shown whatever the Signal holds), so the writer need not and should not set a firm reason for a Duplicate; a plan round-trip test (serialize, parse, equal; an old plan without the member parses to none); a publish/copy test per version-column list that the column survives; a guard that the written text is never derived from `FactValues` (no token expansion, no values); and a projection test that a written text beats the table (already covered by 130d's override test).
 
 ### Fixed points from ontology-r1 and uac-r2 (each is a requirement of the design)
 
@@ -604,8 +604,16 @@ Results (130d fix round 1): `FirmFindingsProjectionTests`, `FirmRejectionReasonT
 
 ### Known limits (130d)
 
-- **Invoice items show the Signal text uncut.** On a decided line (`FirmFindingsProjection` invoice items) the Signal's `sprk_firmreason` is shown as stored (trimmed only); only a rejection finding's text is cut. Until DEF-060's writer exists no Signal carries text, so nothing is exposed today. The DEF-060 writer must therefore enforce, at write time, the 200-character cap, the no-placeholder rule (`{`, `}`), and a control-character and bidirectional-control-character filter (for example U+202A to U+202E, U+2066 to U+2069, U+200E/U+200F); the projection is not the only line of defence for invoice items.
+- **Invoice items: the read side is filtered, the writer must still filter (130d fix round 2).** On a decided line the Signal's `sprk_firmreason` now has control characters (U+0000 to U+001F, U+007F to U+009F) and directional controls (U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) removed, is trimmed and cut like a rejection finding's text (up to 203 characters), and a text with nothing printable left is omitted. Until DEF-060's writer exists no Signal carries text. The DEF-060 writer must still enforce, at write time, the 200-character cap, the no-placeholder rule (`{`, `}`) and the same control and directional-character filter: the projection must not be the only line of defence.
 
 ### DEF-060 design addition (K1): match the override on the reason code
 
 The override is matched today on rule version and line (and the writer-created gate), not on the reason code. A rule can reject on several reasons for one line (ExpenseRule: code and cap; CoreRecordWindow: four), and the writer's Signal is merged per (policy, subject), so one stored text can be shown against a finding it does not describe. Requirement for the writer: store the reason code the text is for together with the firm reason (a stable code beside `sprk_firmreason`, for example in the Signal's evidence under a reviewed kind, or a column if the owner accepts a schema change; the choice belongs with the option 3 schema decision), and a merged Signal stores one (code, text) pair per merged reason. The projection must then match an override on (version, line, reason code) and fall back to the table for a finding whose code has no stored text. Not built here.
+
+### 130d fix round 2
+
+- **F-1, a Duplicate never takes the override.** In `BuildRejectionItemsAsync` a Duplicate finding ignores any Signal firm reason and shows the table text, so the withheld and in-scope cases read the same whatever a Signal holds. Tests: a Duplicate whose Signal has firm reason text still shows exactly the table text (control: the same text overrides a non-Duplicate rejection); the K3 byte-identical test gained a case where only the in-scope Signal carries text.
+- **F-2, stale docs.** The `invoiceDecided` parameter and `BuildRejectionItemsAsync` summaries no longer say an undecided Rejected submission has no firm reason: it carries the table text. The 130c rules-table row for `reasonCode` is corrected.
+- **Core-record wording.** The four CoreRecordWindow texts say "the matter, project or work assignment" (e-billing applies to all three core records). The table above is updated.
+- **Read-side filter.** `FirmRejectionFindings.ShownFirmReason` (next to `Truncate`; no existing filter for AI-assigned values applies to free text, that one is a field-name allow-list) removes control and directional characters, trims and cuts. Applied to both override paths: a rejection finding falls back to the table text when nothing printable is left; an invoice item omits the reason (and the cap now applies to invoice items too).
+Results (130d fix round 2): `FirmFindingsProjectionTests`, `FirmRejectionReasonTextGuardTests`, `FirmOutcomeScopeTests` and `StoredFindingValueBoundaryTests`: 232 passed, 0 failed (3 new tests; the K3 test gained a case). Full `Spaarke.ArchTests`: 2183 passed, 0 failed. Fail-before for F-1: with the Duplicate skip mutated off, 2 of 143 `FirmFindingsProjectionTests` fail (the F-1 test and the K3 byte-identical test); the projection file was restored from a copy and its SHA-256 matched (`16E9B3C1...3B3290FC`).

@@ -36,13 +36,13 @@ internal static class FirmRejectionReasonText
         [BillingReasonCodes.InvoiceTooOld] =
             "The invoice is dated further in the past than the billing guidelines allow.",
         [BillingReasonCodes.BeforeCoreRecordOpened] =
-            "A billed date falls before the matter or project was opened.",
+            "A billed date falls before the matter, project or work assignment was opened.",
         [BillingReasonCodes.AfterCoreRecordClosed] =
-            "A billed date falls after the matter or project was closed.",
+            "A billed date falls after the matter, project or work assignment was closed.",
         [BillingReasonCodes.CoreRecordClosed] =
-            "The matter or project this invoice is billed against is closed.",
+            "The matter, project or work assignment this invoice is billed against is closed.",
         [BillingReasonCodes.CoreRecordClosedToBilling] =
-            "The matter or project this invoice is billed against is closed to new billing.",
+            "The matter, project or work assignment this invoice is billed against is closed to new billing.",
         [BillingReasonCodes.DuplicateInvoiceNumber] =
             "This invoice number has already been used with this client. Please check it or contact the client.",
         [BillingReasonCodes.RequiredFieldMissing] =

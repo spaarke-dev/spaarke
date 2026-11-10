@@ -363,6 +363,35 @@ internal static class FirmRejectionFindings
         return text[..cut].TrimEnd() + "...";
     }
 
+    /// <summary>
+    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix round 2): the control characters
+    /// (U+0000 to U+001F, U+007F to U+009F) and the directional controls (U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) removed, then trimmed,
+    /// then cut with <see cref="Truncate"/>; null when nothing printable is left (the caller then shows no reason, or for a rejection the table
+    /// text). Applied on the read side to every firm reason; the writer (DEF-060) must still filter at write time.
+    /// </summary>
+    internal static string? ShownFirmReason(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw))
+        {
+            return null;
+        }
+
+        var kept = new System.Text.StringBuilder(raw.Length);
+        foreach (var c in raw)
+        {
+            if (c <= '\u001F' || (c >= '\u007F' && c <= '\u009F') || c is '\u200E' or '\u200F' || (c >= '\u202A' && c <= '\u202E')
+                || (c >= '\u2066' && c <= '\u2069'))
+            {
+                continue;
+            }
+
+            kept.Append(c);
+        }
+
+        var text = kept.ToString().Trim();
+        return text.Length == 0 ? null : Truncate(text);
+    }
+
     /// <summary>A member that is a string, or absent / JSON null (then <paramref name="text"/> is null). False for any other type.</summary>
     private static bool TryText(JsonElement element, string name, out string? text)
     {
