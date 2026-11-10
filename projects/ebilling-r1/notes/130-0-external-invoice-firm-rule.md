@@ -989,3 +989,130 @@ Known limits:
 - Variable-named reads (a column name reaching a read through a variable, parameter or data table) are not seen by the guard; the list is in "Item 3" and each is covered by its own select or projection pin.
 - `ChildAccessPermissionReconciler` (`Services/Access/ChildAccessPermissionReconciler.cs`) is owned by another project's branch; it is neither edited nor guarded here. Its document reads are SDK rows with a pinned projection (round 3f).
 - The guard fixes where reads are, not what they do: a change inside a counted group is checked by the tests named in the notes, not by the guard.
+
+## F3b: invoice-linked descendants
+
+Task 130-0b F3b. Every rule below fails closed. An external contact sees only its own firms' invoices, on records it can access; a contact with no firm sees no invoices; a firm read that fails hides everything. A record that is filed under an invoice (a descendant) now follows its invoice's visibility, on the REST plane and on the assistant-tools plane (the 130-0b seam).
+
+### The rules
+
+- **Descendant.** A table with no invoice link of its own, filed under an invoice-linked row, is decided by the invoice links of its parent chain. The set is derived, not listed: `InvoiceLinks.BuildDescendants` (`InvoiceLinks.cs:172`) takes the Filing edges of `RecordFamilyEdges` plus the `SecureChildLineage` read shapes and runs a fixed point over tables that carry no link of their own. `InvoiceLinks.Descendants` (`:102`) is that result and `InvoiceLinks.IsDescendantOnly` (`:110`) asks it. The descendant-only tables are pinned by a test: agreement, analysis output, attachment artifact, communication attachment, communication participant, email artifact, email review log, event log, file version. `sprk_document` is both a table with links of its own and a descendant (its parent-document edge).
+- **Chain.** A child document is decided by EVERY invoice link up its parent chain; it is visible only if every invoice on the chain is visible. The hop bound is 3, the same bound and the same semantics as `ExternalDocumentNarrowing.WalkChainsAsync`: hop 0 is the subject; a parent needed at hop 3 or later is "chain too long"; a parent already on the row's own path is a cycle (a diamond is not one); a parent that does not come back, and an absent, malformed or unreadable link or parent column, are undecidable. An undecidable chain carries the unreadable link (`Guid.AllBitsSet`), so a list hides the row and a single read answers 503 `sdap.access.invoice_unreadable`. A decided-hidden link beats an undecidable one (the answer is then the uniform 403). The chain read is `$select=sprk_documentid,_sprk_invoice_value,_sprk_relatedinvoice_value,_sprk_parentdocument_value`, one batched by-key read per hop.
+- **Service request.** `sprk_servicerequest` follows the child rule on both planes. On the assistant plane it is an entry of `InvoiceLinks.Supplemental` (`:79`). On the REST plane it is decided on every route that reaches a request: the document routes that hang from one (`RightsForServiceRequestAsync`, `ExternalProjectDataEndpoints.cs:1508`; the service request case of `RightsForDocumentParentAsync`, `:1305`), the upload route (`:1774`), delete-own (`:2989`), the module list (`ExternalModuleDataEndpoints.cs:437`), and the message routes (`ExternalMessageEndpoints.cs:804` and `:899`). `ExternalDataService.GetServiceRequestInvoiceLinksAsync` (`:1184`, virtual, returns `Guid[]`) reads the request's links. The invoice rule is applied after the requester gate, so it is no existence oracle. The service requests module's single-record route (`/data/record/sprk_servicerequest/{id}`) refuses every request id before any read (the module's scope is the requester, so the Tier-2 gate compares the request id with the caller's contact id); it returns no row, so there is nothing to decide there (test `ServiceRequestModule_SingleRecordRead_IsRefusedForARequestId_BeforeAnyRead`).
+- **Firms.** An unknown firm read fails the call: a tool error on the assistant plane (`DataverseUnavailableException` through `UnknownFirmsFailTheCall`, `ExternalDataService.cs:2535`), a 503 on a REST single read, and 200 + hidden + `truncated` on a REST list. A caller known to be in no firm hides every invoice-linked row. A fault deciding one row with known firms hides that row (a single read of it is the 503).
+- **Family path.** `HideInvoiceFamilyRowsAsync` (`ExternalDataService.cs:2473`) hides the asked rows on a fault and never throws for a fault; it throws only for the unknown-firms case above.
+- **Registry.** `ExternalModuleRegistry.Register` (`ExternalModuleRegistry.cs:536`) refuses a module whose `RecordEntity` is a descendant-only table: such a table has no invoice link of its own and is not served by a module route.
+- **Fault notion.** One notion only: `InvoiceVisibilityResult.AnyFaulted` / `IsFaultedFor`.
+- **Absent column.** An absent selected column on a Web API row is unreadable, an explicit null is "not filed", typed rows record presence, and every new select is pinned by a test.
+
+### What changed, by scope item
+
+| # | Item | Change | Where |
+|---|---|---|---|
+| 1 | Four named descendants (analysis output, event log, file version, document through `sprk_parentdocument`) | The first three are derived descendants and are decided by `IsInvoiceLinkedChildTable` (now includes `IsDescendantOnly`) and the seam on the assistant plane; a file version is reached on the REST plane only through the document routes, which decide the document and its chain. The document follows its parent chain on the document list, the single-document routes (versions, content) and the documents module fetch; the module's single-record route refuses every document id before any read (round 3b census), so it has nothing to decide. | `ExternalInvoiceVisibility.cs:117-124`; `ExternalDataService.cs:566, 630, 648`; `ExternalProjectDataEndpoints.cs:1594, 1645`; `ExternalModuleDataEndpoints.cs:211-232, 437-467` |
+| 2 | Parent chain, bound 3, cycle and over-bound fail closed | `ReadRowInvoiceLinksAsync`, `ReadAncestorInvoiceLinksAsync`, `StepAsync` | `InvoiceLinks.cs:247, 274, 337` |
+| 3 | Edges derived from the registry | `BuildDescendants` / `Descendants` / `ShapeOf` | `InvoiceLinks.cs:102, 172` |
+| 4 | K-a guard; service request on both planes | `InvoiceLookupCoverageGuardTests`; service request paths above | `tests/Spaarke.ArchTests/InvoiceLookupCoverageGuardTests.cs` |
+| 5 | K-b option 1 | Not implemented; see "Not done" | - |
+| 6 | Family path: a fault hides, never throws | `HideInvoiceFamilyRowsAsync` | `ExternalDataService.cs:2473` |
+| 7 | Firms | `UnknownFirmsFailTheCall`, `HideInvoicesForAsync` (ReadFailed on unknown firms), `RowsLinkedToAnInvoiceNotVisibleAsync` (unknown firms throw, no firm hides the linked rows, a decision fault hides the linked rows) | `ExternalDataService.cs:2372, 2535, 2580` |
+| 8 | K-d | The doc comments that said "firms that cannot be read hide every asked row" now state the rulings | `ExternalInvoiceVisibility.cs:1275-1295`, `ExternalDataService.cs` (`HideInvoiceFamilyRowsAsync`, `HideInvoiceLinkedChildRowsAsync`, `RootRowsWithInvoiceLinkBlankedAsync`, `ReadSystemUserFirmsOrUnknownAsync`), `DataverseReadQueryHandler.cs:469` |
+
+REST helpers: `HideInvoiceLinkedRowsAsync<T>` (`ExternalDataService.cs:2230`) is the list helper; `DecideInvoiceLinkedRowAsync(..., chainUndecidable)` (`:2331`) is the single-read helper and returns Visible, Hidden or Faulted. `ModuleDocumentChainReader` (`InvoiceLinks.cs:13`) is the optional chain reader of `ExecuteScopedFetchCoreAsync` (`ExternalModuleDataEndpoints.cs:280`); the route passes it (`:214`), and a row that has a parent and is given no reader is undecidable (hidden).
+
+### Bug found and fixed while testing
+
+`UploadServiceRequestDocument` (`ExternalProjectDataEndpoints.cs:1774`) did not pass the invoice seam on to `UploadDocumentForParent`, so an upload to a linked service request was always the 503 (a request with no link was unaffected). It now takes `ExternalInvoiceHiding?` and passes it. Test: `ExternalRecordDocumentRoutesTests` (service request upload, hidden / visible / fault).
+
+### Merge resolutions
+
+- Base: the merge of `0f6b49b5ab`, `09403449d8`.
+- Round 3g (`79f5d1a508`, the tip of `task/ebilling-130-0-fix1`) merged as `8b122ae8f5`. The only conflict was this notes file (both branches appended a section); both sections are kept. No code conflicts.
+- `task/ebilling-130-0-fix1` was fetched again before the final verification: the tip is still `79f5d1a508`, already in this branch, so there was nothing to merge.
+- Two lookup reads that arrived with the uac-r2 merge (`d7eabba3bc`) had no reviewed entry in `ExternalLookupAbsentReadGuardTests`, so that guard failed at the fix1 tip. They are reviewed there now (`ProvisionProjectEndpoint.CreatorPersonRow`, 1 site, FailsClosed; `UnsecureProjectEndpoint.SecurityRow`, count 3 to 4). These are not F3b reads; they are recorded here so the guard passes. Guard keys use the round 3g format (`Bff + "path::Class.Member"`).
+
+### K-a: every lookup to `sprk_invoice`
+
+`InvoiceLookupCoverageGuardTests` enumerates every lookup to `sprk_invoice` in `src/dataverse/solutions/SpaarkeMaster` (22 today). The `Entity.xml` files carry the attribute but not its target, so the target comes from the relationship files (`Other/Relationships/*.xml`: `ReferencingEntityName`, `ReferencingAttributeName`, `ReferencedEntityName`), and a second test requires every such relationship attribute to be a `lookup` attribute in its entity's `Entity.xml` (so a scan gone stale fails). Each lookup is decided by the rule or excluded with a one-line reason; a lookup in neither list fails the test.
+
+| Table | Column | Decided by |
+|---|---|---|
+| sprk_analysis | sprk_regardinginvoice | child rule (`InvoiceLinks.Tables`) |
+| sprk_communication | sprk_regardinginvoice | child rule |
+| sprk_communicationthread | sprk_regardinginvoice | child rule |
+| sprk_document | sprk_invoice | child rule |
+| sprk_document | sprk_relatedinvoice | child rule |
+| sprk_event | sprk_regardinginvoice | child rule |
+| sprk_memo | sprk_regardinginvoice | child rule |
+| sprk_servicerequest | sprk_regardinginvoice | child rule (`InvoiceLinks.Supplemental`) |
+| sprk_todo | sprk_regardinginvoice | child rule |
+| sprk_workassignment | sprk_regardinginvoice | root: the link is shown only when that invoice is visible (redacted) |
+| sprk_billingevent | sprk_invoice | invoice family (`FamilyTables`) |
+| sprk_decisionrecord | sprk_regardinginvoice | invoice family |
+| sprk_externalidentifier | sprk_regardinginvoice | invoice family |
+| sprk_invoiceapproval | sprk_invoice | invoice family |
+| sprk_invoicecorrection | sprk_invoice | invoice family |
+| sprk_invoicesubmission | sprk_invoice | invoice family |
+| sprk_signal | sprk_regardinginvoice | invoice family |
+| sprk_storedfile | sprk_invoice | invoice family |
+| sprk_externalrecordaccess | sprk_invoice | excluded: the access grant row (who may open the invoice) is read by the access engine and never returned to a caller as content |
+| contact | sprk_invoice | excluded: a customer-record reference on the contact; not an invoice-linked row of the invoice |
+| sprk_organization | sprk_invoice | excluded: a customer-record reference on the organization; not an invoice-linked row of the invoice |
+| sprk_invoice | sprk_supersedesinvoice | excluded: the invoice's own self reference; the row is the invoice, decided by the invoice rule itself |
+
+Tests (7): the scan is complete and every lookup is decided or excluded; every relationship lookup is a lookup attribute in its `Entity.xml`; the ratchet (an exclusion for a lookup that no longer exists, or that the rule now decides, fails, so the list only shrinks); must-fire controls (a synthetic unlisted lookup is reported; a lookup on a covered table by ANOTHER column is reported); a must-not-fire control (decided examples of the child, family and root classes, an excluded lookup, and the real list are not reported); and a service request is a decided child, not a root.
+
+### Component justification (root CLAUDE.md section 11), F3b
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `InvoiceLinks.Descendants` / `BuildDescendants` / `IsDescendantOnly` | `InvoiceLinks.Tables` (tables with links of their own), `RecordFamilyEdges`, `SecureChildLineage` | Extended `InvoiceLinks` itself; the set is derived from the two existing registries, not a second list | A file version, analysis output or event log under an invoice-linked row is returned with no invoice decision |
+| `InvoiceLinks.ReadAncestorInvoiceLinksAsync` / `RowInvoiceLinks` / `ModuleDocumentChainReader` | `ExternalDocumentNarrowing.WalkChainsAsync` (the 188 parent walk, which decides access, not invoices) | Same bound and semantics; it reads invoice links where the narrowing reads access flags, so the narrowing is not changed | A document under a document linked to another firm's invoice is shown |
+| `ExternalDataService.GetServiceRequestInvoiceLinksAsync` | `GetServiceRequestRequesterAsync` (a by-key read of the same row) and `InvoiceLinksOf` (reads link columns off a row) | Not folded into the requester read: that read is the requester gate and is doubled in many existing tests, and the invoice read must come after the gate (no existence oracle). It follows the same pattern and reuses `InvoiceLinksOf` | A service request linked to another firm's invoice is served on the REST routes |
+| `ExternalModuleRegistry.Register` refusal of a descendant-only `RecordEntity` | `Register`'s existing argument checks | One more check in the same method. Beyond the stated contract: a module on such a table would be served by the module fetch with no invoice decision, so it fails at startup instead | A future module on one of these tables silently shows another firm's invoice work |
+| `InvoiceLookupCoverageGuardTests` | `ExternalInvoiceVisibilityGuardTests` (source-scan guard for the family) | A new class: it reads the solution files, which the existing guard does not | A new `sprk_invoice` lookup is added to the solution and nobody decides it |
+
+### Tests, doubles and counts (F3b)
+
+New test classes: `InvoiceLinkedDescendantsTests` (unit, 49 cases: derivation, the walk and its bound, the select pins, the seam, firms, the family path), `ExternalInvoiceLinkedDescendantRouteTests` (contract, 47: the REST lists, single reads, module fetch, firms, pins, the registry refusal, the service request module record route) and `InvoiceLookupCoverageGuardTests` (ArchTests, 7). Added to existing classes: `ExternalRecordDocumentRoutesTests` (service request routes: hidden, visible, fault, no link, another requester, link read fails, firms, select pin), `ExternalDeleteServiceRequestTests` (4, delete-own), `ExternalMessageEndpointsTests` (3) and `ExternalMessageSendTests` (2) for the service request root of the message routes, `ExternalInvoiceVisibilityTests` and the three handler test files (unknown firms fail the call; no firm sees nothing; a per-row fault with known firms hides the row), `ExternalInvoiceLinkedChildListTests` (the FetchXML pin covers the service request).
+
+Each behaviour has a must-fire and a must-not-fire test: a descendant on a visible invoice is shown, on a hidden invoice hidden (list) or refused (single read), a faulted decision gives the rule's response, and every new select is pinned (`ChainSelect`, the id plus parent column of each derived descendant, the service request link read, the root read of the message routes).
+
+Doubles changed: `ExternalRootEventReadTests.FakeDataverse` (`KeyReadFaultWhenSelecting`: a 503 on a by-key read whose `$select` names a marker, cleared by `Reset`), `InvoiceHidingStubs` (`CallersWithNoFirm`, `CallersWithUnknownFirm`), the stubs in `ExternalRecordDocumentRoutesTests` and `ExternalDeleteOwnTests` (an override of `GetServiceRequestInvoiceLinksAsync` with `ServiceRequestInvoices` / `ServiceRequestInvoiceFault` / `ServiceRequestInvoiceReads`).
+
+Existing tests changed: the two message-route pins `Requester_ReadsTheThreadOnTheirOwnServiceRequest` and `Requester_PostsOnTheirOwnServiceRequest_Is201_RegardingTheRequest` now expect the root read to select the invoice link as well as the requester; `ExternalDocumentNarrowingRouteTests.DocumentsModuleFetch_HidesOwnAndAncestorRestricted_...` is given the chain reader as the route gives it (a row with a parent and no reader is undecidable); the tests that asserted "firms that cannot be read hide every asked row" now assert the ruling.
+
+Counts:
+- BFF build (`dotnet build src/server/api/Sprk.Bff.Api/`): 0 errors, 0 warnings.
+- `Spaarke.ArchTests` (full): 2228 passed, 0 failed, 0 skipped (2221 before F3b; the 7 new tests are the K-a guard).
+- Filtered run of `Sprk.Bff.Api.Tests` (External, MultiRoot, LiveParent, Communication, Document, Invoice, UnifiedAccess, Finance, Issue963, NoAccess, Todo, Event, ServiceRequest, Analysis, FileVersion, EventLog, Dataverse), first run on `b058dd1222`: 22986 total, 22953 passed, 10 skipped, 23 failed (35 minutes, the machine under load from other sessions). Three failures were this change's and are fixed in `2d6761b585`: the two message-route select pins and the documents module fetch test (above). The other 20 were client or host timeouts (1 to 4 minutes each, `HttpRequestException` / `TaskCanceledException` / `TimeoutException`) in classes this change does not touch. Those 16 classes were rerun together: 410 total, 410 passed, 0 failed. The changed and new classes were then run after the fixes: 810 passed, 0 failed.
+- Final filtered run on the tip: see the last line of this list.
+- Fail-before: the eight production files below were restored to `09403449d8` (`InvoiceLinks.cs`, `ExternalInvoiceVisibility.cs`, `ExternalDataService.cs`, `ExternalModuleRegistry.cs`, `ExternalProjectDataEndpoints.cs`, `ExternalModuleDataEndpoints.cs`, `ExternalMessageEndpoints.cs`, `DataverseReadQueryHandler.cs`; no other commit between the base and the tip touches them). The new tests need new members to compile, so the restored files got compile stubs only, with the old behaviour (no descendants, no supplemental link, an empty chain, `GetServiceRequestInvoiceLinksAsync` answering "no link", an unused `readDocumentChains` parameter). The 16 test classes above were run: 1809 total, 90 failed, 1719 passed. The failures are the new tests (the descendant derivation and walk, the REST list, single read and module fetch cases, the service request routes, delete-own and message routes, the firm rulings, the family-path fault, the registry refusal, the pins) and the three updated pins. Passed in both states: the must-not-fire controls and every test of behaviour this change leaves alone. The K-a guard against the restored base: 7 tests, 4 failed (the service request is undecided, and the two controls that depend on the real list), 3 passed. The files were then restored from the commit. Seven match the saved copies by SHA-256; `InvoiceLinks.cs` came back from `git checkout` with CRLF line endings (the working copy was LF), so the saved copy was put back and matches (hashes below). The same 16 classes then ran: 1834 total, 0 failed (25 more cases than before: theory cases generated from the derived descendant set, which is empty in the stubbed base), and the K-a, invoice-visibility and lookup guards passed (59).
+
+| File | SHA-256 |
+|---|---|
+| `InvoiceLinks.cs` | `1915baf24b4666840c5cd6633eb20435b7b4a0ad249a56a03e3e01e438b95a96` |
+| `ExternalInvoiceVisibility.cs` | `107b698e2247049ae04adc2f5fb1f15412fa47f9addebdb40b9c4e1514160ca2` |
+| `ExternalDataService.cs` | `8c4ffd662ce6898b3b4ee8bbc9dcc651d46acc4a6b6706b28fc75cf7c18cf659` |
+| `ExternalModuleRegistry.cs` | `a787e55dc4fb2c3f53a67fb09bc8436df36d9f86c6e136523591b2eb8de19195` |
+| `ExternalProjectDataEndpoints.cs` | `3e9d46bb1de3d711a4c6a09468ab7853e22e8efbbe00be9abc6857f6e2c622ac` |
+| `ExternalModuleDataEndpoints.cs` | `2c347f219dc7c9e4c2166fffec7e4db8634d6b77b653e8ee68fe34fea4b77495` |
+| `ExternalMessageEndpoints.cs` | `bbf7c5e0ff8f2702463071004df01d2b752938066fdffc3cc14b6431b08d744d` |
+| `DataverseReadQueryHandler.cs` | `9226200d8b896f8a863aba14eb874429cc9030e43c41c0de6be7f0a5617fe912` |
+
+### Not done
+
+- **K-b option 1 (a regarding pair whose type is `sprk_invoice`).** Not implemented. `sprk_regardingrecordtype` is a lookup to `sprk_recordtype_ref`; reading a pair means resolving that row to a table name through the record-type cache, which needs a design decision: which tables count, what an unresolvable type means, and how it interacts with the typed lookups (ADR-024). Under ADR-024 a pair is always backed by a typed lookup on BFF-managed writes, so the typed `sprk_regardinginvoice` links are already covered above.
+- **K-d locator.** Searching the 130-0b notes for "K-d" found nothing. The stale doc comments that said "firms that cannot be read hide every asked row" were treated as the candidate and rewritten (item 8). If K-d meant a different comment, it is not covered.
+- **Handler-level descendant tests.** No test drives the assistant-plane handler for each descendant-only table by name; they are covered through `IsInvoiceLinkedChildTable` and the seam tests (`InvoiceLinkedDescendantsTests`).
+
+### Known limits
+
+- The derived descendant set is a superset of the four named tables (the nine tables above); each is decided the same way.
+- The event self-chain (an event under an event) is not followed.
+- The REST ancestor walk supports single-edge tables (documents) only; `ReadAncestorInvoiceLinksAsync` requires exactly one parent edge.
+- The REST plane has no direct route for an analysis output or an event log, and a file version is reached only through the document routes.
+- The notification feed lists the caller's own service requests by name, without the invoice rule.
+- `GetServiceRequestInvoiceLinksAsync` is virtual and returns `Guid[]`, so a double that does not set it up (an unmocked Moq) answers "no link".
+- On a REST single read, document narrowing hides a chain that is over the bound or cyclic first (the uniform 403); the 503 for an undecidable chain is reached through a malformed ancestor link or a failed chain read.
+- The documents module fetch given no chain reader treats a row that has a parent as undecidable (hidden). The route always passes the reader; the optional parameter exists so that a caller that omits it fails closed.
