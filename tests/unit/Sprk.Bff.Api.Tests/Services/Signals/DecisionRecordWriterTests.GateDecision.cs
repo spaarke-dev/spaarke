@@ -824,6 +824,101 @@ public sealed partial class DecisionRecordWriterTests
         world.Calls.Should().BeEmpty("a team-owned record of a message the Direct team does not own is never shared or re-owned at write");
     }
 
+    public enum SecureTurn
+    {
+        /// <summary>No turn: the control. The message stays an unfiled Direct one and its record is shared with the pair.</summary>
+        None,
+
+        /// <summary>The message was filed under a secure record; the ownership resolver itself answers Secure.</summary>
+        FiledResolverAnswersSecure,
+
+        /// <summary>The message was filed under a secure record; the resolver answers the Secure team WITHOUT the flag, so the one Secure check decides.</summary>
+        FiledOneSecureCheck,
+
+        /// <summary>The message is unfiled but Secure-team-owned (the Direct check refuses it: not the Direct-message owner team).</summary>
+        SecureOwnedUnfiled,
+    }
+
+    /// <summary>
+    /// The writer decides the gate record's owner while the message is an unfiled Direct one (the decision is the Direct team, not Secure, so the
+    /// write-time branch <c>ShareTeamOwnedAtWriteAsync</c> runs after the create). The world flips inside the create, before that step reads
+    /// the message again: the message is filed under a secure record or becomes Secure-owned.
+    /// </summary>
+    private static (Harness H, GateSharingWorld World, Guid SecureTeam) DirectDecisionThenTurn(SecureTurn turn)
+    {
+        var secureTeam = Guid.NewGuid();
+        var world = new GateSharingWorld()
+            .WithTeam(GateSharingWorld.DirectTeam, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false)
+            .WithCommunication(CommunicationId, CommunicationOwner, owningTeam: GateSharingWorld.DirectTeam)
+            .WithPair(CommunicationId, CommunicationOwner, CommunicationSharee)
+            .WithUser(CommunicationOwner).WithUser(CommunicationSharee)
+            .Share(GateSharingWorld.Communication, CommunicationId, CommunicationOwner)
+            .Share(GateSharingWorld.Communication, CommunicationId, CommunicationSharee)
+            .WithSecureTeam(secureTeam);
+        world.OwnerAnswers(turn == SecureTurn.FiledResolverAnswersSecure
+            ? RecordOwnerResolution.Owned(secureTeam) with { IsSecureOwner = true }
+            : RecordOwnerResolution.Owned(secureTeam));
+        var h = new Harness(ownership: RecordOwnerResolution.Owned(GateSharingWorld.DirectTeam), participantShares: world.Sharing);
+        CommunicationOwnedBy(h, new EntityReference("team", GateSharingWorld.DirectTeam));
+        h.Rows[("sprk_communication", CommunicationId)]["owningteam"] = new EntityReference("team", GateSharingWorld.DirectTeam);
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                h.Created.Add(e);
+                world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner);
+                world.OwnByTeam(h.NewId, ((EntityReference)e["ownerid"]).Id);
+                switch (turn)
+                {
+                    case SecureTurn.FiledResolverAnswersSecure:
+                    case SecureTurn.FiledOneSecureCheck:
+                        world.WithCommunication(CommunicationId, CommunicationOwner, owningTeam: secureTeam, filedUnder: MatterId)
+                            .WithPair(CommunicationId, CommunicationOwner, CommunicationSharee);
+                        break;
+                    case SecureTurn.SecureOwnedUnfiled:
+                        world.WithCommunication(CommunicationId, CommunicationOwner, owningTeam: secureTeam)
+                            .WithPair(CommunicationId, CommunicationOwner, CommunicationSharee);
+                        break;
+                }
+
+                return Task.FromResult(h.NewId);
+            });
+        return (h, world, secureTeam);
+    }
+
+    [Fact(DisplayName = "198 pass 2 N1 control: with no turn, the Direct decision's record is re-owned to the Direct team and shared with the pair at write")]
+    public async Task Gate_ADirectDecision_WithNoTurn_IsSharedWithThePairAtWrite_TheControlOfTheSecureTurns_D215()
+    {
+        var (h, world, _) = DirectDecisionThenTurn(SecureTurn.None);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        world.RecordSharees(result.RecordId).Should().Equal(new[] { CommunicationOwner, CommunicationSharee }.OrderBy(g => g),
+            "the branch under test is reached, and it shares the pair when nothing turned secure");
+        world.Rows[(GateSharingWorld.Record, result.RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(GateSharingWorld.DirectTeam);
+    }
+
+    [Theory(DisplayName = "198 pass 2 N1 (ontology F2): a Direct message that turns secure between the owner decision and the share leaves the gate record to the Secure mirror at write")]
+    [InlineData(SecureTurn.FiledResolverAnswersSecure)]
+    [InlineData(SecureTurn.FiledOneSecureCheck)]
+    [InlineData(SecureTurn.SecureOwnedUnfiled)]
+    public async Task Gate_ADirectMessageThatTurnsSecureBetweenTheOwnerDecisionAndTheShare_IsLeftToTheSecureMirror_AtWrite_D215(SecureTurn turn)
+    {
+        var (h, world, _) = DirectDecisionThenTurn(turn);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        result.RecordId.Should().Be(h.NewId, "the record is written; the decision itself was the Direct team's, not Secure");
+        result.SecureOwnerTeamId.Should().BeNull();
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal),
+            "a target that turned secure is the Secure mirror's: the record is not re-owned here");
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal) || c.StartsWith("revoke:", StringComparison.Ordinal),
+            "and no participant is granted Read on it");
+        world.RecordSharees(h.NewId).Should().BeEmpty();
+        world.Rows[(GateSharingWorld.Record, h.NewId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(
+            GateSharingWorld.DirectTeam, "left exactly as the writer created it");
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a Secure target is a defined outcome, not a failure");
+    }
+
     // ── Owner decision 2026-10-29: a communication filed under a person-owned work assignment ──────────────────────────
 
     /// <summary>A person-owned communication (ChildBu) filed under a person-owned work assignment (GeneralBu) that is filed under an

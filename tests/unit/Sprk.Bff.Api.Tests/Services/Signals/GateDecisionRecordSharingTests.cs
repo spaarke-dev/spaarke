@@ -579,6 +579,44 @@ public sealed class GateDecisionRecordSharingTests
         reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
     }
 
+    /// <summary>
+    /// 198 pass 2 F3 + ontology F2: <c>GrantAndConfirmAsync</c> reads the record's existing shares BEFORE it grants. A fault in that read must
+    /// grant nothing, revoke nothing and re-own nothing (the next grant or re-file retries), be logged at Warning and counted, and escape no one.
+    /// The Direct mirror path (D-215 rule 3) reaches it: an unfiled Direct message whose Direct-team-owned record is granted its audience.
+    /// </summary>
+    [Fact(DisplayName = "198 F3 / ontology F2: a fault reading the record's shares before the grants grants and revokes nothing, is logged and counted, and escapes no one")]
+    public async Task DirectMirror_AFaultReadingTheRecordsSharesBeforeTheGrants_GrantsAndRevokesNothing_IsLoggedAndCounted_AndNothingEscapes()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenFailures(scope);
+        using var _ = listener;
+        var world = new GateSharingWorld()
+            .WithTeam(GateSharingWorld.DirectTeam, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false)
+            .WithCommunication(CommunicationId, Owner, owningTeam: GateSharingWorld.DirectTeam)
+            .WithPair(CommunicationId, Owner, Reader)
+            .WithUser(Owner).WithUser(Reader).WithUser(Bystander)
+            .Share(GateSharingWorld.Communication, CommunicationId, Owner)
+            .Share(GateSharingWorld.Communication, CommunicationId, Reader)
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Record, RecordId, Bystander); // a leftover non-participant share: it is not revoked when the read faults
+        world.OwnByTeam(RecordId, GateSharingWorld.DirectTeam);
+        world.Shares.FailReadFor.Add(GateSharingWorld.Record);
+
+        var act = () => world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal), "a failed read is not 'no shares': nothing is granted");
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        world.RecordSharees(RecordId).Should().Equal(new[] { Bystander }, "the share the record already carried is left as it was");
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(GateSharingWorld.DirectTeam);
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed
+            && e.Message.Contains("could not be read before the participant grants", StringComparison.Ordinal),
+            "the read's own catch logs it, not the mirror's outer catch");
+        reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
+    }
+
     [Fact]
     public async Task AFailedGrant_IsLoggedAndCounted_TheOtherShareesAreStillShared_AndNoOneBeyondThem()
     {
