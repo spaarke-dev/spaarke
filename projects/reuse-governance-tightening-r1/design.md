@@ -1,10 +1,10 @@
 # reuse-governance-tightening-r1 — Design
 
 > **Status**: Design draft for owner review. Do **not** run `/design-to-spec` or `/project-pipeline` until the owner has answered the Open Questions (§11).
-> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets.
+> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-14 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds.
 > **Created**: 2026-11-10 (recreated; the 2026-09-02 draft was lost: it was in no worktree and never committed).
 > **Sources**: the owner's 2026-11-10 evaluation of an external "Claude Code Quality Recommendations" document (items B1, B2, B4, B7, B8); the Sept 2026 owner decision recorded in auto-memory `project_reuse-governance-tightening-r1.md` (the only surviving summary of the lost draft); the current repo at `d64a45071b`.
-> **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — one scheduled job), BFF (N), SpaarkeAi (N), root CLAUDE.md (N, unless OQ-7 is answered "yes").
+> **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `[Obsolete]` attributes and `Directory.Build.props`; no new surface), SpaarkeAi (N), root CLAUDE.md (N, unless OQ-7 is answered "yes").
 
 ---
 
@@ -40,7 +40,7 @@ This project closes G1–G4 with the lightest mechanism that works for each. It 
 - No blocking gate on duplication counts (§10.2).
 - No generated or exhaustive capability catalogue (§10.4).
 - No executing the consolidations themselves inside r1 beyond the ones the owner marks cheap (OQ-5); larger consolidations are filed as their own projects.
-- No BFF code change. This project touches no `src/server/**` file, so the BFF publish-size and placement obligations (root CLAUDE.md §10) do not apply. Item 5(e) adds an ArchTest that *reads* BFF IL; it changes no BFF code.
+- No new BFF surface. Item 5(e) does touch BFF and shared-library source: it changes the existing `[Obsolete]` attributes, marks backfilled superseded members, and edits `Directory.Build.props`. It adds no endpoint, service, registration or package, so the publish-size delta should be zero; the task still measures it, per root CLAUDE.md §10, because it edits files under `Sprk.Bff.Api`.
 
 ## 3. Item 1 — Capability index (B1)
 
@@ -215,6 +215,13 @@ Added at the owner's request: the low-priority items from the 2026-11-10 review 
 
 **A detail the brief does not mention.** `researcher.md` restricts its tools in frontmatter (`tools: Read, Bash, Glob, Grep, WebSearch, WebFetch`). Unless the Learn server's tool names are added to that list, the agent cannot call the server, whatever its prose says. The task adds them and proves it with one research call that cites a Learn MCP result.
 
+**Pre-filtering: not needed, and scoping happens at query time instead (owner Q1, 2026-11-10).** The Learn MCP server is search-on-demand: each call returns a few relevant doc chunks or one fetched page, and nothing is loaded up front. The size of Learn therefore costs nothing until a query runs, and the server has no setting that limits it to a subset of topics. Relevance comes from three rules in the researcher prose:
+1. `knowledge/` stays first. Its topic folders (Foundry, SharePoint Embedded, Dataverse MCP, Azure AI Search, M365 Copilot, Fluent UI v9, …) are the curated, Spaarke-relevant layer, and the Learn MCP is the fallback for what they do not cover or for checking whether they are current.
+2. Queries name the product and the API surface ("SharePoint Embedded container permissions Graph API"), never a bare concept ("permissions"), so results stay inside the Spaarke stack.
+3. Search, then fetch the one or two pages that matter, rather than reading many search hits.
+
+If the owner later wants hard scoping, the place for it is the researcher's topic list, not the server.
+
 **Constraints.** The server sends queries to Microsoft. The queries are about public platform documentation, but the researcher prose gets one line saying they must never contain customer data, tenant names or secrets. A project-scoped `.mcp.json` server needs one-time user approval on each machine; the README line says so.
 
 **Enforcement rung: prose.** "Prefer Learn over web search" is a choice about research order, so a check cannot enforce it. The tool-list half is enforced by the platform: without the entry, the call fails.
@@ -232,9 +239,16 @@ Added at the owner's request: the low-priority items from the 2026-11-10 review 
 
 **What.** `knowledge/REFRESH-PROCEDURE.md` prescribes a monthly refresh. `knowledge/REFRESH-LOG.md` shows that no full monthly refresh has run since the initial curation on 2026-05-14; only interim updates have (2026-07-14 and 2026-08-26). A scheduled routine runs Steps 1–5 of the procedure (re-clone, diff, update the topics, check the 6 skills) and opens a **draft** PR with the log entry. The owner reviews and merges it; the routine never merges. Sign-off stays with a human, as the procedure requires.
 
-**Where it runs (OQ-12).** Either a Claude Code scheduled cloud routine, which can do the judgment-heavy diff-and-update steps, or a GitHub Action that only re-clones and diffs, then opens an issue listing what changed for a session to act on. I recommend the routine, because the procedure's Steps 2–3 are judgment work. Either way, it opens a draft PR or issue in this repo and nothing else.
+**Where it runs — decided (OQ-12): a Claude Code scheduled cloud routine.** It runs on Anthropic's cloud on a monthly cron. **No server, timer or refresh script of ours is needed** (owner Q2): the routine's schedule is the timer, and `REFRESH-PROCEDURE.md` is the script it follows. What the setup needs:
+- a cloud environment connected to the `spaarke-dev/spaarke` GitHub repository, so the routine can clone it, push a branch and open a draft PR;
+- the routine itself, created with `/schedule`, with its model and effort stated (the procedure's diff-and-update steps are judgment work: sonnet at `high`);
+- a line in `REFRESH-PROCEDURE.md` naming the routine and its schedule, because the routine is defined outside the repo and would otherwise be invisible to anyone reading the procedure.
 
-**Enforcement rung: scheduled automation.** It replaces a prose cadence that has not been followed for six months. Its failure (no draft in a month) is visible: the routine posts a `quality-alert` (`monthly/knowledge-refresh`) when it cannot produce a draft.
+The routine opens a draft PR in this repo and does nothing else; it never merges.
+
+**Watchdog.** A routine that silently stops running is the failure that left the procedure unused since May. A small job in `nightly-health.yml` reads the newest "Monthly refresh" date in `knowledge/REFRESH-LOG.md` and reports `quality-alert` check `monthly/knowledge-refresh` as failing when it is older than 35 days. This uses the existing alert plumbing and does not depend on the routine itself working.
+
+**Enforcement rung: scheduled automation + CI watchdog.** It replaces a prose cadence that has not been followed for six months.
 
 ### 7.4 (d) Requirements-trace check in the adversarial reviewer — S
 
@@ -244,17 +258,63 @@ Added at the owner's request: the low-priority items from the 2026-11-10 review 
 
 Items (d) and 3's capability-duplication check edit the same file; they land in one change.
 
-### 7.5 (e) Census of superseded-but-not-`[Obsolete]` APIs — M
+### 7.5 (e) The superseded-API process, fixed properly — M
 
-**What.** A census ArchTest, `SupersededApiCensusTests.cs`, built on the existing `tests/Spaarke.ArchTests/IlCallScan.cs`. Its census lists the BFF/shared C# APIs that an ADR or architecture doc names as superseded. Each entry has its replacement, an ADR citation and a reason; the first task populates the list from the ADRs' "replaces"/"superseded" language. For each entry the test reads the compiled IL and records the **types that call it**, against a ratchet baseline. A new caller fails; a removed caller must be dropped from the baseline.
+Revised at the owner's request ("let's properly fix the superseded api process"). The first draft proposed only a hand-kept census. The repo's actual state calls for fixing the process end to end.
 
-**Why a census rather than `[Obsolete]`.** `Directory.Build.props` sets `TreatWarningsAsErrors=true`, so marking a still-used API `[Obsolete]` turns every existing call into a CS0618 build error. That is probably why superseded APIs are left unmarked. An IL caller-census gives the same "no new callers" signal without breaking the build, and `[Obsolete]` is applied once the baseline reaches zero. The test also fails when an entry has zero callers and still lacks `[Obsolete]` (or has not been deleted), so the last step is not forgotten.
+**What is broken today (verified 2026-11-10).**
+1. **The `[Obsolete]` check is switched off for everything.** `Directory.Build.props` sets `TreatWarningsAsErrors=true`, but line 41 adds `CS0618` to `WarningsNotAsErrors`. The reason is one blocked refactor: 14 callers of the obsolete `DemoProvisioningOptions.Environments`/`DefaultEnvironment`, waiting on the DemoExpirationService migration. The side effect is repo-wide: a *new* call to *any* obsolete API, including framework or NuGet obsoletions, is a warning nobody sees in a green build.
+2. **Marking is ad hoc.** `src/server` has about 6 `[Obsolete]` attributes with free-text messages (e.g. `GenericAnalysisHandler.cs:535` "Use PromptSchemaRenderer.Render() instead…", `EmailProcessingOptions.cs:199`, `ApproveRequestDto.cs:9`). None says which ADR made the call, none tracks its callers, and none has a removal trigger.
+3. **Two different meanings share one attribute.** The provisioning rejection-code files use `[Obsolete]` for constants *retained for external compatibility* (e.g. `BffDeployRejectionCodes.cs:70`: "Kept so external filters on the string keep compiling"). These have no replacement to migrate to. They are not "superseded" in the same sense as an API with a successor.
+4. **Nothing in the workflow says when to mark.** A task that introduces a replacement has no step requiring the old API to be marked, so most superseded APIs are known only from ADR prose.
 
-**Enforcement rung: ArchTest + ratchet baseline.** IL scan, not text, so receiver-type and lambda cases are caught, as `IlCallScan` documents. It has a must-fire control (a seeded call to a listed API) and a must-not-fire control (the call to the replacement API).
+**The fix.**
+1. **Two Spaarke diagnostic IDs on the standard attribute.** .NET lets `[Obsolete]` carry its own `DiagnosticId` and `UrlFormat`:
+   - `[Obsolete("Use X — ADR-0NN", DiagnosticId = "SPRK001", UrlFormat = "<ADR link>")]` means **superseded**: callers must migrate to X.
+   - `[Obsolete("…", DiagnosticId = "SPRK002")]` means **retained for compatibility**: do not call; there is no replacement and it is never deleted on a schedule.
+
+   Callers get warning `SPRK001`/`SPRK002` instead of `CS0618`, with a strikethrough and the ADR link in the IDE. Both IDs go in `WarningsNotAsErrors`, so existing callers keep building, and the IDs are named rather than hiding behind the generic code.
+2. **Re-arm `CS0618`.** Convert the 6 existing markers and the `DemoProvisioningOptions` ones to SPRK001/SPRK002, then remove `CS0618` from `WarningsNotAsErrors`. A framework or NuGet obsoletion becomes a build error again, which is the behaviour `TreatWarningsAsErrors` intends. The task first re-counts CS0618 on a clean Release build. If framework obsoletions are hidden behind the suppression (the 2026-08-15 count says all 14 are DemoProvisioning, but that is three months old), each one is fixed, or listed with a reason and filed.
+3. **Caller ratchet ArchTest (`SupersededApiTests.cs`).** It reflects over the Spaarke assemblies for every member marked `SPRK001`; **the attribute is the census**, so there is no separate hand list to drift. It then uses `IlCallScan` to find the types that call each one. The callers are compared with a committed baseline: a new caller fails the build; a removed caller must be dropped from the baseline; a member with zero callers fails until it is **deleted** (the end state of a supersession is deletion, not a permanent marker). `SPRK002` members must have zero callers in Spaarke code. Any `[Obsolete]` in Spaarke code *without* one of the two IDs fails, so the convention cannot be skipped.
+4. **The workflow hook.**
+   - `task-create` Step 3.5.6: when a task's `<justification>` introduces a replacement for an existing API, the task's steps include marking the old one `SPRK001` with the ADR or design link.
+   - `code-review` Step 6.6 checks that marking.
+   - The capability-index row (item 1) moves to the new component and names the superseded one.
+5. **Backfill.** The planning tier reads the ADRs and architecture docs for explicit "replaces / superseded by / use X instead of Y" statements, plus the existing `[Obsolete]` messages, and marks those APIs `SPRK001`.
+
+**Decided: no approval step (owner Q8 / OQ-13).** Agreed: if an ADR or merged design names the replacement, the API is superseded, and that is a fact to record, not a decision to approve. The only judgment is reading the text correctly. Wording like "prefer X" or "new code should use X" without saying Y is replaced is *not* treated as a supersession. Those cases are listed in the PR as "not marked, and why", so they are visible rather than silently skipped.
+
+**Scope.** C# only. TypeScript has the equivalent `@deprecated` JSDoc tag, but enforcing it needs type-aware ESLint (`@typescript-eslint/no-deprecated`), which is out of this project (OQ-11). It is listed under §12.
+
+**Enforcement rung: attribute (compiler) + ArchTest (IL) + ratchet.** The attribute puts the warning at the call site in the IDE and the build, and the ArchTest blocks new callers. Controls:
+- must-fire: a seeded new call to an `SPRK001` member; an `[Obsolete]` with no ID; an `SPRK001` member with zero callers;
+- must-not-fire: a call to the replacement API; a baseline caller.
 
 ### 7.6 (f) Per-session C# language-server trial — S
 
-**What.** A time-boxed trial in **one** worktree of the per-session C# language-server plugin for Claude Code. On `src/server/api/Sprk.Bff.Api` (and `Spaarke.sln` if feasible), measure cold-start time to the first usable result, steady-state memory, CPU while idle, and whether find-references and go-to-definition answers beat Grep on three real questions from recent sessions. Record the numbers and a recommendation in `notes/csharp-lsp-trial.md`. The owner decides adoption. Adoption would be a separate change to `.claude/settings.json` or the plugin configuration, gated on that decision.
+**How it would be used (owner Q4).** Today an agent answers code-structure questions with text search: Grep for a name, read the hits, and guess which ones are the real call or implementation. A C# language server is the same Roslyn engine that powers IDE navigation. Through a Claude Code LSP plugin (C# plugins in the official marketplace wrap a server such as `csharp-ls`; the trial confirms which one), the agent gets a code-intelligence tool with compiler-exact answers:
+- **Find references**: every real call site of a method, including calls through interfaces, DI, extension methods and lambdas, with no matches from comments or same-named symbols.
+- **Find implementations**: every class that implements an interface. This is the exact question item 2's reuse scan asks ("is there already an `INumberGenerator`?").
+- **Go to definition / hover**: the actual type of a receiver, through `var`, generics and overloads.
+- **Diagnostics after an edit**: compile errors reported seconds after the agent saves a file, before a full `dotnet build`.
+
+The expected gain is fewer wrong answers and fewer tool calls on navigation questions. The expected cost is a background process per session, which takes time to load the solution and holds memory while it runs.
+
+**Making sure it is actually useful.** The trial is an A/B comparison, not an impression. Ten fixed questions are taken from real recent sessions: 4 find-references, 3 find-implementations, 2 receiver-type/definition, and 1 "what breaks if I change this signature". The same model answers each twice in one worktree, once Grep-only and once with the LSP tool allowed. The trial records correctness against a hand-checked answer, tool calls, tokens and wall time. The result goes in `notes/csharp-lsp-trial.md` with the owner's decision. Adoption is then a separate change: the plugin setting, plus a one-time install of the language-server binary on each machine.
+
+**Go / no-go thresholds — decided (OQ-14: "use the recommended best practices").** There is no published industry standard for an agent-side language server, so these follow common practice for Roslyn-based servers on large solutions and the ~17-worktree reality of this machine. All must hold:
+
+| Gate | Threshold |
+|---|---|
+| Correctness | ≥ 9 of 10 questions correct with LSP, and none worse than the Grep answer |
+| False "no references" | **Zero.** A false negative is the dangerous failure for reuse decisions, because it says "nothing exists" when something does |
+| Efficiency | ≥ 30% fewer tool calls or tokens on the reference/implementation questions |
+| Cold start | ≤ 90 s to the first correct answer on `Sprk.Bff.Api`; ≤ 3 min on `Spaarke.sln` |
+| Memory | ≤ 2 GB resident per session at steady state; with 3 concurrent sessions, ≥ 25% of machine RAM still free |
+| Idle CPU | < 5% once indexing finishes |
+| Edit diagnostics | Reported within 10 s of a save and agree with `dotnet build` |
+
+If cost fails but usefulness passes, the fallback is opt-in per session (enabled only for navigation-heavy work such as item 2's scans), not a project-wide setting.
 
 **Relation to the rejected shared index (§10.6).** The September rejection was about one **shared** index serving about 17 worktrees, which is stale for all but one of them. A per-session plugin indexes only its own worktree, so it does not have that staleness problem. Its open risk is cost: N concurrent sessions run N language servers on one machine. The trial measures exactly that cost, and does not reopen the shared-index decision.
 
@@ -266,9 +326,9 @@ Items (d) and 3's capability-duplication check edit the same file; they land in 
 |---|---|---|
 | (a) Learn MCP | Platform (tool allow-list) + prose | Research order is judgment |
 | (b) TS strictness | ArchTest + ratchet | Already near the top; a compiler flag cannot ratchet across 76 configs |
-| (c) Knowledge refresh | Scheduled automation + quality-alert | The content update needs review by a person |
+| (c) Knowledge refresh | Scheduled automation + CI watchdog (quality-alert) | The content update needs review by a person |
 | (d) Requirements trace | Prose (reviewer) | Semantic mapping |
-| (e) Superseded APIs | ArchTest (IL) + ratchet | `[Obsolete]` would break the build under `TreatWarningsAsErrors` |
+| (e) Superseded APIs | Attribute (compiler warning) + ArchTest (IL) + ratchet; `CS0618` re-armed as a build error | A hard error on SPRK001 would break every existing caller at once; the ratchet blocks new ones instead |
 | (f) C# LSP | n/a (trial) | Decision, not rule |
 
 ## 8. Root CLAUDE.md §11 justification for each new surface
@@ -284,9 +344,9 @@ Items (d) and 3's capability-duplication check edit the same file; they land in 
 | `notes/package-reviews/*.md` | ADR-012 census "reason" column (one line each). | No: one line cannot hold the three-test evidence and a migration plan. | The 9 grandfathered packages stay grandfathered indefinitely (G4); "under review" with no review is the old "etc." again. |
 | (a) Learn MCP entry in `.mcp.json` + `researcher.md` tool list | `.mcp.json` (one server: `dataverse`); `researcher.md` already prefers `learn.microsoft.com`, reached through `WebFetch`. | Yes — one entry added to the existing file and one tool-list and prose change to the existing agent; no new file. | The researcher scrapes Learn pages through generic web fetch, which returns whole pages instead of targeted doc chunks and loses to a moved URL (REFRESH-PROCEDURE.md recorded 14+ moved Learn URLs in four months). |
 | (b) `TsconfigStrictnessCensusTests.cs` | The census tests (`SharedPackageCensusTests`, `CredentialCensusTests`, …) in `tests/Spaarke.ArchTests/`; there is no tsconfig check today (Grep of ArchTests for `tsconfig`: no match). | No: it asserts a new invariant over a different file set; it copies the census structure. | New tsconfigs can land non-strict (27 of 76 are today) and nothing stops the count from growing, so strictness moves backwards silently. |
-| (c) Scheduled refresh routine | `knowledge/REFRESH-PROCEDURE.md` (a manual monthly ritual). | Yes — it automates that procedure's Steps 1–5 and leaves Step 6 sign-off to a person; the procedure doc gets a pointer, not a rewrite. | The procedure has not run in six months (last full curation 2026-05-14), so the 6 knowledge-base skills serve guidance that the procedure itself says drifts within four months. |
+| (c) Scheduled refresh routine + watchdog job | `knowledge/REFRESH-PROCEDURE.md` (a manual monthly ritual); `nightly-health.yml` quality-alert matrix. | Yes — the routine automates that procedure's Steps 1–5 and leaves Step 6 sign-off to a person; the procedure doc gets a pointer, not a rewrite; the watchdog is one more check in the existing matrix. | The procedure has not run in six months (last full curation 2026-05-14), so the 6 knowledge-base skills serve guidance that the procedure itself says drifts within four months. |
 | (d) Requirements-trace check | `adversarial-reviewer.md` checklist; Completeness Lint (criteria exist). | Yes — a line in the existing definition. | A change set can pass review while an acceptance criterion has no implementation, because nothing maps criteria to the diff. |
-| (e) `SupersededApiCensusTests.cs` | `IlCallScan.cs` (the IL reference scanner it reuses); `[Obsolete]` (unusable under `TreatWarningsAsErrors` while callers remain). | Partly: it reuses `IlCallScan` and adds only the census and baseline; a new test class is needed for a new invariant. | New code keeps calling APIs that an ADR has already replaced, and nothing reports it until a migration finds the extra callers. |
+| (e) `SPRK001`/`SPRK002` diagnostic IDs + `SupersededApiTests.cs` + `Directory.Build.props` change | `[Obsolete]` (about 6 ad-hoc uses in `src/server`); `IlCallScan.cs` (the IL reference scanner); the blanket `CS0618` downgrade in `Directory.Build.props:41`. | Yes for the mechanism — it extends the standard `[Obsolete]` attribute with its built-in `DiagnosticId` instead of inventing an attribute, and reuses `IlCallScan`; a new test class is needed only for the new invariant. | With `CS0618` downgraded repo-wide, a new call to *any* obsolete API, including framework obsoletions, passes a green build unseen; superseded APIs keep gaining callers until a migration finds them. |
 | (f) `notes/csharp-lsp-trial.md` | Rejected shared index (§10.6). | n/a — a trial record inside this project, not repo surface. Adoption would be a separate, justified change. | The per-session question stays open indefinitely and keeps being re-argued without numbers. |
 
 No new service, endpoint, DI registration, package reference or Dataverse column.
@@ -324,16 +384,18 @@ Do not re-adopt these without new evidence.
 | OQ-7 | Root `CLAUDE.md` §11 names the three questions but not the index. Add a one-line pointer there ("`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`")? It would make root CLAUDE.md a hot-path touch. | Yes, one line; `task-create` alone is read only at task-authoring time. |
 | OQ-8 | jscpd new-cluster floor (tokens, cross-area rule) for the alert. | Start at 50 tokens / different top-level areas; tune after four weeks of reports. |
 | OQ-9 | Epic and portfolio registration: which Epic does this project sit under (the code-quality program, Epic #427, is the obvious parent)? | Epic #427. |
-| OQ-10 | 5(b): which shared packages move to `strict` in r1, given that a migration can be large? | All shared packages whose strict build shows fewer than ~100 errors; split off and file the rest. |
-| OQ-11 | 5(b): extend type-aware ESLint beyond the packages made strict in r1? | Not in r1; a second ratchet after the strict baseline shrinks. |
-| OQ-12 | 5(c): a Claude Code scheduled cloud routine (does the update and opens a draft PR) or a GitHub Action (diffs only, opens an issue)? A cloud routine also needs a cloud environment with repo access. | Cloud routine, opening a draft PR only. |
-| OQ-13 | 5(e): who owns the initial superseded-API list? The ADRs say "replaces" in prose, so populating the census takes judgment. | The planning tier drafts it from the ADRs; the owner approves the list before the test lands. |
-| OQ-14 | 5(f): which plugin to trial, and the go/no-go thresholds (e.g. cold start < 60 s, < 1.5 GB per session)? | Set the thresholds before the trial so the result is not argued afterwards. |
+| OQ-10 | 5(b): which shared packages move to `strict` in r1? | **Decided 2026-11-10**: all shared packages whose strict build shows fewer than ~100 errors; the rest are split off and filed. |
+| OQ-11 | 5(b): extend type-aware ESLint beyond the packages made strict in r1? | **Decided 2026-11-10**: not in this project (§12). |
+| OQ-12 | 5(c): cloud routine or GitHub Action? | **Decided 2026-11-10**: Claude Code scheduled cloud routine, opening a draft PR only; plus the CI watchdog (§7.3). |
+| OQ-13 | 5(e): does the superseded-API list need approval? | **Decided 2026-11-10**: no. A supersession named in an ADR or merged design is a fact; ambiguous wording is listed as "not marked, and why" (§7.5). |
+| OQ-14 | 5(f): go/no-go thresholds for the language-server trial. | **Decided 2026-11-10**: common-practice thresholds in §7.6, fixed before the trial runs. |
+| OQ-15 | 5(e): when `CS0618` is re-armed, a fresh count may show framework or NuGet obsoletions hidden behind the suppression (the last count is from 2026-08-15). Fix them within this project, or list them with reasons and file them? | Fix those that take under an hour each; file the rest, with the suppression narrowed to their diagnostic IDs only. |
+| OQ-16 | 5(c): the cloud routine needs a cloud environment connected to the GitHub repo. Does one exist, or is creating it part of this project? | Creating it is the owner's one-time setup step; the task supplies the exact steps. |
 
 ## 12. Out of scope / future
 
 - **Coding-agent eval set** (15–20 replayable tasks with known-good outcomes, used to compare models, effort levels and procedure changes). It came from the same review, but its effort is L, so the owner left it out of r1. It is the natural next project once items 2 and 5(d) have changed how reviews and plans are checked, because it would measure whether they work.
-- Repo-wide type-aware ESLint (OQ-11).
+- Repo-wide type-aware ESLint (OQ-11), and with it the TypeScript half of the superseded-API process (`@deprecated` + `@typescript-eslint/no-deprecated`).
 - Executing large package consolidations from item 4 (filed as their own projects).
 
 ## 13. Success criteria
@@ -344,4 +406,4 @@ Do not re-adopt these without new evidence.
 4. The weekly sweep runs, exits 0, excludes `.claude/worktrees/agent-*`, and opens/closes exactly one `quality-alert` issue (`weekly/duplication-sweep`) based on clusters not in the baseline.
 5. `adversarial-reviewer.md` carries the capability-duplication check pointing at the index.
 6. Each of the 9 grandfathered packages has an owner-approved decision record; every *sanction* has landed as an ADR-012 amendment with the census table and `SharedPackageCensusTests` updated in the same PR; consolidations are executed or filed per OQ-5.
-7. (a) `.mcp.json` carries the Learn MCP server, and one `researcher` run cites a Learn MCP result. (b) `TsconfigStrictnessCensusTests` passes with its controls, and the baseline is smaller than 27 at project close. (c) The scheduled routine has produced at least one draft refresh PR (or issue) that the owner reviewed. (d) The reviewer reports a per-criterion trace when given a POML. (e) `SupersededApiCensusTests` passes with an owner-approved census and its controls. (f) `notes/csharp-lsp-trial.md` records the measurements and the owner's adopt or no-adopt decision.
+7. (a) `.mcp.json` carries the Learn MCP server, and one `researcher` run cites a Learn MCP result. (b) `TsconfigStrictnessCensusTests` passes with its controls, and the baseline is smaller than 27 at project close. (c) The scheduled routine has produced at least one draft refresh PR that the owner reviewed, `REFRESH-PROCEDURE.md` names the routine, and the watchdog check exists in `nightly-health.yml`. (d) The reviewer reports a per-criterion trace when given a POML. (e) Every `[Obsolete]` in Spaarke code carries `SPRK001` or `SPRK002`; `CS0618` is no longer in `WarningsNotAsErrors`; `SupersededApiTests` passes with its controls; `task-create` 3.5.6 and `code-review` 6.6 carry the marking step; the backfill PR lists both what was marked and what was not marked, and why. (f) `notes/csharp-lsp-trial.md` records the A/B results against the §7.6 thresholds and the owner's adopt or no-adopt decision.
