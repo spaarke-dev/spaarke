@@ -126,6 +126,26 @@ Four known-open sites (admin, revoke and impersonated paths) plus the `sprk_acce
 
 DEF-063 #2642 (Import-SolutionScoped exits 1 when there is nothing to publish), DEF-064 #2643 (guard: every BFF writer of invoice core lookups calls InvoiceFamilyCoreRecordGuard), DEF-065 #2644 (BillingFactLoader half only; waits for 198's `IsSecureOwnerTeamAsync` on master, no local copy).
 
+## Live state (2026-11-10)
+
+- **130-0:** split diffs to uac-r2.
+  - Diff 1 (`ed11b30f95..c5c30a9fc4`) APPROVED.
+  - Diff 2 (3g, `c5c30a9fc4..79f5d1a508`) APPROVED; the Sonnet re-check found no F.
+  - Batch-merge housekeeping: trim the 3g notes consumer table's "Before" column (it describes old gap behaviour); fix `ListingSelect =RowSelect` spacing.
+  - Diff 3 = **F3b**, running (Sonnet xhigh, `task/ebilling-130-0-f3b`, base c5c30a9fc4 + 0f6b49b5ab, merges the 3g tip). Then its own review, then to uac-r2.
+- **130d:** FINAL at `944e7e0aa3` (`task/ebilling-130d`, from 130c 3a49f67f65). Two Opus passes, uac-r2 APPROVED all rounds. Goes in the one dev batch.
+- **DEF-060:** OWNER DECISION PENDING.
+  - A = a per-rule admin description `sprk_policyversion.sprk_firmdescription`, copied onto the Signal at create in `SignalWriter.BuildEntity` (ontology-r1 must accept). Needs a schema change plus a dev go.
+  - B = a per-rejection reviewer text.
+  - Option 1 (table only) was withdrawn; it doesn't meet "option C both".
+  - Design in the 130 notes on `task/ebilling-130d`. Duplicate never takes an override.
+- **DEF-061:** `task/ebilling-def061` `d8c15dceb2..fd8a259460`.
+  - Opus adversarial review running.
+  - ontology-r1 review: **F1**, `OpenedAWindow` must keep Active/Superseded status as evidence: `From != null && (Active/Superseded || PublishedOn != null || Retired && publishedRules)`, with `Status != Draft` for the stamp. **ScopeLockedAsync** reads the stamp IN THIS change, via a shared predicate. Remarks updated. Backfill reports the fallback count.
+  - Resume the DEF-061 agent with F1 plus the review's findings, then send ontology-r1 the SHA.
+  - Live column apply waits until after the fixes.
+- **116:** running (Opus high, `task/ebilling-116` from 8770b2c659). It reports the `sprk_sourcedocument` census plus read-only counts for the owner's delete confirmation. Two new routes go to uac-r2.
+
 ## Owner answers 2026-11-09 (typed in THIS session)
 
 1. **166 go:** applied on dev, `-Verify` passed (notes 166 section 7). Follow-up filed as DEF-066 #2651 (a new business unit's default team doesn't get the Readers profile).
