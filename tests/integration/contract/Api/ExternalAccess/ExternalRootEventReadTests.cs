@@ -483,6 +483,13 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>Task 188: entity sets whose by-key reads answer this status (a narrowing read fault).</summary>
         public Dictionary<string, HttpStatusCode> KeyReadFaults { get; } = new();
 
+        /// <summary>
+        /// ebilling-r1 task 130-0 F3b: when set, a by-key read whose <c>$select</c> names this text answers 503. Used to fail the invoice
+        /// chain read (it alone selects an invoice link column of a parent document) while the document narrowing's own hop reads
+        /// still answer.
+        /// </summary>
+        public string? KeyReadFaultWhenSelecting { get; set; }
+
         /// <summary>Task 188: every by-key read sent to one of <see cref="KeyReadSets"/> ("set?query", unescaped).</summary>
         public IReadOnlyList<string> KeyReads(string set) =>
             Urls.Where(u => u.Contains($"/{set}?", StringComparison.Ordinal) && u.Contains($"{KeyReadSets[set]} eq ", StringComparison.Ordinal))
@@ -572,6 +579,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             FlagFault = null;
             FlagReadThrows = false;
             KeyReadFaults.Clear();
+            KeyReadFaultWhenSelecting = null;
             MaskedColumns.Clear();
             FilingReadThrows = false;
             FilingFaultEntity = null;
@@ -1037,6 +1045,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             {
                 if (KeyReadFaults.TryGetValue(set, out var keyFault))
                     return Task.FromResult(new HttpResponseMessage(keyFault));
+                if (KeyReadFaultWhenSelecting is { } marker
+                    && Regex.Match(url, @"\$select=([^&]*)").Groups[1].Value.Contains(marker, StringComparison.Ordinal))
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
                 var keys = Regex.Matches(url, $@"{keyColumn} eq ([0-9a-fA-F-]{{36}})")
                     .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);

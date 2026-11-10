@@ -2088,6 +2088,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             Targets.Clear();
             LiveParents.Clear();
             Requesters.Clear();
+            ServiceRequestInvoices.Clear();
             States.Clear();
             Volatile.Write(ref _requesterAndStateReads, 0);
             StateFault = null;
@@ -2151,5 +2152,11 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
                 return Task.FromException<Guid?>(fault);
             return Task.FromResult(Requesters.TryGetValue(serviceRequestId, out var requester) ? requester : (Guid?)null);
         }
+
+        /// <summary>ebilling-r1 task 130-0 F3b: service request id → the invoices it links to. Absent = none.</summary>
+        public ConcurrentDictionary<Guid, Guid[]> ServiceRequestInvoices { get; } = new();
+
+        public override Task<Guid[]> GetServiceRequestInvoiceLinksAsync(Guid serviceRequestId, CancellationToken ct = default) =>
+            Task.FromResult(ServiceRequestInvoices.TryGetValue(serviceRequestId, out var links) ? links : Array.Empty<Guid>());
     }
 }
