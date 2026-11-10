@@ -39,6 +39,8 @@ internal static class RateProcedureWorld
         ["sprk_versionnumber"] = 1,
         ["sprk_status"] = new OptionSetValue(ProcedureEntity.VersionStatusActive),
         ["sprk_effectivefrom"] = InForceFrom,
+        // DEF-061: an Active version carries the server's publish stamp; without it the resolver reads the version as never published.
+        [ProcedureEntity.VersionPublishedOnColumn] = InForceFrom,
     };
 
     /// <summary>The standard world: one all-records Procedure with one version in force.</summary>

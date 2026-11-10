@@ -185,6 +185,34 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
         DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_signal").Should().Contain("signal");
     }
 
+    // ── ebilling-r1 DEF-061 fix round 1: a Procedure Version is created and published only by ProcedureService; its own words ─────
+
+    [Fact(DisplayName = "DEF-061 (must fire): chat execute refuses a Procedure Version in its own words, before any Dataverse call")]
+    public async Task CreateRecord_AProcedureVersion_IsRefused_WithItsOwnWords_AndNoCreateCall()
+    {
+        _user.Held.UnionWith(["prvCreatesprk_procedureversion", "prvAppendsprk_procedureversion"]);
+
+        var result = await CreateRecord("sprk_procedureversion", Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_procedureversion"));
+        result.ErrorMessage.Should().Contain("REJECTED").And.Contain("Do NOT retry")
+            .And.Contain("Procedure versions are created and published only from the Procedure's versions page")
+            .And.NotContain("signal").And.NotContain("decision").And.NotContain("Invoice lines");
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+        _reads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "DEF-061 (must not fire): the other writer-only tables keep their own words next to the Procedure Version's")]
+    public void TheOtherWriterOnlyTables_KeepTheirWords()
+    {
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_procedureversion").Should().BeTrue();
+        DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_signal").Should().Contain("signal").And.NotContain("versions page");
+        DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_billingevent").Should().Contain("Invoice lines").And.NotContain("versions page");
+    }
+
     // ── ebilling-r1 task 096b (EB-D-201): an invoice is created only by submission; this tool never creates one ──────────────
     // The block lives in the handler, not in the registry's GenericCreateOnlyRefused flag (which would also refuse the Office
     // quick create and the service seams), so the registry rule is asserted unchanged below.

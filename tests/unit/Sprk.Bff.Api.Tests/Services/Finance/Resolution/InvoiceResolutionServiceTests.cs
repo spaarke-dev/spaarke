@@ -159,6 +159,8 @@ public sealed class InvoiceResolutionServiceTests
             ["sprk_effectivefrom"] = from,
         };
         if (to is { } t) row["sprk_effectiveto"] = t;
+        // DEF-061: a published (Active or Superseded) version carries the server's publish stamp.
+        if (status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded) row[ProcedureEntity.VersionPublishedOnColumn] = from;
         return row;
     }
 
