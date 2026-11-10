@@ -917,17 +917,74 @@ public sealed class SecureRecordSetupProcedureTests
         dv.Writes.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task CustomerUnit_NamedLikeTheSecureUnit_IsRefused_BecauseItsUsersWouldBeInTheSecureUnit()
+    [Theory]
+    [InlineData("exact name")]
+    [InlineData("other casing")]
+    [InlineData("accent variant")]
+    public async Task CustomerUnit_ThatDataverseFindsForTheSecureName_IsRefusedById_WithoutWriting(string variant)
     {
-        // Intake refuses this name; if a unit called "Secure Record" were recorded as the customer's anyway, S1 adopts it as
-        // the Secure Record unit and S2 refuses the BFF's application users found in it.
+        // Must fire: a fresh stamp where H10 created the customer's unit under a name Dataverse cannot tell apart from the
+        // Secure Record name (no Secure Record unit existed yet for H10 to compare against). S1's lookup finds the
+        // CUSTOMER's unit; S1 refuses by id — naming the real cause — before S2 or any write.
+        var customerName = variant switch
+        {
+            "exact name" => Set.BusinessUnitName,
+            "other casing" => Set.BusinessUnitName.ToUpperInvariant(),
+            _ => AccentVariant(Set.BusinessUnitName),
+        };
+        if (variant == "accent variant")
+        {
+            customerName.Should().NotBe(Set.BusinessUnitName, "the accent variant must really differ from the configured name");
+            string.Equals(customerName, Set.BusinessUnitName, StringComparison.OrdinalIgnoreCase)
+                .Should().BeFalse("OrdinalIgnoreCase — the old code-side comparison — does not see the collision");
+        }
         var dv = NewEnv();
         dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
-        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, Set.BusinessUnitName, dv.RootUnitId));
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, customerName, dv.RootUnitId));
 
-        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired);
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerUnitId.ToString()).And.Contain("without case or accents");
         dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerUnit_AccentVariantName_WhenTheSecureUnitAlsoExists_IsRefusedAsTheCustomersUnit_WithoutWriting()
+    {
+        // Dataverse finds both units for the Secure Record name; one is the customer's — the refusal names that cause
+        // (QuarantineRequired), not a generic "rename one" ambiguity.
+        var dv = NewEnv();
+        dv.Units.Add(new SecureSetupBusinessUnit(Guid.NewGuid(), Set.BusinessUnitName, dv.RootUnitId));
+        dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, AccentVariant(Set.BusinessUnitName), dv.RootUnitId));
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit, FailureClass.QuarantineRequired)
+            .Diagnostic.Should().Contain(dv.CustomerUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SecureUnitLookup_Fault_FailsClosed_WithoutWriting()
+    {
+        var dv = NewEnv();
+        dv.Fault = member => member == nameof(ISecureRecordSetupDataverse.FindBusinessUnitsByNameAsync)
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "simulated Dataverse 503")
+            : null;
+
+        var act = () => RunAsync(dv);
+
+        // The fault propagates (the handler maps it to a failure) — never read as "no Secure Record unit, create one".
+        await act.Should().ThrowAsync<SecureRecordSetupDataverseException>();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The configured name with its first Latin vowel accented ("Secure Record" → "Sécure Record").</summary>
+    private static string AccentVariant(string name)
+    {
+        var index = name.IndexOfAny(['e', 'a', 'o', 'u', 'i']);
+        index.Should().BeGreaterThanOrEqualTo(0, "the Secure Record name needs a vowel to accent");
+        var accented = name[index] switch { 'e' => 'é', 'a' => 'á', 'o' => 'ó', 'u' => 'ú', _ => 'í' };
+        return name[..index] + accented + name[(index + 1)..];
     }
 
     [Fact]

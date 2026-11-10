@@ -89,6 +89,13 @@ public static class SecureRecordSetupRejectionCodes
     public const string CustomerBusinessUnitWrongParent = "secure_setup.customer_bu_wrong_parent";
 
     /// <summary>
+    /// S1: the unit Dataverse finds for the Secure Record name has the customer's business-unit id (H10's
+    /// InterStepState.CustomerBusinessUnitId) — the names differ only by case or accents, which Dataverse ignores. The
+    /// customer's unit holds the BFF's users and can never be the Secure Record unit (QuarantineRequired).
+    /// </summary>
+    public const string BusinessUnitIsCustomerUnit = "secure_setup.bu_is_customer_bu";
+
+    /// <summary>
     /// T259 (§6 T3, ISS-010): one of H10's two BFF application users is not in the customer's business unit (or does not
     /// exist). Moving it strips its roles — an owner decision (QuarantineRequired).
     /// </summary>

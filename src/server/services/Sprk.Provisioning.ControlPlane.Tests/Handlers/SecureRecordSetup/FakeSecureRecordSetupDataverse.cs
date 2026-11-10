@@ -353,9 +353,16 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task<IReadOnlyList<SecureSetupBusinessUnit>> FindBusinessUnitsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
     {
         Read(nameof(FindBusinessUnitsByNameAsync));
+        // Dataverse's `name eq` ignores case AND accents (CI_AI collation) — so does this fake.
         return Task.FromResult<IReadOnlyList<SecureSetupBusinessUnit>>(
-            Units.Where(u => string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray());
+            Units.Where(u => string.Equals(FoldAccents(u.Name), FoldAccents(name), StringComparison.OrdinalIgnoreCase)).Take(2).ToArray());
     }
+
+    /// <summary>Strips combining marks after canonical decomposition ("Sécure" → "Secure"), as Dataverse's name match does.</summary>
+    internal static string FoldAccents(string value)
+        => new string(value.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .ToArray()).Normalize(System.Text.NormalizationForm.FormC);
 
     public Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(SecureRecordSetupTarget target, Guid businessUnitId, CancellationToken cancellationToken)
     {
