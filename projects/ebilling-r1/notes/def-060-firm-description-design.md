@@ -167,4 +167,22 @@ Conditions (binding for the build):
 
 uac-r2 receives the build diff when it is ready, plus notices before and after each live step.
 
-### ontology-r1: pending (Q5)
+### ontology-r1: ACCEPTED with conditions (2026-11-10, Q5)
+
+- **O1, FirmReason never changes Signal identity.**
+  - It is not in the dedupe key, the reason-set fingerprint, the sentence or any hash.
+  - The dedupe refresh writes neither `sprk_firmreason` nor the Signal's policy-version lookup.
+  - Test: a refresh under a newer version with a different description leaves both the text and the cited version unchanged.
+- **O2, the writer refusal is bypass detection only.**
+  - The stable code is `firm_reason_invalid`; logs carry ids only.
+  - The mapper path never reaches it.
+  - Test: the preflight fallback request (`BillingFindingSignalMapper` `:395-398`), if it is built, carries no `FirmReason`.
+- **O3, only the billing mapper sets `FirmReason`** (plus the replay, which re-derives it per C1). The ontology evaluator, re-evaluation and decision paths never do. The ArchTest scan is widened to "`FirmReason =` is assigned only in `BillingFindingSignalMapper` and the plan replay". `OntologyAdminAuthoringService` already refuses billing policy versions (uniform 404), so the Ontology admin tab needs no carry-forward.
+- **O4, schema by the ontology recipe** (`projects/spaarke-ontology-platform-r1/notes/schema-draft.md`):
+  - Web API with SchemaName `sprk_FirmDescription`, Memo 2000;
+  - the `MSCRM.SolutionUniqueName` header of the solution that owns `sprk_policyversion` on dev;
+  - publish `sprk_policyversion` only, never `PublishAllXml`;
+  - `Entity.xml` synced via 079.
+  - The owner's dev go in ebilling-r1 is enough for the column; ontology-r1 receives notices before and after.
+- **O5, field security: CONFLICTS with uac-r2 Q1.** The ontology project rule (its `CLAUDE.md` §5) forbids field security profiles on the five ontology tables, `sprk_policyversion` included. Securing the column is an exception that needs the owner's explicit go typed in the **ontology-r1** session. ontology-r1's view: unsecured is enough, like `sprk_messagetemplate`, because a form edit already needs Write on `sprk_policyversion` (admins only), and the mapper, replay and projection re-validate. **Open: owner decision.**
+- **O6, scoped ontology review before merge** of `SignalWriter.cs` and everything under `Services/Signals/**`, including the billing mapper and loader.
