@@ -30,8 +30,45 @@ Replace rule: the new file is Servable first; only then are the earlier Servable
 
 Relationships: `sprk_document_ruleset_sourcedocument`, `sprk_document_ratecard_sourcedocument`. Neither column is field-secured (the two `FieldSecurityProfiles.xml` entries named `sprk_sourcedocument` are `sprk_storedfile`'s, 088's, which stays).
 
-Code and script references still to clear (task 116's remaining work): `RateCardImportService` (writes it), `RecordOwnershipResolver.cs:1809` (a citation entry `("sprk_ruleset", "sprk_sourcedocument")`, uac-r2's code), RuleReview `ruleSetApi.ts` / `testKit.ts` (`sourceDocumentId`), `Deploy-EbillingFormsViews.ps1` (both forms), and the tests that seed it. Creation scripts `Deploy-EbillingPolicyStoreSchema.ps1` and `Deploy-EbillingTimekeeperRateCardSchema.ps1` add the lookups and stay as history. SpaarkeMaster XML is 079's to re-sync.
+Code and script references still to clear (task 116's remaining work): ~~`RateCardImportService` (writes it)~~ (done in part 2), `RecordOwnershipResolver.cs:1809` (a citation entry `("sprk_ruleset", "sprk_sourcedocument")`, uac-r2's code), RuleReview `ruleSetApi.ts` / `testKit.ts` (`sourceDocumentId`), `Deploy-EbillingFormsViews.ps1` (both forms), and the tests that seed it. Creation scripts `Deploy-EbillingPolicyStoreSchema.ps1` and `Deploy-EbillingTimekeeperRateCardSchema.ps1` add the lookups and stay as history. SpaarkeMaster XML is 079's to re-sync.
+
+## Part 2: tests, guards, the rate-card file step (2026-11-10)
+
+| Commit | What |
+|---|---|
+| `c47fefc492` | Drafting, compensation, job and seam tests re-keyed per Procedure Version (EB-D-211: memo first, Yes last; AlreadyDrafted reads the Yes/No; `RuleSetDetail.NotConverted` is the highest-numbered version's memo; compensation per version keeps copy-forward drafts; source states Pending (retried), Malicious (Poisoned), Missing (`ruleset.source_missing`), exactly one Servable file else 422). Job: payload, subject, idempotency and lock key are the version id; a payload with no version id is Poisoned. Retired rule-set routes: a test that they are gone. |
+| `9f1d82ec37` | `StoredFileService.ReadRowsForProcedureVersionAsync` and `ReplaceForCallerAsync` (new Servable before the earlier is Removed; a failed withdraw rethrows, the new row Removed and the earlier one still Servable; a refused or failed upload leaves the earlier file alone; `WithdrawForUndoAsync` still one conditional write). `ProcedureService.GetDraftVersionForFileAsync` accepts only a Draft version of this live Procedure (a missing status is not a Draft). |
+| `b58b9a9039` | **Fix**: the file route stored the client's claimed Content-Type although `RuleSetService.MimeTypeOf` (until then unused) documents a type derived from the name; the route now uses it. Route tests for `/draft` and `/file` (privileges must-fire and must-not-fire, 202 keyed by the version, refusals answered now with no job, 409 already drafted, 503 queue down, 413 by Content-Length and by file length, refused versions store nothing, replace, failed withdraw 500 with the earlier file Servable, no Write on the version 403, no file 400). |
+| `ee35443df5` | Rate-card import: the workbook is the version's source file through `ReplaceForCallerAsync`, AFTER the card, rates and timekeepers; a refused or faulted file write removes the rows. No `SpeFileStore`, `sprk_document`, container read or card source lookup remains. `RateCardImportResult.SourceDocumentId` becomes `SourceFileId`. A store that cannot stage refuses 503 `stored_file.store_not_configured` before any write (replaces `ratecard.container_not_configured`; no client reads that code). |
+| `58a969074d` | ArchTests ledgers (below). |
+
+**Refused rate-card file write, HTTP mapping.** Copied from `ProcedureEndpoints.PutVersionFile`, the codebase's existing mapping of a refused caller write to the file store: `CallerNotInternal` 403 `system_failure`; `NoWriteOnParent` 403 `insufficient_rights` ("You need Write on this Procedure Version."); `OwnerUnresolved` 409 with the owner code; `NotConfigured` 503 `stored_file.store_not_configured`; `InvalidRequest` 400 `ratecard.import_invalid`; anything else 500 `ratecard.import_failed`. The import carries the store's refusal out as `RateCardOutcomeKind.FileRefused`, and the route maps it.
+
+**ArchTests.** The pre-116 base `698fd222cc` passes 2200/2200, so the six failures were all 116's. Each ledger now matches the code; no guard's rule changed:
+- SPE write-sink provenance (2 tests): the four `RateCardImportService` and `RuleSetService` `UploadSmallAsync`/`DeleteFileAsync` sites are gone; their entries are deleted.
+- Writer-only delete: `RuleSetService.CompensateAsync` (the retired create's rollback) is gone; its entry is deleted.
+- Child-create census: `RuleSetService.cs` no longer creates `sprk_ruleset`; the entry is deleted and the 089a non-vacuity check expects the two waived tables left. A new create there fails the census.
+- InvoicePdf writer and app-only update writer: the status-only withdraw moved from `WithdrawForUndoAsync` into the shared `WithdrawRowsAsync` (undo and replace); the entries name it, with the same constraint.
+
+**Fail-before.**
+- The media-type test failed on the old route ("text/html" stored).
+- With the rate-card change reverted (no `FileRefused` arm, no row compensation on a refusal), 8 of 8 new refusal tests failed.
+- The drafting, job, store and route tests were written against the pre-116 contract's absence: the old code has no version-keyed drafting, `ReplaceForCallerAsync` or the two routes, so the tests do not compile against it.
+
+**Verification (HEAD `58a969074d`).**
+- BFF build: 0 errors, 0 warnings.
+- Full ArchTests: 2200/2200.
+- Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling): 7914 passed, 4 skipped, 0 failed, on the first run.
+
+**Known limits and open items.**
+- Two concurrent uploads to one version can leave two Servable files. Drafting and publish then refuse (422 / 400) until the next upload.
+- A PUT to `/file` that is not multipart is answered 415 by routing, before authentication. That is ASP.NET's `Accepts` matcher; it reveals nothing beyond the route's existence.
+- `RecordOwnershipResolver.cs:1809`, the citation entry `("sprk_ruleset", "sprk_sourcedocument")`, is uac-r2's code, and so are its tests (`SecureChildLineageTests`) and the `SecureChildLineage.cs` comment. They are not changed here and go to uac-r2.
+- `grep ProcedureLibraryContainerId src/server` also finds `RecordContainerResolver.DocumentPointer.cs:65`, a list of configuration keys, not a read by the import.
 
 ## Not done yet
 
-See the task report: unit and seam tests, the rate-card import file step, RuleReview, the two scripts, verification, reviews, TASK-INDEX.
+- Publish-size delta against a fresh master build.
+- code-review and adr-check on the 116 diff.
+- RuleReview and the two scripts (another agent).
+- TASK-INDEX.
