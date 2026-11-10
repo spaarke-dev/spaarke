@@ -57,10 +57,14 @@ Branch `task/fm-054a-3` (cut from 5b58c87875). FULL rigor. No live Dataverse wri
 
 - A **Direct message** is a Message row (`sprk_communicationtype` = Message) that carries no typed regarding lookup and joins a thread the join found Direct (`ThreadGrantAudience.DirectParticipants`: typed Direct, no typed lookup — #1629's audience, not a re-read).
 - It carries its own two participants: `sprk_sentby` (the sender) and `sprk_directrecipient` (the thread's other participant).
-- The recipient comes from the existing source of a Direct thread's two-party list, `IDirectThreadAccessService.GetParticipantSystemUserIdsAsync` (the thread's user owner and the users it is shared to; empty unless the thread is typed Direct). It is stamped only when that list is exactly 2 distinct, non-empty ids, one of them the sender, and both systemusers read `isdisabled = false`. Otherwise no recipient is stamped.
+- The recipient comes from the stamp's own read of the thread's two-party list (`DirectMessageRecipient.ReadParticipantsAsync`, fix round 1): the thread's user owner and every systemuser holding a share on the thread whose mask includes Read (`(mask & 1) != 0`, `RecordShareLevels.CanRead`); a team owner and a team share are never participants; empty unless the thread is typed Direct. The share read is the strict one (`GetPrincipalAccessOrThrowAsync`). It is stamped only when that list is exactly 2 distinct, non-empty ids, one of them the sender, and both systemusers read `isdisabled = false` and carry no `applicationid` (an application user is never a participant). Otherwise no recipient is stamped.
 - `sprk_sentby`: a row that already carries it keeps it as it is. A row without one (inbound chat) gets the systemuser its chat identity maps to, in the same write as the recipient.
 - Inbound sender not mappable: no sender and no recipient are stamped; ONE Error is logged with event code `direct_message.recipient_unmapped` (EventId name and message), the message id and the thread id. The message is still created and still filed into the thread.
-- Any fault reading the participants stamps nothing (logged Warning); the thread lookup is still written.
+- Any fault reading the message, the thread or its shares stamps nothing; the thread lookup is still written. Each outcome has its own log event:
+  - not exactly two participants including the sender: Information, `direct_message.recipient_not_two_participants` (5402);
+  - a participant disabled, missing or an application user: Information, `direct_message.recipient_participant_not_eligible` (5403);
+  - participants could not be read: Warning, `direct_message.recipient_participants_unread` (5404);
+  - sender unmapped: Error, `direct_message.recipient_unmapped` (5401).
 - Every other row — email, a record-filed message, a record thread, the per-user master, the chat create, secure filings — gets no column from this step.
 - Written as the BFF application user (`IGenericEntityService`, SDK, app-only). No impersonated write.
 
@@ -74,11 +78,17 @@ No create path knows that a message is Direct when it creates the row: the threa
 
 ### Create-path inventory (`sprk_communication`)
 
-| Create site | Type | Thread filing step | Result |
+Corrected in fix round 1: the "can a recipient be stamped today" column is what today's flows reach, not what the stamp would do on a thread holding a pair. Line numbers are on `task/fm-054a-4`.
+
+| Create site | Type | Thread filing step | Recipient in today's flows |
 |---|---|---|---|
-| `CommunicationService.cs:1140` (`BuildMessageDataverseRecordAsync`, created at :953) — Message send | Message | find-or-create: `ThreadResolver.cs:159` (JOIN) or `:186` (CREATE); explicit `ThreadId`: `CommunicationService.cs:1573` (respond) | **Direct: stamped** (sender already on the row at create) |
-| `MessagingIngestor.cs:225` (created at :267) — inbound chat join (ACS) | Message | `ThreadResolver.cs:159` (JOIN) / `:186` (CREATE) | **Direct: stamped** (sender mapped from the chat identity and stamped in the filing write) |
-| New Direct thread, first message — `ThreadResolver.cs:186` (resolver CREATE with no regarding) | Message | the CREATE path's filing write | **Direct: stamped** when the new thread's list holds the pair (see limit L1) |
+| `CommunicationService.cs` Message send, no `ThreadId` (the UI send) | Message | `ResolveOutboundMessageThreadAsync` (:1506) → resolver | **None.** The send passes `AcsThreadId = null` (`CommunicationService.cs:942`), so the messaging sender creates a fresh ACS thread (`MessagingChannelSender.cs:72-84`). The key strategy finds no channel ref for it and answers `CreateNew` (`MessagingThreadKeyStrategy.cs:40-54`), so the resolver CREATEs a Direct thread (`ThreadResolver.cs:190-197`). That thread names no owner (`ThreadResolver.cs:248` sets one only for a record anchor), so it is owned by the BFF application user, and it is shared to nobody: no pair, no recipient. |
+| `CommunicationService.cs` Message send naming a `ThreadId` (respond) | Message | `AssignExplicitThreadAsync` (:1510 → :1567, join at :1577) | **Stamped only when the named thread holds a pair**, i.e. a thread created by `POST /threads/direct` (`CommunicationEndpoints.cs:181` → `FindOrCreateDirectThreadAsync`, owned by the caller and shared with Read to the other user). A respond into a resolver-created thread stamps none. |
+| `MessagingIngestor.cs` inbound chat (ACS), via the resolver (`MessagingIngestor.cs:112-119`) | Message | resolver JOIN (`ThreadResolver.cs:168`) or CREATE (`:190-197`) | **None.** Inbound joins by ACS thread id through `sprk_communicationchannelref`, and the only writer of a channel ref is `MessagingThreadKeyStrategy.OnThreadCreatedAsync` (`MessagingThreadKeyStrategy.cs:63`), which links a thread the resolver just created. So inbound never joins a pair thread. |
+| New Direct thread, first message — resolver CREATE with no regarding (`ThreadResolver.cs:190-197`) | Message | the CREATE path's filing write | **None.** The new thread is app-owned and unshared (see the first row). |
+
+- `startDirectThread` (`src/client/shared/Spaarke.UI.Components/src/services/communicationThreadListApi.ts:385`) has no caller in `src`: no shipped surface creates a `/threads/direct` thread today.
+- So in today's flows no Direct message gets a recipient. The stamp fires for a respond into a `/threads/direct` thread, and for a join into one if such a thread is ever reached by key. Fail closed: a missing recipient grants nothing.
 | `CommunicationService.cs:1696` (created at :1723) — external thread post | Message | record default thread (Tier 2, `ThreadResolver.cs:580`) | not Direct: never stamped (always filed under a record) |
 | `CommunicationService.cs:2573` (created at :2336) — email send as user | Email | `ResolveOutboundThreadAsync` / respond | not Direct: never stamped (email) |
 | `CommunicationService.cs:2809` (created at :1994) — email from a shared mailbox | Email | as above | not Direct: never stamped (email) |
@@ -98,12 +108,28 @@ No Teams inbound handler exists in the BFF today; the only chat inbound path is 
 
 ### Known limits (stated, not defects)
 
-- **L1.** A Direct thread the resolver creates itself (a chat message with no regarding and no known thread) is owned by the BFF application user and shared to nobody, so its two-party list is not a sender/recipient pair and no recipient is stamped. A Direct thread with a real pair is the one `POST /threads/direct` creates (`FindOrCreateDirectThreadAsync`, owned by the caller, shared to the other user); its messages are stamped on the respond path.
+- **L1.** A Direct thread the resolver creates itself (a chat message with no regarding and no known thread) is owned by the BFF application user and shared to nobody, so its two-party list is not a sender/recipient pair and no recipient is stamped. A Direct thread with a real pair is the one `POST /threads/direct` creates (`FindOrCreateDirectThreadAsync`, owned by the caller, shared to the other user); its messages are stamped on the respond path. See "Open: the resolver-CREATE gap".
+- **L3. The thread's owner controls which pair the thread yields.** The stamp reads the thread's owner and its Read shares at the filing write. Whoever can change the thread's owner or shares before a message is filed decides that message's recipient. The rule still holds: exactly two distinct enabled people, one of them the sender.
 - **L2.** A message filed under a record is not a Direct message and gets no recipient. If it is later unfiled back into a Direct thread, no step here stamps it (the unfile step does not refile into a thread); 054c's backfill rule covers such rows.
+
+### Open: the resolver-CREATE gap (owner decision pending)
+
+- Facts: a UI send with no `ThreadId` always reaches the resolver CREATE (see the inventory). The thread it creates is a Direct thread with no regarding, owned by the BFF application user and shared to nobody. Inbound joins only such threads.
+- Rule kept in this round: a resolver-created thread yields no recipient. The stamp does not infer a pair from the ACS membership, the message's addressees or the caller; it reads only the thread's owner and Read shares. Fail closed: no recipient, so 198's reconcile grants and revokes nothing for that message.
+- Not changed in this round: how the resolver creates a Direct thread, and whether a send goes through `FindOrCreateDirectThreadAsync`. Either change is the owner's decision. Until it is made, 054c's backfill rule (exactly 2 distinct enabled systemusers, one of them `sprk_sentby`) also selects no message in a resolver-created thread.
+
+### Deploy order (binding, piece 2)
+
+- 054b's field security on `sprk_sentby`, `sprk_directrecipient` and the message's thread lookup is live on an environment BEFORE 198 R2 reads the pair there. Until those columns are secured, a user who can write the message can change them, so 198 R2 must not decide grants from them.
 
 ### Impersonated writes found (for 054b)
 
 - The stamp itself: none. Both writers (`ThreadResolver.AssignThreadAsync`, `CommunicationService.AssignExplicitThreadAsync`) use `IGenericEntityService` (app-only SDK).
+- Run-as-user writers of `sprk_communication` 054b must cover (each writes as the caller, so once the three columns are secured a payload naming one of them fails; 054b's dry-run lists each with what it can carry):
+  - `Api/ChildRecordEndpoints.cs:817` — the generic child-record PATCH (`user.PatchAsync` with the mapped body); `sprk_communication` is a supported table (`:911`). Its body is caller-supplied, so it can name `sprk_sentby`, `sprk_directrecipient` or `sprk_communicationthread`.
+  - `Services/Dataverse/OwnedChildWrite.cs:1559` — the owned-child update, a run-as-caller PATCH of the mapped body (`sprk_communication` is handled there, `:1551`).
+  - `Services/Signals/Actions/InquiryDispositionService.cs:485` — a run-as-caller PATCH of `sprk_associationstatus` only; listed for completeness, it names none of the secured columns.
+  - `DataverseCreateRecordHandler.cs:489` and `EmailDraftToolHandler.cs:478`, below.
 - `DataverseCreateRecordHandler.cs:489` — the chat create of an UNFILED `sprk_communication` is a run-as-user POST of model-supplied columns. Once 054b secures `sprk_sentby`, `sprk_directrecipient` and the message's thread lookup, a user-run create naming any of them fails. 054b should confirm the write mapper refuses or drops those columns (or that the failure is the wanted answer), and list this path in its dry-run evidence.
 - `EmailDraftToolHandler.cs:478` — an UNFILED email draft is a run-as-user POST. Its payload never names `sprk_sentby` (the sender is written only on the filed, app-only path), the recipient or the thread lookup. No change needed; listed for 054b's scan.
 
@@ -111,7 +137,9 @@ No Teams inbound handler exists in the BFF today; the only chat inbound path is 
 
 `DirectMessageRecipient` (static, beside `DirectThreadAccessService`):
 - **Existing:** `DirectThreadAccessService` holds the two-party list and the per-message grant; `ThreadResolver` holds the join that decides Direct. Neither writes a participant onto the message.
-- **Extension:** it is a static helper over those two (no new service, interface member or DI registration); it reuses `GetParticipantSystemUserIdsAsync` for the list and the join's `ThreadAssignment` for Direct-ness.
+- **Extension:** it is a static helper (no new service, interface member or DI registration); it uses the join's `ThreadAssignment` for Direct-ness.
+- **Deliberate duplicate (fix round 1):** the stamp reads the thread's owner and shares itself (`ReadParticipantsAsync`) instead of calling `GetParticipantSystemUserIdsAsync`. Why: the stamp decides a write from the shares, so it needs the strict read (`GetPrincipalAccessOrThrowAsync`) and the Read-mask filter, and the shared reader in `DirectThreadAccessService.cs` uses the soft read and is being changed by its owner in UAC-r2 task 198. When 198 lands with a strict, Read-filtered reader, the stamp converges onto it and this read is removed.
+- **New dependency, not a registration:** `ThreadResolver` and `CommunicationService` take an optional `IDataverseRecordShareService` (already registered, `CommunicationModule.cs:711`), passed to the stamp. Without it no participant is stamped.
 - **Cost of doing nothing:** 198's reconcile reads the pair from `{sprk_sentby, sprk_directrecipient}`; without the stamp, no new Direct message has a recipient and the recipient never gets Read once the message is owned by the Direct team.
 
 `ChannelIngestRequest.ProviderSenderId`, `ThreadResolutionRequest.SenderChatIdentity`, `AcsEventNormalizer.ResolveSenderIdentifier`:
@@ -149,3 +177,33 @@ No new package, plugin, DI registration or Dataverse column (the column was crea
 - **Publish-size delta:** not measured here, because `scripts/publish-delta.ps1` runs in the main session only. This change adds no package and no project reference.
 
 rework: 054a piece 2 — sprk_directrecipient and sprk_sentby stamped in the write that files a Message into a Direct thread (send, respond, inbound join, new Direct thread); none on any other row.
+
+## 054a piece 2 — fix round 1 (review)
+
+Branch `task/fm-054a-4` (cut from a26074e6d6). FULL rigor. No live Dataverse write, no deploy. Code commit b8d48727ef.
+
+### Scope as changed by the file's owner
+
+`DirectThreadAccessService.cs` belongs to UAC-r2, which fixes the zero-mask filter in its reader in task 198. This round leaves that file unchanged: `git diff a26074e6d6 -- src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs` is empty. So F1 and F2 are fixed on the stamp's own path. The shared reader and its callers (`GetParticipantSystemUserIdsAsync`, the grant path's `ReadDirectParticipantsForGrantAsync`, and `FindExistingAsync`) do not change in this round. The stamp no longer calls the shared reader.
+
+### Fixes
+
+- **F1, zero-mask shares.** `DirectMessageRecipient.ReadParticipantsAsync` counts a share only when it is a systemuser share whose mask includes Read (`RecordShareLevels.CanRead`, the `(mask & 1)` convention of `InternalShareEndpoints.cs` and `SecureChildShareSynchronizer.DirectMasks`).
+- **F2, strict read.** The stamp's share read is `GetPrincipalAccessOrThrowAsync`. A throw lands in the existing catch: Warning `direct_message.recipient_participants_unread`, no recipient, and the thread lookup is still written. The outcomes have distinct events (see "The rule").
+- **K2, application users.** `BothEnabledPeopleAsync` requires both participants enabled and without `applicationid`.
+- **F3/F4, tests.** The participant double is now the thread as stored: the owner on the thread row, and the share rows seeded by the test plus any granted during the run. A thread the resolver creates becomes the stored thread, owned by the application user, with no shares. The resolver-CREATE test asserts no recipient. The send-JOIN and inbound-JOIN cases are named and commented as reachable only for a thread created by `POST /threads/direct`. Must-fire cases kept: respond (both orientations), and a join into a `/threads/direct` thread.
+- **Notes.** The path inventory is corrected, and these sections were added: the resolver-CREATE gap, the 054b writer list, the deploy-order rule, and L3 (the thread's owner controls the pair).
+
+### Evidence
+
+- **Fail-then-pass** (filter `FullyQualifiedName~DirectMessageRecipientStampTests`).
+  - Before: the three fixes were reverted inside the stamp's reader only. The share read was soft with fault → empty, there was no Read-mask filter and no application-user filter. Result: **Failed 3, Passed 22, Total 25.** The 3 failures are the new must-not-fire tests, one per fix: `AZeroMaskShareRow_IsNotAParticipant_AndGetsNoRecipient` (F1), `AShareReadFault_StampsNothing_LogsTheUnreadWarning_AndStillFilesTheMessage` (F2) and `AThreadOwnedByAnApplicationUser_SharedToTheSender_GetsNoRecipient` (K2).
+  - After: **Passed 25, Failed 0.**
+  - The rewritten resolver-CREATE test (`FirstMessageOfAThreadTheResolverCreates_GetsNoRecipient_BecauseTheThreadIsAppOwnedAndUnshared`) passes before and after. Production never stamped there; the old test's double returned a pair for every thread, which is what made it fire.
+- **Builds (after the commit's `dotnet format`):** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each built with 0 warnings and 0 errors.
+- **Filtered run (after the commit):** the filter was (DirectMessageRecipient | DirectThreadAccess | Communication | ThreadResolver | Messaging | InternalShare | SecureChildShare | the round-4 field-mapping set from `scripts/verify-suites.sh`) with `FullyQualifiedName!~Api.Office.` (#2060). Result: **8810 passed, 0 failed, 2 skipped.** No timing test failed in this run.
+  - An earlier run gave 3 failures. It ran against a test build left from the fail-then-pass step (the source was restored but not rebuilt). After a rebuild, the same three tests pass. Recorded so the count is not mistaken.
+- **CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` reports no vulnerable packages. No package was added.
+- **Publish-size delta:** not measured here (`scripts/publish-delta.ps1` runs in the main session). No package or project reference was added.
+
+rework: 054a piece 2 fix round 1 — the Direct recipient stamp reads the thread's owner and Read shares itself with the strict share read; zero-mask shares, application users and unread shares give no recipient; the tests are driven by the thread as stored; notes corrected (reachability, the resolver-CREATE gap, 054b writers, deploy order).
