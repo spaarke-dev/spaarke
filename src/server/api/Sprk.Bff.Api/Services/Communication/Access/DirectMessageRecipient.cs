@@ -37,6 +37,8 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// recipient. When the sender cannot be mapped, nothing is stamped and one Error is logged with
 /// <see cref="RecipientUnmappedEventCode"/> and the message id.</para>
 /// <para><b>Never fails the message.</b> Any fault stamps nothing and is logged; the thread lookup is still written.</para>
+/// <para><b>Deploy order.</b> The schema script runs before a BFF built with this stamp deploys; when it has not, the thread
+/// lookup is still written and one Error names the script (<see cref="WriteThreadFilingAsync"/>).</para>
 /// <para>Written as the BFF application user (<see cref="IGenericEntityService"/>), never with an impersonated caller.</para>
 /// </remarks>
 internal static class DirectMessageRecipient
@@ -61,9 +63,19 @@ internal static class DirectMessageRecipient
     /// <summary>Warning: the message, the thread or the thread's shares could not be read.</summary>
     internal const string ParticipantsUnreadEventCode = "direct_message.recipient_participants_unread";
 
+    /// <summary>
+    /// Error: the filing write was refused because a stamp column does not exist on the table (the schema script has not run
+    /// in this environment); the message was filed with the thread lookup alone.
+    /// </summary>
+    internal const string RecipientColumnMissingEventCode = "direct_message.recipient_column_missing";
+
+    /// <summary>The script that adds the stamp's column, named by the <see cref="RecipientColumnMissingEventCode"/> Error.</summary>
+    internal const string SchemaScriptCommand = "scripts/Set-DirectRecipientSchema.ps1 -Apply";
+
     private static readonly EventId NotTwoParticipantsEvent = new(5402, NotTwoParticipantsEventCode);
     private static readonly EventId ParticipantNotEligibleEvent = new(5403, ParticipantNotEligibleEventCode);
     private static readonly EventId ParticipantsUnreadEvent = new(5404, ParticipantsUnreadEventCode);
+    private static readonly EventId RecipientColumnMissingEvent = new(5405, RecipientColumnMissingEventCode);
 
     private const string CommunicationTable = "sprk_communication";
     private const string CommunicationTypeColumn = "sprk_communicationtype";
@@ -178,6 +190,54 @@ internal static class DirectMessageRecipient
             return None;
         }
     }
+
+    /// <summary>
+    /// The ONE write that files <paramref name="communicationId"/> into <paramref name="threadId"/>: the thread lookup plus
+    /// <paramref name="alongside"/> (<see cref="ColumnsForDirectFilingAsync"/>), in one update. Both writers use it — the
+    /// resolver's join and create, and the respond-into-thread path.
+    /// </summary>
+    /// <remarks>
+    /// The schema script (<see cref="SchemaScriptCommand"/>) runs before a BFF that stamps these columns deploys. When it has
+    /// not, the combined write is refused because a stamp column does not exist on the table; the write is then sent once
+    /// more with the thread lookup alone, and one Error (<see cref="RecipientColumnMissingEventCode"/>) names the script.
+    /// Only that refusal retries — matched by <see cref="CommunicationService.IsMissingColumnFault"/> against a stamp column
+    /// this write carried (the SDK's typed <c>0x80041103</c> fault, or the "no such attribute / property" text the SDK and the
+    /// Web API answer with) — and only when the write carried stamp columns. Any other fault, and any fault of a write without
+    /// them, propagates unchanged to the caller's best-effort catch. A fault of the retry propagates the same way.
+    /// </remarks>
+    internal static async Task WriteThreadFilingAsync(
+        IGenericEntityService entities,
+        ILogger logger,
+        Guid communicationId,
+        Guid threadId,
+        IReadOnlyDictionary<string, object> alongside,
+        CancellationToken ct)
+    {
+        var fields = ThreadResolver.ThreadFilingFields(threadId, alongside);
+        try
+        {
+            await entities.UpdateAsync(CommunicationTable, communicationId, fields, ct);
+        }
+        catch (Exception ex) when (AStampColumnIsMissing(ex, fields))
+        {
+            await entities.UpdateAsync(CommunicationTable, communicationId, ThreadResolver.ThreadFilingFields(threadId, None), ct);
+            logger.LogError(
+                RecipientColumnMissingEvent,
+                ex,
+                "{EventCode}: Direct message {CommunicationId} was filed into thread {ThreadId} without its participants because " +
+                "a participant column does not exist on sprk_communication in this environment; run {SchemaScript}",
+                RecipientColumnMissingEventCode, communicationId, threadId, SchemaScriptCommand);
+        }
+    }
+
+    /// <summary>
+    /// <c>true</c> when <paramref name="ex"/> is Dataverse refusing the write because one of the stamp columns in
+    /// <paramref name="fields"/> (every column but the thread lookup) does not exist on the table.
+    /// </summary>
+    private static bool AStampColumnIsMissing(Exception ex, IReadOnlyDictionary<string, object> fields) =>
+        fields.Keys.Any(column =>
+            !string.Equals(column, ThreadResolver.ThreadLookupOnCommunication, StringComparison.OrdinalIgnoreCase)
+            && CommunicationService.IsMissingColumnFault(ex, column));
 
     /// <summary>
     /// A Direct thread's two-party list as the stamp decides from it: the thread's user owner and every systemuser holding a
