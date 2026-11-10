@@ -1275,15 +1275,21 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
 /// table the USER's own read returned), the ids an external caller may NOT see. The rows' invoice links and the decision are
 /// read app-only (a submission row is decided by <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, as on the
 /// routes); only the hidden id set comes back (a hide decision; no row data). The tool has already decided the caller is
-/// external. A failed read THROWS (the tool call fails with no data). Registered by <c>AddExternalAccess</c>.
+/// external. Registered by <c>AddExternalAccess</c>.
 /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. <paramref name="caller"/> is the tool call's caller
 /// (<see cref="InvoiceFamilyCaller"/>, one per tool call), whose firms are read at most once for every call of the seam in that
-/// tool call. No firm, or firms that cannot be read, hide every asked row.
+/// tool call. A caller known to be in NO firm has every asked invoice-linked (or invoice-family) row hidden: that is an answer.
+/// Firms that CANNOT be read (a failed or null read) are a whole-read failure instead (ebilling-r1 task 130-0 F3b, uac-r2 ruling):
+/// the seam THROWS and the tool call fails with no data, for every kind of table, whenever an asked row needs the firms (a family row
+/// always; a child, descendant or root row only when it links to an invoice).
 /// Task 130-0b step 2: <paramref name="table"/> may also be a CHILD table with an invoice link
-/// (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>: a to-do, event, document, communication, analysis, memo...).
+/// (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>: a to-do, event, document, communication, analysis, memo...) or,
+/// since F3b, a DESCENDANT of one (<see cref="InvoiceLinks.IsDescendantOnly"/>: an analysis output, an event log, a file version...),
+/// which is decided by the invoice links of the rows it hangs from, up its parent chain.
 /// Such a row is hidden when ANY invoice it links to is not visible (the same invoice decision, with the caller's firms) or cannot be
-/// decided; a row with no invoice link is not hidden. On a child table a fault does not throw: a failed link read hides every asked
-/// row, and a failed decision (or firms that cannot be read) hides every asked row that links to an invoice.
+/// decided; a row with no invoice link is not hidden. With the firms KNOWN a fault hides rather than throws, on a child table and on
+/// the family path alike: a failed link read hides every asked row, and a failed decision hides every asked row that links to an
+/// invoice.
 /// Task 130-0b step 3: <paramref name="table"/> may also be a ROOT with an invoice link (<see cref="InvoiceLinks.IsRootWithInvoiceLink"/>;
 /// today the work assignment). A root is decided by its grant and is NEVER hidden by its invoice link: for a root the returned ids are
 /// the rows whose invoice link the tool must blank (<see cref="ExternalInvoiceVisibility.BlankRootInvoiceLink"/>), under the child

@@ -467,8 +467,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             }
 
             // Task 130-0b step 2: a row of a CHILD table with an invoice link is hidden when any invoice it links to is hidden or
-            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); a fault
-            // there hides every invoice-linked row of the page rather than throwing. A row without a readable id is hidden.
+            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); with the
+            // caller's firms known, a fault there hides every invoice-linked row of the page rather than throwing; firms that cannot be
+            // read fail the tool call (F3b). A row without a readable id is hidden.
             IReadOnlySet<Guid>? hiddenInvoiceLinkedRows = null;
             if (guardInvoiceLinks &&
                 response.Body is { } linkedBody && linkedBody.TryGetProperty("value", out var linkedValue) &&

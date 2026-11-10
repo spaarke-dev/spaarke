@@ -2457,14 +2457,16 @@ public class ExternalDataService
     /// <summary>
     /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
     /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
-    /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// already known to be external. Read app-only.
     /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. The caller's firms come from
     /// <paramref name="caller"/>, read through <paramref name="systemUserFirms"/> at most ONCE per tool call. Known firms apply the
     /// own-firms rule (the firm hold decides first, firm_missing; then firm_not_callers; a submission row is also hidden when its own
-    /// firm is not one of the caller's). A caller with no firm, and firms that cannot be read (a throw, a null answer,
-    /// <see cref="CallerFirmsState.Unknown"/>), hide every asked row, with no row read.
-    /// Task 130-0b step 2: rows of a CHILD table with an invoice link go to <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by
-    /// the invoices they link to; a fault there hides rather than throws).
+    /// firm is not one of the caller's). A caller KNOWN to be in no firm hides every asked row, with no row read (an answer).
+    /// F3b (uac-r2 ruling): firms that cannot be read (a throw, a null answer, <see cref="CallerFirmsState.Unknown"/>) are a whole-read
+    /// failure: this THROWS <see cref="DataverseUnavailableException"/> and the tool call fails with no data (<see cref="UnknownFirmsFailTheCall"/>).
+    /// With the firms known, a fault on the decided rows hides them (the asked rows) and does not throw, on the family path too.
+    /// Task 130-0b step 2: rows of a CHILD table with an invoice link, and (F3b) of a DESCENDANT of one, go to
+    /// <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by the invoices they link to; a fault there hides rather than throws).
     /// Task 130-0b step 3: rows of a ROOT with an invoice link go to <see cref="RootRowsWithInvoiceLinkBlankedAsync"/>; for such a table
     /// the returned ids are the rows whose invoice link is blanked, never rows to hide.
     /// </summary>
@@ -2545,8 +2547,10 @@ public class ExternalDataService
     /// the union of the linked invoices, with the caller's firms from <paramref name="caller"/> (the same decision as
     /// <see cref="HideInvoicesForAsync"/>: firm hold, firm_not_callers, (a′)). A row is hidden when ANY linked invoice is not visible or
     /// cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>); a row with no invoice link is not hidden, and the firms
-    /// are not read when no asked row has one. Fail closed without throwing: a failed link read hides every asked row (which of them link
-    /// to an invoice is unknown); firms that are not known, and a failed or faulted decision, hide every asked row that links to one.
+    /// are not read when no asked row has one. Fail closed: a failed link read hides every asked row (which of them link to an invoice
+    /// is unknown) and a failed or faulted decision hides every asked row that links to one, neither throwing; a caller known to be in
+    /// no firm has every invoice-linked row hidden; firms that CANNOT be read (<see cref="CallerFirmsState.Unknown"/>) fail the call
+    /// (<see cref="UnknownFirmsFailTheCall"/>) when some asked row links to an invoice.
     /// </summary>
     private Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
         InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
@@ -2559,8 +2563,9 @@ public class ExternalDataService
     /// root is decided by its grant and is never hidden by its invoice link; its invoice link is shown only when that invoice is visible.
     /// The decision is the child rule's, with the same reads (one app-only link read, then ONE invoice decision with the firms from
     /// <paramref name="caller"/>): a row whose linked invoice is not visible or cannot be decided is returned; a row with no invoice
-    /// link is not, and the firms are not read when no asked row has one. Fail closed without throwing: a failed link read returns
-    /// every asked row; firms that are not known, and a failed or faulted decision, return every asked row that links to an invoice.
+    /// link is not, and the firms are not read when no asked row has one. Fail closed: a failed link read returns every asked row, and
+    /// a failed or faulted decision (or a caller known to be in no firm) returns every asked row that links to an invoice, neither
+    /// throwing; firms that CANNOT be read fail the call (<see cref="UnknownFirmsFailTheCall"/>) when some asked row links to an invoice.
     /// </summary>
     private Task<IReadOnlySet<Guid>> RootRowsWithInvoiceLinkBlankedAsync(
         InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
@@ -2645,7 +2650,8 @@ public class ExternalDataService
 
     /// <summary>
     /// Task 130-0b: the assistant caller's firms through <paramref name="read"/>; a throw or a null answer is
-    /// <see cref="CallerFirms.Unknown"/> (fail closed: every asked row hidden). Cancellation propagates.
+    /// <see cref="CallerFirms.Unknown"/>, which the decision paths turn into a whole-read failure (<see cref="UnknownFirmsFailTheCall"/>).
+    /// Cancellation propagates.
     /// </summary>
     private async Task<CallerFirms> ReadSystemUserFirmsOrUnknownAsync(
         Func<Guid, CancellationToken, Task<CallerFirms>> read, Guid systemUserId, CancellationToken ct)
