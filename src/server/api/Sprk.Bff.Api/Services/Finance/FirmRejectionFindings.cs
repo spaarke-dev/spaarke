@@ -364,10 +364,11 @@ internal static class FirmRejectionFindings
     }
 
     /// <summary>
-    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix round 2): the control characters
-    /// (U+0000 to U+001F, U+007F to U+009F) and the directional controls (U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) removed, then trimmed,
-    /// then cut with <see cref="Truncate"/>; null when nothing printable is left (the caller then shows no reason, or for a rejection the table
-    /// text). Applied on the read side to every firm reason; the writer (DEF-060) must still filter at write time.
+    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix rounds 2 and 3): every character whose Unicode
+    /// category is Control, Format, LineSeparator or ParagraphSeparator removed (<see cref="IsInvisibleControl"/>: the C0 and C1 controls, the
+    /// directional marks and overrides, U+061C, the zero-width characters, U+2060 to U+2064, U+FEFF, U+00AD, U+2028 and U+2029), then trimmed, then
+    /// cut with <see cref="Truncate"/>; null when nothing printable is left (the caller then shows no reason, or for a rejection the table
+    /// text). Applied on the read side to every firm reason; the writer (DEF-060) must use the same predicate at write time.
     /// </summary>
     internal static string? ShownFirmReason(string? raw)
     {
@@ -379,18 +380,20 @@ internal static class FirmRejectionFindings
         var kept = new System.Text.StringBuilder(raw.Length);
         foreach (var c in raw)
         {
-            if (c <= '\u001F' || (c >= '\u007F' && c <= '\u009F') || c is '\u200E' or '\u200F' || (c >= '\u202A' && c <= '\u202E')
-                || (c >= '\u2066' && c <= '\u2069'))
+            if (!IsInvisibleControl(c))
             {
-                continue;
+                kept.Append(c);
             }
-
-            kept.Append(c);
         }
 
         var text = kept.ToString().Trim();
         return text.Length == 0 ? null : Truncate(text);
     }
+
+    /// <summary>The one rule for a character a firm reason may not hold: Unicode category Control, Format, LineSeparator or ParagraphSeparator.</summary>
+    internal static bool IsInvisibleControl(char c) =>
+        char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format
+            or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
 
     /// <summary>A member that is a string, or absent / JSON null (then <paramref name="text"/> is null). False for any other type.</summary>
     private static bool TryText(JsonElement element, string name, out string? text)

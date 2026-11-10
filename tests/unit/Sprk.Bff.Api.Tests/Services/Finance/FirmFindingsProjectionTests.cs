@@ -2655,4 +2655,22 @@ public sealed class FirmFindingsProjectionTests
         cut.Length.Should().BeLessThanOrEqualTo(FirmRejectionFindings.MaxValueTextLength + 3);
         Regex.IsMatch(cut, "[\\uD800-\\uDFFF]").Should().BeFalse();
     }
+
+    [Theory(DisplayName = "130d fix 3: one rule - every Control, Format, LineSeparator and ParagraphSeparator character is dropped from a firm reason; ordinary text is kept")]
+    [InlineData("\u061C")]   // Arabic letter mark (Format)
+    [InlineData("\uFEFF")]   // byte order mark / zero-width no-break space (Format)
+    [InlineData("\u200B")]   // zero-width space (Format)
+    [InlineData("\u200D")]   // zero-width joiner (Format)
+    [InlineData("\u2060")]   // word joiner (Format)
+    [InlineData("\u00AD")]   // soft hyphen (Format)
+    [InlineData("\u2028")]   // line separator
+    [InlineData("\u2029")]   // paragraph separator
+    [InlineData("\u202E")]   // right-to-left override (Format)
+    [InlineData("\u0085")]   // next line (Control)
+    public void TheFirmReasonFilter_DropsEveryInvisibleCategory(string invisible)
+    {
+        FirmRejectionFindings.ShownFirmReason($"Your{invisible} rate{invisible} is high.{invisible}").Should().Be("Your rate is high.");
+        FirmRejectionFindings.ShownFirmReason($"{invisible}{invisible} ").Should().BeNull("nothing printable is left");
+        FirmRejectionFindings.ShownFirmReason("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.").Should().Be("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.");
+    }
 }
