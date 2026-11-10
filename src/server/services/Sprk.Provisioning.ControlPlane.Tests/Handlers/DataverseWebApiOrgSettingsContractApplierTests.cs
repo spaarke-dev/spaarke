@@ -50,7 +50,7 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
         get.Method.Should().Be(HttpMethod.Get);
         get.Uri.AbsolutePath.Should().Be("/api/data/v9.2/organizations");
         Uri.UnescapeDataString(get.Uri.Query).Should()
-            .Contain("$select=organizationid,auditretentionperiodv2,isauditenabled,maxuploadfilesize");
+            .Contain("$select=organizationid,auditretentionperiodv2,isauditenabled,isuseraccessauditenabled,maxuploadfilesize");
         get.Authorization.Should().Be("Bearer fake-dataverse-token");
 
         var patch = handler.Requests[1];
@@ -85,7 +85,35 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     {
         StaticOrgSettingsContractManifest.DefaultOrgSettings.Should().Contain("isauditenabled", "true")
             .And.Contain("auditretentionperiodv2", "-1")
+            .And.Contain("isuseraccessauditenabled", "true")
             .And.Contain("maxuploadfilesize", "25600000");
+    }
+
+    [Fact]
+    public async Task ApplyAsync_AccessLoggingOff_TurnsOnlyItOn_TypedAndReadBack()
+    {
+        // ACME's state on 2026-11-07: record auditing on and Forever, access logging off.
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 25600000, accessAudit: "false"));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>()
+            .Which.AppliedOrAlreadyCorrect["isuseraccessauditenabled"].Should().Be("true");
+        handler.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Get);
+        using var body = JsonDocument.Parse(handler.Requests[1].Body!);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("isuseraccessauditenabled");
+        body.RootElement.GetProperty("isuseraccessauditenabled").ValueKind.Should().Be(JsonValueKind.True);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_AccessLoggingIgnoredByDataverse_FailsNamingIt()
+    {
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 25600000, accessAudit: "false", patchTakes: false));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("isuseraccessauditenabled (target true, reads back false)");
     }
 
     [Fact]
@@ -361,9 +389,10 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     /// test about one setting sees only that setting move. Values are raw JSON (<c>"null"</c> for a null column).
     /// </summary>
     private static Func<HttpRequestMessage, HttpResponseMessage> OrganizationRow(
-        long maxUpload, string auditEnabled = "true", string retention = "-1", bool patchTakes = true)
+        long maxUpload, string auditEnabled = "true", string retention = "-1", bool patchTakes = true,
+        string accessAudit = "true")
     {
-        var state = Columns(maxUpload, auditEnabled, retention);
+        var state = Columns(maxUpload, auditEnabled, retention, accessAudit);
         return request =>
         {
             if (request.Method == HttpMethod.Get)
@@ -382,11 +411,13 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
         };
     }
 
-    private static Dictionary<string, string> Columns(long maxUpload, string auditEnabled, string retention) => new(StringComparer.Ordinal)
+    private static Dictionary<string, string> Columns(
+        long maxUpload, string auditEnabled, string retention, string accessAudit = "true") => new(StringComparer.Ordinal)
     {
         ["maxuploadfilesize"] = maxUpload.ToString(System.Globalization.CultureInfo.InvariantCulture),
         ["isauditenabled"] = auditEnabled,
         ["auditretentionperiodv2"] = retention,
+        ["isuseraccessauditenabled"] = accessAudit,
     };
 
     private static string OrganizationJson(long maxUpload, string auditEnabled, string retention)
