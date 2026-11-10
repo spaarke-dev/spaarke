@@ -99,6 +99,51 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     /// <inheritdoc />
     public string HandlerId => HandlerIdValue;
 
+    /// <summary>
+    /// Task 130-0b fix round 1 (F1-2): the one refusal for a WHERE or ORDER BY on a root's invoice link or regarding columns
+    /// (<see cref="RootInvoiceLinkRedaction"/>). Neutral and fixed: the same text whether or not any row would be blanked.
+    /// </summary>
+    internal const string RootInvoiceLinkPredicateRefusal =
+        "Filtering or sorting this table on its regarding or invoice link columns is not supported. " +
+        "Remove those columns from WHERE and ORDER BY; they can still be selected.";
+
+    /// <summary>
+    /// Task 130-0b R1 (owning project ruling): the one fixed note on a call whose hiding seam is active, byte-identical whether or
+    /// not a row was left out.
+    /// </summary>
+    internal const string RowsLeftOutNote =
+        "Rows you cannot access are left out of this result, so a page shorter than TOP does not prove there are no further matches.";
+
+    /// <summary>
+    /// Task 130-0b fix round 1 (F1-2): true when an OData clause (<paramref name="clauses"/>: the translated filter and order-by)
+    /// names any of <paramref name="columns"/> as an identifier outside a quoted literal. Every identifier is compared whole, so
+    /// each form in the set (<c>col</c>, <c>_col_value</c>, <c>colname</c>) is matched exactly; a literal never matches.
+    /// </summary>
+    internal static bool NamesAnyColumn(IReadOnlySet<string> columns, params string?[] clauses)
+    {
+        if (columns.Count == 0)
+            return false;
+        foreach (var clause in clauses)
+        {
+            if (string.IsNullOrEmpty(clause))
+                continue;
+            var segments = clause.Split('\'');
+            for (var i = 0; i < segments.Length; i += 2)
+            {
+                foreach (System.Text.RegularExpressions.Match token in IdentifierPattern.Matches(segments[i]))
+                {
+                    if (columns.Contains(token.Value))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex IdentifierPattern =
+        new(@"[A-Za-z_][A-Za-z0-9_]*", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     /// <summary>Task 188: a row's primary id (<see cref="Guid.Empty"/> when it is absent or not a GUID: never visible).</summary>
     private static Guid RecordIdOf(JsonElement record, string primaryIdAttribute) =>
         record.ValueKind == JsonValueKind.Object && record.TryGetProperty(primaryIdAttribute, out var id) &&
@@ -247,6 +292,24 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         DataverseUserClientErrorCodes.AccessDenied, startedAt);
                 }
             }
+
+            // Task 130-0b fix round 1 (F1-2): a root row is never hidden, so a predicate or sort on its invoice link would answer
+            // what the blanking below withholds. For an external caller on a root with an invoice link, a WHERE or ORDER BY that
+            // names any column of the root redaction set (RootInvoiceLinkRedaction: the link in every form, the regarding pair and
+            // its resolver columns) is refused BEFORE any read. Decided from the query's column names alone, never from data, so
+            // the answer is the same whether or not any row would be blanked.
+            if (guardRootInvoiceLink &&
+                NamesAnyColumn(RootInvoiceLinkRedaction.ColumnsOf(translation.EntityLogicalName), translation.RawFilter, translation.RawOrderBy))
+            {
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, "root_invoice_link_predicate_refused", context.DecisionId);
+                return Error(tool, RootInvoiceLinkPredicateRefusal, ToolErrorCodes.ValidationFailed, startedAt);
+            }
+
+            // Task 130-0b R1 (owning project ruling): a seam that can leave rows out of the page is ACTIVE for this call. Decided
+            // from the caller and the table before the read, never from whether any row was left out.
+            var hidingSeamActive = guardCommunications || guardDocuments || guardDerived || guardInvoices || guardInvoiceLinks;
 
             // Resolve entity-set + primary id from metadata (under the user's token — a table
             // invisible to this user 404s here, which is the correct fail-closed behavior).
@@ -445,8 +508,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var blankedRootLinkRows = 0;
             var hiddenDocuments = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
-            // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
-            // hidden — a page that hit TOP stays reported as capped even when the narrowing removed rows from it.
+            // Task 188 round 4a (F1-5) measured the row cap on the RAW page. Superseded by 130-0b R1 (owning project ruling): when a
+            // hiding seam is active for the call (hidingSeamActive, decided before the read), the cap is measured on the VISIBLE
+            // rows and the result carries one fixed note; a call with no active seam keeps the raw rule. No page refill.
             var rawPageLength = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
@@ -614,9 +678,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rawPageLength >= translation.Top)
+            // 130-0b R1 (supersedes task 188 round 4a F1-5): with a hiding seam active, warn if and only if the VISIBLE rows reach
+            // TOP, and always add the one fixed note (byte-identical whether or not a row was left out). Otherwise the raw rule.
+            if ((hidingSeamActive ? rows.Count : rawPageLength) >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
+            }
+            if (hidingSeamActive)
+            {
+                warnings.Add(RowsLeftOutNote);
             }
 
             return ToolResult.Ok(

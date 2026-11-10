@@ -1217,7 +1217,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     // ═════════════════════════════════════════════════════════════════════════════
 
     private const string RootQuery =
-        "SELECT sprk_name, sprk_regardinginvoice, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl FROM sprk_workassignment";
+        "SELECT sprk_name, sprk_regardinginvoice, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, "
+        + "sprk_regardingrecordnumber, sprk_regardingrecordtype FROM sprk_workassignment";
 
     /// <summary>Every form of the work assignment's invoice link a read_query row can carry (the lookup is mapped back to its logical name).</summary>
     private static readonly string[] RootLinkForms =
@@ -1229,6 +1230,10 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         "sprk_regardingrecordid",
         "sprk_regardingrecordname",
         "sprk_regardingrecordurl",
+        // Fix round 1 F1: the number (the invoice number for an invoice target) and K2: the record type, with its annotation.
+        "sprk_regardingrecordnumber",
+        "sprk_regardingrecordtype",
+        "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue",
     };
 
     /// <summary>
@@ -1245,7 +1250,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
                 + "{ \"LogicalName\": \"sprk_regardinginvoice\", \"AttributeType\": \"Lookup\" }, "
                 + "{ \"LogicalName\": \"sprk_regardingrecordid\", \"AttributeType\": \"String\" }, "
                 + "{ \"LogicalName\": \"sprk_regardingrecordname\", \"AttributeType\": \"String\" }, "
-                + "{ \"LogicalName\": \"sprk_regardingrecordurl\", \"AttributeType\": \"String\" } ] }")));
+                + "{ \"LogicalName\": \"sprk_regardingrecordurl\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordnumber\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordtype\", \"AttributeType\": \"Lookup\" } ] }")));
         var target = regardingIsInvoice ? invoice : regardingTarget;
         var link = invoice is { } id
             ? "\"_sprk_regardinginvoice_value\": \"" + id.ToString("D") + "\", "
@@ -1256,10 +1263,16 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         var regarding = target is { } t
             ? "\"sprk_regardingrecordid\": \"" + t.ToString("D") + "\", \"sprk_regardingrecordname\": \"" + (regardingIsInvoice ? "INV-0042" : "Matter A")
               + "\", \"sprk_regardingrecordurl\": \"https://org.test/main.aspx?id=" + t.ToString("D") + "\", "
+              + "\"sprk_regardingrecordnumber\": \"" + (regardingIsInvoice ? "INV-0042" : "M-0001") + "\", "
+              + "\"_sprk_regardingrecordtype_value\": \"" + (regardingIsInvoice ? InvoiceRecordType : MatterRecordType).ToString("D") + "\", "
+              + "\"_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue\": \"" + (regardingIsInvoice ? "Invoice" : "Matter") + "\", "
             : string.Empty;
         UserReadReturns("sprk_workassignments", "{ \"value\": [ { \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", "
             + link + regarding + "\"sprk_name\": \"Root\" } ] }");
     }
+
+    private static readonly Guid InvoiceRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000001");
+    private static readonly Guid MatterRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000002");
 
     private static JsonElement OnlyRow(ToolResult result)
     {
@@ -1310,6 +1323,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         row.GetProperty("_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue").GetString().Should().Be("INV-0042");
         row.GetProperty("sprk_regardingrecordid").GetString().Should().Be(invoice.ToString("D"));
         row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("INV-0042");
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("INV-0042", "fix round 1 F1: kept when the invoice is visible");
+        row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(InvoiceRecordType.ToString("D"), "fix round 1 K2: kept when the invoice is visible");
         firms.FirmReads.Should().Be(1);
     }
 
@@ -1360,6 +1375,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
         row.GetProperty("sprk_regardingrecordid").GetString().Should().Be(matter.ToString("D"));
         row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Matter A");
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("M-0001");
+        row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(MatterRecordType.ToString("D"));
         firms.FirmReads.Should().Be(0, "the root links to no invoice, so no firm is needed");
     }
 
@@ -1377,25 +1394,125 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         {
             // The query names neither the regarding id nor the invoice link, so the row cannot tell which target the name holds.
             UserReadReturns("sprk_workassignments", "{ \"value\": [ { \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", "
-                + "\"sprk_regardingrecordname\": \"INV-0042\", \"sprk_regardingrecordurl\": \"https://org.test/main.aspx\", \"sprk_name\": \"Root\" } ] }");
+                + "\"sprk_regardingrecordname\": \"INV-0042\", \"sprk_regardingrecordurl\": \"https://org.test/main.aspx\", "
+                + "\"sprk_regardingrecordnumber\": \"INV-0042\", \"_sprk_regardingrecordtype_value\": \"" + InvoiceRecordType.ToString("D") + "\", "
+                + "\"sprk_name\": \"Root\" } ] }");
         }
 
         _hideInvoiceFamily = firms.Seam;
 
         var row = OnlyRow(await ReadAsync(kind == "another-target"
             ? RootQuery
-            : "SELECT sprk_name, sprk_regardingrecordname, sprk_regardingrecordurl FROM sprk_workassignment"));
+            : "SELECT sprk_name, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber, sprk_regardingrecordtype FROM sprk_workassignment"));
 
         if (blank)
         {
-            ShouldBeBlank(row, "sprk_regardingrecordname", "sprk_regardingrecordurl");
+            ShouldBeBlank(row, "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_regardingrecordtype");
         }
         else
         {
             ShouldBeBlank(row, RootLinkForms.Take(4).ToArray());
             row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Matter A");
             row.GetProperty("sprk_regardingrecordurl").GetString().Should().NotBeNullOrEmpty();
+            row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("M-0001", "fix round 1 F1: another target's number is kept");
+            row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(MatterRecordType.ToString("D"), "fix round 1 K2: another target's type is kept");
         }
+    }
+
+    // -- Fix round 1 F1-2: an external WHERE or ORDER BY on a root's redaction set is refused before any read --
+
+    /// <summary>Every column of the work assignment's redaction set a model can name, by each predicate or sort shape.</summary>
+    public static TheoryData<string, string> RootLinkPredicates
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            var columns = new[]
+            {
+                "sprk_regardinginvoice", "sprk_regardinginvoicename", "sprk_regardingrecordid", "sprk_regardingrecordname",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_regardingrecordtype",
+            };
+            foreach (var column in columns)
+            {
+                data.Add(column, $"WHERE {column} = '6f9619ff-8b86-d011-b42d-00c04fc964ff'");
+                data.Add(column, $"WHERE {column} LIKE 'INV%'");
+                data.Add(column, $"WHERE {column} < 'M'");
+                data.Add(column, $"WHERE {column} > 'M'");
+                data.Add(column, $"ORDER BY {column} DESC");
+                data.Add(column, $"WHERE {column} IS NOT NULL");
+                data.Add(column, $"WHERE sprk_name = 'x' OR ({column} = 'y')");
+                data.Add(column, $"WHERE {column.ToUpperInvariant()} = 'y'");
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "130-0b fix round 1 F1-2 read_query must fire: an external WHERE or ORDER BY on any column of a root's redaction set is refused before any read")]
+    [MemberData(nameof(RootLinkPredicates))]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_APredicateOnTheRootLink_IsRefusedBeforeAnyRead(string column, string clause)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync($"SELECT sprk_name FROM sprk_workassignment {clause}");
+
+        result.Success.Should().BeFalse(column);
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Be(DataverseReadQueryHandler.RootInvoiceLinkPredicateRefusal);
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(), "refused before any read");
+        firms.World.Urls.Should().BeEmpty();
+        firms.FirmReads.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: a WHERE or ORDER BY on a column outside the set (or a literal that spells one) is served")]
+    [InlineData("WHERE sprk_name = 'x'")]
+    [InlineData("WHERE sprk_name = 'sprk_regardingrecordnumber'")]
+    [InlineData("ORDER BY sprk_name ASC")]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_APredicateOutsideTheSet_IsServed(string clause)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        OnlyRow(await ReadAsync($"{RootQuery} {clause}"));
+    }
+
+    [Fact(DisplayName = "130-0b R1: an external caller on a root (no seam that leaves rows out) keeps the raw row-cap rule and gets no note")]
+    public async Task ExecuteChatAsync_R1_ExternalRoot_KeepsTheRawRule_AndNoNote()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync(RootQuery.Replace("SELECT ", "SELECT TOP 1 ", StringComparison.Ordinal));
+
+        OnlyRow(result);
+        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"), "a root row is never left out, so the raw page decides");
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: an internal caller's WHERE and ORDER BY on the root link are served")]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_AnInternalCaller_IsServed()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(
+            $"{RootQuery} WHERE sprk_regardingrecordnumber LIKE 'INV%' AND sprk_regardinginvoice = '{invoice:D}' ORDER BY sprk_regardingrecordtype ASC"));
+
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("INV-0042");
+        firms.FirmReads.Should().Be(0);
     }
 
     [Fact(DisplayName = "130-0b step 3 read_query: an internal systemuser's root row is unchanged, and no link or firm is read")]
@@ -1539,39 +1656,81 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         AssertTelemetryRespectsAdr015($"Doc {DocInternal:N}");
     }
 
-    /// <summary>
-    /// Task 188 round 4a (F1-5): the row-cap warning is measured on the RAW page Dataverse returned, not on what is left after
-    /// the narrowing hid rows. A page of <paramref name="returned"/> rows under TOP 50, 3 of them hidden: the model must still be
-    /// told the result hit the cap when the raw page did.
-    /// </summary>
-    [Theory(DisplayName = "Task 188 r4a F1-5: the row-cap warning counts the raw page, before hidden rows are removed")]
-    [InlineData(50, true)]
-    [InlineData(49, false)]
-    public async Task ExecuteChatAsync_ExternalCaller_RowCapWarning_IsMeasuredBeforeTheNarrowing(int returned, bool capped)
+    // =============================================================================
+    // 130-0b R1 (owning project ruling; supersedes task 188 round 4a F1-5): with a hiding seam active for the call, the row cap is
+    // measured on the VISIBLE rows and the result carries one fixed note; a call with no active seam keeps the raw rule.
+    // =============================================================================
+
+    /// <summary>A document query: <paramref name="returned"/> rows under <paramref name="top"/>, the first <paramref name="hidden"/> own-Restricted.</summary>
+    private async Task<ToolResult> ReadDocumentsAsync(int top, int returned, int hidden, bool external = true)
     {
-        AsExternalCaller();
+        if (external)
+            AsExternalCaller();
         SetupDocumentMetadata();
         var ids = Enumerable.Range(0, returned).Select(_ => Guid.NewGuid()).ToList();
         foreach (var (id, i) in ids.Select((id, i) => (id, i)))
         {
-            _appOnly.Document(id, permission: i < 3 ? 100000002 : null);
+            _appOnly.Document(id, permission: i < hidden ? 100000002 : null);
         }
         CaptureDocumentQueries(DocRows(ids.Select(id => DocRow(id)).ToArray()));
 
-        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT TOP 50 sprk_documentname FROM sprk_document"));
-        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+        return await ReadAsync($"SELECT TOP {top} sprk_documentname FROM sprk_document");
+    }
+
+    [Theory(DisplayName = "130-0b R1: with a hiding seam active, the row-cap warning fires if and only if the VISIBLE rows reach TOP")]
+    [InlineData(50, 0, true)]
+    [InlineData(50, 3, false)]
+    [InlineData(49, 0, false)]
+    public async Task ExecuteChatAsync_R1_HidingSeamActive_RowCapWarning_CountsTheVisibleRows(int returned, int hidden, bool capped)
+    {
+        var result = await ReadDocumentsAsync(top: 50, returned, hidden);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        RowIds(result).Should().HaveCount(returned - 3, "the three own-Restricted rows are hidden");
+        RowIds(result).Should().HaveCount(returned - hidden);
         if (capped)
-        {
-            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"),
-                "the raw page hit TOP: hiding 3 rows must not make a capped result look complete");
-        }
+            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"), "the visible rows reached TOP");
         else
-        {
-            result.Warnings.Should().NotContain(w => w.Contains("row cap"), "the raw page was under TOP");
-        }
+            result.Warnings.Should().NotContain(w => w.Contains("row cap"), "the visible rows are under TOP");
+        result.Warnings.Should().ContainSingle(w => w == DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b R1: TOP 1 whose only match is hidden returns zero rows, no cap warning, and the fixed note")]
+    public async Task ExecuteChatAsync_R1_Top1_OnlyAHiddenMatch_NoCapWarning_TheNote()
+    {
+        var result = await ReadDocumentsAsync(top: 1, returned: 1, hidden: 1);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        RowIds(result).Should().BeEmpty();
+        result.Warnings.Should().NotContain(w => w.Contains("row cap"));
+        result.Warnings.Should().ContainSingle(w => w == DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b R1: the note and every warning are byte-identical whether or not a row was hidden")]
+    public async Task ExecuteChatAsync_R1_TheNote_IsIdenticalWithAndWithoutHiding()
+    {
+        var withHiding = await ReadDocumentsAsync(top: 50, returned: 10, hidden: 3);
+        var withoutHiding = await ReadDocumentsAsync(top: 50, returned: 10, hidden: 0);
+
+        RowIds(withHiding).Should().HaveCount(7);
+        RowIds(withoutHiding).Should().HaveCount(10);
+        withHiding.Warnings.Should().Equal(withoutHiding.Warnings, "nothing in the warnings tells whether a row was left out");
+        withHiding.Warnings.Should().Contain(DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Theory(DisplayName = "130-0b R1: an internal caller (no active seam) keeps the raw rule and gets no note")]
+    [InlineData(50, true)]
+    [InlineData(49, false)]
+    public async Task ExecuteChatAsync_R1_NoActiveSeam_KeepsTheRawRule_AndNoNote(int returned, bool capped)
+    {
+        var result = await ReadDocumentsAsync(top: 50, returned, hidden: 0, external: false);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        RowIds(result).Should().HaveCount(returned);
+        if (capped)
+            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"));
+        else
+            result.Warnings.Should().NotContain(w => w.Contains("row cap"));
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
     }
 
     [Fact]
