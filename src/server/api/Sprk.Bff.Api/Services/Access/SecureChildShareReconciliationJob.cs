@@ -416,12 +416,17 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             services.GetService<Spaarke.Dataverse.DataverseWebApiClient>(), _logger);
         var incomplete = new List<Guid>();
         int granted = 0, revoked = 0;
+        // 198 pass 2 N2 (ontology): a participant this pass grants on the MESSAGE also gets its gate Decision Records (D-215), through the
+        // one mirror the live grant calls. Only after a pass that granted, so a steady state costs nothing. Registered by SignalsModule.
+        var gateRecords = services.GetService<Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing>();
         foreach (var id in work)
         {
             ct.ThrowIfCancellationRequested();
             var outcome = await reconciler.ReconcileAsync(id, team, ct).ConfigureAwait(false);
             granted += outcome.Granted.Count;
             revoked += outcome.Revoked.Count;
+            if (gateRecords is not null && outcome.Granted.Any(g => g.Table == DirectMessageParticipantShares.CommunicationTable))
+                await gateRecords.MirrorCommunicationSharesAsync(id, ct).ConfigureAwait(false); // never throws (cancellation is logged)
             if (outcome.Complete)
             {
                 attempts.Remove(id);
