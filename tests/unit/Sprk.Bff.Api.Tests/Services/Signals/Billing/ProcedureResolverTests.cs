@@ -99,7 +99,15 @@ public sealed class ProcedureResolverTests
         return id;
     }
 
-    private Guid AddVersion(Guid procedure, int number, DateOnly? from, DateOnly? to, int status = ProcedureEntity.VersionStatusActive)
+    /// <summary>The publish stamp (DEF-061) a version published by <c>ProcedureService</c> carries.</summary>
+    private static readonly DateTime PublishedOn = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// A version row. <paramref name="stamped"/> is the DEF-061 publish stamp: by default an Active or Superseded version carries it (the
+    /// publish wrote it, or the backfill did) and a Retired or Draft one does not (a Retired version's evidence is then its Published policy
+    /// version, as for a version published before the column existed).
+    /// </summary>
+    private Guid AddVersion(Guid procedure, int number, DateOnly? from, DateOnly? to, int status = ProcedureEntity.VersionStatusActive, bool? stamped = null)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
@@ -108,6 +116,8 @@ public sealed class ProcedureResolverTests
             (ProcedureEntity.VersionNumberColumn, number),
             (ProcedureEntity.VersionStatusColumn, Option(status)),
         };
+        if (stamped ?? status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded)
+            columns.Add((ProcedureEntity.VersionPublishedOnColumn, PublishedOn));
         if (from is { } f) columns.Add((ProcedureEntity.VersionEffectiveFromColumn, Stored(f)));
         if (to is { } t) columns.Add((ProcedureEntity.VersionEffectiveToColumn, Stored(t)));
         _world.Add(ProcedureEntity.VersionEntity, id, columns.ToArray());
@@ -1075,6 +1085,139 @@ public sealed class ProcedureResolverTests
         await Resolve(CoreRecordKind.Matter, M, F);
 
         _world.Queries.Should().NotContain(q => q.EntityName == "sprk_ratecard");
+    }
+
+    // ── DEF-061: the server's publish stamp decides whether a version opened a window ───────────────────────────
+
+    [Theory(DisplayName = "DEF-061: a Retired version with NO Published policy version (a rate-card-only version) opened a window only with the publish stamp: stamped, work in it is a gap; unstamped, it is not applicable")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ARetiredVersionWithNoPublishedPolicyVersion_OpenedAWindow_OnlyWithTheStamp(bool stamped)
+    {
+        var procedure = AddProcedure("Rates only", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired, stamped: stamped);
+        AddCard(v1); // it governed only rate cards: no policy version sits under it
+        AddVersion(procedure, 2, Apr1, null);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var inWindow = resolution.RulesOn(Feb15);
+
+        if (stamped)
+        {
+            inWindow.Gaps.Should().ContainSingle("the stamp says it was published, so its window is a gap").Which.Kind.Should().Be(ProcedureGapKind.HoleBetweenVersions);
+        }
+        else
+        {
+            inWindow.Gaps.Should().BeEmpty("no stamp and no Published policy version: it opened nothing (the 085 limit, for versions published before the stamp)");
+            inWindow.Procedures.Should().BeEmpty();
+        }
+
+        resolution.RulesOn(Apr15).Procedures.Should().ContainSingle("control: v2 is chosen once it is in force");
+    }
+
+    [Theory(DisplayName = "DEF-061: an Active or Superseded version WITHOUT the stamp did not open a window (the backfill stamps it): the Procedure is not applicable on any date; stamped (control) it is chosen")]
+    [InlineData(ProcedureEntity.VersionStatusActive, false)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, false)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true)]
+    public async Task AnActiveOrSupersededVersion_OpenedAWindow_OnlyWithTheStamp(int status, bool stamped)
+    {
+        var procedure = AddProcedure("Published before the stamp", ProcedureAppliesTo.AllRecords);
+        var version = AddVersion(procedure, 1, Jan1, status == ProcedureEntity.VersionStatusActive ? null : Apr1, status, stamped: stamped);
+        AddRuleVersion(AddProcedureRule(procedure, "OLD-PUBLISH"), version, Jan1); // a Published policy version does not stand in for the stamp on an Active or Superseded row
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var onDate = resolution.RulesOn(Feb15);
+
+        if (stamped)
+        {
+            onDate.Rules.Select(r => r.Version.PolicyCode).Should().Equal("OLD-PUBLISH");
+        }
+        else
+        {
+            onDate.Rules.Should().BeEmpty();
+            onDate.Gaps.Should().BeEmpty();
+            onDate.Procedures.Should().BeEmpty("no version of the Procedure opened a window, so it is not applicable on any date");
+        }
+    }
+
+    [Theory(DisplayName = "DEF-061 fallback: a Retired version with NO stamp (published before the column) keeps the policy-version evidence: opened with a Published policy version under it, not opened without one")]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task ARetiredVersionWithoutTheStamp_FallsBackToThePolicyVersionEvidence(bool hadPublishedRule, bool opened)
+    {
+        var procedure = AddProcedure("Retired before the stamp", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired, stamped: false);
+        AddRuleVersion(AddProcedureRule(procedure, "V1-RULE"), v1, Jan1, published: hadPublishedRule);
+        AddVersion(procedure, 2, Apr1, null);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var inWindow = resolution.RulesOn(Feb15);
+
+        if (opened)
+        {
+            inWindow.Gaps.Should().ContainSingle().Which.Kind.Should().Be(ProcedureGapKind.HoleBetweenVersions);
+        }
+        else
+        {
+            inWindow.Gaps.Should().BeEmpty();
+            inWindow.Procedures.Should().BeEmpty();
+        }
+    }
+
+    [Theory(DisplayName = "DEF-061: OpenedAWindow is 'has an effective-from AND the stamp'; only a Retired version with no stamp is rescued by a Published policy version")]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, true, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, true, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, true, false, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, true, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusActive, true, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded, true, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, true, false, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, false, true, true)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, true, false, false, false)]
+    [InlineData(ProcedureEntity.VersionStatusActive, false, true, true, false)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, false, true, true, false)]
+    public void OpenedAWindow_IsTheEffectiveFromAndTheStamp(int status, bool hasFrom, bool hasStamp, bool hasPublishedPolicyVersion, bool expected)
+    {
+        var id = Guid.NewGuid();
+        var row = new ProcedureVersionRow(id, Guid.NewGuid(), 1, status, hasFrom ? Jan1 : null, null, hasStamp ? PublishedOn : null);
+        IReadOnlySet<Guid> withRules = hasPublishedPolicyVersion ? new HashSet<Guid> { id } : new HashSet<Guid>();
+
+        row.OpenedAWindow(withRules).Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "DEF-061 select pin: every read of the Procedure Versions asks for sprk_publishedon")]
+    public async Task EveryProcedureVersionRead_SelectsThePublishStamp()
+    {
+        Simple("PIN-1");
+        AddVersion(AddProcedure("Second", ProcedureAppliesTo.AllRecords), 1, Jan1, null);
+
+        await Resolve(CoreRecordKind.Matter, M, F);
+
+        var reads = _world.Queries.Where(q => q.EntityName == ProcedureEntity.VersionEntity).ToList();
+        reads.Should().NotBeEmpty("the resolver read the versions");
+        reads.Should().OnlyContain(q => q.ColumnSet.Columns.Contains(ProcedureEntity.VersionPublishedOnColumn));
+        ProcedureEntity.VersionPublishedOnColumn.Should().Be("sprk_publishedon");
+    }
+
+    [Fact(DisplayName = "DEF-061: an environment without sprk_publishedon rejects the version read, and the resolution faults (fail closed): a missing column is never 'not published'")]
+    public async Task AnAbsentStampColumn_IsUnreadable_NotNotPublished()
+    {
+        Simple("ABSENT-1");
+        var withoutTheColumn = SecureChildShareWorld.EntitiesOver(() => _world);
+        withoutTheColumn
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                query.EntityName == ProcedureEntity.VersionEntity && query.ColumnSet.Columns.Contains(ProcedureEntity.VersionPublishedOnColumn)
+                    ? throw new InvalidOperationException("Dataverse: 'sprk_procedureversion' entity doesn't contain attribute with Name = 'sprk_publishedon'.")
+                    : Task.FromResult(_world.Answer(query)));
+
+        var resolve = () => ProcedureResolver.ReadAsync(
+            withoutTheColumn.Object, NullLogger.Instance, new CoreRecordReference(CoreRecordKind.Matter, M), F, CancellationToken.None);
+
+        await resolve.Should().ThrowAsync<InvalidOperationException>().WithMessage("*sprk_publishedon*");
+        // Control: the same rows resolve over an environment that has the column.
+        (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().Equal("ABSENT-1");
     }
 
     [Theory(DisplayName = "082b gaps (F1, ontology-r1 D-203): retiring the whole Procedure is a normal end of life: no gap, no rules, assigned or not")]

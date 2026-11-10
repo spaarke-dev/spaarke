@@ -1084,7 +1084,10 @@ public static class ProcedureResolver
             {
                 ColumnSet = new ColumnSet(
                     ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionEffectiveFromColumn,
-                    ProcedureEntity.VersionEffectiveToColumn, ProcedureEntity.VersionStatusColumn),
+                    ProcedureEntity.VersionEffectiveToColumn, ProcedureEntity.VersionStatusColumn,
+                    // DEF-061: an environment without this column rejects the query, which propagates (fail closed): a missing column is
+                    // never read as "not published". A row's own null (the SDK omits an empty column) is the only "not published".
+                    ProcedureEntity.VersionPublishedOnColumn),
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.VersionProcedureColumn, ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -1100,7 +1103,8 @@ public static class ProcedureResolver
                     row.Id, procedureId, row.GetAttributeValue<int?>(ProcedureEntity.VersionNumberColumn) ?? 0,
                     row.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value ?? ProcedureEntity.VersionStatusDraft,
                     DateOf(row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionEffectiveFromColumn)),
-                    DateOf(row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionEffectiveToColumn))));
+                    DateOf(row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionEffectiveToColumn)),
+                    row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn)));
             }
         }
 
@@ -1327,33 +1331,34 @@ internal sealed record ProcedureRows(
 
 internal sealed record ProcedureRow(Guid Id, string Name, ProcedureAppliesTo AppliesTo, Guid? FirmId);
 
-internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number, int Status, DateOnly? From, DateOnly? To)
+/// <param name="PublishedOn">
+/// <c>sprk_publishedon</c> (DEF-061): the instant <c>ProcedureService.PublishVersionAsync</c> published the version; <c>null</c> on a Draft and on
+/// a version published before the column existed (the backfill stamps Active and Superseded ones).
+/// </param>
+internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number, int Status, DateOnly? From, DateOnly? To, DateTime? PublishedOn = null)
 {
     /// <summary>Active or Superseded with an effective-from: in force for its own window (model 3.1).</summary>
     public bool IsInForce => Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded && From is not null;
 
     /// <summary>
-    /// The version opened a window at its effective-from (ontology-r1 D-203 (5a), (9)): it is Active or Superseded with an effective-from,
-    /// or Retired with an effective-from and at least one Published policy version under it. A Retired version is never in force, but a
-    /// window it had is not "before the first version" either: work in it is a gap. A Draft never opened one, and neither did a Draft that
-    /// was retired unpublished (<paramref name="versionsWithPublishedRules"/> does not name it): publish refuses a Draft whose dates overlap,
-    /// so a discarded Draft dated early must not hold work as a gap.
+    /// The version opened a window at its effective-from (ontology-r1 D-203 (5a), (9); DEF-061): it has an effective-from AND the server's publish
+    /// stamp (<see cref="PublishedOn"/>), whatever its status now. A Draft has no stamp, so a Draft retired unpublished never opened one (publish
+    /// refuses a Draft whose dates overlap, so a discarded Draft dated early must not hold work as a gap). A Retired version is never in force,
+    /// but a window it had is not "before the first version" either: work in it is a gap.
     /// </summary>
     /// <remarks>
-    /// Publish marks the version's Accepted rules Published in the same transaction that makes it Active (<c>ProcedureService.PublishVersionAsync</c>,
-    /// the only path to Active), so an Active version that had rules has a Published policy version. Two known limits keep the other answer:
-    /// a version published with NO Accepted rule (an empty rule set, or every rule rejected) and then retired is read as never opened, as
-    /// <c>ProcedureService.ScopeLockedAsync</c> reads it (it governed nothing); and a RATE-CARD-ONLY version (085: its only evidence is a
-    /// Published rate card) that was in force and then Retired without being superseded is read the same way: work in its window is "not
-    /// applicable" rather than a gap, so its rates are not checked there, and it does not lock the Procedure's scope. That is rare (ending a
-    /// rate-card-only Procedure outright) and fails open. A Published card is NOT used as evidence that the version opened a window: a card can
-    /// be Published while its version is still a Draft, so a Draft retired without ever being published would then read as having opened one
-    /// (ontology-r1 ruling (c), 085 fix round 2). The durable fix is a server-written publish stamp on the version (the publish-stamp
-    /// deferral, filed separately).
+    /// <para><b>Fallback for a Retired version with no stamp</b> (published before the column existed; the backfill leaves Retired versions
+    /// alone because a Retired row cannot tell a published version from a retired Draft): the earlier evidence, at least one Published policy
+    /// version under it (<paramref name="versionsWithPublishedRules"/>). Publish marks the version's Accepted rules Published in the same
+    /// transaction that makes it Active (<c>ProcedureService.PublishVersionAsync</c>, the only path to Active), so such a version that had rules
+    /// has a Published policy version. The known limits of that evidence stay for these rows only: a version published with NO Accepted rule, or
+    /// a rate-card-only one (085), that was then retired.</para>
+    /// <para><b>An Active or Superseded version with no stamp did not open a window</b>: it is a version published before the column existed
+    /// that the backfill has not stamped yet. Run the backfill before the BFF carrying this change is deployed (notes/def-061).</para>
     /// </remarks>
     public bool OpenedAWindow(IReadOnlySet<Guid> versionsWithPublishedRules) =>
         From is not null
-        && (Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded
+        && (PublishedOn is not null
             || Status == ProcedureEntity.VersionStatusRetired && versionsWithPublishedRules.Contains(Id));
 
     /// <summary>Half-open [from, to); a null <c>to</c> is open-ended.</summary>

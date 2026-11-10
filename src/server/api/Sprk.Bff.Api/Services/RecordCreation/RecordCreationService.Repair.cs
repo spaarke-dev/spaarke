@@ -51,10 +51,12 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// Review F1-f / UAC-r2: tables Repair never touches. Repair's own set, NOT the registry's ownership exception: Create's
     /// step 7 reads <see cref="RecordTableRule.OwnershipException"/> and refuses an unfiled create with it, so a registry
-    /// entry would change Create.
+    /// entry would change Create. DEF-061: and <c>sprk_procedureversion</c>, which is in the registry only for its writer-only publish stamp
+    /// (<see cref="RecordTableRule.WriterOnlyColumns"/>): a Procedure Version is created, owned and changed by <c>ProcedureService</c>, so
+    /// registering it must not make Repair read, map into or re-own it (it was "table not supported" before the entry).
     /// </summary>
     private static readonly IReadOnlySet<string> AppendOnlyTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord", "sprk_procedureversion" };
 
     /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
     internal const string RepairSourceUnreadableWarning =

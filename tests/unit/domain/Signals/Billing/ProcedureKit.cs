@@ -19,6 +19,9 @@ internal sealed class ProcedureKit
     /// <summary>082d: a direct parent (distance 1); on the chain once a row names it (<see cref="Override"/>).</summary>
     internal static readonly CoreRecordLink Parent = new("sprk_matter", Id("procedure-kit:parent"), 1);
 
+    /// <summary>DEF-061: the publish stamp every kit version carries (an Active version was published by <c>ProcedureService</c>, or backfilled).</summary>
+    private static readonly DateTime PublishedOn = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+
     private readonly List<ProcedureOverrideRow> _overrides = [];
     private readonly List<ProcedureRow> _procedures = [];
     private readonly List<ProcedureVersionRow> _versions = [];
@@ -42,7 +45,7 @@ internal sealed class ProcedureKit
     {
         var id = ProcedureId(name);
         _procedures.Add(new ProcedureRow(id, name, appliesTo, firm));
-        _versions.Add(new ProcedureVersionRow(ProcedureVersionId(name), id, 1, ProcedureEntity.VersionStatusActive, from ?? RulesFrom, to));
+        _versions.Add(new ProcedureVersionRow(ProcedureVersionId(name), id, 1, ProcedureEntity.VersionStatusActive, from ?? RulesFrom, to, PublishedOn));
         _sets.Add(new RuleSetRow(Id("procedure-kit:set:" + name), id, null, null));
         if (assigned)
         {
@@ -56,7 +59,7 @@ internal sealed class ProcedureKit
     /// <summary>A further Active version of <paramref name="name"/> (number 2 or more) over its own window: a gap between two windows is a hole.</summary>
     internal ProcedureKit NextVersion(string name, int number, DateOnly from, DateOnly? to = null)
     {
-        _versions.Add(new ProcedureVersionRow(ProcedureVersionId(name, number), ProcedureId(name), number, ProcedureEntity.VersionStatusActive, from, to));
+        _versions.Add(new ProcedureVersionRow(ProcedureVersionId(name, number), ProcedureId(name), number, ProcedureEntity.VersionStatusActive, from, to, PublishedOn));
         return this;
     }
 

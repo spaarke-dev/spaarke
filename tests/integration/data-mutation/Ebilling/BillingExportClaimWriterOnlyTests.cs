@@ -116,7 +116,8 @@ public class BillingExportClaimWriterOnlyTests
     {
         RecordTableRules.Get(Invoice).WriterOnlyColumns.Should().BeEquivalentTo([Claim]);
         RecordTableRules.Get(Invoice).MappingProtectedColumns.Should().Contain(Claim);
-        RecordTableRules.All.Where(r => r.WriterOnlyColumns.Count > 0).Select(r => r.Table).Should().Equal(Invoice);
+        // DEF-061 added the Procedure Version's publish stamp; the claim is still the invoice's only (ProcedureVersionPublishedOnWriterOnlyTests).
+        RecordTableRules.All.Where(r => r.WriterOnlyColumns.Count > 0).Select(r => r.Table).Should().Equal(Invoice, "sprk_procedureversion");
 
         RecordTableRules.RefuseWriterOnlyColumns(Invoice, ["sprk_description"]).Should().BeNull();
         RecordTableRules.RefuseWriterOnlyColumns(null, [Claim]).Should().BeNull();

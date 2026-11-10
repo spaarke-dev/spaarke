@@ -331,6 +331,7 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
             (ProcedureEntity.VersionNumberColumn, 1),
             (ProcedureEntity.VersionStatusColumn, new OptionSetValue(ProcedureEntity.VersionStatusActive)),
             (ProcedureEntity.VersionEffectiveFromColumn, from.ToDateTime(TimeOnly.MinValue)),
+            (ProcedureEntity.VersionPublishedOnColumn, new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc)), // DEF-061: published by the BFF
         };
         if (to is { } end) columns.Add((ProcedureEntity.VersionEffectiveToColumn, end.ToDateTime(TimeOnly.MinValue)));
         world.Add(ProcedureEntity.VersionEntity, version, columns.ToArray());

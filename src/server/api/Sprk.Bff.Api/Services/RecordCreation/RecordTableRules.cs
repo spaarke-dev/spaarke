@@ -355,6 +355,20 @@ internal static partial class RecordTableRules
             // (CreatedOnlyByItsWriter, which also drives those refusals, stays false).
             GenericCreateOnlyRefused = true,
         },
+        // ebilling-r1 DEF-061 (owner-approved schema change, 2026-11-09): the Procedure Version's publish stamp. Only ProcedureService.PublishVersionAsync
+        // writes it, and the resolver reads "this version opened a window" from it, so no generic writer (a field-mapping rule, an AI output mapping,
+        // the Update Record node, a repair pass, the chat update tool) sets, moves or clears it: a user-set stamp would make a never-published Draft
+        // hold work as a gap, and a cleared one would hide a published version's window. Registered for those two columns only: a Procedure Version is
+        // created by ProcedureService alone, so the generic create stays refused (GenericCreateOnlyRefused: the same record_creation.table_unsupported an
+        // unregistered table gets), and every other column of it is exactly as it was.
+        new RecordTableRule
+        {
+            Table = "sprk_procedureversion",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            WriterOnlyColumns = Columns(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureEntity.VersionPublishedOnColumn),
+            GenericCreateOnlyRefused = true,
+        },
 
         // ── The rest of the invoice family (task 017): InvoiceFamilyCoreRecordGuard.CoreRecordLookups keys ──────────
         // Registered so the invoice-family rule guards every family table a server create path can write (the chat create

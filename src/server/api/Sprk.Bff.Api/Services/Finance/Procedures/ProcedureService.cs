@@ -45,6 +45,13 @@ public static class ProcedureEntity
     public const string VersionEffectiveToColumn = "sprk_effectiveto";
     public const string VersionStatusColumn = "sprk_status";
 
+    /// <summary>
+    /// DEF-061: when the version was published (Date and Time, user local, optional, no default). Written only by
+    /// <c>ProcedureService.PublishVersionAsync</c>, in the write that makes the version Active, and never moved afterwards. Empty on a Draft
+    /// and on a version published before the column existed. <c>ProcedureResolver</c> reads "has this version opened a window" from it.
+    /// </summary>
+    public const string VersionPublishedOnColumn = "sprk_publishedon";
+
     public const int VersionStatusDraft = 100000000;
     public const int VersionStatusActive = 100000001;
     public const int VersionStatusSuperseded = 100000002;
@@ -190,8 +197,11 @@ public class ProcedureService
     {
         ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionPreviousColumn,
         ProcedureEntity.VersionEffectiveFromColumn, ProcedureEntity.VersionEffectiveToColumn, ProcedureEntity.VersionStatusColumn,
-        RuleSetService.RowVersionColumn,
+        ProcedureEntity.VersionPublishedOnColumn, RuleSetService.RowVersionColumn,
     };
+
+    /// <summary>The clock the publish stamp reads (DEF-061); a test sets it.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
     private readonly IGenericEntityService _entities;
     private readonly RuleSetService _ruleSets;
@@ -700,7 +710,8 @@ public class ProcedureService
     /// <summary>
     /// Publishes a Draft version from <paramref name="effectiveFrom"/> (or its own effective-from), in ONE transaction (I-P1): the version goes
     /// Active; the previous Active version gets <c>to</c> = that date and goes Superseded; the version's Accepted rules are marked Published and
-    /// each policy's <c>sprk_currentversion</c> moves to its newest published version (model 7.2). Refused, with nothing written, without one
+    /// each policy's <c>sprk_currentversion</c> moves to its newest published version (model 7.2). The same write stamps
+    /// <c>sprk_publishedon</c> with the server's UTC now (DEF-061); this is the only writer of it. Refused, with nothing written, without one
     /// Servable Procedure-source Stored File (400 <c>file</c>), without an effective-from (400), with a Proposed rule (400), or when the dates
     /// overlap another version in force (409 <c>procedure.version_overlap</c>). No invoice is re-checked (model 8.2).
     /// </summary>
@@ -788,6 +799,14 @@ public class ProcedureService
             [ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive),
             [ProcedureEntity.VersionEffectiveFromColumn] = ToDate(start),
         };
+        // DEF-061: the publish stamp, in the write that makes the version Active (the only writer). Only a Draft reaches this point (an
+        // Active, Superseded or Retired version was refused 409 above, and nothing returns a version to Draft), so a re-publish cannot
+        // move a stamp; a Draft that somehow already carries one (written outside the BFF) keeps it.
+        if (version.Row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn) is null)
+        {
+            versionFields[ProcedureEntity.VersionPublishedOnColumn] = Clock.GetUtcNow().UtcDateTime;
+        }
+
         var requests = new List<OrganizationRequest>();
         if (ConditionalUpdate(ProcedureEntity.VersionEntity, version.Row, versionFields) is not { } versionUpdate)
         {
