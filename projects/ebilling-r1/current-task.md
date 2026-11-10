@@ -38,7 +38,12 @@
      - uac-r2 reviews the two routes (`POST .../procedures/{p}/versions/{v}/draft`, `PUT .../versions/{v}/file`);
      - clear the `RecordOwnershipResolver.cs:1809` citation entry with uac-r2;
      - close out the notes and TASK-INDEX.
-   - **Dev apply of 080's script (memo column):** needs the owner's go here, plus uac-r2 notices.
+   - **Dev apply of 080's script: DONE 2026-11-10.**
+     - The owner's go was typed in this session; notices went to uac-r2 and ontology-r1 before and after.
+     - The run was `861008c591`, exit 0. -WhatIf and the real run matched: 3 created (`sprk_notconvertedlist` plus 2 field permissions), 2 changed (the `sprk_notconverted` Description; securing the new column), 86 skipped.
+     - Verify: the column is secured, reader read-only, writer read/create/update, and no other writer profile.
+     - Masked window 28.3 s; there was one 429 retry (a concurrent publish).
+     - **Still to do:** record the run in the 116 notes at close-out.
    - **`sprk_sourcedocument` census (dev, read-only):**
      - `sprk_ruleset`: 0 rows, 0 non-null; `sprk_ratecard`: 0 rows, 0 non-null.
      - The only dependency is each table's main form.
@@ -98,7 +103,6 @@
 
 ## Open owner questions / pending goes
 
-- The dev go for 080's script (the `sprk_notconvertedlist` memo column), plus uac-r2 notices.
 - Confirmation of the `sprk_sourcedocument` delete (both tables are empty; the delete runs after 079).
 - Later: the dev go for the DEF-060 column and the smoke Signal.
 
