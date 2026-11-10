@@ -376,7 +376,7 @@ public class RuleSetService
 
     // Task 089c (089a K1): the core-record lookups are read too, so every read here can refuse a record-scoped set
     // (RecordRuleSet.IsRecordScoped: a record scope OR a core lookup).
-    // Task 116: no sprk_sourcedocument (retired: a Procedure Version's file is its Stored File) and no set-level sprk_notconverted (the
+    // Task 116: no source-document lookup (retired: a Procedure Version's file is its Stored File) and no set-level sprk_notconverted (the
     // drafting marker is the Procedure Version's).
     private static readonly string[] RuleSetColumns = new[]
     {

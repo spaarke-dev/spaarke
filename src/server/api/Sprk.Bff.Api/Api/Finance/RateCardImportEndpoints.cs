@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -74,14 +75,16 @@ public static class RateCardImportEndpoints
             .WithName("ImportRateCard")
             .WithSummary("Import a rate card and timekeepers from a workbook as a Draft")
             .WithDescription(
-                "Validates every row and returns all invalid rows (sheet, row, column, message) with nothing written; otherwise stores " +
-                "the workbook in the Procedure Library and creates a Draft rate card with its rates and Pending timekeepers.")
+                "Validates every row and returns all invalid rows (sheet, row, column, message) with nothing written; otherwise creates a " +
+                "Draft rate card with its rates and Pending timekeepers and stores the workbook as the Procedure Version's source file. " +
+                "A refused file write removes the rows and answers as the version file route does (403, 409, 503).")
             .Produces<RateCardImportResult>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // POST /api/finance/ratecards/{rateCardId}/publish — Draft to Published
@@ -378,16 +381,38 @@ public static class RateCardImportEndpoints
         Guid? callerOid = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
 
         var outcome = await service.ImportAsync(
-            new RateCardImportRequest(firmId, name, procedureVersionId, callerOid), bytes, ct);
+            new RateCardImportRequest(firmId, name, procedureVersionId, callerOid, http.User, TokenHelper.ExtractBearerTokenOrNull(http)), bytes, ct);
 
         return outcome.Kind switch
         {
             RateCardOutcomeKind.Done => Results.Created($"{Route}/{outcome.Value!.RateCardId}", outcome.Value),
             RateCardOutcomeKind.Invalid => InvalidProblem(outcome.Errors),
             RateCardOutcomeKind.OwnerRefused => ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "rate card", http.TraceIdentifier),
+            RateCardOutcomeKind.FileRefused => FileRefused(outcome.FileRefusal!, http),
             _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!),
         };
     }
+
+    /// <summary>
+    /// Task 116: the file store refused the workbook (the rows were removed). Mapped as <c>ProcedureEndpoints.PutVersionFile</c> maps a refused
+    /// caller write: step 0 is a 403 <c>system_failure</c>, no Write on the version a 403 <c>insufficient_rights</c>, no owner the 409 owner code,
+    /// a store that is not configured 503, a request the store does not accept 400, anything else 500 <c>ratecard.import_failed</c>.
+    /// </summary>
+    private static IResult FileRefused(StoredFileCreateResult refusal, HttpContext http) => refusal.RefusalCode switch
+    {
+        StoredFileRefusal.CallerNotInternal => ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier),
+        StoredFileRefusal.NoWriteOnParent => ProblemDetailsHelper.Forbidden(
+            FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier),
+        StoredFileRefusal.OwnerUnresolved => Results.Problem(
+            statusCode: StatusCodes.Status409Conflict, detail: "The workbook could not be given an owner; nothing was imported.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = refusal.OwnerRefusalCode ?? StoredFileRefusal.OwnerUnresolved }),
+        StoredFileRefusal.NotConfigured => Refused(
+            StatusCodes.Status503ServiceUnavailable, StoredFileRefusal.NotConfigured, "The file store is not configured in this environment."),
+        StoredFileRefusal.InvalidRequest => InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The workbook was not accepted by the file store.") }),
+        _ => Refused(
+            StatusCodes.Status500InternalServerError, RateCardImportService.CodeImportFailed,
+            "The rate card could not be imported and nothing was saved. Try again; if it keeps failing, contact support."),
+    };
 
     internal static async Task<IResult> PublishRateCard(Guid rateCardId, HttpContext http, RateCardImportService service, CancellationToken ct)
     {

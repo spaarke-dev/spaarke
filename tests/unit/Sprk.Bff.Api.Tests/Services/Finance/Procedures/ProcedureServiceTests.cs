@@ -756,7 +756,7 @@ public sealed class ProcedureServiceTests
         copy.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(1, "a Draft: in force nowhere until published");
         copy.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
         copy.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
-        copy.Contains("sprk_sourcedocument").Should().BeFalse("the copy has no source document");
+        copy.Attributes.Keys.Should().NotContain(k => k.StartsWith("sprk_source", StringComparison.Ordinal), "the copy has no source lookup (task 116)");
         var rateCopy = w.H.Rows["sprk_ratecardrate"].Where(r => r.GetAttributeValue<EntityReference>("sprk_ratecard").Id == copy.Id).ToList()
             .Should().ContainSingle().Subject;
         rateCopy.GetAttributeValue<Money>("sprk_approvedrate").Value.Should().Be(500m);

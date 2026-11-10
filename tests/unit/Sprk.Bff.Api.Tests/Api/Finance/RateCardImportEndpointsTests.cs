@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
@@ -67,16 +68,10 @@ public sealed class RateCardImportEndpointsTests
 
         public Host()
         {
-            var gcf = Mock.Of<IGraphClientFactory>();
-            var spe = new SpeFileStore(
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()));
             Service = new Mock<RateCardImportService>(
                 MockBehavior.Strict,
-                Mock.Of<IGenericEntityService>(), Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<ILogger<RateCardImportService>>());
+                Mock.Of<IGenericEntityService>(), new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig().Service, Mock.Of<IRecordOwnershipResolver>(),
+                Mock.Of<ILogger<RateCardImportService>>());
         }
 
         public static async Task<Host> StartAsync(bool ebillingEnabled = true, int maxMb = 25, bool admin = true)
@@ -343,7 +338,8 @@ public sealed class RateCardImportEndpointsTests
         var bytes = new byte[] { 9, 8, 7, 6 };
         RateCardImportRequest? seen = null;
         byte[]? seenBytes = null;
-        var result = new RateCardImportResult(CardId, Guid.NewGuid(), "Draft", 3, 2, 0);
+        var sourceFile = Guid.NewGuid();
+        var result = new RateCardImportResult(CardId, sourceFile, "Draft", 3, 2, 0);
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .Callback((RateCardImportRequest r, byte[] b, CancellationToken _) => { seen = r; seenBytes = b; })
             .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Done(result));
@@ -355,10 +351,13 @@ public sealed class RateCardImportEndpointsTests
         var body = await Json(response);
         body["rateCardId"]!.GetValue<Guid>().Should().Be(CardId);
         body["status"]!.GetValue<string>().Should().Be("Draft");
+        body["sourceFileId"]!.GetValue<Guid>().Should().Be(sourceFile, "task 116: the workbook is the version's source file");
         seen!.ProcedureVersionId.Should().Be(VersionId);
         seen.FirmId.Should().BeNull("the firm comes from the Procedure");
         seen.Name.Should().Be("2026 rates");
         seen.CallerObjectId.Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId));
+        seen.Caller.FindFirst("oid")!.Value.Should().Be(FinanceAuthzTestAuthHandler.CallerObjectId, "task 116: the file store asks as the caller");
+        seen.CallerBearerToken.Should().NotBeNullOrEmpty();
         seenBytes.Should().Equal(bytes);
         host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId && c.HasToken,
             "the Procedure's rights are asked of Dataverse as the caller");
@@ -480,16 +479,43 @@ public sealed class RateCardImportEndpointsTests
     }
 
     [Fact]
-    public async Task Import_ContainerNotConfigured_Returns503WithItsCode()
+    public async Task Import_FileStoreNotConfigured_Returns503WithItsCode()
     {
         await using var host = await Host.StartAsync();
         host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Refused(503, RateCardImportService.CodeContainerNotConfigured, "not configured"));
+            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.Refused(503, StoredFileRefusal.NotConfigured, "not configured"));
 
         var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ratecard.container_not_configured");
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("stored_file.store_not_configured");
+    }
+
+    [Theory(DisplayName = "116 must-fire: a refused workbook write is answered as the version file route answers it, never a generic 500")]
+    [InlineData(StoredFileRefusal.CallerNotInternal, 403, "reasonCode", FinanceAuthorizationFilter.SystemFailureReasonCode)]
+    [InlineData(StoredFileRefusal.NoWriteOnParent, 403, "reasonCode", FinanceAuthorizationFilter.InsufficientRightsReasonCode)]
+    [InlineData(StoredFileRefusal.OwnerUnresolved, 409, "errorCode", RecordOwnerRefusal.NoOwnerSource)]
+    [InlineData(StoredFileRefusal.NotConfigured, 503, "errorCode", StoredFileRefusal.NotConfigured)]
+    [InlineData(StoredFileRefusal.InvalidRequest, 400, "errorCode", "ratecard.import_invalid")]
+    [InlineData("stored_file.something_else", 500, "errorCode", "ratecard.import_failed")]
+    public async Task Import_ARefusedFileWrite_IsMappedAsTheVersionFileRouteMapsIt(string refusal, int status, string field, string code)
+    {
+        await using var host = await Host.StartAsync();
+        var stored = refusal == StoredFileRefusal.OwnerUnresolved
+            ? StoredFileCreateResult.Refused(refusal, RecordOwnerRefusal.NoOwnerSource)
+            : StoredFileCreateResult.Refused(refusal);
+        host.Service.Setup(s => s.ImportAsync(It.IsAny<RateCardImportRequest>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RateCardOutcome<RateCardImportResult>.FileRefused(stored));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Import}?procedureVersionId={VersionId}&name=Card", content: Upload(new byte[] { 1 })));
+
+        ((int)response.StatusCode).Should().Be(status);
+        var body = await Json(response);
+        body[field]!.GetValue<string>().Should().Be(code);
+        if (refusal == StoredFileRefusal.NoWriteOnParent)
+        {
+            body["detail"]!.GetValue<string>().Should().Be("You need Write on this Procedure Version.");
+        }
     }
 
     [Theory]
