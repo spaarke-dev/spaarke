@@ -9,7 +9,8 @@
 | Field | Value |
 |-------|-------|
 | **Task** | None active. The business-unit id fix is ON MASTER: PR #2661 merged 2026-11-10 as `d64a45071b` (34 checks pass, 9 skipped). uac-r2 told the SHA. |
-| **Next Action** | Owner decisions (below). ACME gets S23/S24 + the BU id fix only through a control-plane deploy — separate live action, owner OK per action. |
+| **Next Action** | Owner decisions (below). **Dev control plane redeployed 2026-11-10** from `7489f5b6b0` (master `d64a45071b` + H6 access logging; run log). ACME gets the new handlers only through a NEW run (owner OK). |
+| **Done 2026-11-10** | H6 org-settings contract adds `isuseraccessauditenabled=true` (owner: include it) — `7489f5b6b0`, on branch, not on master; Validate-DeployedEnvironment check 6 + guide updated. |
 | **Done 2026-11-08/09** | #2605 reply posted; PR #2638 (S23 + 49ba9a70d3 + 266) merged to master `3fa6a061`, #2605 closed. ACME still needs a control-plane deploy (owner OK) to get S23/S24 and the BU id fix. |
 | **Quality alert** | #2060 tier2-master/full-unit-tests (nightly) open — mention to owner; not started. |
 | **Task 266 outcome** | Code + tests + guide; no live change. Commits b514a9edca … 9f24305bf2. 3315 control-plane tests, ArchTests 1950/1950. Code review: W1 (justification) fixed in POML; adr-check clean. Adversarial ×2 + scoped re-check done; notes in the POML. |
@@ -20,8 +21,8 @@
 
 1. **ACME registry row**: SpaarkeMaster on ACME is now **1.3.0.0** (ontology ran it 2026-11-07; run log). The registry row `sprk_solutionversion` still holds the run's value — update it? (spaarkeextid write, owner OK).
 2. **#2618** — customer default team contact-owner role vs ontology writer least privilege (options in the issue; recommend option 1).
-3. Add `isuseraccessauditenabled` to the H6 org-settings contract (ACME off, dev on; recommend yes) + org-audit section in the role check.
-4. #2443 read-only check of the production workforce + CIAM clients.
+3. (Decided 2026-11-10: include `isuseraccessauditenabled` — done in code.) ACME's own setting changes only on its next H6 run or by hand (owner OK).
+4. #2443 / #2532 (073 go-live): read-only 2026-11-10 — no production workforce SPA client exists in the Spaarke tenant (only dev `5859e812`, redirects to the dev SWA); external.spaarke.com serves the SWA placeholder (nothing deployed). Open gates: prod workforce client, CIAM BFF app (T240d), routing (T240c, owner), GitHub env vars, A9 on ACME, DNS.
 5. Older: L56 AI content for ACME (H12a seeds 4 of 12 sets); demo accounts unclassified; dev BFF secrets printed locally (rotation); ISS-026 publisher verification.
 
 ## Branch state
