@@ -69,6 +69,45 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
         assign.Should().BeGreaterThan(directStepRead, "the gate Decision Record step runs last");
     }
 
+    [Fact(DisplayName = "198 pass 2 item 6: a cancellation during the Direct participant step cannot skip the gate step")]
+    public async Task AfterRefile_CancelledDuringTheDirectParticipantStep_StillRunsTheGateStep()
+    {
+        // Ontology R-b: the D-169/D-215 re-own sits in a finally, so a caller passing a real token can never skip it.
+        var gate = SharedGateRecord();
+        using var cts = new CancellationTokenSource();
+        var uac = new Mock<IGenericEntityService>();
+        uac.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryExpression, CancellationToken>((query, _) =>
+            {
+                if (query.EntityName == "sprk_communication" && query.ColumnSet.Columns.Contains("sprk_sentby"))
+                {
+                    gate.Calls.Add("direct-step-cancelled");
+                    cts.Cancel();
+                    cts.Token.ThrowIfCancellationRequested();
+                }
+
+                return Task.FromResult(new EntityCollection());
+            });
+        var directory = new Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble().WithDirectTeam(GateSharingWorld.DirectTeam);
+
+        var act = () => Reconciler(gate.Sharing, uac, directory.Lookup())
+            .AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, RefileThreadStep.PlacedByWriter, cts.Token);
+        try
+        {
+            await act();
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller's cancellation may surface; the gate step must have run regardless.
+        }
+
+        var cancelled = gate.Calls.IndexOf("direct-step-cancelled");
+        cancelled.Should().BeGreaterThanOrEqualTo(0, "the Direct participant step was reached and cancelled");
+        gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal))
+            .Should().BeGreaterThan(cancelled, "the gate Decision Record re-own still ran, last");
+        gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+    }
+
     /// <summary>The re-filed communication's user-owned gate record, shared with a participant, and the resolver's ordinary answer.</summary>
     private static GateSharingWorld SharedGateRecord()
     {
