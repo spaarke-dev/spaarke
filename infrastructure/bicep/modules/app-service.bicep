@@ -75,6 +75,9 @@ param appSettings object = {}
 @description('Resource ID of the User-Assigned Managed Identity to bind to BOTH production and staging slots. REQUIRED (T5 structural fix - no BFF App Service may be deployed without an explicit UAMI). Sourced from `modules/uami.bicep` (task 028); consumed at the caller as `uami.outputs.id`. The same value MUST be passed to the corresponding `app-service-slot.bicep` / `deployment-slot.bicep` invocation so the slot binds the SAME identity.')
 param userAssignedIdentityResourceId string
 
+@description('Further user-assigned identities to attach next to userAssignedIdentityResourceId (task 266 / #2605: the ontology writer UAMI). They are only ATTACHED: keyVaultReferenceIdentity and the BFF runtime identity stay userAssignedIdentityResourceId. Pass the SAME list to the site and its slot so a swap changes no attached identity. Default empty - other callers are unchanged.')
+param additionalUserAssignedIdentityResourceIds array = []
+
 @description('Subnet ID for VNet integration (outbound traffic). Leave empty to disable.')
 param vnetIntegrationSubnetId string = ''
 
@@ -104,9 +107,10 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
   kind: 'app,linux'
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${userAssignedIdentityResourceId}': {}
-    }
+    userAssignedIdentities: union(
+      { '${userAssignedIdentityResourceId}': {} },
+      toObject(additionalUserAssignedIdentityResourceIds, id => id, id => {})
+    )
   }
   properties: {
     serverFarmId: appServicePlanId

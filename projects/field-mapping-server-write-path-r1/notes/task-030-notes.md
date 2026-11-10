@@ -189,3 +189,166 @@ rework: none task 030
   `OfficeTodoCreateThroughServiceContractTests` (a faulted stamp read gives the try-again detail; no create right gives the
   generic detail). With the mapping arms removed, 10 failed (9 map rows, 1 contract); the pin and the controls passed, as they
   describe unchanged behaviour.
+
+## 6. Task 030b: Office document save, association in the create (W3 direction)
+
+Branch `task/fm-030b`, cut from the work branch at `656ab8ddb6`. Rigor FULL. Re-scoped in the POML (`<subtask id="030b">`,
+commit "docs: 030b re-scoped under W3") to the owner's W3 direction (decisions.md 2026-11-06, bullet 030): the document save
+stays outside `RecordCreationService` as a named exception, the association moves into the existing create call, and guards pin
+the rest. No change to `RecordCreationService`.
+
+### What changed
+
+- `Spaarke.Dataverse.CreateDocumentRequest` gains `Association` (`DocumentAssociationBind`: a `DocumentLinkFields` entry and a
+  record id), `[JsonIgnore]` like every other server-only member.
+- `DocumentAssociationMap.TryApply(CreateDocumentRequest, …)`: the create overload. Same spellings, same columns as the update
+  overload (event, To Do and contact go to their `sprk_related*` columns).
+- `DataverseServiceClientImpl.CreateDocumentAsync` stages it (`StageDocumentAssociation`) in the one create entity. An
+  association with an empty id is refused before the write.
+- The three Office create sites apply the association to the CREATE request and no longer to the update:
+  `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync`, `UploadFinalizationWorker.CreateDocumentRecordAsync` (fallback)
+  and `UploadFinalizationWorker.ProcessSingleAttachmentAsync` (each attachment child). `ApplyAssociationLookup` now takes a
+  `CreateDocumentRequest`; its warning no longer logs a pointer as a "document id" and logs no name.
+- Fix round (below): the SPE pointer, and an attachment child's parent link, also moved into the create. The email-archive
+  columns and the descriptive file metadata stay in the follow-up update.
+
+### Invariant owners (how "the save calls the stamp and owner classes" is met)
+
+- I-1 (stamp): a document has no stamp column. `CoreAncestorResolver.IntermediateRootColumns["sprk_document"]` reads a
+  document's root from its typed association column, which the create now writes. Pinned as a column agreement
+  (`DocumentAssociationCreateStagingTests`), not a call.
+- I-6 (owner): `ResolveOwnerAsync` over `OfficeDocumentPersistence.DocumentOwnershipOf`, asked over the same column the create
+  writes (`RecordReparent.ParentChangesOf` agreement test); the worker's carried `OwningTeamId` still wins.
+- Narrowing (I-19, task 189, task 095): `ApplyEmailCommunicationOutcome`, unchanged, still the one setter.
+
+### Guards (`tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs`)
+
+| Guard | Pins | Must fire (control) | Must not fire (control) |
+|---|---|---|---|
+| G1 | every Office association apply targets a `CreateDocumentRequest`; no association lookup set in the two creator files; at least 4 apply sites | apply on an update request (two spellings), `MatterLookup =`, `{ ProjectLookup = … }`, a target whose type is not in view | apply on a new create request, on a typed parameter, a comment, the owner question in `DocumentOwnershipOf` (the one listed non-writing member) |
+| G2 | `CreateDocumentAsync` calls `StageDocumentAssociation(document, request)` | no call, a commented call, the call in another method | the call in the body |
+| G3 | OfficeService asks `ResolveOwnerAsync(OfficeDocumentPersistence.DocumentOwnershipOf(…))` at least twice, the worker at least once; every Office create's initializer sets `OwningTeamId` | an owner set after the initializer; an owner question not built by `DocumentOwnershipOf` | the initializer with `OwningTeamId`; the `with { … }` and fully qualified forms |
+| G4 | `CreateDocumentRequest` binds only Name, ContainerId, Description; the Office save body (`SaveRequest` and every type it carries) has no member named for a pointer, narrowing, owner or new-row id | an unignored server-only member; a nested and a listed body member named `GraphItemId` / `AccessPermission` | `ExistingDocumentId`, `ExchangeItemId`, an ignored `Id` |
+| G5 | `CreateDocumentAsync` creates and never upserts; only `OfficeDocumentPersistence.cs` sets a create's `Id`; `preAssignedDocumentId` is only `Guid.NewGuid()` or null | `UpsertAsync`, an `UpsertRequest`, an initializer or member `Id` set elsewhere, `preAssignedDocumentId = request.Document.DocumentId` | `CreateAsync` with `document.Id`, an `Entity.Id` set, a comparison |
+
+"A client-supplied id that already exists is refused, never updated": today no client supplies the create's id (the server mints
+it, G5). If one did, the create is a plain `CreateAsync`, which Dataverse refuses on an existing key; the save throws before its
+update (`Save_WithAGivenIdThatAlreadyExists_…`) and takes the existing failure path (generic `OFFICE_INTERNAL`, job Failed).
+
+### Tests and evidence
+
+- `tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs`: the save (13 spellings, an
+  unsupported type, no target, a given id that already exists) and the worker (fallback create with and without a carried
+  owner, attachment children, an account save).
+- `tests/unit/domain/Dataverse/DocumentAssociationCreateStagingTests.cs`: the create overload and stager, the column agreement
+  with `RecordReparent.ParentChangesOf` and `CoreAncestorResolver.IntermediateRootColumns`, and the JSON binding.
+- `tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs`: G1 to G5 and their controls (13 tests).
+- `OfficeEndpointsContractTests`: the fake world now reads the matter from the create's association.
+
+Fail-first: I put back the pre-change save and worker, and removed the stager's call from `CreateDocumentAsync`. The two new BFF
+classes then failed 16 of 57 (all 13 save spellings and the three worker create tests). The guards failed 2 of 13 (G1 and G2).
+The domain tests compile only against the new contract, so before the change they did not build.
+
+After the change:
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- `tests/Spaarke.ArchTests`, in full: 2011 passed, 0 failed.
+- The filtered BFF run (`Office|RecordCreation|RecordOwnership|DocumentAssociation`): 3159 passed, 0 failed, 7 skipped.
+- The publish-size delta was not measured: this task adds no package and is not deployed.
+
+### Fix round: pointer and parent link in the create (coordinator, 2026-11-07)
+
+An attachment child carries its parent link in the create, and every Office create carries its SPE pointer.
+
+- **The pointer is final at create time.** All three creates run after the upload:
+  - the save gets the drive id, item id and web URL from its upload (dedup already reads them before the create);
+  - the worker's fallback create takes them from `TempFileLocation`, an upload that has already happened;
+  - each child takes them from its own `UploadSmallAsync` result.
+
+  Nothing later changes them. Other BFF creates already write the pointer and its bound copy in the create (inbound mail,
+  Compose, the communication archive), so the app user's create rights on these columns are an existing path.
+- **One parent-link surface.** The parent link uses task 034's `CreateDocumentRequest.ParentDocumentLookup` and its stager
+  `StageDocumentParent` (commit `9cbcf78759`, on this branch by fast-forward). This task adds no second property for it.
+- **Contract.** `CreateDocumentRequest.FilePointer` (`DocumentFilePointer(DriveId, ItemId, WebUrl)`), `[JsonIgnore]`.
+- **Staging.** `DataverseServiceClientImpl.StageDocumentFilePointer`, called from `CreateDocumentAsync` after
+  `StageDocumentParent`, writes:
+  - `sprk_graphdriveid`;
+  - `sprk_graphitemid` with `sprk_graphitemidbound` (the same value, in the same write, as task 171 requires);
+  - `sprk_filepath` when a URL is known.
+
+  A pointer without its drive or item id is refused before the write.
+- **Callers.**
+  - The save, the fallback and each child set `FilePointer`.
+  - Each child also sets `ParentDocumentLookup` on its create request.
+  - The updates no longer set `GraphDriveId`, `GraphItemId`, `FilePath` or `ParentDocumentLookup`.
+  - The parent's descriptive details (`ParentFileName`, `ParentGraphItemId`, `RelationshipType`) stay in the child's update.
+- **G6** (ArchTests):
+  - nothing in the two Office creator files sets `GraphDriveId` or `GraphItemId`;
+  - `ParentDocumentLookup` is set only on a `CreateDocumentRequest`. The member exists on both requests, so it is judged by
+    the innermost initializer, or by the variable's type;
+  - at least 3 creates set `FilePointer` and at least 1 sets `ParentDocumentLookup`;
+  - `CreateDocumentAsync` calls `StageDocumentFilePointer`. `StageDocumentParent` is pinned by 034's
+    `InboundIngestionCreatorsGuardTests`.
+
+  Controls:
+  - must fire: those members in an update initializer, or on an update variable.
+  - must not count: `FilePointer` on another type.
+  - must not fire: the create initializer (with a nested switch); a typed create variable; the version save's `FilePath`
+    refresh; `ParentGraphItemId`; a comparison; a comment; the stager call in the body.
+
+  G4's save-body deny list gains `FilePointer` and `ParentDocumentLookup`.
+
+Fail-first: I put back the save and worker as committed (unchanged since `581f034144`) and removed the
+`StageDocumentFilePointer` call. The two BFF test classes then failed 15 of 62:
+- the 13 save spellings (the pointer is not in the create);
+- the fallback pointer test;
+- the child parent-link test.
+
+G6 failed 2 of 17 guard tests.
+
+After the change, on top of task 034's branch (`427488f11d`):
+- BFF build: 0 errors, 0 warnings.
+- `tests/Spaarke.ArchTests`, in full: 2108 passed, 0 failed. This includes 034's guards.
+- The filtered BFF run (`Office|RecordCreation|RecordOwnership|DocumentAssociation|DocumentParent`): 3192 passed, 0 failed,
+  7 skipped.
+
+### Known limits
+
+- Office-saved documents get no field mapping (named exception).
+- A failure between the create and the update leaves a row with its association, owner, narrowing, pointer and parent link,
+  without its descriptive file metadata (name, size, MIME type, hash) and email-archive columns.
+- A refused given id leaves the stamped upload in SPE, as any failed create on this path does today.
+- G1, G3, G5 and G6 are source scans: they see the shapes their controls pin.
+- `EmailAttachmentProcessor` (inbound mail, not an Office path): task 034 moved its links into the create, and the cleanup
+  round below deleted its attachment creator, which had no caller. It is now the attachment filter only.
+
+### Cleanup round (coordinator, 2026-11-07)
+
+After the adversarial review of 030b and 034 (no fix-now findings):
+
+- **Dead code.** `EmailAttachmentProcessor.ProcessAttachmentsAsync` had no caller (`IncomingCommunicationProcessor` uses only
+  `ShouldFilterAttachment`). Deleted with the types and members only it used; 034's guard rule C6 now pins that no
+  ingestion file creates a document through the document seam. Detail in `task-034-notes.md`.
+- **Lockstep.** `DocumentAssociationCreateStagingTests` reads its spellings from `DocumentAssociationMap.SupportedSpellings`
+  instead of a hand list. Every supported spelling must succeed in both `TryApply` overloads, on the same column; an
+  unsupported spelling or an empty id must fail in both and set nothing.
+- **Hardening.** `CreateDocumentRequest.Association` has an internal setter: outside `Spaarke.Dataverse` it is set only
+  through `TryApply`. `InternalsVisibleTo` names only `Sprk.Bff.Api.Tests`, and no production code outside the assembly set
+  it, so nothing else changed. `StageDocumentAssociation` refuses a field that is not one of the map's association
+  columns with its verified target (`DocumentAssociationMap.IsAssociationField`), before any write.
+
+### Component justification (§11)
+
+One sentence each. `ParentDocumentLookup` and `StageDocumentParent` are task 034's; their answers are in
+`task-034-notes.md`.
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `DocumentFilePointer` (record) | `UpdateDocumentRequest.GraphDriveId`, `GraphItemId` and `FilePath` carry the same values on the update. | Those are update members; three loose nullable strings on the create request would admit a pointer without its drive or item, which one record with a refusing stager does not. | The Office creates write the pointer in a second write, so a failed update leaves a document row with no file pointer and no bound copy. |
+| `DocumentAssociationBind` (record) | `UpdateDocumentRequest`'s seven typed `*Lookup` properties, and `DocumentLinkField`. | Copying the seven lookups onto the create request would add seven server-only members and a second column switch; one (field, id) pair reuses `DocumentLinkFields.All`'s verified column and target. | The create cannot name its association lookup, so it goes back to the follow-up update and a failed update leaves the document without it. |
+| `CreateDocumentRequest.Association` | The update request's typed lookups. | It is the extension: one `[JsonIgnore]` member on the existing create request, set only through `TryApply`. | As `DocumentAssociationBind`: the association stays a second write. |
+| `CreateDocumentRequest.FilePointer` | The update request's pointer members. | It is the extension: one `[JsonIgnore]` member on the existing create request. | As `DocumentFilePointer`: the pointer stays a second write. |
+| `DocumentAssociationMap.TryApply(CreateDocumentRequest, …)` | `TryApply(UpdateDocumentRequest, …)`. | The update overload sets typed properties the create request does not have; this overload shares the one alias table and differs only in where it writes, and the lockstep test pins both to the same column. | Each create caller would map spellings itself, the drift between copies that the map was created to end. |
+| `DataverseServiceClientImpl.StageDocumentAssociation` | The lookup block of `UpdateDocumentAsync`, and `StageDocumentCommunicationFields`. | The update block builds its own entity inline and cannot write the create entity; the stager follows the `StageDocumentCommunicationFields` pattern (pure, internal, tested directly). | `CreateDocumentAsync` never writes `Association`, so a caller's association is dropped without an error. |
+| `DataverseServiceClientImpl.StageDocumentFilePointer` | The pointer lines of `UpdateDocumentAsync`, and `DocumentPointerBinding` (the bound copy). | As `StageDocumentAssociation`; it writes the bound copy beside the item id, as `DocumentPointerBinding` requires of every write of the pointer. | `CreateDocumentAsync` never writes `FilePointer`, so the pointer is dropped without an error. |
+
+The publish-size delta is left to the coordinator.

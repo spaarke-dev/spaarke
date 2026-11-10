@@ -79,8 +79,11 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
     /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
     /// 5 = ISS-025 / #1803: S22, the lock on contact.sprk_externalinvitedon and (once present) sprk_externalinvitecodehash.
+    /// 6 = S23: the BFF's runtime application user holds "Spaarke Ontology Service"; no team or interactive user does.
+    /// 7 = S24 (#2605): the ontology writer application user holds exactly "Spaarke Ontology Service" and is the only member
+    ///     of the two ontology-writer profiles.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=5";
+    internal const string ProcedureVersion = "secure-setup-procedure=7";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;
@@ -220,11 +223,15 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (4) The procedure.
+        // (4) The procedure. S24's writer (#2605): absent or unparseable is Guid.Empty, which the procedure refuses Resumable
+        // ("start a new run"): a run whose H10 completed before task 266 has no writer.
+        var writerAppUser = Guid.TryParse(state.OntologyWriterSystemUserId, out var parsedWriter) ? parsedWriter : Guid.Empty;
         var request = new SecureRecordSetupRequest(
             new SecureRecordSetupTarget(state.DataverseEnvUrl!, tenantId, state.BffAppRegId!),
             roleSet,
             [bffAppUser, miAppUser],
+            miAppUser,
+            writerAppUser,
             customerUnitId,
             dryRun);
         SecureRecordSetupOutcome outcome;

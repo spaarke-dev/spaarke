@@ -481,6 +481,19 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
             }
         }
 
+        // (8) Task 266 (#2605) — the stamp's ontology writer identity holds NO Graph app role: it writes Signals and Decision
+        //     Records in Dataverse only, and on Model 1 any Graph role reaches Spaarke's own tenant. Its principal id IS its
+        //     service principal's object id (a managed identity), so no lookup is needed. Checked once the stamp identity
+        //     passes; a failure there is reported first.
+        if (parityResult is GraphAppRoleParityResult.Verified)
+        {
+            var writerOutcome = await CheckOntologyWriterAsync(request, cancellationToken).ConfigureAwait(false);
+            if (writerOutcome is not null)
+            {
+                return writerOutcome;
+            }
+        }
+
         switch (parityResult)
         {
             case GraphAppRoleParityResult.Verified verified:
@@ -533,6 +546,60 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                     $"T3 verdict deferred: IGraphAppRoleParityVerifier returned an unrecognized " +
                     $"result type '{parityResult.GetType().Name}'. Probe author must update the " +
                     "verdict switch to handle the new case.");
+        }
+    }
+
+    /// <summary>
+    /// Task 266: null when the ontology writer identity holds no Microsoft Graph app role; otherwise Failed (a role, or a run
+    /// that carries no writer principal id) or InfraFault (the read could not be completed).
+    /// </summary>
+    private async Task<TrapVerificationOutcome?> CheckOntologyWriterAsync(
+        TrapVerificationRequest request, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(request.OntologyWriterObjectId?.Trim(), out var writer) || writer == Guid.Empty)
+        {
+            var missing =
+                "T3 FAILED: this run carries no InterStepState.OntologyWriterObjectId (blank or not a GUID) — H2a did not record " +
+                "the ontology writer identity, or the run predates task 266 — so the writer's Graph app roles cannot be checked " +
+                "and the stamp has no recorded writer. Start a new run (a resume does not re-run a completed H2a).";
+            _logger.LogWarning("T3 probe FAILED (no ontology writer identity): {Diagnostic}", missing);
+            return new TrapVerificationOutcome.Failed(Kind, missing);
+        }
+
+        GraphAppRoleExtrasResult held;
+        try
+        {
+            held = await _parityVerifier.FindAnyRolesAsync(writer.ToString("D"), request.TenantId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                $"T3 verdict deferred: checking the ontology writer's Graph app roles threw {ex.GetType().Name}: {ex.Message}.");
+        }
+
+        switch (held)
+        {
+            case GraphAppRoleExtrasResult.None:
+                return null;
+            case GraphAppRoleExtrasResult.Unknown unknown:
+                return new TrapVerificationOutcome.InfraFault(Kind,
+                    $"T3 verdict deferred: could not read the ontology writer's Graph app roles (principal '{writer:D}'): {unknown.Diagnostic}");
+            case GraphAppRoleExtrasResult.Found found:
+                var diagnostic =
+                    $"T3 FAILED on the ontology writer identity (principal '{writer:D}') in tenant='{request.TenantId}': it holds " +
+                    $"Graph app role(s) {string.Join(", ", found.RoleValues)}. The writer holds NO Graph app role (task 266, #2605): " +
+                    "it writes Dataverse only, and on Model 1 a Graph role reaches Spaarke's own tenant. Remove the " +
+                    $"appRoleAssignment(s) (Graph DELETE /servicePrincipals/{writer:D}/appRoleAssignments/{{id}}) and find whoever granted them.";
+                _logger.LogWarning("T3 probe FAILED (ontology writer holds Graph roles): {Diagnostic}", diagnostic);
+                return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+            default:
+                return new TrapVerificationOutcome.InfraFault(Kind,
+                    "T3 verdict deferred: the ontology writer check returned no recognisable result (null or an unknown subtype).");
         }
     }
 

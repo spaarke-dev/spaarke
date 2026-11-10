@@ -80,6 +80,9 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiClientId = "11111111-2222-3333-4444-555555555555";
     private const string UamiObjectId = "66666666-7777-8888-9999-000000000000";
+    private const string WriterClientId = "77777777-aaaa-bbbb-cccc-000000000001";   // T266: ontology writer UAMI
+    private const string WriterObjectId = "77777777-aaaa-bbbb-cccc-000000000002";
+    private const string WriterSystemUserId = "eeeeeeee-4444-4444-4444-444444444444";
     private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com";
     private const string BffSystemUserId = "bbbbbbbb-1111-1111-1111-111111111111";
     private const string UamiSystemUserId = "cccccccc-2222-2222-2222-222222222222";
@@ -123,12 +126,21 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         repo.LastWrittenRun.GateStates.Should().ContainKey(H10Gates.GraphRoleParity)
             .WhoseValue.Status.Should().Be(GateState.Verified);
 
-        creator.CallCount.Should().Be(2, "both BFF app-reg and UAMI App Users are registered");
+        creator.CallCount.Should().Be(3, "the BFF app-reg, the UAMI and (T266) the ontology writer App Users are registered");
         creator.UnitNames.Should().Equal(CustomerName);
         creator.Requests.Should().OnlyContain(r => r.BusinessUnitId == CustomerUnitId,
-            "T259: both App Users are created IN the customer's unit, never the root");
+            "T259: every App User is created IN the customer's unit, never the root");
         repo.LastWrittenRun.InterStepState.CustomerBusinessUnitId.Should().Be(CustomerUnitId.ToString("D"));
-        creator.Requests.Select(r => r.ApplicationId).Should().Contain(new[] { BffAppRegId, UamiClientId });
+        creator.Requests.Select(r => r.ApplicationId).Should().Contain(new[] { BffAppRegId, UamiClientId, WriterClientId });
+
+        // T266 (#2605): the writer's App User gets NO role from H10 (H7b S24 grants exactly the writer role) and its
+        // azureactivedirectoryobjectid is its principal id (auth-v4 §10.4), never the client id.
+        var writerRequest = creator.Requests.Should().ContainSingle(r => r.ApplicationId == WriterClientId).Subject;
+        writerRequest.SecurityRoleName.Should().BeNull("H10 must never make the ontology writer System Administrator (FR-21)");
+        writerRequest.SystemUserAzureActiveDirectoryObjectId.Should().Be(WriterObjectId);
+        repo.LastWrittenRun.InterStepState.OntologyWriterSystemUserId.Should().Be(WriterSystemUserId);
+        creator.Requests.Where(r => r.ApplicationId != WriterClientId).Should()
+            .OnlyContain(r => r.SecurityRoleName == "System Administrator", "the two BFF identities keep System Administrator");
 
         // auth-v4 §10.4 (punch row A41) — the UAMI row's azureactivedirectoryobjectid
         // MUST be the UAMI's principalId (UamiObjectId), NEVER its clientId.
@@ -150,6 +162,98 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         granter.CallCount.Should().Be(1);
         granter.LastUamiObjectId.Should().Be(UamiObjectId);
         parityVerifier.CallCount.Should().Be(1);
+    }
+
+    // ---------- T266 (#2605): the ontology writer UAMI's App User ----------
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task T266_MissingOntologyWriterIdentity_IsResumable_BeforeAnyDataverseCall(bool clearClientId, bool clearObjectId)
+    {
+        var run = BuildRun();
+        if (clearClientId) run.InterStepState.OntologyWriterClientId = null;
+        if (clearObjectId) run.InterStepState.OntologyWriterObjectId = " ";
+        var repo = new FakeRepository(run, etag: "etag-t266a");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H10Rejections.MissingOntologyWriterIdentity);
+        creator.CallCount.Should().Be(0);
+        creator.UnitNames.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T266_WriterIdentityEqualToTheStampUami_IsQuarantined_BeforeAnyDataverseCall()
+    {
+        // Fail closed: the writer must never be the System Administrator UAMI (FR-21).
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = UamiClientId.ToUpperInvariant();
+        var repo = new FakeRepository(run, etag: "etag-t266b");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.OntologyWriterIsStampIdentity);
+        creator.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T266_WriterAppUserCreationFails_IsResumable_AndH10DoesNotComplete()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t266c");
+        var granter = FakeGranter.Success(3);
+        var handler = BuildHandler(repo, FakeCreator.FailForApplicationId(WriterClientId, "boom"),
+            FakeVerifier.Verified(UamiSystemUserId), granter, FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H10Rejections.OntologyWriterAppUserCreationFailed);
+        failure.Diagnostic.Should().Contain("boom");
+        repo.LastWrittenRun!.InterStepState.OntologyWriterSystemUserId.Should().BeNull();
+        granter.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T266_ARunFromBeforeTheWriter_DoesNotShortCircuit_AndTellsTheOperatorToStartANewRun()
+    {
+        // As production leaves a pre-T266 run: H2a completed without the writer outputs and H10 completed under the old key
+        // (no app-user-set marker). H10 must not short-circuit past the missing writer, and the only fix is a new run - a
+        // resume never re-runs a completed H2a.
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        run.InterStepState.OntologyWriterObjectId = null;
+        var ids = string.Join("|", ThreeRoleFixture.Select(r => r.AppRoleId!.ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal));
+        var oldHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
+        var oldKey = $"appuser-{CustomerId}-g{Convert.ToHexString(oldHash, 0, 4).ToLowerInvariant()}";
+        oldKey.Should().NotBe(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture));
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H10", IdempotencyKey = oldKey, JobId = run.RunId,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-1), CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
+        });
+        var repo = new FakeRepository(run, etag: "etag-t266d");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.RejectionCode.Should().Be(H10Rejections.MissingOntologyWriterIdentity);
+        failure.Diagnostic.Should().Contain("start a new run").And.Contain("does not re-run a completed H2a");
+        creator.CallCount.Should().Be(0);
     }
 
     // ---------- AC-2 T2 verify fail ----------
@@ -746,6 +850,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     [Theory]
     [InlineData(BffAppRegId)]
     [InlineData(UamiClientId)]
+    [InlineData(WriterClientId)]
     public async Task T259_AnAppUserAlreadyInAnotherUnit_IsQuarantined_NeverMoved(string applicationId)
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-t259d");
@@ -842,6 +947,8 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         run.InterStepState.BffAppRegId = BffAppRegId;
         run.InterStepState.MiClientId = UamiClientId;
         run.InterStepState.MiObjectId = UamiObjectId;
+        run.InterStepState.OntologyWriterClientId = WriterClientId;   // T266
+        run.InterStepState.OntologyWriterObjectId = WriterObjectId;
         run.InterStepState.DataverseEnvUrl = DataverseEnvUrl;
         return run;
     }
@@ -889,16 +996,19 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             _unit = unit ?? new CustomerBusinessUnitOutcome.Success(CustomerUnitId, Created: true);
         }
 
-        public static FakeCreator Success(CustomerBusinessUnitOutcome? unit = null) => new(req => req.ApplicationId == BffAppRegId
-            ? new DataverseAppUserCreationOutcome.Success(BffSystemUserId)
-            : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId), unit);
+        private static DataverseAppUserCreationOutcome Default(DataverseAppUserCreationRequest req) => req.ApplicationId switch
+        {
+            BffAppRegId => new DataverseAppUserCreationOutcome.Success(BffSystemUserId),
+            WriterClientId => new DataverseAppUserCreationOutcome.Success(WriterSystemUserId),
+            _ => new DataverseAppUserCreationOutcome.Success(UamiSystemUserId),
+        };
+
+        public static FakeCreator Success(CustomerBusinessUnitOutcome? unit = null) => new(Default, unit);
 
         public static FakeCreator ForeignUnitFor(string applicationId, Guid unit) => new(req =>
             req.ApplicationId == applicationId
                 ? new DataverseAppUserCreationOutcome.InForeignBusinessUnit(Guid.NewGuid().ToString(), unit)
-                : req.ApplicationId == BffAppRegId
-                    ? new DataverseAppUserCreationOutcome.Success(BffSystemUserId)
-                    : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId));
+                : Default(req));
 
         public Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
             string environmentUrl, string tenantId, string name, CancellationToken ct)
@@ -910,9 +1020,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         public static FakeCreator FailForApplicationId(string applicationId, string diagnostic) => new(req =>
             req.ApplicationId == applicationId
                 ? new DataverseAppUserCreationOutcome.Failure(diagnostic)
-                : req.ApplicationId == BffAppRegId
-                    ? new DataverseAppUserCreationOutcome.Success(BffSystemUserId)
-                    : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId));
+                : Default(req));
 
         public Task<DataverseAppUserCreationOutcome> EnsureAppUserAsync(
             DataverseAppUserCreationRequest request, CancellationToken ct)
@@ -1034,6 +1142,10 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             ExtrasCallCount++;
             return Task.FromResult(_sequence is { Count: > 0 } ? _sequence.Dequeue() : _extras);
         }
+
+        /// <summary>H10 never calls it (only H13 T3 does, for the ontology writer).</summary>
+        public Task<GraphAppRoleExtrasResult> FindAnyRolesAsync(string servicePrincipalObjectId, string tenantId, CancellationToken ct)
+            => throw new InvalidOperationException("H10 must not call FindAnyRolesAsync.");
     }
 
     private sealed class FakeRegistry : IGraphAppRolesRegistry
