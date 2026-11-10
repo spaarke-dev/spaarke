@@ -210,6 +210,45 @@ public sealed class GraphRestAppRoleReconcileTests
         graph.Requests.Should().Contain(r => r.Contains("/servicePrincipals/x%2F..%2FservicePrincipals%2Fother/appRoleAssignments"));
     }
 
+    // ---- T266 (#2605): FindAnyRolesAsync — an identity that must hold no Graph app role (the ontology writer) ----
+
+    [Fact]
+    public async Task FindAny_NamesEveryGraphRole_IncludingTheStampsOwn_IgnoresOtherResources()
+    {
+        var graph = new ScriptedGraph();
+        graph.Assignments(page1: new[]
+        {
+            ("a-fsc", FscSelected, GraphSpId), ("a-sites", SitesReadWriteAll, GraphSpId), ("a-other", UserInviteAll, OtherResourceSpId),
+        });
+
+        var result = await Verifier(graph).FindAnyRolesAsync(StampSpId, TenantId, CancellationToken.None);
+
+        result.Should().BeOfType<GraphAppRoleExtrasResult.Found>().Which.RoleValues
+            .Should().BeEquivalentTo("FileStorageContainer.Selected", "Sites.ReadWrite.All");
+    }
+
+    [Fact]
+    public async Task FindAny_NoGraphAssignment_IsNone()
+    {
+        var graph = new ScriptedGraph();
+        graph.Assignments(page1: new[] { ("a-other", UserInviteAll, OtherResourceSpId) });
+
+        (await Verifier(graph).FindAnyRolesAsync(StampSpId, TenantId, CancellationToken.None))
+            .Should().BeOfType<GraphAppRoleExtrasResult.None>();
+    }
+
+    [Fact]
+    public async Task FindAny_ReadFailsOrIsUnreadable_IsUnknown_NeverNone()
+    {
+        var failing = new ScriptedGraph { AssignmentsStatus = HttpStatusCode.InternalServerError };
+        var unreadable = new ScriptedGraph { RawAssignmentsBody = "{\"@odata.context\":\"x\"}" };
+
+        (await Verifier(failing).FindAnyRolesAsync(StampSpId, TenantId, CancellationToken.None))
+            .Should().BeOfType<GraphAppRoleExtrasResult.Unknown>();
+        (await Verifier(unreadable).FindAnyRolesAsync(StampSpId, TenantId, CancellationToken.None))
+            .Should().BeOfType<GraphAppRoleExtrasResult.Unknown>();
+    }
+
     [Fact]
     public async Task FindUnexpected_OnlyAllowed_IsNone()
     {

@@ -48,6 +48,13 @@
 // id ("D"-format GUID, InterStepState.CustomerBusinessUnitId) to BOTH slots. This clause reads both back and
 // compares them as GUIDs (hex case is irrelevant). Only the GUIDs — public identifiers — are ever echoed.
 //
+// THE TRAP (ontology writer identity, task 266; #2605). The BFF writes Signals and Decision Records as a separate
+// managed identity (OntologyWriterCredentialFactory, config key Ontology:Writer:ManagedIdentityClientId) that holds only
+// "Spaarke Ontology Service" and the two ontology-writer field profiles (H7b S24). Without the setting the factory fails
+// closed and every such write is refused; the stamp identity there would write as System Administrator (FR-21). H2a
+// creates the writer UAMI and attaches it to both slots; H4b writes its client id to both. This clause reads both back,
+// compares them as GUIDs with InterStepState.OntologyWriterClientId, and fails on the stamp identity's own client id.
+//
 // OUTCOMES
 //   Passed     — both slots: Customer__Id == request.CustomerId (ordinal), AND the
 //                settings under WorkforceIdentity__CustomerTenantIds (every child, the
@@ -57,7 +64,8 @@
 //                AND the BFF app registration's removeUnverifiedEmailClaim is true;
 //                AND both slots: ExternalAccess__CustomerBusinessUnitId parses as a GUID equal to the
 //                run's InterStepState.CustomerBusinessUnitId (the name is matched case-insensitively,
-//                like Customer__Id).
+//                like Customer__Id); AND both slots: Ontology__Writer__ManagedIdentityClientId parses as a GUID
+//                equal to the run's InterStepState.OntologyWriterClientId and unequal to the stamp's own client id.
 //   Failed     — either slot missing / blank / a different Customer__Id (a case-only
 //                difference included: the value is canonical by the customerId standard
 //                and is never normalised — INCOMING §1.1), two Customer__Id names differing
@@ -67,14 +75,15 @@
 //                (authenticationBehaviors itself null), or the registration not found (404);
 //                either slot's ExternalAccess__CustomerBusinessUnitId missing / blank / not a GUID /
 //                a different GUID, two names differing only in case with different values (ambiguous),
-//                or a run that carries no H10 customer business unit (blank / not a GUID).
+//                or a run that carries no H10 customer business unit (blank / not a GUID); the same shapes
+//                for Ontology__Writer__ManagedIdentityClientId, plus the stamp identity's client id there.
 //   InfraFault — a request field (incl. BffAppRegId, TenantId) is missing or unparseable, an
 //                ARM or Graph read fails (ODataError, 401/403/5xx, timeout), or the reads
 //                exceed H13AcceptanceOptions.TrapVerifierTimeout. Never Passed on a read failure.
 //
 // What it is NOT: Customer__Id is defence in depth and an observability handle,
 // not the customer boundary — that is the dedicated per-customer resource
-// (INCOMING §5). Only Customer__Id, the workforce tenant ids and the customer business unit id (public identifiers)
+// (INCOMING §5). Only Customer__Id, the workforce tenant ids, the customer business unit id and the writer client id (public identifiers)
 // are ever logged or reported (length-capped, control characters escaped); no other
 // app setting is (several are Key Vault references).
 //
@@ -103,7 +112,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// H13 trap T7 — both App Service slots carry <c>Customer__Id</c> equal to the run's customerId and (task 255) exactly
 /// the run's customer workforce tenant list, and (task 264) the stamp's BFF app registration has
 /// <c>authenticationBehaviors.removeUnverifiedEmailClaim = true</c>, and (task 265) both slots carry
-/// <c>ExternalAccess__CustomerBusinessUnitId</c> equal to H10's customer business unit.
+/// <c>ExternalAccess__CustomerBusinessUnitId</c> equal to H10's customer business unit, and (task 266) both slots carry
+/// <c>Ontology__Writer__ManagedIdentityClientId</c> equal to H2a's ontology writer identity.
 /// </summary>
 public sealed class CustomerIdentityT7Probe : ITrapProbe
 {
@@ -115,6 +125,9 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
 
     /// <summary>Task 265: the app setting the BFF binds to <c>ExternalAccess:CustomerBusinessUnitId</c> (H4b writes it from H10's output).</summary>
     internal const string CustomerBusinessUnitSettingName = "ExternalAccess__CustomerBusinessUnitId";
+
+    /// <summary>Task 266: the app setting the BFF binds to <c>Ontology:Writer:ManagedIdentityClientId</c> (H4b writes it from H2a's output).</summary>
+    internal const string OntologyWriterSettingName = "Ontology__Writer__ManagedIdentityClientId";
 
     /// <summary>Staging slot name (parity with app-service.bicep and the T1 / T5 probes).</summary>
     internal const string DefaultStagingSlotName = "staging";
@@ -348,9 +361,13 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
         var productionBusinessUnit = CheckCustomerBusinessUnit(productionSettings, request.CustomerBusinessUnitId);
         var stagingBusinessUnit = CheckCustomerBusinessUnit(stagingSettings, request.CustomerBusinessUnitId);
 
+        var productionWriter = CheckOntologyWriter(productionSettings, request.OntologyWriterClientId, request.UamiClientId);
+        var stagingWriter = CheckOntologyWriter(stagingSettings, request.OntologyWriterClientId, request.UamiClientId);
+
         if (productionShape == SlotShape.Ok && stagingShape == SlotShape.Ok
             && productionWorkforce is null && stagingWorkforce is null
             && productionBusinessUnit is null && stagingBusinessUnit is null
+            && productionWriter is null && stagingWriter is null
             && unverifiedEmailProblem is null)
         {
             if (logPass)
@@ -406,6 +423,25 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
                       "then re-run H13."
                     : ". H10 never recorded the unit on this run, so only a new run fixes it."));
         }
+        if (productionWriter is not null || stagingWriter is not null)
+        {
+            var runHasWriter = TryParseGuid(request.OntologyWriterClientId, out var expectedWriter);
+            problems.Add(
+                $"expected both slots to carry {OntologyWriterSettingName} = " +
+                (runHasWriter
+                    ? $"'{expectedWriter:D}' (H2a's ontology writer identity). "
+                    : "H2a's ontology writer identity — but this run carries no InterStepState.OntologyWriterClientId (blank or not a GUID): " +
+                      "H2a did not record it, or the run predates task 266. ") +
+                $"Observed: production {productionWriter ?? "[OK]"}; {DefaultStagingSlotName} {stagingWriter ?? "[OK]"}. " +
+                "Without it the BFF's ontology writer credential fails closed and every Signal and Decision Record write is " +
+                "refused; the stamp identity must never take its place — it holds System Administrator (FR-21). H4b writes it " +
+                "from H2a's output to both slots — start a new run (a resume does not re-run a completed H4b)" +
+                (runHasWriter
+                    ? $", or set it on the affected slot(s) with `az webapp config appsettings set -g {request.ResourceGroupName} " +
+                      $"-n {request.AppServiceName} [--slot {DefaultStagingSlotName}] --settings {OntologyWriterSettingName}={expectedWriter:D}`, " +
+                      "then re-run H13."
+                    : ". H2a never recorded the writer on this run, so only a new run fixes it."));
+        }
         if (unverifiedEmailProblem is not null)
         {
             problems.Add(
@@ -432,34 +468,64 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
     /// case-variant names with different values are ambiguous). Only this setting's value is echoed.
     /// </summary>
     internal static string? CheckCustomerBusinessUnit(IDictionary<string, string>? settings, string? expected)
+        => CheckGuidSetting(settings, CustomerBusinessUnitSettingName, expected,
+            "[NO EXPECTED UNIT — the run carries no H10 customer business unit to compare against]", forbidden: null);
+
+    /// <summary>
+    /// Task 266: null when the slot carries <see cref="OntologyWriterSettingName"/> as a GUID equal to
+    /// <paramref name="expected"/> (H2a's ontology writer client id) and unequal to <paramref name="stampClientId"/> (the
+    /// stamp identity, System Administrator — FR-21); otherwise a bracketed description of what is wrong. Matched and
+    /// echoed exactly as <see cref="CheckCustomerBusinessUnit"/>.
+    /// </summary>
+    internal static string? CheckOntologyWriter(IDictionary<string, string>? settings, string? expected, string? stampClientId)
+        => CheckGuidSetting(settings, OntologyWriterSettingName, expected,
+            "[NO EXPECTED WRITER — the run carries no H2a ontology writer client id to compare against]",
+            forbidden: TryParseGuid(stampClientId, out var stamp) ? stamp : null,
+            forbiddenLabel: "the stamp identity's own client id (System Administrator - FR-21)");
+
+    /// <summary>
+    /// The GUID-valued setting check shared by the business-unit and writer clauses: a blank or unparseable
+    /// <paramref name="expected"/> is itself a problem; the NAME is matched case-insensitively (two case-variant names with
+    /// different values are ambiguous); the value is compared as a GUID. A value equal to <paramref name="forbidden"/> is
+    /// reported as such, even when it is also the expected one. Only this setting's value is echoed.
+    /// </summary>
+    private static string? CheckGuidSetting(
+        IDictionary<string, string>? settings, string name, string? expected, string noExpected, Guid? forbidden,
+        string? forbiddenLabel = null)
     {
-        if (!TryParseBusinessUnit(expected, out var expectedUnit))
+        if (!TryParseGuid(expected, out var expectedValue))
         {
-            return "[NO EXPECTED UNIT — the run carries no H10 customer business unit to compare against]";
+            return noExpected;
         }
 
-        var lookup = FindSetting(settings, CustomerBusinessUnitSettingName);
+        var lookup = FindSetting(settings, name);
         if (lookup.Ambiguous)
         {
-            return $"[AMBIGUOUS — several {CustomerBusinessUnitSettingName} names differing only in case, with different values]";
+            return $"[AMBIGUOUS — several {name} names differing only in case, with different values]";
         }
         if (lookup.Value is null)
         {
-            return $"[MISSING — no {CustomerBusinessUnitSettingName} setting]";
+            return $"[MISSING — no {name} setting]";
         }
         if (string.IsNullOrWhiteSpace(lookup.Value))
         {
-            return $"[BLANK — {CustomerBusinessUnitSettingName} is set but empty]";
+            return $"[BLANK — {name} is set but empty]";
         }
         if (!Guid.TryParse(lookup.Value.Trim(), out var observed))
         {
-            return $"[UNPARSEABLE — {CustomerBusinessUnitSettingName}='{Sanitize(lookup.Value)}' is not a GUID]";
+            return $"[UNPARSEABLE — {name}='{Sanitize(lookup.Value)}' is not a GUID]";
         }
-        return observed == expectedUnit ? null : $"[MISMATCH — {CustomerBusinessUnitSettingName}='{observed:D}']";
+        if (forbidden is { } forbiddenValue && observed == forbiddenValue)
+        {
+            return $"[FORBIDDEN — {name}='{observed:D}' is {forbiddenLabel}]";
+        }
+        return observed == expectedValue ? null : $"[MISMATCH — {name}='{observed:D}']";
     }
 
-    private static bool TryParseBusinessUnit(string? value, out Guid unit)
-        => Guid.TryParse(value?.Trim(), out unit) && unit != Guid.Empty;
+    private static bool TryParseBusinessUnit(string? value, out Guid unit) => TryParseGuid(value, out unit);
+
+    private static bool TryParseGuid(string? value, out Guid parsed)
+        => Guid.TryParse(value?.Trim(), out parsed) && parsed != Guid.Empty;
 
     /// <summary>
     /// Task 255: null when the slot's workforce tenant settings are exactly <paramref name="expected"/>; otherwise a

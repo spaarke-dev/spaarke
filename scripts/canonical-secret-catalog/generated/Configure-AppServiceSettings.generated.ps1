@@ -77,6 +77,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KvVaultUri,
 
+    [Parameter(Mandatory = $true)]
+    [string]$OntologyWriterClientId,
+
     [Parameter(Mandatory = $false)]
     [string]$OpenaiMonthlyLimitUsd = '',
 
@@ -165,6 +168,7 @@ $settings = @(
     "ManagedIdentity__ClientId=$UamiClientId",
     "Membership__EventPublisher__ServiceBusNamespace=$ServiceBusFqns",
     "Membership__JunctionUpdater__ServiceBusNamespace=$ServiceBusFqns",
+    "Ontology__Writer__ManagedIdentityClientId=$OntologyWriterClientId",
     "PublicConfig__BffUrl=$BffUrl",
     "PublicConfig__MsalClientId=$BffAppClientId",
     "PublicConfig__TenantId=$TenantId",

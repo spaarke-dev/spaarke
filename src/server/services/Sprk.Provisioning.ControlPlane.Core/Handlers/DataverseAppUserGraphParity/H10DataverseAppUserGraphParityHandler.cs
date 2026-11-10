@@ -298,6 +298,23 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 "InterStepState.miObjectId is not populated — the UAMI (H2a/uami.bicep) must complete before H10.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (string.IsNullOrWhiteSpace(interStep.OntologyWriterClientId) || string.IsNullOrWhiteSpace(interStep.OntologyWriterObjectId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingOntologyWriterIdentity,
+                "InterStepState.ontologyWriterClientId / ontologyWriterObjectId is not populated — H2a deploys the ontology " +
+                "writer UAMI (customer.bicep, task 266) before H10. A run whose H2a completed before task 266 never recorded " +
+                "it, and a resume does not re-run a completed H2a: start a new run. Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (string.Equals(interStep.OntologyWriterClientId, interStep.MiClientId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Fail closed: the writer must never be the stamp UAMI, which H10 makes System Administrator (FR-21).
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterIsStampIdentity,
+                $"InterStepState.ontologyWriterClientId equals the stamp UAMI's client id ({interStep.MiClientId}). The Signal / " +
+                "Decision Record writer must be its own least-privileged identity, never the System Administrator UAMI. Fix " +
+                "customer.bicep's outputs, then start a new run. Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,
@@ -410,6 +427,28 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
         var uamiSystemUserIdFromCreate = ((DataverseAppUserCreationOutcome.Success)uamiOutcome).SystemUserId;
+
+        // (10b) Task 266 (#2605): the ontology writer UAMI's App User — IN the customer unit, with NO role (SecurityRoleName
+        //       null). H7b S24 gives it exactly the writer role and profiles; never System Administrator (FR-21). The
+        //       explicit azureactivedirectoryobjectid is the writer's principal id, as for the stamp UAMI (auth-v4 §10.4).
+        var writerClientId = interStep.OntologyWriterClientId!;
+        var writerOutcome = await _appUserCreator.EnsureAppUserAsync(
+            new DataverseAppUserCreationRequest(
+                dataverseEnvUrl, tenantId, writerClientId, SecurityRoleName: null, customerUnitId,
+                SystemUserAzureActiveDirectoryObjectId: interStep.OntologyWriterObjectId),
+            cancellationToken).ConfigureAwait(false);
+        if (writerOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit writerElsewhere)
+        {
+            return await ForeignUnitAsync(run, etag, "ontology writer UAMI", writerClientId, writerElsewhere, customerUnitId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        if (writerOutcome is DataverseAppUserCreationOutcome.Failure writerFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.OntologyWriterAppUserCreationFailed,
+                $"Ontology writer UAMI App User registration failed: {writerFailure.Diagnostic}", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        var writerSystemUserId = ((DataverseAppUserCreationOutcome.Success)writerOutcome).SystemUserId;
 
         // (11) T2 SILENT-FAIL TRAP — independent post-registration re-query.
         var t2Result = await _appUserVerifier.VerifyAsync(
@@ -560,8 +599,14 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         return await MarkCompleteAsync(
             run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate, customerUnitId,
-            envelope, cancellationToken).ConfigureAwait(false);
+            writerSystemUserId, envelope, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The set of application users H10 registers, folded into the idempotency key so a run completed under an older set
+    /// re-runs H10. <c>2</c> = task 266 added the ontology writer UAMI's application user (no role).
+    /// </summary>
+    internal const string AppUserSetVersion = "app-user-set=2";
 
     /// <summary>T259: an App User already in another business unit — QuarantineRequired, nothing moved.</summary>
     private Task<HandlerResult> ForeignUnitAsync(
@@ -585,7 +630,8 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
         ArgumentNullException.ThrowIfNull(entraRoles);
-        var ids = string.Join("|", entraRoles.Select(r => (r.AppRoleId ?? string.Empty).ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal));
+        var ids = string.Join("|", entraRoles.Select(r => (r.AppRoleId ?? string.Empty).ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal))
+            + "|" + AppUserSetVersion;
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
         return $"appuser-{customerId}-g{Convert.ToHexString(hash, 0, 4).ToLowerInvariant()}";
     }
@@ -659,6 +705,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         string uamiSystemUserId,
         string bffSystemUserId,
         Guid customerUnitId,
+        string writerSystemUserId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -681,6 +728,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         run.InterStepState.SystemUserId = uamiSystemUserId;
         run.InterStepState.BffAppRegSystemUserId = bffSystemUserId;
         run.InterStepState.CustomerBusinessUnitId = customerUnitId.ToString("D");   // T259 — read by H7b and H11
+        run.InterStepState.OntologyWriterSystemUserId = writerSystemUserId;          // T266 — read by H7b S24
 
         run.GateStates[H10Gates.AppUserCreated] = new GateEntry
         {

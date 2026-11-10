@@ -44,6 +44,15 @@ public static class H10Rejections
     /// <summary>InterStepState.miObjectId missing — H2a (uami.bicep) has not completed yet.</summary>
     public const string MissingUamiObjectId = "h10-missing-uami-object-id";
 
+    /// <summary>Task 266: InterStepState.ontologyWriterClientId / ontologyWriterObjectId missing — H2a has not deployed the writer UAMI.</summary>
+    public const string MissingOntologyWriterIdentity = "h10-missing-ontology-writer-identity";
+
+    /// <summary>Task 266: the ontology writer's client id equals the stamp UAMI's — the writer would be System Administrator (FR-21).</summary>
+    public const string OntologyWriterIsStampIdentity = "h10-ontology-writer-is-stamp-identity";
+
+    /// <summary>Task 266: the ontology writer UAMI's App User could not be found or created.</summary>
+    public const string OntologyWriterAppUserCreationFailed = "h10-ontology-writer-app-user-creation-failed";
+
     /// <summary>InterStepState.dataverseEnvUrl missing — H5/H6 has not completed yet.</summary>
     public const string MissingDataverseEnvUrl = "h10-missing-dataverse-env-url";
 

@@ -50,6 +50,9 @@ param appServicePlanId string
 @description('Resource ID of the User-Assigned Managed Identity to bind to this slot. REQUIRED (T5 structural fix). MUST equal the `userAssignedIdentityResourceId` bound to the parent App Service (`modules/app-service.bicep`) so slot-swap does NOT rotate the effective identity. Sourced from `modules/uami.bicep` (task 028) as `uami.outputs.id`.')
 param userAssignedIdentityResourceId string
 
+@description('Further user-assigned identities to attach next to userAssignedIdentityResourceId (task 266 / #2605: the ontology writer UAMI). They are only ATTACHED: keyVaultReferenceIdentity and the BFF runtime identity stay userAssignedIdentityResourceId. Pass the SAME list to the site and its slot so a swap changes no attached identity. Default empty - other callers are unchanged.')
+param additionalUserAssignedIdentityResourceIds array = []
+
 @description('Health check path for the slot')
 param healthCheckPath string = '/healthz'
 
@@ -75,9 +78,10 @@ resource slot 'Microsoft.Web/sites/slots@2023-01-01' = {
   tags: tags
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${userAssignedIdentityResourceId}': {}
-    }
+    userAssignedIdentities: union(
+      { '${userAssignedIdentityResourceId}': {} },
+      toObject(additionalUserAssignedIdentityResourceIds, id => id, id => {})
+    )
   }
   properties: {
     serverFarmId: appServicePlanId
