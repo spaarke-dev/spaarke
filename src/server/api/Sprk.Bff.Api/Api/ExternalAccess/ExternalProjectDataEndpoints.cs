@@ -2801,8 +2801,9 @@ public static class ExternalProjectDataEndpoints
             return (false, false);
         if (links.Count == 0)
             return (true, false);
+        // EB-D-215: a single record keeps its uniform refusal for an undecidable link; only a list says truncated for it.
         var (visible, faulted) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
-            caller, new[] { links }, l => l, hideInvoices, logger, surface, ct).ConfigureAwait(false);
+            caller, new[] { links }, l => l, hideInvoices, logger, surface, ct, undecidableTruncates: false).ConfigureAwait(false);
         return (visible.Count == 1, visible.Count == 0 && faulted);
     }
 

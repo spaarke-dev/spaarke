@@ -232,10 +232,66 @@ public sealed class ExternalInvoiceLinkedFamilyRouteTests : IClassFixture<Extern
         Child("todo-event", "Chained", EventChain(WalkBound + pastTheBound, topIsOtherFirms ? _other : _own));
         Child("todo-event", "Not filed under anything", null);
 
-        var (names, _) = await ListAsync("sprk_todo");
+        var (names, truncated) = await ListAsync("sprk_todo");
 
         names.Contains("Chained").Should().Be(shown);
         names.Should().Contain("Not filed under anything");
+        // EB-D-215 (ruling D-70): a row hidden because its chain is past the bound is a fault on a list, so the list says truncated;
+        // a row decided within the bound (shown, or hidden by another firm's invoice) is an answer and does not.
+        truncated.Should().Be(pastTheBound > 0);
+    }
+
+    // =====================================================================
+    // EB-D-215: a row hidden because its chain is undecidable says truncated
+    // =====================================================================
+
+    [Theory(DisplayName = "EB-D-215 REST list (must fire): a to-do hidden because its chain is undecidable (a cycle, an unreadable link, a row above that does not come back) makes the list say truncated; a decided sibling is listed")]
+    [InlineData("cycle")]
+    [InlineData("unreadable-link")]
+    [InlineData("row-above-missing")]
+    public async Task List_AnUndecidableChain_SaysTruncated(string kind)
+    {
+        switch (kind)
+        {
+            case "cycle":
+                // Two events, each regarding the other, both filed under the matter.
+                var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+                _fixture.Data.AddFilingRow("sprk_event", first,
+                    ("sprk_regardingmatter", "sprk_matter", Matter), ("sprk_regardingevent", "sprk_event", second));
+                _fixture.Data.AddFilingRow("sprk_event", second,
+                    ("sprk_regardingmatter", "sprk_matter", Matter), ("sprk_regardingevent", "sprk_event", first));
+                Child("todo-event", "Undecidable", first);
+                break;
+            case "unreadable-link":
+                // The service request edge: only the invoice walk reads it (a service request is outside the Secure lineage map, so
+                // the task 187 live-parent rule does not decide this row first).
+                var garbled = Child("todo-servicerequest", "Undecidable", null);
+                _fixture.Data.SetColumn("sprk_todos", "sprk_todoid", garbled, "_sprk_regardingservicerequest_value", "not-a-guid");
+                break;
+            default:
+                Child("todo-event", "Undecidable", Guid.NewGuid());
+                break;
+        }
+
+        Child("todo-event", "Under own firm's", RowAbove("sprk_event", _own));
+
+        var (names, truncated) = await ListAsync("sprk_todo");
+
+        names.Should().Equal("Under own firm's");
+        truncated.Should().BeTrue("a row the walk could not decide is a fault on a list, not an answer");
+    }
+
+    [Fact(DisplayName = "EB-D-215 REST list (must not fire): a list whose rows are all decided - hidden by another firm's invoice, shown, or filed under nothing - does not say truncated")]
+    public async Task List_WithNoUndecidableRow_DoesNotSayTruncated()
+    {
+        Child("todo-event", "Under other firm's", EventChain(WalkBound, _other));
+        Child("todo-event", "Under own firm's", EventChain(WalkBound, _own));
+        Child("todo-event", "Not filed under anything", null);
+
+        var (names, truncated) = await ListAsync("sprk_todo");
+
+        names.Should().BeEquivalentTo("Under own firm's", "Not filed under anything");
+        truncated.Should().BeFalse();
     }
 
     [Fact(DisplayName = "F3b fix round 1 REST single record (bound): delete-own of a to-do one hop past the bound is the uniform refusal, not a 5xx")]

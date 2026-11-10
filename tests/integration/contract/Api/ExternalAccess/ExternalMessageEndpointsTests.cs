@@ -1028,6 +1028,43 @@ public class ExternalMessageEndpointsTests
         body.Value.Select(m => m.SprkCommunicationid).Should().Equal(new[] { plain.ToString("D") });
     }
 
+    // EB-D-215 (ruling D-70): a message withheld because a link it decides on cannot be decided is a fault on the list, so the thread
+    // read says truncated, as for a failed decision. Must not fire: the fix3b theory above (a decided hidden invoice is no fault).
+    [Theory(DisplayName = "EB-D-215 thread (must fire): a message withheld because its invoice chain is undecidable (an unreadable link, a cycle above it) says truncated; a plain message is listed")]
+    [InlineData("unreadable-link")]
+    [InlineData("cycle")]
+    public async Task EbD215_AMessageWithAnUndecidableChain_OnAMattersThread_SaysTruncated(string kind)
+    {
+        var matter = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var undecidable = Guid.NewGuid();
+        var row = MessageRow(undecidable, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        if (kind == "unreadable-link")
+        {
+            row["_sprk_regardinginvoice_value"] = El("not-a-guid");
+        }
+        else
+        {
+            // Two events, each regarding the other, both filed under the matter.
+            var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+            _roots.AddFilingRow("sprk_event", first,
+                ("sprk_regardingmatter", "sprk_matter", matter), ("sprk_regardingevent", "sprk_event", second));
+            _roots.AddFilingRow("sprk_event", second,
+                ("sprk_regardingmatter", "sprk_matter", matter), ("sprk_regardingevent", "sprk_event", first));
+            row["_sprk_regardingevent_value"] = El(first.ToString("D"));
+        }
+
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _invoiceHiding = InvoiceHidingStub.NoneHidden();
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        var body = (await Get("matters", matter, Ciam(matter: matter)))
+            .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
+
+        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(new[] { plain.ToString("D") });
+        body.Truncated.Should().BeTrue("a message the walk could not decide is a fault on the list, not an answer");
+    }
+
     // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice whose core record is a work assignment is reached through it.
     [Fact(DisplayName = "130-0 fix2 K3 thread (must not fire / must fire / fault): an invoice reached only through its work assignment")]
     public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ItsThreadIsReadThroughIt()

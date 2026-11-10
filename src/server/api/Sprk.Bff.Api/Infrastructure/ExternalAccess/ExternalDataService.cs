@@ -2300,6 +2300,10 @@ public class ExternalDataService
     /// not visible (or its link is unreadable). No seam, a seam that throws and a faulted decision hide EVERY invoice-linked row of the
     /// page (fail closed), and the answer says <c>Truncated</c> when that dropped a row. Logs carry counts only.
     /// </summary>
+    /// <param name="undecidableTruncates">EB-D-215 (ruling D-70: on a list a fault hides the rows and sets truncated): a row hidden
+    /// because a link it decides on cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>: a chain past the bound, a
+    /// cycle, an unreadable link or a parent that does not come back) is a fault, not an answer, so the list says <c>Truncated</c>.
+    /// True for every list; false only for a single-record decision, which keeps its uniform hidden answer.</param>
     internal static async Task<(List<T> Visible, bool Truncated)> HideInvoiceLinkedRowsAsync<T>(
         CallerPrincipal caller,
         IReadOnlyList<T> rows,
@@ -2307,7 +2311,8 @@ public class ExternalDataService
         ExternalInvoiceHiding? hideInvoices,
         ILogger logger,
         string surface,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool undecidableTruncates = true)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(rows);
@@ -2329,7 +2334,9 @@ public class ExternalDataService
         // decision) says Truncated; a row dropped for a decided "not visible" does not.
         var droppedForFault = faulted || (decision is not null && rows.Where((_, i) => links[i].Count > 0
             && !links[i].All(decision.IsVisible) && links[i].Any(decision.IsFaultedFor)).Any());
-        return (visible, droppedForFault && visible.Count != rows.Count);
+        // EB-D-215: a row dropped because a link it decides on cannot be decided (the unreadable link is never visible) says Truncated too.
+        var droppedUndecidable = undecidableTruncates && links.Any(l => l.Contains(ExternalDocumentNarrowing.UnreadableLink));
+        return (visible, (droppedForFault || droppedUndecidable) && visible.Count != rows.Count);
     }
 
     /// <summary>

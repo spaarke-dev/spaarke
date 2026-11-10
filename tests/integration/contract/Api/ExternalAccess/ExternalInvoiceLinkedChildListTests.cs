@@ -651,7 +651,7 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         truncated.Should().BeTrue();
     }
 
-    [Fact(DisplayName = "130-0 fix1 filter: an unreadable invoice link hides its row, and is never put to the seam")]
+    [Fact(DisplayName = "130-0 fix1 filter / EB-D-215: an unreadable invoice link hides its row, is never put to the seam, and the list says truncated")]
     public async Task TheFilter_AnUnreadableLink_HidesTheRow()
     {
         var garbled = new Dictionary<string, System.Text.Json.JsonElement>
@@ -666,8 +666,30 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
 
         links.Should().Equal(ExternalDocumentNarrowing.UnreadableLink);
         visible.Select(r => r.Item1).Should().Equal("own");
-        truncated.Should().BeFalse("an unreadable link is an answer (hide), not a read failure");
+        truncated.Should().BeTrue("EB-D-215: a row withheld because its link cannot be decided means the list may be short");
         _hiding.Calls.Should().ContainSingle().Which.Should().Equal(_own);
+    }
+
+    [Theory(DisplayName = "EB-D-215 (must fire / must not fire): a row withheld as undecidable (a chain past the bound, a cycle, an unreadable link) says truncated on a list; a single-record decision keeps its uniform answer; a page of decided rows does not")]
+    [InlineData("list", true)]
+    [InlineData("single-record", false)]
+    [InlineData("decided-only", false)]
+    public async Task TheFilter_AnUndecidableRow_SaysTruncated_OnAListOnly(string kind, bool expected)
+    {
+        // What the descendant walk returns for an undecidable chain: the unreadable link alongside any invoice it did decide.
+        IReadOnlyList<Guid> undecidable = new[] { _own, ExternalDocumentNarrowing.UnreadableLink };
+        var rows = kind == "decided-only"
+            ? new[] { ("hidden", (IReadOnlyList<Guid>)new[] { _other }), ("own", (IReadOnlyList<Guid>)new[] { _own }), ("plain", Array.Empty<Guid>()) }
+            : new[] { ("undecidable", undecidable), ("own", (IReadOnlyList<Guid>)new[] { _own }), ("plain", Array.Empty<Guid>()) };
+        var hiding = InvoiceHidingStub.Hiding(_other);
+
+        var (visible, truncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            CallerOn(Matter), rows, r => r.Item2, hiding.Seam, NullLogger.Instance, "test", CancellationToken.None,
+            undecidableTruncates: kind != "single-record");
+
+        visible.Select(r => r.Item1).Should().Equal("own", "plain");
+        truncated.Should().Be(expected);
+        hiding.Calls.Should().OnlyContain(c => !c.Contains(ExternalDocumentNarrowing.UnreadableLink), "the unreadable link is never put to the seam");
     }
 
     [Fact(DisplayName = "130-0 fix3 absent link (must fire / must not fire): an absent link column reads as unreadable (hidden); a selected explicit null is no link")]

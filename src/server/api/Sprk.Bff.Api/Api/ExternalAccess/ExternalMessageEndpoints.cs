@@ -659,7 +659,10 @@ public static class ExternalMessageEndpoints
 
         // Task 130-0 fix round 2 (F2): a decision that could not be made (faulted, or no predicate) withholds every message regarding
         // an asked invoice; the read reports it as Truncated, so a fault never reads as "there are no more messages".
-        if (invoiceFault is not null && ((asked.Count > 0 && (decision is null || decision.AnyFaulted)) || chainFailed))
+        // EB-D-215 (ruling D-70): so does a message withheld because a link it decides on cannot be decided (a chain past the bound, a
+        // cycle, an unreadable link or a parent that does not come back: the unreadable link, never visible).
+        var undecidable = candidates.Any(c => InvoicesOf(c) is { } links && links.Contains(ExternalDocumentNarrowing.UnreadableLink));
+        if (invoiceFault is not null && ((asked.Count > 0 && (decision is null || decision.AnyFaulted)) || chainFailed || undecidable))
             invoiceFault.Value = true; // task 130-0 fix round 3b: a whole-read fault or one invoice's own failed decision; F3b: a chain fault
 
         return row => InvoicesOf(row) is { } invoices && invoices.All(id =>
