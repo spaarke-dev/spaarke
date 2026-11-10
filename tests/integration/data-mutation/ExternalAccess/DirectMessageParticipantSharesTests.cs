@@ -1,14 +1,19 @@
 using FluentAssertions;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -136,9 +141,12 @@ public class DirectMessageParticipantSharesTests
 
     // ── The scheduled job ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private SecureChildShareReconciliationJob Job()
+    private SecureChildShareReconciliationJob Job(GateDecisionRecordSharing? gate = null)
     {
-        var services = new ServiceCollection()
+        var services = new ServiceCollection();
+        if (gate is not null)
+            services.AddSingleton(gate); // 198 pass 2 N2: the host registers it (SignalsModule)
+        var provider = services
             .AddSingleton(_world.Synchronizer(_shares))
             .AddSingleton(SecureChildShareWorld.EntitiesOver(() => _world).Object)
             .AddSingleton<IDataverseRecordShareService>(_shares)
@@ -148,7 +156,7 @@ public class DirectMessageParticipantSharesTests
             .AddSingleton<DataverseWebApiClient>(_users)
             .BuildServiceProvider();
         return new SecureChildShareReconciliationJob(
-            services.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), _time,
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), _time,
             NullLogger<SecureChildShareReconciliationJob>.Instance);
     }
 
@@ -1046,5 +1054,69 @@ public class DirectMessageParticipantSharesTests
         foreach (var user in new[] { Caller, Other })
             Holds(table, id, user).Should().BeTrue($"{table}");
         Revokes().Should().Be(0);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Pass 2, N2: a participant the job grants on the message also gets the message's gate Decision Record
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid GateWriter = Guid.Parse("c1980000-0000-4000-8000-0000000000f1");
+
+    /// <summary>The REAL <see cref="GateDecisionRecordSharing"/> over this world and share table (the writer's identity is
+    /// <see cref="GateWriter"/>), with the Direct lookup and the Secure settings, as the host composes it.</summary>
+    private GateDecisionRecordSharing GateOverTheWorld()
+    {
+        var org = new Mock<IOrganizationServiceAsync2>();
+        org.Setup(o => o.ExecuteAsync(It.IsAny<WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<OrganizationResponse>(new WhoAmIResponse { Results = { ["UserId"] = GateWriter } }));
+        return new GateDecisionRecordSharing(
+            SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares,
+            new OntologyWriterDataverseClient(() => org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
+            Mock.Of<IRecordOwnershipResolver>(), Mock.Of<IMembershipCacheInvalidator>(), NullLogger<GateDecisionRecordSharing>.Instance,
+            Lookup(), _configuration);
+    }
+
+    /// <summary>A Direct message whose Sender (<see cref="Caller"/>) reads every row and whose Recipient (<see cref="Other"/>) reads none
+    /// (a secure exit back to Direct whose Part C step did not re-grant them), and its gate record, owned by the Direct team and shared
+    /// with the Sender only (the gate step computed the audience as the Sender).</summary>
+    private (Guid Message, Guid Record, IReadOnlyList<(string Table, Guid Id)> Rows) SecureExitWhoseRecipientWasNotRegranted()
+    {
+        var (message, rows) = DirectMessage();
+        _world.User(Caller, SecureChildShareWorld.GeneralBu).User(Other, SecureChildShareWorld.GeneralBu);
+        foreach (var (table, id) in rows)
+            _shares.Seed(table, id, DataversePrincipalRef.User(Caller), Read);
+        var record = Guid.NewGuid();
+        _world.Add("sprk_decisionrecord", record,
+            ("sprk_regardingcommunication", new EntityReference("sprk_communication", message)),
+            OwnedBy(DirectTeam),
+            ("createdby", new EntityReference("systemuser", GateWriter)));
+        _shares.Seed("sprk_decisionrecord", record, DataversePrincipalRef.User(Caller), Read);
+        return (message, record, rows);
+    }
+
+    [Fact(DisplayName = "198 pass 2 N2 must-fire: the job grants the Recipient on the message, and the gate record then gets the Recipient's Read")]
+    public async Task N2_Job_AParticipantItGrantsOnTheMessage_IsMirroredToTheGateRecord()
+    {
+        var (message, record, _) = SecureExitWhoseRecipientWasNotRegranted();
+
+        var run = await Job(GateOverTheWorld()).ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Holds("sprk_communication", message, Other).Should().BeTrue("the job re-granted the Recipient on the message");
+        Holds("sprk_decisionrecord", record, Other).Should().BeTrue("D-215: the message's gate record follows its participants");
+        Holds("sprk_decisionrecord", record, Caller).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "198 pass 2 N2 must-not-fire: a pass that grants nothing does not run the gate mirror")]
+    public async Task N2_Job_APassThatGrantsNothing_DoesNotRunTheMirror()
+    {
+        var (_, record, rows) = SecureExitWhoseRecipientWasNotRegranted();
+        foreach (var (table, id) in rows)
+            _shares.Seed(table, id, DataversePrincipalRef.User(Other), Read);
+
+        await Job(GateOverTheWorld()).ExecuteAsync(RunContext(), CancellationToken.None);
+
+        Grants().Should().Be(0, "steady state: nothing is granted, and the mirror is not run");
+        Holds("sprk_decisionrecord", record, Other).Should().BeFalse("the mirror runs only after a pass that granted");
     }
 }
