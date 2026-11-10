@@ -26,7 +26,9 @@ public sealed class ContactFirmsCoreTests
     private static readonly Guid Contact = Guid.Parse("13000000-0000-4000-8000-0000000000c1");
     private static readonly Guid FaultyContact = Guid.Parse("13000000-0000-4000-8000-0000000000c2");
     private static readonly Guid InactiveContact = Guid.Parse("13000000-0000-4000-8000-0000000000c3");
-    private static readonly Guid SystemUser = Guid.Parse("13000000-0000-4000-8000-0000000000e1");
+    private static readonly Guid UnreadableMembershipsContact = Guid.Parse("13000000-0000-4000-8000-0000000000c4");
+    private static readonly Guid NoMembershipsContact = Guid.Parse("13000000-0000-4000-8000-0000000000c5");
+    private static readonly Guid SystemUser =Guid.Parse("13000000-0000-4000-8000-0000000000e1");
     private static readonly Guid FirmA = Guid.Parse("13000000-0000-4000-8000-0000000000a1");
 
     private readonly Mock<ExternalParticipationService> _participations = new(
@@ -45,44 +47,65 @@ public sealed class ContactFirmsCoreTests
             .ThrowsAsync(new TimeoutException("The membership read failed (test)."));
         _participations.Setup(p => p.ReadOrganizationMembershipsAsync(InactiveContact, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ActiveOrgMemberships(new[] { FirmA }, Array.Empty<Guid>(), Unreadable: false));
+        _participations.Setup(p => p.ReadOrganizationMembershipsAsync(UnreadableMembershipsContact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ActiveOrgMemberships(new[] { FirmA }, Array.Empty<Guid>(), Unreadable: true));
+        _participations.Setup(p => p.ReadOrganizationMembershipsAsync(NoMembershipsContact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ActiveOrgMemberships(Array.Empty<Guid>(), Array.Empty<Guid>(), Unreadable: false));
     }
 
-    public static TheoryData<string> Principals => new() { "unreadable", "no-contact", "active", "inactive", "membership-fault" };
+    /// <summary>
+    /// Fix round 1 K5: one principal state per row, as the contact plane sees it (a <see cref="CallerPrincipal"/>) and as the assistant's
+    /// systemuser plane sees it (the identity resolution's contact, or its contact-binding fault), with the state both must reach.
+    /// </summary>
+    public static TheoryData<string, string> States => new()
+    {
+        { "active-firms", nameof(CallerFirmsState.Known) },
+        { "inactive-contact", nameof(CallerFirmsState.NoFirm) },
+        { "unreadable-contact", nameof(CallerFirmsState.Unknown) },
+        { "unreadable-memberships", nameof(CallerFirmsState.Unknown) },
+        { "membership-read-fault", nameof(CallerFirmsState.Unknown) },
+        { "no-memberships", nameof(CallerFirmsState.NoFirm) },
+        { "no-contact", nameof(CallerFirmsState.NoFirm) },
+    };
 
-    private static CallerPrincipal Principal(string kind) => new()
+    private static Guid ContactOf(string state) => state switch
+    {
+        "inactive-contact" => InactiveContact,
+        "unreadable-memberships" => UnreadableMembershipsContact,
+        "membership-read-fault" => FaultyContact,
+        "no-memberships" => NoMembershipsContact,
+        "unreadable-contact" or "no-contact" => Guid.Empty,
+        _ => Contact,
+    };
+
+    private static CallerPrincipal Principal(string state) => new()
     {
         Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = kind switch
-        {
-            "no-contact" or "unreadable" => Guid.Empty,
-            "inactive" => InactiveContact,
-            "membership-fault" => FaultyContact,
-            _ => Contact,
-        },
-        ContactUnreadable = kind == "unreadable",
+        ContactId = ContactOf(state),
+        ContactUnreadable = state == "unreadable-contact",
         Email = "partner@firm.test",
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
     };
 
-    [Theory(DisplayName = "130-0b the contact plane's firm read is the contact-keyed core: the delegate and the core agree in every state")]
-    [MemberData(nameof(Principals))]
-    public async Task TheDelegate_AndTheCore_Agree(string kind)
-    {
-        var principal = Principal(kind);
-
-        var viaDelegate = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(
-            principal, _participations.Object, NullLogger.Instance, CancellationToken.None);
-        var viaCore = await ExternalInvoiceSubmissionAuthorizationFilter.ReadContactFirmsAsync(
-            principal.ContactId, principal.ContactUnreadable, _participations.Object, NullLogger.Instance, CancellationToken.None);
-
-        viaDelegate.Unreadable.Should().Be(viaCore.Unreadable);
-        viaDelegate.Firms.Should().Equal(viaCore.Firms);
-        (kind switch
+    private static PersonIdentity Person(string state) =>
+        new(SystemUser, ContactId: ContactOf(state) is var contact && contact != Guid.Empty ? contact : null)
         {
-            "active" => CallerFirmsState.Known,
-            "no-contact" or "inactive" => CallerFirmsState.NoFirm,
-            _ => CallerFirmsState.Unknown,
-        }).Should().Be(CallerFirms.From(viaCore.Firms, viaCore.Unreadable).State);
+            Faults = state == "unreadable-contact" ? IdentityReadFaults.ContactBinding : default,
+        };
+
+    [Theory(DisplayName = "130-0b K5: the contact plane (ReadCallerFirmsAsync) and the systemuser plane through the core give identical firms in every principal state")]
+    [MemberData(nameof(States))]
+    public async Task TheContactPlane_AndTheCore_GiveIdenticalFirms(string state, string expectedState)
+    {
+        var expected = Enum.Parse<CallerFirmsState>(expectedState);
+        var contactPlane = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(
+            Principal(state), _participations.Object, NullLogger.Instance, CancellationToken.None);
+        var systemUserPlane = await SystemUserFirms(Person(state));
+
+        contactPlane.Unreadable.Should().Be(systemUserPlane.Unreadable, state);
+        contactPlane.Firms.Should().Equal(systemUserPlane.Firms, state);
+        CallerFirms.From(contactPlane.Firms, contactPlane.Unreadable).State.Should().Be(expected, state);
+        CallerFirms.From(systemUserPlane.Firms, systemUserPlane.Unreadable).State.Should().Be(expected, state);
     }
 
     private Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> SystemUserFirms(PersonIdentity person)

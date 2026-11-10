@@ -783,13 +783,21 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         "sprk_regardingrecordid",
         "sprk_regardingrecordname",
         "sprk_regardingrecordurl",
+        // Fix round 1 F1: the number (the invoice number for an invoice target) and K2: the record type, in its value form.
+        "sprk_regardingrecordnumber",
+        "_sprk_regardingrecordtype_value",
+        "_sprk_regardingrecordtype_value@Microsoft.Dynamics.CRM.lookuplogicalname",
     };
+
+    private static readonly Guid InvoiceRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000001");
+    private static readonly Guid MatterRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000002");
 
     /// <summary>
     /// Describes the work assignment <paramref name="root"/> as the user reads it, linked to <paramref name="invoice"/> in every form
-    /// (when not null), with the regarding id/name/URL naming that invoice.
+    /// (when not null), with the regarding id/name/URL/number/type naming that invoice, or <paramref name="otherTarget"/> (a matter)
+    /// when given.
     /// </summary>
-    private Task<ToolResult> DescribeRootAsync(Guid root, Guid? invoice)
+    private Task<ToolResult> DescribeRootAsync(Guid root, Guid? invoice, Guid? otherTarget = null)
     {
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_workassignment')")), It.IsAny<CancellationToken>()))
@@ -799,8 +807,7 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
               + "\"_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue\": \"INV-0042\", "
               + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname\": \"sprk_invoice\", "
               + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.associatednavigationproperty\": \"sprk_RegardingInvoice\", "
-              + "\"sprk_regardingrecordid\": \"" + id.ToString("D") + "\", \"sprk_regardingrecordname\": \"INV-0042\", "
-              + "\"sprk_regardingrecordurl\": \"https://org.test/main.aspx?id=" + id.ToString("D") + "\", "
+              + Regarding(otherTarget ?? id, otherTarget is null)
             : "\"_sprk_regardinginvoice_value\": null, ";
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_workassignments({root:D})")), It.IsAny<CancellationToken>()))
@@ -811,6 +818,14 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
             BuildChatInvocationContext(toolArgumentsJson: "{\"path\":\"tables/sprk_workassignment/records/" + root.ToString("D") + "\"}"),
             BuildDescribeTool(), CancellationToken.None);
     }
+
+    /// <summary>The regarding pair and its resolver columns naming <paramref name="target"/>: the invoice, or else a matter.</summary>
+    private static string Regarding(Guid target, bool isInvoice) =>
+        "\"sprk_regardingrecordid\": \"" + target.ToString("D") + "\", \"sprk_regardingrecordname\": \"" + (isInvoice ? "INV-0042" : "Matter A") + "\", "
+        + "\"sprk_regardingrecordurl\": \"https://org.test/main.aspx?id=" + target.ToString("D") + "\", "
+        + "\"sprk_regardingrecordnumber\": \"" + (isInvoice ? "INV-0042" : "M-0001") + "\", "
+        + "\"_sprk_regardingrecordtype_value\": \"" + (isInvoice ? InvoiceRecordType : MatterRecordType).ToString("D") + "\", "
+        + "\"_sprk_regardingrecordtype_value@Microsoft.Dynamics.CRM.lookuplogicalname\": \"sprk_recordtype_ref\", ";
 
     private static void ShouldReturnTheRootWithTheLinkBlank(ToolResult result)
     {
@@ -857,7 +872,30 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         fields.GetProperty("_sprk_regardinginvoice_value").GetString().Should().Be(invoice.ToString("D"));
         fields.GetProperty("_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname").GetString().Should().Be("sprk_invoice");
         fields.GetProperty("sprk_regardingrecordname").GetString().Should().Be("INV-0042");
+        fields.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("INV-0042", "fix round 1 F1: kept when the invoice is visible");
+        fields.GetProperty("_sprk_regardingrecordtype_value").GetString().Should().Be(InvoiceRecordType.ToString("D"), "fix round 1 K2: kept when the invoice is visible");
         firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b fix round 1 K2 describe must not fire: a root whose regarding target is another record keeps the regarding number and type while its invoice link is blank")]
+    public async Task ExecuteChatAsync_Task130_0b_K2_ARootRegardingAnotherRecord_KeepsTheRegardingColumns()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        var matter = Guid.NewGuid();
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await DescribeRootAsync(root, invoice, otherTarget: matter);
+
+        ShouldReturnTheRecord(result);
+        var fields = result.Data!.Value.GetProperty("fields");
+        fields.GetProperty("_sprk_regardinginvoice_value").ValueKind.Should().Be(JsonValueKind.Null, "the invoice link itself is always blanked");
+        fields.GetProperty("sprk_regardingrecordid").GetString().Should().Be(matter.ToString("D"));
+        fields.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("M-0001");
+        fields.GetProperty("_sprk_regardingrecordtype_value").GetString().Should().Be(MatterRecordType.ToString("D"));
+        fields.GetRawText().Should().NotContain(invoice.ToString("D"));
     }
 
     [Theory(DisplayName = "130-0b step 3 describe fault: a failed link read or a failed decision returns the root with every link form blank")]
