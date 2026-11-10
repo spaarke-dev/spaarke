@@ -5,7 +5,7 @@
 > Work head is `origin/work/ebilling-r1` (DEF-061 merged; DEF-060 design docs on top). The dev BFF is uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.**
 >
 > **Agents running (3 of 4):**
-> - F3b fix round 1, step 1 (Opus, F3b worktree): commit the WIP and repair the 172 failing tests;
+> - F3b fix round 1, step 2 (Opus, F3b worktree, from `d3d997511d`): F2 feed tests, the service-request parity test, the F1 route/handler tests on both planes, K1 with narrowing off, a C2 pin, fail-before, full ArchTests. Step 1 is DONE: ExternalAccess filter 5682/5682; 142 new pins; a real defect fixed in `55ae7e6cec` (the message ancestor map was keyed by reference, so every message read as a failed chain). Still to do after step 2: C1 logging and the C3 dev query (if the owner accepts the conditions), code-review, adr-check, notes, then the scoped Opus re-check, then diff 3;
 > - 116 verify + code-review + adr-check (Sonnet high, report only);
 > - 116 adversarial pass (Opus, read-only).
 >
