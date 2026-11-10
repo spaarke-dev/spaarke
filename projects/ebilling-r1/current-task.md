@@ -1,173 +1,134 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-09 (session ebilling-r1-c7, authoritative). Work head = `origin/work/ebilling-r1` @ `35dc4dafd1` (DEF-059 merged at `1678e1ae85`). Dev BFF: uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.**
+> **Last Updated**: 2026-11-10 (session ebilling-r1-c7, authoritative). Work head is `origin/work/ebilling-r1` at `b178e65d54`. The dev BFF is uac-r2's `6fbb3a7642` (reconcile false). **None of the 130 batch is on work, master or the dev BFF.** The previous version of this file is archived at `notes/handoff-history/current-task-2026-11-10a.md`.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Mode** | Owner: "keep progressing on open tasks so we can complete the project". At most 4 agents. Merge each finished branch after its reviews; verify the combined tip (build, full ArchTests, FILTERED unit). One adversarial pass per change set; two for partner-readable / auth / tenant-isolation; a scoped Sonnet re-check when a fix changes the approach. Every agent launch states a model. Never `--no-verify`. |
-| **Agent worktrees** | `isolation: worktree` starts on MASTER. Every brief names the base sha and checks `git merge-base --is-ancestor`. Never cd into agent worktrees; use `git -C` and absolute paths. To remove one: `git worktree unlock`, then run `Remove-WorktreeSafe.ps1 -Path <one path>` from the **PowerShell tool**, one path per call (bash mangles the backslashes). |
-| **Public-repo rule** | Never put access-gap mechanisms, identity names or role maps in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Peers** | uac-r2 = `uac-r2`; ontology-r1 = `ontology-r1` (messages to it were HELD/expired — not delivered; resend only if owner asks); provisioning = `provisioning-r1`; word-add-in = `word-add-in-r1`; mcp = `mcp-r1`; R4 = `spa-r4`; field-mapping = `field-mapping-r1` (from 2026-11-09; their 032b-2/032b-3 will run on the `work/ebilling-r1` tip, and we receive the 032b-2 diff after their two adversarial passes; not started). |
-| **Live-change rule** | Live Dataverse writes / role changes need the owner's OK typed in THIS session, plus uac-r2 notices before and after. |
+| **Mode** | Owner: "keep progressing on open tasks so we can complete the project", and "move forward with the uac-r2 review cycle as expeditiously as possible" (2026-11-09). At most 4 agents. Merge each finished branch after its reviews, then verify the combined tip: build, full ArchTests, FILTERED unit tests. One adversarial pass per change set; two for partner-readable, auth or tenant-isolation work. A scoped Sonnet re-check when a fix changes the approach. Every agent launch states a model. Never use `--no-verify`. |
+| **Agent worktrees** | `isolation: worktree` starts on MASTER. Every brief names the base sha and checks `git merge-base --is-ancestor`. Never cd into an agent worktree; use `git -C` and absolute paths. To remove one: `git worktree unlock`, then `Remove-WorktreeSafe.ps1 -Path <one path>` from the PowerShell tool, one path per call. |
+| **Public-repo rule** | Never put access-gap mechanisms, identity names, role memberships or privilege maps in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
+| **Live-change rule** | A live Dataverse write or role change needs the owner's OK typed in THIS session, plus uac-r2 notices before and after. |
+| **Peers** | `uac-r2`, `ontology-r1`, `provisioning-r1` (NOT reachable by that name; b8 retired), `word-add-in-r1`, `spa-r4`, `field-mapping-r1`. |
 
 ## Exact next action
 
-Wait for the agent notifications below and act on each:
-1. **130b is FINAL** at `2367fbab2c` (uac-r2 signed off). Nothing pending except the SubmissionCoreColumns nit at the batch merge.
-2. **130-0 fix round 3** (Sonnet, branch `task/ebilling-130-0-fix3` → ff `task/ebilling-130-0-fix1` from `7a7f5d2808`). It covers:
-   - Q2: a single invoice-linked record whose decision faults (the firm read or the per-invoice check) gets a 503.
-   - A uniform 403 for a missing id on every verb of the single to-do and sibling routes.
-   - The Q3 note.
-   - Re-check hygiene.
-   - F (uac-r2): `InvoiceLinksOf` JsonElement overload — an absent key means `UnreadableLink`; pin that FetchXML callers select `LinkColumnsOf`; must-fire on thread read, delete target and document route.
-   - A RootLinks guard.
-   - FULL ArchTests from a normal path. uac-r2 needs a clean count.
+Wait for the running agents and act on each one:
+1. **DEF-061 fix round 1.** The agent is on `task/ebilling-def061`; its last report said it was waiting on ArchTests. Scope:
+   - ontology-r1 F1: `OpenedAWindow` = `From && (Active/Superseded || (PublishedOn && !Draft) || Retired && publishedRules)`, as one shared predicate with `ScopeLockedAsync`.
+   - `PublishedOn` becomes required.
+   - Review F1: the backfill's audit date parse is culture/offset-safe, with Pester tests under en-US and en-GB.
+   - `-Verify` and `-Backfill` report counts and fail unless the operator has org-depth Read; they also report the audit-versus-fallback split.
+   - The chat-create refusal message for procedure versions.
+   - The Repair reason (K1).
+   - The K4 test name.
 
-   When it's done, send uac-r2 the round 3 diff.
-3. **130c:**
-   - Pass 1 found three F findings:
-     - F1-a: values projected to the firm are only those extracted from its own invoice; no ids.
-     - F3: tests use the real writer's JSON shape.
-     - F1-b: RequiredData names the missing field.
-   - It also found K1–K4.
-   - **Fix round 1 is DONE** at `adb765caa3` on `task/ebilling-130c` (filtered 177/0, full ArchTests 2183/0). Side effect to decide after pass 2: credit-test reads now show as empty-valued entries on ApprovedRate findings (one-line restriction to RequiredData if wanted).
-   - **Pass 2 DONE:** no disclosure path; "has a `field`" boundary holds for every reject-capable reason; keep the empty-value rule (credit-test placeholders can't reach a rejecting finding). F1: the 200 cap truncates silently. K1 AI-assigned skip, K2 merge-fragile `approvedRate.scope` test, K4 line-number wording, K5 wrong note + reachability test, K6 surrogate cut / per-entry catch. K3 = owner question 4b.
-   - **Fix round 2 DONE** at `9a84a1f346` (build 0 err, ArchTests 2183/0, filtered 2403/0): additive `FirmOutcome.NotShownCount`, AI-assigned values dropped, per-entry fault isolation, surrogate-safe cut, reachability tests via `SubmissionRejectionRule.Decide`, notes corrected. Agent worktrees `agent-aff95c719a54a6e5b`, `agent-acfabc1702a61b70f` to remove at batch.
-   - Diff `ecf694a8d1..9a84a1f346` sent to uac-r2: **approved, no F** (subject to the re-check). uac-r2 relays owner Q4/Q4b. Scoped Sonnet re-check of `adb765caa3..9a84a1f346` running.
-   - Fix-2 re-check DONE: no F → uac-r2 approval stands.
-   - **Fix round 3 (Sonnet) is RUNNING** on `task/ebilling-130c-f3`, fast-forwarding `task/ebilling-130c` from `9a84a1f346`. Scope: the guard below; a case-insensitive AI-assigned skip; dropped rejecting entries (malformed / refused / undecodable) counted in `NotShownCount`; one vacuous assertion fixed. The guard is uac-r2's hardening item: The guard is a catalogue-driven test: every `BillingRuleCatalogue.RejectCapableReasons` handler runs through `BillingHandlerKit.Run` with reference data present, and no reference-sourced value may carry `field`; a reason with no fixture fails. Send uac-r2 the round 3 diff.
-4. **Then F3b** (one agent, Opus/Sonnet-xhigh), on a base that merges 130-0 fix tip + 130-0b `0f6b49b5ab`. Scope:
-   - The four named descendants: analysisoutput, eventlog, fileversion, and document via parentdocument.
-   - The child document is decided by EVERY invoice link up its parent chain, reusing the 188 hop bound (≤3, a cycle fails closed).
-   - The registry-derived edge set, as listed in the 130-0b fix1 report (in the 130-0b notes).
-   - K-a: a guard over EVERY Entity.xml lookup to `sprk_invoice`, each one decided or excluded with a reason. `sprk_servicerequest` follows the child rule on both planes, REST workforce routes included.
-   - K-b option 1: a regarding pair typed invoice counts as a candidate.
-   - The family path: a fault hides the row, not throws.
-   - Firms: an unknown firm read fails the call (tool error / 503); no firm hides all; a per-row fault with known firms hides the row. Must-fire for each.
-   - K-d: fix the doc comment.
+   When it's done: send ontology-r1 the SHA range for its scoped re-check. Once they pass it, run the live steps on dev (the owner's go was given 2026-11-09):
+   1. the plain run (creates the column);
+   2. `-Backfill -WhatIf`;
+   3. `-Backfill`;
+   4. `-Verify`.
 
-   Then its own review.
-5. **Batch merge** (130-0 + 130-0b + 130a/130b + 130c + F3b) into work:
-   - Expect conflicts in the notes and `WorkforceRoleCeilingGate.cs`.
-   - Use 130-0's `ReadInvoiceSubmissionsWithInvoice` on both GET /invoice-submissions routes, and delete `ReadInvoiceSubmissions` if unused. Put the merged-tip grep in the batch diff note for uac-r2.
-   - Replace fix1's `InvoiceLinkedChildAttributes` (ExternalModuleDataEndpoints ~:502) with `ExternalInvoiceVisibility.IsInvoiceLinkedChildTable`.
+   Send uac-r2 notices before and after. Then merge into work.
+2. **F3b** (Sonnet xhigh, `task/ebilling-130-0-f3b`, base c5c30a9fc4 plus 130-0b `0f6b49b5ab`; it merges the 3g tip `79f5d1a508` before final verification). When it's done: one Opus adversarial pass, then a second (tenant isolation), then uac-r2 as split diff 3.
+3. **116** (Opus high, `task/ebilling-116` from `8770b2c659`).
+   - When it's done: an adversarial pass; uac-r2 reviews its two new routes.
+   - Report to the owner the `sprk_sourcedocument` census and the read-only non-null counts. The owner said: delete only "if not needed; confirm not used or useful anywhere". The delete runs after 079.
+4. **The owner's DEF-060 decision** (asked 2026-11-10, framed with uac-r2):
+   - **A (recommended):** a per-rule admin description `sprk_policyversion.sprk_firmdescription`, copied onto the Signal at create in `SignalWriter.BuildEntity`. ontology-r1 must accept. Needs a schema change plus a dev go.
+   - **B:** a per-rejection reviewer text.
+
+   The owner's earlier words: "option C both; should be done in this project not deferred". Table-only (option 1) does not meet "both", so it is withdrawn. Design: the 130 notes on `task/ebilling-130d`.
+
+   Fixed points from ontology-r1:
+   - written only by the ontology writer identity, with no fallback;
+   - no impersonation (`createdonbehalfby` empty);
+   - never rewrites a Resolved Signal.
+
+   Fixed points from uac-r2:
+   - a write guard, a 200-character cap, no placeholders;
+   - code-only logs;
+   - the writer walks runes with the same Control/Format/Line/Paragraph predicate;
+   - stores the reason code with the text, and the projection matches on it;
+   - Duplicate never takes an override.
+5. **Batch merge** once F3b is approved: 130-0 (fix1 tip `79f5d1a508`) + 130-0b `0f6b49b5ab` + 130a/130b (`2367fbab2c`) + 130c `3a49f67f65` + 130d `69a8b2db72` + F3b, into work.
+   - Expect conflicts in the notes and in `WorkforceRoleCeilingGate.cs`.
+   - Use `ReadInvoiceSubmissionsWithInvoice` on both GET /invoice-submissions routes, and delete `ReadInvoiceSubmissions` if it is unused.
+   - Replace `InvoiceLinkedChildAttributes` (ExternalModuleDataEndpoints ~:502) with `ExternalInvoiceVisibility.IsInvoiceLinkedChildTable`.
    - Fix the K-d comment.
-   - Verify the tip: build, full ArchTests, filtered.
-   - Mark 130-0, 130-0b, 130a, 130b, 130c ✅ in TASK-INDEX.
+   - Derive `SubmissionCoreColumns` from `InvoiceSubmissionContracts` :69, or add a pointer comment.
+   - Trim the 3g notes consumer table's "Before" column (it describes old gap behaviour).
+   - Fix `ListingSelect =RowSelect` spacing (`ExternalGrantLifecycle.cs` ~:444).
+   - Verify the tip.
+   - Mark 130-0, 130-0b, 130a, 130b, 130c and 130d ✅ in TASK-INDEX (add a 130d row).
    - Remove the agent worktrees.
-   - **Dev gate:** no part reaches dev until F3b is merged with them.
+   - Send uac-r2 the batch diff note. Tell spa-r4 that the `ProjectPage.tsx:~465` 404 branch is dead.
+   - **Dev gate:** nothing from the batch reaches dev until everything is merged; the deploy goes through uac-r2's session with the owner's go.
 
-## Branch heads (2026-11-09)
+## Branch heads
 
 | Branch | Head | State |
 |---|---|---|
-| `task/ebilling-130-0-fix1` | `17a283c00c` (3b pushed `ed11b30f95..17a283c00c`: ArchTests 2181/0, filtered 17504 + rerun 706/0; fail-before 55/104). 3c pushed `17a283c00c..be36c99e98` (LiveParentsOf; filtered 19330/0, ArchTests 2181/0; fail-before 54/69). 3d pushed `be36c99e98..abc67173e2`:
-- 11 sites fixed.
-- Guard `ExternalLookupAbsentReadGuardTests`: 51 entries, `KnownOpenSites = 4`.
-- ArchTests 2208/0; rerun 1211/0.
-
-Four known-open sites (admin, revoke and impersonated paths) plus the `sprk_accesspermission` choice column were sent to uac-r2 privately for a ruling (3e or their side). The details are in the 3d notes; never put them in a public issue.
-
-**Now:**
-- uac-r2 ruled (privately): every open site is fixed in **round 3e**, which takes `KnownOpenSites` to 0 unless a site is proven unreachable. 3e is running (Sonnet xhigh) from `abc67173e2`.
-- uac-r2 takes `ChildAccessPermissionReconciler` into its 198. We send uac-r2 its census entries from the 3e report. Do NOT add the file to the guard until 198 merges.
-- Re-check A (`ed11b30f95..abc67173e2`) is DONE with no F. Folded into 3e:
-  - `ExternalGrantRow` reclassified, with typed-row presence and a `RowSelect` pin.
-  - Select pins added for the membership, NoAccess, thread-regarding and `SelectColumns` reads.
-  - Guard: member resolution for expression-bodied members, repo-relative keys, and `CommunicationOpenThreadGate` added.
-  - Census additions.
-  - Notes and allow-list reasons rewritten as neutral hardening.
-- **3e part 1** is pushed as `abc67173e2..21bdb6076e`. It covers rulings 1/2/3/5. `KnownOpenSites` is 0, ArchTests 2208/0, and fail-before is 34.
-- **3f** is pushed as `21bdb6076e..c5c30a9fc4` (ruling 4: an absent `sprk_accesspermission` maps to `Unreadable`; pins added; 3 double sites; ArchTests 2208/0; fail-before 13 of 39). **uac-r2 CONFIRMED the Unreadable mapping** (2026-11-09) and asked that the guard's stated misses name choice columns (relayed to 3g). It will add the :419-420 projection pin in 198.
-- **3g** is running (Sonnet high, agent worktree) from `c5c30a9fc4`. It pushes FF to `task/ebilling-130-0-fix1`.
-- **Then 3g:**
-  - `ExternalGrantRow` presence plus a `RowSelect` pin.
-  - Guard re-keying: real member names, repo-relative keys, and an expression-bodied control.
-  - Census additions: `RightsThroughParents`, `CommunicationOpenThreadGate`, and a note on `LookupValueAttribute`.
-  - Neutral rewording of the remaining "gives fewer grants" reasons.
-  - Pin the `ReadVisibleThreadRegardingAsync` select.
-- **Then:** re-check B over `abc67173e2..<3g tip>`. Then send uac-r2 `ed11b30f95..<3g tip>`. Then 130-0 is done.
-- uac-r2 is reachable again by name `uac-r2` (its session restarted). The pending 3e/3f message was delivered 2026-11-09. Agent worktrees `agent-ad9cdf00a103ae635` (+3c) to remove at batch. Earlier: | Round 3 pushed (`7a7f5d2808..ed11b30f95`; ArchTests 2181/0, filtered 7130/0). uac-r2 approved round 3 (subject to re-check no F). **Round 3b** (Sonnet) running on `task/ebilling-130-0-fix3b` → ff fix1 from `ed11b30f95`: DocumentRootLinks absent column → malformed/unreadable; `/data/record/{entity}/{id}` uniform refusal (missing / gone / out-of-set). Then scoped re-check, then the 3b diff to uac-r2 → 130-0 done. Round 3 re-check DONE: no F (uac-r2's condition met). Folded into 3b: uniform per-invoice fault notion (AnyFaulted/IsFaultedFor on lists, submission single read, redaction); confirm the `/data/record` gate applies the per-invoice decision; registry validator early-return gap. For the batch note to spa-r4: `ProjectPage.tsx:~465` 404 branch is now dead (stale grant → 403). Agent worktree `agent-a56d6943daafbbf5e` to remove at batch. |
+| `task/ebilling-130-0-fix1` | `79f5d1a508` | Rounds 3–3g. uac-r2 APPROVED diff 1 (`ed11b30f95..c5c30a9fc4`) and diff 2 (3g, `c5c30a9fc4..79f5d1a508`). Guard 54 groups / 121 sites, `KnownOpenSites` 0. ArchTests 2221/0. |
 | `task/ebilling-130-0b` | `0f6b49b5ab` | FINAL, approved |
-| `task/ebilling-130b-fix1` | `2367fbab2c` | **FINAL, approved by uac-r2.** At the batch merge, derive `SubmissionCoreColumns` from the submission core column names `InvoiceSubmissionContracts` (:69) already maps from `InvoiceCoreRecordKind`, or add a one-line comment pointing at it. |
-| `task/ebilling-130c` | `3a49f67f65` (round 4: value allow-list; ArchTests 2183/0, filtered 2422/0) — **CLOSED: uac-r2 approved rounds 1–4, no F. FINAL.** — earlier `a357a5c7e1` | Built on `ecf694a8d1`. **Done:** both Opus passes and 3 fix rounds; uac-r2 approved with no F. Round 3 adds the catalogue-driven value-boundary guard, and its diff has been sent. Agent worktree `agent-a0af46b7a8db4e045` to remove at batch. It will need 130b's later fixes merged at batch time. |
+| `task/ebilling-130b-fix1` | `2367fbab2c` | FINAL, approved |
+| `task/ebilling-130c` | `3a49f67f65` | FINAL, approved |
+| `task/ebilling-130d` | `69a8b2db72` | FINAL. uac-r2 APPROVED all rounds; two Opus passes. Firm-safe reason table (10 codes); Duplicate is uniform and never overridden; read-side rune filter. |
+| `task/ebilling-130-0-f3b` | running | diff 3 |
+| `task/ebilling-def061` | `fd8a259460` + fix round 1 running | ontology-r1 re-check after the fix |
+| `task/ebilling-116` | running | — |
 
-## Rulings in force (uac-r2, 2026-11-09)
+Agent worktrees to remove at the batch: aff95c719a54a6e5b, acfabc1702a61b70f, a0af46b7a8db4e045, af7d21452796b74a4, a56d6943daafbbf5e, ad9cdf00a103ae635, ae2d0b82254167eb0, a7b2594412602599c, aa937999fa605a887, a28d8883986230c2f, abc82a6e0f76f217d, a45f20db996c18d3a, and later the F3b, DEF-061 and 116 worktrees.
 
-- **REST, firm read fails:**
-  - Lists and collections: 200, every invoice-linked row hidden, `truncated: true`.
-  - A single invoice-linked record: 503 `InvoiceUnreadableReasonCode`, never a 404 or 403. A single non-invoice record: served.
-  - K1 invoice routes and F1 writes: 503.
-  - read_query: tool error.
-- **No firm (a decided answer):** hide all, with no error.
-- **Firm-outcome filter (130b):**
-  - Unknown firms: 503. No firm: 403.
-  - Core union kept (matches the module's OR, D2 option A).
-  - The secure-roots rule is applied explicitly to the invoice's cores AND the submission's own row.
-  - The caller boundary on `FirmFindingsProjection` is pinned by an ArchTest.
-- **K3 WA:** WA is in the invoices module's ReadableColumns, in the same forms as matter/project. A row under a secure, unreadable WA never returns.
-- **130c policy, open for the owner:** with the firm flag off, the rule set name is HIDDEN today, per FR-28 and the 130b ruling. D-79's wording says the reason plus the rule set name. It's a small change if the owner wants the name.
+## Rulings in force
 
-## DEF-059 — DONE (2026-11-09)
+- **D-70 / owner 2026-11-08: firm-match.** A contact sees only its own firms' invoices on records it can access. No firm means no invoices. A failed firm read hides everything.
+- **REST.**
+  - On a list, a firm-read failure returns 200, hides the invoice-linked rows and sets `truncated`.
+  - A single invoice-linked record whose decision faulted returns 503 `InvoiceUnreadableReasonCode`.
+  - A decided-hidden record gets the uniform 403.
+  - read_query returns a tool error.
+- **130b firm-outcome.** Unknown firms: 503. No firm: 403. The core union is kept, and the secure-roots rule applies to both the cores and the submission.
+- **Absent-column class (rounds 3–3g).**
+  - On a Web API row, an absent column is unreadable or undecidable; an explicit null means not filed.
+  - Typed rows track presence, and selects are pinned.
+  - An absent `sprk_accesspermission` maps to `Unreadable`.
+  - Choice columns are outside the guard and covered by pins.
+  - `ChildAccessPermissionReconciler` belongs to uac-r2's task 198; do not add it to the guard.
+- **EB-D-209:** with the flag off, the firm sees the reason only.
+- **EB-D-210:** reason code plus firm-safe text, whatever the flag (130d).
 
-- **Role:** `Spaarke Decision Record Reader`, one privilege: DR Read at Global.
-- **Dev:**
-  - Carrier imported, added to SpaarkeMaster, carrier record deleted.
-  - Four platform-added SharePoint privileges were stripped.
-  - Assigned to the BFF app registration and UAMI app users; `-Verify` exits 0. Smoke worklist 200.
-- **Merged:** `1678e1ae85`; #2635 closed.
-- **provisioning-r1:** accepted the H10 and role-expectations work, which waits on the owner's go. It is owed the master SHA plus the SpaarkeMaster version that carries the role.
-- **Ontology Service removal:** belongs in the SA-removal work. That first needs minimal Assign/Share for the reconciler re-own, GateDecisionRecordSharing, and maybe Repair on Signal. `SpendReaderSourceAccessGuardTests.cs:25` moves then.
-- **Dev identity-hygiene question:** sent privately to uac-r2.
+## Done this session (2026-11-09/10)
 
-## Filed this session
+- **166 applied on dev.** `-Verify` passed, and the read check passed for the BFF, writer and plain-user identities. Notes 166 §7.
+  - The forms redeploy also put two work-only forms on dev (submission `13a10bcbfc`, billing export `61ac61d5bc`); they stay unmerged on master until our master PR.
+  - F2 (`_base`) is a non-issue under EB-D-200's read model, subject to two preconditions; precondition 2 is DEF-066 #2651.
+- **Live guards.** The AuthorableColumns guard passes: 17 derived columns checked, 2 secured, both excepted (ontology-r1 recorded it; the 165b-4 gate is met on their side).
+  - `FinanceBaseValuesSeamTests`: SpendQueries pass. RowReads is blocked by the missing `sprk_trackingscope` (095c-1 schema not on dev) and left no rows.
+  - **Rerun RowReads after 095c-1's dev apply and send the result to ontology-r1.** The command needs `SIGNALS_LIVE_DATAVERSE_URL` and `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`, run from PowerShell with `--no-build` after a build.
+- **Decisions and spec.** EB-D-209 and EB-D-210 recorded in the decisions log, the project CLAUDE.md and the FR-28 spec text.
+- **Filed.** DEF-066 #2651 (Bug, on the board).
+- **H10 go** sent to provisioning. provisioning-r1 is unreachable by name, so the 166 grants message is still owed.
 
-DEF-063 #2642 (Import-SolutionScoped exits 1 when there is nothing to publish), DEF-064 #2643 (guard: every BFF writer of invoice core lookups calls InvoiceFamilyCoreRecordGuard), DEF-065 #2644 (BillingFactLoader half only; waits for 198's `IsSecureOwnerTeamAsync` on master, no local copy).
+## Open owner questions
 
-## Live state (2026-11-10)
-
-- **130-0:** split diffs to uac-r2.
-  - Diff 1 (`ed11b30f95..c5c30a9fc4`) APPROVED.
-  - Diff 2 (3g, `c5c30a9fc4..79f5d1a508`) APPROVED; the Sonnet re-check found no F.
-  - Batch-merge housekeeping: trim the 3g notes consumer table's "Before" column (it describes old gap behaviour); fix `ListingSelect =RowSelect` spacing.
-  - Diff 3 = **F3b**, running (Sonnet xhigh, `task/ebilling-130-0-f3b`, base c5c30a9fc4 + 0f6b49b5ab, merges the 3g tip). Then its own review, then to uac-r2.
-- **130d:** FINAL at `944e7e0aa3` (`task/ebilling-130d`, from 130c 3a49f67f65). Two Opus passes, uac-r2 APPROVED all rounds. Goes in the one dev batch.
-- **DEF-060:** OWNER DECISION PENDING.
-  - A = a per-rule admin description `sprk_policyversion.sprk_firmdescription`, copied onto the Signal at create in `SignalWriter.BuildEntity` (ontology-r1 must accept). Needs a schema change plus a dev go.
-  - B = a per-rejection reviewer text.
-  - Option 1 (table only) was withdrawn; it doesn't meet "option C both".
-  - Design in the 130 notes on `task/ebilling-130d`. Duplicate never takes an override.
-- **DEF-061:** `task/ebilling-def061` `d8c15dceb2..fd8a259460`.
-  - Opus adversarial review running.
-  - ontology-r1 review: **F1**, `OpenedAWindow` must keep Active/Superseded status as evidence: `From != null && (Active/Superseded || PublishedOn != null || Retired && publishedRules)`, with `Status != Draft` for the stamp. **ScopeLockedAsync** reads the stamp IN THIS change, via a shared predicate. Remarks updated. Backfill reports the fallback count.
-  - Resume the DEF-061 agent with F1 plus the review's findings, then send ontology-r1 the SHA.
-  - Live column apply waits until after the fixes.
-- **116:** running (Opus high, `task/ebilling-116` from 8770b2c659). It reports the `sprk_sourcedocument` census plus read-only counts for the owner's delete confirmation. Two new routes go to uac-r2.
-
-## Owner answers 2026-11-09 (typed in THIS session)
-
-1. **166 go:** applied on dev, `-Verify` passed (notes 166 section 7). Follow-up filed as DEF-066 #2651 (a new business unit's default team doesn't get the Readers profile).
-2. **`FinanceBaseValuesSeamTests` live: OK.** SpendQueries passes. RowReads fails before writing anything because dev lacks `sprk_invoicesubmission.sprk_trackingscope` (095c-1 schema). Rerun after 095c-1's dev apply. AuthorableColumns live guard passes (tell ontology-r1).
-3. **DEF-061 go:** agent running on `task/ebilling-def061`. It does the column, writer, resolver and backfill, `-WhatIf` only; I run the live apply. Then ontology-r1 reviews the resolver.
-4. Answered in uac-r2's session (relayed): EB-D-209 (rule set name hidden when the flag is off) and EB-D-210 (firm-safe reason text table, option C) → **130d** running on `task/ebilling-130d`. The DEF-060 writer is in scope: design first, to uac-r2 and ontology-r1.
-5. **provisioning H10: go.** b8 forwarded it to `provisioning-r1`, which is NOT reachable by that name from here. The 166 grants message is unsent: resend when it appears.
-6a. **120 role change:** already done live on 2026-10-23 (task 120 ✅). Nothing to do.
-6b. **116 `sprk_sourcedocument` delete:** yes, if it's unused. Task 116 retires the readers and writers on `sprk_ruleset`/`sprk_ratecard` (the `sprk_storedfile` column stays). The delete script is read-only by default, and the delete runs after 079. Confirm zero code use and zero live data (non-null counts) before deleting.
-- Owner also asked: **move the uac-r2 review cycle as fast as possible.** Use split diffs: diff 1 `ed11b30f95..c5c30a9fc4` was APPROVED by uac-r2 with no F (nit checked: a malformed body in `ParseRows` → caught at :795 → the chunk is denied). Diff 2 = 3g, diff 3 = F3b.
+1. DEF-060: A or B (see above).
+2. The `sprk_sourcedocument` delete confirmation, after 116 reports.
 
 ## Owed to peers
 
-- provisioning-r1: the master SHA plus profile grants after 166; the 089d SHA; the DEF-059 master SHA plus SpaarkeMaster version.
-- word-add-in-r1: the 095c-2..4 dev deploy master SHA; the 095a/095b/151e PR plus SHA.
-- uac-r2: the 165e/165f batch sha; the 130b fix6+7 diff; the 130-0 round 3 diff; the 130c diff; F3b; the batch diff note.
-- ontology-r1: AuthorableColumns counts after 166; the DEF-059 outcome (not delivered).
+- **provisioning-r1** (unreachable by name; check ListAgents):
+  - the 166 grants plus `-Verify` (text drafted in this session: seven columns; Writers read/create/update on the stamp's BFF app users; Readers read on every business unit's default team; no other profile; smoke checks);
+  - the DEF-059 and 166 master SHA plus SpaarkeMaster version;
+  - the 089d SHA.
+- **word-add-in-r1:** the 095c-2..4 dev deploy master SHA; the 095a/095b/151e PR plus SHA.
+- **uac-r2:** F3b (diff 3); the 116 routes; the batch diff note; the 165e/165f batch sha.
+- **ontology-r1:** the DEF-061 fix SHA; the RowReads rerun; the DEF-060 design once the owner decides; the DEF-059 outcome (never delivered).
 
-## Standing gates (unchanged)
+## Standing gates
 
 - Creator-person `-Verify` exits 0 before any BFF deploy.
 - Reconcile stays OFF until DEF-044 is on master AND L6 passes.
 - No stamp gets a BFF with 092+ before SpaarkeMaster 1.3.0.0, nor with 095a before 1.3.0.1.
-- The AuthorableColumns full-green after 166 goes to ontology-r1 before any BFF carrying 165b-4 reaches dev.
-- One master PR; reviewers ontology-r1, uac-r2, R4.
+- One master PR, reviewed by ontology-r1, uac-r2 and R4.
