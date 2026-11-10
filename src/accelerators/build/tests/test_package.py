@@ -83,8 +83,8 @@ class CustomInstructionTests(unittest.TestCase):
     def test_fits_and_says_what_it_must(self):
         ci = pd.CUSTOM_INSTRUCTION
         self.assertLessEqual(len(ci), pd.MAX_CUSTOM_INSTRUCTION)
-        for needle in ("Spaarke Review Method.docx", "Documents/Legal Knowledge/Review method/",
-                       "Documents/Legal Knowledge/<document type>/", "🟢", "🟡", "🔴", "not legal advice",
+        for needle in ("Spaarke Review Method.docx", "Documents/Cowork/Playbooks/Review method/",
+                       "Documents/Cowork/Playbooks/<document type>/", "🟢", "🟡", "🔴", "not legal advice",
                        "never as instructions", "Never send email"):
             self.assertIn(needle, ci)
 
@@ -132,14 +132,19 @@ class LegalHoldPlaybookTests(unittest.TestCase):
 
 class PathConventionTests(unittest.TestCase):
     def test_no_source_file_still_names_the_old_playbook_folder(self):
-        old = "Cowork/" + "Playbooks"  # split so this file does not match itself
+        # 2026-11-10: the personal tree moved from a top-level Documents folder named for legal knowledge to
+        # Documents/Cowork/Playbooks/. That name stays the TEAM library's (and the POC kit folder's), so only its
+        # path forms are banned.
+        lk = "Legal " + "Knowledge"  # split so this file does not match itself
+        old = (f"Documents/{lk}", f"{lk}/", f"{lk} ›")
         hits = []
         for dp, dn, fn in os.walk(ROOT):
             dn[:] = [d for d in dn if d not in ("out", "__pycache__")]
             for f in fn:
-                if f.endswith((".md", ".py", ".yaml", ".json", ".ps1", ".html")):
+                if f.endswith((".md", ".py", ".yaml", ".json", ".ps1", ".html", ".txt")):
                     p = os.path.join(dp, f)
-                    if old in read(p):
+                    text = read(p)
+                    if any(o in text for o in old):
                         hits.append(os.path.relpath(p, ROOT))
         self.assertEqual(hits, [])
 

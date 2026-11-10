@@ -10,7 +10,7 @@ Output (under <out>/package/):
   Spaarke test documents v0.1.zip                       its top level is Spaarke Test Documents/
   manifest.json                                         sizes and SHA-256 of every file
 
-Documents/ holds Cowork/Skills (the nda build's three skills + legal-hold-review) and Legal Knowledge/ (per document
+Documents/Cowork/ holds Skills/ (the nda build's three skills + legal-hold-review) and Playbooks/ (per document
 type: the four-column Word playbook, the readable "(agent knowledge)" copy and the Markdown master; the review method;
 Start here). No network or model calls; nothing secret. Exit 0 only when every gate passes.
 """
@@ -47,7 +47,7 @@ REVIEW_METHOD_SRC = os.path.join(ROOT, "core", "shared-references", "spaarke-rev
 METHOD_DOCX = "Spaarke Review Method.docx"
 NDA_SKILLS = ("nda-review", "nda-library-review", "accelerator-setup")
 
-# the library playbooks of the package: practice (topics catalogue), Type folder under Legal Knowledge, master file
+# the library playbooks of the package: practice (topics catalogue), Type folder under Cowork/Playbooks, master file
 PLAYBOOKS = [
     {"practice": "nda", "folder": "NDA", "require_side": True,
      "source": os.path.join(ROOT, "practices", "nda", "positions", "Spaarke NDA – Mutual v1.2.md")},
@@ -105,7 +105,7 @@ def read(path):
 
 
 def render_playbook(spec, work, lk):
-    """Validate one library playbook against its catalogue and write its three files under Legal Knowledge/<Type>/."""
+    """Validate one library playbook against its catalogue and write its three files under Cowork/Playbooks/<Type>/."""
     cat, sides = catalogue_for(spec["practice"], os.path.join(work, spec["practice"], "generated"))
     text = read(spec["source"])
     try:
@@ -153,7 +153,7 @@ def build_individual_base(out, nda_skills, work):
     if os.path.exists(os.path.join(pkg, "individual-base")):
         shutil.rmtree(os.path.join(pkg, "individual-base"))
     skills_dir = os.path.join(root, "Cowork", "Skills")
-    lk = os.path.join(root, "Legal Knowledge")
+    lk = os.path.join(root, *gates.KNOWLEDGE_TREE.split("/"))
     os.makedirs(skills_dir)
 
     log("[1/5] library playbooks: validate, render (four-column, readable), copy the master")
@@ -275,12 +275,12 @@ def verify_zip(path, expected_top, expected_files=()):
 
 def expected_package_files(stems):
     nda, lh = stems["nda"], stems["legal-hold"]
-    files = [f"Legal Knowledge/NDA/{nda}.docx", f"Legal Knowledge/NDA/{nda} (agent knowledge).docx",
-             f"Legal Knowledge/NDA/Playbook master/{nda}.md",
-             f"Legal Knowledge/Legal Hold Notice/{lh}.docx", f"Legal Knowledge/Legal Hold Notice/{lh} (agent knowledge).docx",
-             f"Legal Knowledge/Legal Hold Notice/Playbook master/{lh}.md",
-             f"Legal Knowledge/Review method/{METHOD_DOCX}"]
-    files += [f"Legal Knowledge/Start here/{n}" for n in
+    k = gates.KNOWLEDGE_TREE
+    files = [f"{k}/NDA/{nda}.docx", f"{k}/NDA/{nda} (agent knowledge).docx", f"{k}/NDA/Playbook master/{nda}.md",
+             f"{k}/Legal Hold Notice/{lh}.docx", f"{k}/Legal Hold Notice/{lh} (agent knowledge).docx",
+             f"{k}/Legal Hold Notice/Playbook master/{lh}.md",
+             f"{k}/Review method/{METHOD_DOCX}"]
+    files += [f"{k}/Start here/{n}" for n in
               (START_HERE["readme"], START_HERE["instruction"], *(a["file"] for a in docs.AGENTS.values()))]
     files += [f"Cowork/Skills/{s}/SKILL.md" for s in (*NDA_SKILLS, "legal-hold-review")]
     return files
@@ -301,7 +301,7 @@ def main(argv=None):
         pkg = os.path.join(a.out, "package")
         log("[5/5] zips")
         zip_path = ba.zip_dir(root, os.path.join(pkg, PACKAGE_ZIP))
-        verify_zip(zip_path, {"Cowork", "Legal Knowledge"}, expected_package_files(stems))
+        verify_zip(zip_path, {"Cowork"}, expected_package_files(stems))
         test_parent = build_test_documents(a.out, a.kit, read(REVIEW_METHOD_SRC))
         test_zip = ba.zip_dir(test_parent, os.path.join(pkg, TEST_ZIP))
         verify_zip(test_zip, {"Spaarke Test Documents"}, [
@@ -327,7 +327,7 @@ def main(argv=None):
     for z in (zip_path, test_zip):
         log(f"  {os.path.relpath(z, a.out)}  ({os.path.getsize(z):,} bytes)")
     for rel, size in manifest["documents"].items():
-        if rel.startswith("Legal Knowledge/"):
+        if rel.startswith(gates.KNOWLEDGE_TREE + "/"):
             log(f"    {rel}  ({size:,})")
     return 0
 

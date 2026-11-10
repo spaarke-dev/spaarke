@@ -13,11 +13,19 @@ verification code, never by its name alone.
 | `Cowork/Tasks/`, `Cowork/Projects/`, `Cowork/AGENTS.md` | Cowork | Cowork's own task inputs/outputs, projects, and a note saying the folder is Cowork's durable, agent-read-only user folder | **No**: Cowork writes these |
 | `Copilot/Created/` | Microsoft 365 Copilot | Where Copilot saves files it creates (Word Legal skill outputs, revised copies; observed, not documented) | **No** |
 | `Copilot/Memory/v2/` | Microsoft 365 Copilot | Memory store (`MEMORY.md`, `PREFERENCES.md`, `CONTEXT.md`, JSON). Undocumented; ours are empty ("none yet") | **No, never edit** |
-| `Legal Knowledge/` | Ours | Playbooks, review method, Start here (same tree as the team library) | **Yes**: from the package zip |
+| `Cowork/Playbooks/` | Ours | Playbooks per document type, review method, Start here (type folders match the team library) | **Yes**: from the package zip |
 | `Spaarke Test Documents/` | Ours (tests only) | NDAs and legal hold drafts to review; outputs land beside them | **Yes**: from the test-documents zip |
 
 `Documents/Copilot/` is **not** a folder Copilot reads instructions from. Nothing Microsoft publishes says so, and
 in Act 7 Word found a file there only through search. It is Copilot's output and memory area.
+
+**Where Microsoft's Legal plugin puts playbooks it makes.** Word `/Create playbook` writes a new `.docx` to
+`Copilot/Created/` (Act 1). Importing a playbook and choosing *Save playbook* creates no file: the saved copy lives
+in Copilot's own store, frozen at import (R4, R6). Cowork's create-playbook skill writes its `.docx` as task output
+(location not checked).
+
+So all of ours is under `Documents/Cowork/` (owner decision 2026-11-10; it was a top-level `Legal Knowledge/`
+for a few hours and was never installed there).
 
 ## Archive
 

@@ -8,7 +8,7 @@ Mutual NDA from the owner's OneDrive. Expected issues by topic: `evals/expected/
 | # | Case | Prompt | Document | Pass when |
 |---|---|---|---|---|
 | C1 | Trigger, no playbook [T-06] | "Review this NDA" | nda-01 | `nda-review` runs; at most one question card; provenance says "Spaarke baseline positions (not tailored)"; `check_outputs.py` all ok in the sandbox; issues match `expected/nda-01-…md` on the High topics |
-| C2 | Customer playbook [T-07] | "Review this NDA for the disclosing side" | nda-01, with `acme-nda-disclosing.md` in `Documents/Legal Knowledge/NDA/Playbook master/` | The Acme playbook is found and named in the provenance line; Florida venue proposed; silent topics (residuals, non-solicit…) marked "playbook silent; baseline applied" |
+| C2 | Customer playbook [T-07] | "Review this NDA for the disclosing side" | nda-01, with `acme-nda-disclosing.md` in `Documents/Cowork/Playbooks/NDA/Playbook master/` | The Acme playbook is found and named in the provenance line; Florida venue proposed; silent topics (residuals, non-solicit…) marked "playbook silent; baseline applied" |
 | C3 | Negative trigger [T-09] | "Review this MSA" | msa-01 | `nda-review` does **not** run (Legal for Cowork `review-contract` or general chat does) |
 | C4 | Receiving side [T-10] | "We're receiving this NDA, light touch" | nda-01 | Positions flip where side matters (e.g. no push for longer term); fewer edits; provenance says the mutual baseline was applied to a receiving review |
 | C5 | Already redlined [T-10] | "Review this NDA" | nda-02 | Reports Harbor Counsel's insertion, deletion and comment; does not accept or reject them; `existing_revisions` ok; the residuals escalation acknowledges the counterparty comment |

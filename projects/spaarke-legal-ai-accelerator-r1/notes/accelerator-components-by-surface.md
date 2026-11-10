@@ -25,16 +25,21 @@ The zip is laid out like `Documents/`, so "extract into Documents" puts everythi
 | Folder | Holds | Why this folder |
 |---|---|---|
 | `Documents/Cowork/Skills/<skill>/` | Our Cowork skills, each with its scripts | **Cowork loads skills from here automatically** (`[Tested]` T-01/T-02) |
-| `Documents/Legal Knowledge/<document type>/` | Playbook master (`.md`), Word playbook (four columns, contracts), readable playbook (table-free `.docx`), samples | One tree for both surfaces, the same layout as the team library (design §5.9) |
-| `Documents/Legal Knowledge/Review method/` | `Spaarke Review Method.docx` (the method for non-contract reviews in Word) | The custom instruction names it |
-| `Documents/Legal Knowledge/Start here/` | Quick cards, the custom-instruction text, the agent recipes (advanced) | — |
+| `Documents/Cowork/Playbooks/<document type>/` | Word playbook (four columns, contracts), readable playbook (table-free `.docx`), and `Playbook master/` (`.md`, what Cowork reads) | Next to the skills that read them, in the folder Microsoft made for Cowork; Word finds files by name, so the folder doesn't matter to Word. Inside `Playbooks/` the type folders match the team library's (design §5.9) |
+| `Documents/Cowork/Playbooks/Review method/` | `Spaarke Review Method.docx` (the method for non-contract reviews in Word) | The custom instruction names it |
+| `Documents/Cowork/Playbooks/Start here/` | Quick cards, the custom-instruction text, the agent recipes (advanced) | — |
+
+Owner decision 2026-11-10: playbooks go under `Documents/Cowork/Playbooks/`, not a separate top-level
+`Documents/Legal Knowledge/` folder. An individual has only playbooks to keep, so a second root added nothing. The team
+library keeps the name *Legal Knowledge* because it also holds policies, precedents and templates.
 
 **Microsoft's own folders (checked 2026-11-10; detail in `poc-e2e/onedrive-layout.md`).** `Documents/Cowork/` is
 Cowork's workspace. Microsoft documents only one thing it reads automatically: `Cowork/skills/<name>/SKILL.md`, at
 the start of every conversation. Cowork writes `Tasks/`, `Projects/` and an `AGENTS.md` (it calls the folder its
 durable user folder) itself. `Documents/Copilot/` is Copilot's own area: `Created/` holds files Copilot makes, and
 `Memory/v2/` is an undocumented memory store. Neither is documented as a place Copilot reads instructions from, so
-we put nothing there. Our files go in `Cowork/Skills/` (the one auto-loaded location) and `Legal Knowledge/`.
+we put nothing there: Word's `/Create playbook` also writes its draft playbooks to `Copilot/Created/`, and ours
+would mix with them. Our files go in `Cowork/Skills/` (the one auto-loaded location) and `Cowork/Playbooks/`.
 
 **Word doesn't load files from a folder.** Copilot in Word uses:
 - the open document;
@@ -57,7 +62,7 @@ file is test G-2.
 | Word | **Word playbook** (four columns), one per contract type | "Review this NDA against the attached playbook" (attach), then *Apply edits with comments*. **In-place redline**; contracts only | Tested (Acts 2, 7) |
 | Word | **Review method + readable playbook** for non-contract types | Agent mode; attach the playbook; the custom instruction brings in the method. Rated review in chat | Review tested (Act 7, 13/13 counts); in-place redline after it untested (H-1) |
 | Word | **Custom instruction** (one block, pasted once) | Names the method file, says to attach the playbook, marks results as drafts | Tested in Word agent mode; whether one setting also covers Cowork is P-1 |
-| Cowork | **Skill folders**: `setup`, `help`, a review skill per document type, `library-review`, plus the engines | Plain request ("review this NDA") or `/skill-name`; plan card; redlines (internal and external), clean copy, dashboard, audit pack | NDA tested (Acts 3–6). Legal hold skill not built. Reading from `Documents/Legal Knowledge/` untested (C-2) |
+| Cowork | **Skill folders**: `setup`, `help`, a review skill per document type, `library-review`, plus the engines | Plain request ("review this NDA") or `/skill-name`; plan card; redlines (internal and external), clean copy, dashboard, audit pack | NDA tested (Acts 3–6, playbooks then flat in `Cowork/Playbooks/`). Legal hold skill built 2026-11-10, untested in Cowork (C-3). Reading from `Cowork/Playbooks/<type>/Playbook master/` untested (C-2) |
 | Cowork | **Attorney profile** | Written by `setup` after one approval | Tested (T-05) |
 | Both | **Quick cards** | One per surface and task | v1.1; needs the tiers |
 
@@ -65,7 +70,7 @@ file is test G-2.
 
 | Component | How | What it adds | Status |
 |---|---|---|---|
-| **Agent recipe** per document type (name, instructions text, suggested prompts, which knowledge files to pick) | The user builds the agent in Agent Builder. Knowledge = the readable playbook in their own `Documents/Legal Knowledge/` (OneDrive files, not uploads) | Same `@`-name and method in Word (agent mode), Cowork and the Copilot app; no custom instruction needed; in Cowork, review **plus** a redlined copy in one step (instructions v0.2) | Owner built three (Copilot Studio); OneDrive-file knowledge and v0.2 untested (A-1, A-2) |
+| **Agent recipe** per document type (name, instructions text, suggested prompts, which knowledge files to pick) | The user builds the agent in Agent Builder. Knowledge = the readable playbook in their own `Documents/Cowork/Playbooks/` (OneDrive files, not uploads) | Same `@`-name and method in Word (agent mode), Cowork and the Copilot app; no custom instruction needed; in Cowork, review **plus** a redlined copy in one step (instructions v0.2) | Owner built three (Copilot Studio); OneDrive-file knowledge and v0.2 untested (A-1, A-2) |
 
 The base stays in use: in Word the agent can't edit the open document and blocks the Legal skills in its chat, so
 contracts still go through *Review contract* for an in-place redline.
@@ -111,7 +116,7 @@ tiers: `poc-e2e/tier-test-script.md`.
 
 **Cowork base**
 - **C-1** Fresh install by extracting the zip: skill folders show in `/` without a plugin upload, and the scripts run.
-- **C-2** Skills read playbooks from `Documents/Legal Knowledge/` (the new tree; the old one was `Documents/Cowork/Playbooks/`).
+- **C-2** Skills read playbooks from `Documents/Cowork/Playbooks/<type>/Playbook master/` (Acts 3–6 used flat files in `Cowork/Playbooks/`).
 - **C-3** Legal hold through the Cowork skill (after it's built): review plus redlined copy.
 
 **Individual advanced**

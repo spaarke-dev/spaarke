@@ -68,8 +68,8 @@ Outputs in `build/out/nda/`:
 ```
 
 Outputs in `build/out/package/`: `Spaarke Legal Accelerator - Individual base v0.1.zip` (extract into
-OneDrive `Documents/`: `Cowork/Skills/...` and `Legal Knowledge/...`) and `Spaarke test documents v0.1.zip`.
-Gates: unique file names under `Legal Knowledge/`, paths of at most 200 characters, a custom
+OneDrive `Documents/`: `Cowork/Skills/...` and `Cowork/Playbooks/...`) and `Spaarke test documents v0.1.zip`.
+Gates: unique file names under `Cowork/Playbooks/`, paths of at most 200 characters, a custom
 instruction of at most 1,500 characters, no answer-key material. The test documents come from the
 POC kit (`--kit`, default `projects/spaarke-legal-ai-accelerator-r1/notes/poc-e2e`).
 

@@ -197,8 +197,8 @@ class PackageGateTests(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         for rel in ("Cowork/Skills/a/SKILL.md", "Cowork/Skills/b/SKILL.md", "Cowork/Skills/a/references/guardrails.md",
                     "Cowork/Skills/b/references/guardrails.md",  # repeated inside skill folders by design
-                    "Legal Knowledge/NDA/Playbook one.docx", "Legal Knowledge/NDA/Playbook master/Playbook one.md",
-                    "Legal Knowledge/Review method/Method.docx"):
+                    "Cowork/Playbooks/NDA/Playbook one.docx", "Cowork/Playbooks/NDA/Playbook master/Playbook one.md",
+                    "Cowork/Playbooks/Review method/Method.docx"):
             self.put(rel)
 
     def tearDown(self):
@@ -217,11 +217,11 @@ class PackageGateTests(unittest.TestCase):
         self.assertEqual(gates.lint_package(self.tmp, "Documents/", "x" * 1500), [])
 
     def test_duplicate_file_name_in_the_knowledge_tree_fires(self):
-        self.put("Legal Knowledge/Legal Hold Notice/Method.docx")
+        self.put("Cowork/Playbooks/Legal Hold Notice/Method.docx")
         self.assertEqual(self.rules(), {"unique-names"})
 
     def test_duplicate_allowed_by_name_does_not_fire(self):
-        self.put("Legal Knowledge/Decoy/Method.docx")
+        self.put("Cowork/Playbooks/Decoy/Method.docx")
         self.assertEqual(self.rules(allowed_duplicates={"Method.docx"}), set())
 
     def test_knowledge_file_name_reused_inside_cowork_fires(self):
@@ -233,7 +233,7 @@ class PackageGateTests(unittest.TestCase):
 
     def test_long_path_fires_at_201_characters_and_not_at_200(self):
         prefix = "Documents/"
-        name = "Legal Knowledge/NDA/" + "x" * (200 - len(prefix) - len("Legal Knowledge/NDA/") - 5) + ".docx"
+        name = "Cowork/Playbooks/NDA/" + "x" * (200 - len(prefix) - len("Cowork/Playbooks/NDA/") - 5) + ".docx"
         self.assertEqual(len(prefix + name), 200)
         self.put(name)
         self.assertEqual(self.rules(), set())
@@ -258,12 +258,12 @@ class PackageGateTests(unittest.TestCase):
             shutil.rmtree(flat)
 
     def test_forbidden_material_fires_by_name_and_by_text(self):
-        self.put("Legal Knowledge/NDA/answer-key.md")
-        self.put("Legal Knowledge/NDA/Corteva NDA.docx")
-        self.put("Legal Knowledge/NDA/RPX list.docx")
+        self.put("Cowork/Playbooks/NDA/answer-key.md")
+        self.put("Cowork/Playbooks/NDA/Corteva NDA.docx")
+        self.put("Cowork/Playbooks/NDA/RPX list.docx")
         self.assertEqual(len([m for r, m in gates.lint_package(self.tmp, "Documents/") if r == "forbidden"]), 3)
         import zipfile
-        p = os.path.join(self.tmp, "Legal Knowledge", "NDA", "Text.docx")
+        p = os.path.join(self.tmp, "Cowork", "Playbooks", "NDA", "Text.docx")
         with zipfile.ZipFile(p, "w") as z:
             z.writestr("word/document.xml", "<w:document><w:t>Helios IP</w:t></w:document>")
         found = [m for r, m in gates.lint_package(self.tmp, "Documents/", scan_text=True) if "Text.docx" in m]

@@ -12,7 +12,7 @@ Organisation: {{organisation}}
 Role: {{role}}
 Posture: {{posture}}
 Jurisdiction default: {{jurisdiction}}
-Playbook folder: Documents/Legal Knowledge/NDA/Playbook master/
+Playbook folder: Documents/Cowork/Playbooks/NDA/Playbook master/
 Playbook in use: {{playbook}}
 
 ## Delivery

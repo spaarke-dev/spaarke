@@ -206,7 +206,8 @@ def lint_plugin(manifest_path):
 # ---------------------------------------------------------------- package gates (build_package.py)
 MAX_PACKAGE_PATH = 200       # characters, counted from the zip root's parent ("Documents/..."), OneDrive adds more
 MAX_CUSTOM_INSTRUCTION = 1500
-KNOWLEDGE_TREE = "Legal Knowledge"
+KNOWLEDGE_TREE = "Cowork/Playbooks"   # playbooks, review method, Start here
+SKILLS_TREE = "Cowork/Skills"
 FORBIDDEN_IN_PACKAGE = re.compile(r"answer[- ]?key|corteva|\brpx\b|helios", re.I)
 
 
@@ -214,11 +215,11 @@ def lint_package(root, prefix, custom_instruction=None, allowed_duplicates=(), s
     """Gate for one package folder (one zip, checked on its own). Returns a list of (rule, message).
 
     path-length      no file path (prefix + path inside the package) exceeds 200 characters;
-    unique-names     no two files under Legal Knowledge/ share a file name, and none of them shares a name with a
-                     file under Cowork/ (Word finds files by name, anywhere in OneDrive). Skill folders repeat
+    unique-names     no two files under Cowork/Playbooks/ share a file name, and none of them shares a name with a
+                     file under Cowork/Skills/ (Word finds files by name, anywhere in OneDrive). Skill folders repeat
                      SKILL.md, guardrails.md and so on among themselves by design. allowed_duplicates = names a
-                     package deliberately repeats (a decoy). A package with no Legal Knowledge/ is checked on
-                     all of its files;
+                     package deliberately repeats (a decoy). A package with neither tree is checked on all of
+                     its files;
     custom-instruction  the custom instruction text is at most 1,500 characters;
     forbidden        no file name (and, with scan_text, no .docx text) mentions an answer key, Corteva, RPX or Helios;
     unreadable       (scan_text only) every .docx opens as a zip.
@@ -235,16 +236,16 @@ def lint_package(root, prefix, custom_instruction=None, allowed_duplicates=(), s
             out.append(("forbidden", f"file name {rel!r} mentions material that must not ship"))
     allowed = set(allowed_duplicates)
     knowledge = [f for f in files if f.startswith(KNOWLEDGE_TREE + "/")]
-    pool = knowledge if knowledge or any(f.startswith("Cowork/") for f in files) else files
+    pool = knowledge if knowledge or any(f.startswith(SKILLS_TREE + "/") for f in files) else files
     names = {}
     for rel in pool:
         names.setdefault(os.path.basename(rel), []).append(rel)
     for name, rels in sorted(names.items()):
         if len(rels) > 1 and name not in allowed:
             out.append(("unique-names", f"{name!r} appears {len(rels)} times: {', '.join(rels)}"))
-    skill_names = {os.path.basename(f) for f in files if f.startswith("Cowork/")}
+    skill_names = {os.path.basename(f) for f in files if f.startswith(SKILLS_TREE + "/")}
     for name in sorted({os.path.basename(f) for f in knowledge} & skill_names - allowed):
-        out.append(("unique-names", f"{name!r} is in Legal Knowledge and also inside Cowork"))
+        out.append(("unique-names", f"{name!r} is in Cowork/Playbooks and also inside Cowork/Skills"))
     if custom_instruction is not None and len(custom_instruction) > MAX_CUSTOM_INSTRUCTION:
         out.append(("custom-instruction", f"{len(custom_instruction)} characters (> {MAX_CUSTOM_INSTRUCTION})"))
     if scan_text:

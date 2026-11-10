@@ -33,5 +33,5 @@ them and says so.
 
 ## Where playbooks live
 
-`Documents/Legal Knowledge/<Type>/Playbook master/<name>.md` in the user's OneDrive (Type: `NDA`, `Legal Hold Notice`). The Word legal plugin
+`Documents/Cowork/Playbooks/<Type>/Playbook master/<name>.md` in the user's OneDrive (Type: `NDA`, `Legal Hold Notice`). The Word legal plugin
 uses a rendered `.docx` copy of the same playbook, attached to each review.

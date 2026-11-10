@@ -17,7 +17,7 @@
 | **Next Action** | Put the two zips where the owner can extract them; when results arrive, record a "Tier tests round 1" section in `results.md` |
 
 ### Critical context
-- **Microsoft folders:** `Documents/Cowork/skills/<name>/SKILL.md` is the only documented auto-loaded location (Cowork FAQ). `Cowork/Tasks|Projects|AGENTS.md` are Cowork's. `Documents/Copilot/Created` = Copilot outputs; `Copilot/Memory/v2` = undocumented memory store. Nothing reads instructions from `Documents/Copilot`. Our files: `Cowork/Skills/` + `Legal Knowledge/` + `Spaarke Test Documents/`.
+- **Microsoft folders:** `Documents/Cowork/skills/<name>/SKILL.md` is the only documented auto-loaded location (Cowork FAQ). `Cowork/Tasks|Projects|AGENTS.md` are Cowork's. `Documents/Copilot/Created` = Copilot outputs; `Copilot/Memory/v2` = undocumented memory store. Nothing reads instructions from `Documents/Copilot`. Our files: `Cowork/Skills/` + `Cowork/Playbooks/` (owner decision 2026-11-10; was top-level `Legal Knowledge/`) + `Spaarke Test Documents/`. Team library keeps the name `Legal Knowledge`.
 - **OneDrive sync on the owner's PC is broken** since ~2026-11-07 (downloads fail: "cloud file provider exited unexpectedly"); all clean-up was done in the cloud via the M365 connector. Owner must restart OneDrive before installing.
 - **Archive:** OneDrive root `Spaarke test archive (not current)/` (still searchable → tests identify files by verification code). `Copilot/Created/_before-Act2/` still to move (423 locked).
 - Owner's original protocol (PBR-1109-A) copied to `src/accelerators/core/shared-references/review-method.owner-v1.0.md`.

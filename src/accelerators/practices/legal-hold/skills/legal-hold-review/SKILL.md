@@ -31,7 +31,7 @@ which item is missing.
    matching skill.
 3. Find the playbook, first match wins, and say which one you used:
    1. a playbook the user attaches or names in this conversation;
-   2. `Documents/Legal Knowledge/Legal Hold Notice/Playbook master/` in the user's OneDrive (more
+   2. `Documents/Cowork/Playbooks/Legal Hold Notice/Playbook master/` in the user's OneDrive (more
       than one file: ask which; an unreadable folder: say so in one line and go on);
    3. the copy shipped with this skill: `references/legal-hold-playbook.md`.
 4. Validate it: `python scripts/playbook_parse.py <playbook.md> --topics references/topics.json --no-side`.

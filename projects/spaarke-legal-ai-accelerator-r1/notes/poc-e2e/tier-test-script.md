@@ -9,7 +9,7 @@ Design: `notes/accelerator-components-by-surface.md`. Layout and archive: `onedr
 
 | Code | File |
 |---|---|
-| `SRM-1110-A` | `Legal Knowledge/Review method/Spaarke Review Method.docx` (the real one) |
+| `SRM-1110-A` | `Cowork/Playbooks/Review method/Spaarke Review Method.docx` (the real one) |
 | `SRM-DECOY-1` | the decoy copy (G-1, G-2 only) |
 | `NDAR-1110-A` / `LHR-1110-A` | the NDA / Legal Hold Review agents (v0.2 instructions) |
 
@@ -29,9 +29,10 @@ Test documents (from the test zip): `Spaarke Test Documents/Brightwater Mutual N
 3. **Clear the custom instruction.** Copilot app › Settings › Personalization › Custom instructions: copy the
    current text somewhere safe, then delete it.
 4. **Install the base package.** Extract `Spaarke Legal Accelerator - Individual base v0.1.zip` into OneDrive
-   `Documents` (choose `Documents` itself as the target; the zip already contains `Cowork/` and
-   `Legal Knowledge/`). Extract `Spaarke test documents v0.1.zip` into `Documents` too.
-5. **Paste the custom instruction** from `Legal Knowledge/Start here/Spaarke – Custom instruction.txt` into
+   `Documents` (choose `Documents` itself as the target; the zip's top folder is `Cowork/`, so it adds
+   `Cowork/Skills/` and `Cowork/Playbooks/` to the Cowork folder you already have and replaces nothing). Extract
+   `Spaarke test documents v0.1.zip` into `Documents` too.
+5. **Paste the custom instruction** from `Cowork/Playbooks/Start here/Spaarke – Custom instruction.txt` into
    Settings › Personalization › Custom instructions. Save.
 6. Wait for OneDrive to show the green ticks, then wait about 15 minutes so search picks up the new files.
 
@@ -40,7 +41,7 @@ Test documents (from the test zip): `Spaarke Test Documents/Brightwater Mutual N
 ## W-1. Word, contract (regression check of the packaged Word playbook)
 
 1. Open a copy of `Brightwater Mutual NDA.docx` in **Word desktop**. Copilot pane, **Allow editing**.
-2. Attach `Legal Knowledge/NDA/Spaarke NDA – Mutual v1.2.docx`. Type: *Review this NDA against the attached playbook.*
+2. Attach `Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2.docx`. Type: *Review this NDA against the attached playbook.*
 3. When the review shows, choose *Apply all › Apply edits with comments*.
 
 **Record:** the playbook card name; the number of topics; whether tracked changes and comments appear in the
@@ -52,7 +53,7 @@ document. **Pass:** card shows v1.2, 24 topics, tracked changes with comments in
    It has the same name as the real method file but code `SRM-DECOY-1`. Wait 15 minutes.
 2. Open a copy of `Harbor Point – Legal Hold Notice (draft A).docx` in Word desktop. Copilot pane, **agent
    mode**, **Chat only** (not Allow editing).
-3. Attach `Legal Knowledge/Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx`.
+3. Attach `Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx`.
    Type: *Review this notice against the attached playbook.*
 4. Repeat steps 2–3 in **three new chats**.
 
@@ -62,7 +63,7 @@ copy with the same name exists.
 
 ## G-2. Word: does a full file link in the custom instruction pin the exact file?
 
-1. In OneDrive, select `Legal Knowledge/Review method/Spaarke Review Method.docx` › Copy link (people in your
+1. In OneDrive, select `Cowork/Playbooks/Review method/Spaarke Review Method.docx` › Copy link (people in your
    organisation). Edit the custom instruction: replace the method file's name with that link. Save.
 2. Leave the decoy in place. Repeat G-1 steps 2–3 in **three new chats**.
 
@@ -82,7 +83,7 @@ two files are offered and used.
 
 ## G-4. Word: Markdown playbook instead of Word
 
-Same as G-1 step 3, but attach `Legal Knowledge/Legal Hold Notice/Playbook master/Spaarke Legal Hold Notice –
+Same as G-1 step 3, but attach `Cowork/Playbooks/Legal Hold Notice/Playbook master/Spaarke Legal Hold Notice –
 Employee Custodians v1.0.md`. **Record:** whether Word accepts the `.md` file; row count; code.
 
 ## H-1. Word, non-contract: apply the review as tracked changes with comments
@@ -113,9 +114,9 @@ place after a rated review?
 **Record:** which Spaarke skills appear (expected: accelerator-setup, nda-review, nda-library-review,
 legal-hold-review); whether the probe step ran its script; the saved profile path and its `Playbook folder:` line.
 **Pass:** four skills listed without any plugin; profile saved to `Documents/Cowork/Profile/legal-profile.md`;
-playbook folder under `Documents/Legal Knowledge/`.
+playbook folder under `Documents/Cowork/Playbooks/`.
 
-## C-2. Cowork: NDA review reads the playbook from `Legal Knowledge`
+## C-2. Cowork: NDA review reads the playbook from `Cowork/Playbooks`
 
 1. New chat. Attach or point to `Spaarke Test Documents/Brightwater Mutual NDA.docx`. Type: *Review this NDA.*
    Choose **No email** on any card. Approve the plan.
@@ -136,9 +137,9 @@ in it: the shaded summary table on page 1, tracked changes, comments starting wi
 
 ## A-1. Agent Builder: build the agents from the recipes, knowledge from OneDrive files
 
-1. Open `Legal Knowledge/Start here/Spaarke – Agent recipe – NDA Review.docx`. In the Copilot app › Agents ›
+1. Open `Cowork/Playbooks/Start here/Spaarke – Agent recipe – NDA Review.docx`. In the Copilot app › Agents ›
    Create agent › **Configure**, enter the name, description and instructions from the recipe.
-2. Knowledge: choose **OneDrive files** and pick `Legal Knowledge/NDA/Spaarke NDA – Mutual v1.2 (agent
+2. Knowledge: choose **OneDrive files** and pick `Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2 (agent
    knowledge).docx` (don't upload a copy). Add the suggested prompts. Create.
 3. Do the same for **Legal Hold Review** with its recipe and `(agent knowledge).docx`.
 4. In each agent: *Which playbook and version are you using? List all its topics with their Topic IDs.*
@@ -159,7 +160,7 @@ what the agent does about the redline (expected: says it can't create files and 
 
 ## A-3. Does a playbook change reach the agent without rebuilding it?
 
-1. Open `Legal Knowledge/NDA/Spaarke NDA – Mutual v1.2 (agent knowledge).docx` and add a sentence to the
+1. Open `Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2 (agent knowledge).docx` and add a sentence to the
    **Term and survival** topic: *Test marker A3: three years is preferred.* Save and close.
 2. After 15 minutes, and again after an hour: ask the agent *What does the playbook say about term and survival?*
 3. Remove the sentence afterwards.
