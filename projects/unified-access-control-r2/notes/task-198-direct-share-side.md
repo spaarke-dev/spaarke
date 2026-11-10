@@ -473,6 +473,50 @@ Adversarial review pass 1, findings 3, 4 and 9; coordinator rulings 2026-11-09.
 
 Before the test compositions matched the host, the brief filter showed 19 failures. All were record-anchored grants in hand-built compositions with no probe and no user reader (see ruling 2).
 
+### §7.4 Fix round 1, R2 (the participant source)
+
+Adversarial review pass 1, finding R2 (F, security): the participants were derived from the THREAD's user owner and its POA systemuser sharees, which is not a record of the pair that only the BFF writes. Owner-approved fix: option A, a BFF-stamped recipient column on the message. Coordinator rulings 2026-11-09 (binding).
+
+**Live metadata (read-only, dev):** `sprk_communication.sprk_sentby` (schema `sprk_SentBy`) and `sprk_communication.sprk_directrecipient` (schema `sprk_DirectRecipient`) are both `Lookup` attributes with `Targets = [systemuser]`, requirement level None. The sender premise holds.
+
+**Before:** `DirectMessageParticipantShares.DeriveParticipantsAsync(dataverse, shares, communicationId, threadId, …)` read the thread's `ownerid` and its share list (strict). The reconcile read the thread with `ownerid`.
+
+**After:** the participant pair is `{sprk_sentby, sprk_directrecipient}` read from the MESSAGE row.
+- **One rule, `ParticipantsOf(Entity message)`.** Valid only as exactly two distinct, non-empty `systemuser` ids. Anything else is `ParticipantDerivation.None(reason)`: one or both not stamped (absent from the row, null or an empty id), both the same user, or a lookup to another table. There is no fallback to the thread's owner or shares.
+- **The reconcile (re-file step and share job)** reads `MessageColumns = [owningteam, sprk_communicationthread, sprk_sentby, sprk_directrecipient]` by name in its one step-1 row read, and applies `ParticipantsOf` to that row. An invalid pair is `Outcome.Settled(NoAudience, reason)`: `Complete = true`, nothing granted, nothing revoked, logged at Information. The job does not carry it or fail the run for it. A later stamp (a repair, fm 054c's backfill) moves `modifiedon`, and the Direct pass lists the message again. A read fault is still `Retry` (status Unknown, incomplete).
+- **The live grant** (`DirectThreadAccessService.GrantDirectTeamMessageAsync`) calls `DeriveParticipantsAsync(dataverse, communicationId, logger, ct)`. That reads the same `MessageColumns` and applies the same `ParticipantsOf`. An invalid pair grants nobody (Information). A fault, or a message not found, grants nobody (Warning), and the job retries it.
+- **The thread only narrows.** The message must have a thread, the thread must be Direct (`sprk_threadtype` = 100000001), and it must not be the per-user master thread. The thread read now selects `sprk_threadtype` and `sprk_isdefaultthread` only (`ownerid` was removed). The thread's share list is no longer read anywhere for the audience.
+- **Disabled participants.** `RestrictedFilingShareBar.EligibleForGrantAsync` has an overload with `excludeDisabled`. It reuses the ONE user read (`RestrictedExternalShareRemover.ReadUsersAsync`, whose `SystemUserSelect` already takes `isdisabled`), so no second client is added. With the flag, a user with `isdisabled = true` is not eligible, and that is settled (`Complete` unchanged). A user whose `isdisabled` did not come back is not eligible and the answer is incomplete (retried). A user-read fault still makes nobody eligible (incomplete). Both Direct callers pass `excludeDisabled: true`. The anchor grant keeps the 3-argument form, unchanged.
+- **Revoke** is unchanged: every user other than the pair, on the message. An invalid pair revokes nothing.
+- Unchanged: the Restricted bar, Secure handling, the Direct-team check (K3), and R1/R3–R6.
+
+**Rule 7, the pre-move path:** `ReadDirectParticipantsForGrantAsync` (a USER-owned Direct message, before fm 054a: the thread's owner and shares) is master behaviour and is not changed. Recommendation for later: move it to the columns only once fm 054c has backfilled `sprk_directrecipient` on user-owned Direct messages. Until then, switching it would grant nobody on legacy rows. That path also does not run for Direct-team-owned messages.
+
+**§11:** `SentByColumn`, `DirectRecipientColumn`, `MessageColumns`, `ParticipantsOf` and `ParticipantDerivation.None` replace the old derivation's surface, inside the same class. The `EligibleForGrantAsync(…, excludeDisabled, …)` overload is new surface in an existing class. (1) *Existing:* the 3-argument `EligibleForGrantAsync` and its user read, which already selects `isdisabled`. (2) *Extension:* it extends that method with a flag, because changing the default would alter the anchor grant (out of scope). (3) *Cost of doing nothing:* rule 4 cannot be met without a second user read.
+
+**Tests** (`DirectMessageParticipantSharesTests` over the real share job / re-file step; `DirectThreadAccessServiceTests` for the live grant). `UserFlagDirectoryDouble` gained `Disabled`: unlisted users are enabled, `null` omits the column. It also gained `Selects`. The Direct fixtures stamp `Caller → Other`, the same two users as the thread's two-party list, so every earlier test is unchanged.
+- **Must-fire (job/re-file):** the stamped pair is granted on the message and content rows, and a third user's share is revoked (real job). The thread's sharee is not granted when outside the pair, and the thread's owner is not either (the old source is gone). The step-1 read selects `owningteam`, the thread, `sprk_sentby` and `sprk_directrecipient`. With no recipient, the real job grants and revokes nothing: `incomplete:0`, `carried:0`, Success. Once stamped and modified, the next run grants the pair. No recipient → `NoAudience`, Complete, detail names the recipient. Invalid pair ×5 (no sender, neither, equal, recipient a contact, sender a team) → NoAudience, Complete, no writes. A pair absent from the row (real job) → no grant, no revoke, the thread's users not granted. A disabled recipient → the sender is granted on every row and the recipient on none; Complete; the user read selects `isdisabled`. `isdisabled` not returned → not granted, incomplete. User-read fault → nothing granted, incomplete. Message-read fault → Unknown, incomplete, no writes.
+- **Must-fire (live):** the pair is granted and the thread's sharee is not. The read selects both columns. No recipient → no grant. Sender = recipient → no grant. A disabled recipient → the sender only. Pair-read fault → no grant.
+- **Must-not-fire:** a valid pair already holding exactly its shares → zero writes (real job). A non-Direct thread with a valid pair → NoAudience "its thread is not a Direct thread", no writes. The earlier pins (master thread, record-anchored thread, user-owned, Secure) still pass.
+
+**Fail-first** (tests commit `37df738d14`, run against the unchanged source): 20 failed and 2930 passed (scoped filter + `MembershipReconcile`, 2950 total). The 4 new tests that pass both ways are fault/narrowing pins whose outcome the old code shared: a user-read fault, a message-read fault, a live pair-read fault, and a non-Direct thread. An earlier fail-first attempt raced with the first source edit (the reconcile select test passed because `MessageColumns` had already landed). It was discarded and rerun cleanly.
+
+**Counts** (base `740df14540` → after):
+
+| Run | Before | After |
+|---|---|---|
+| Brief filter (§7.3, without `MembershipReconcile`) | 2912 | 2936/2936 (+24 new) |
+| The same plus `MembershipReconcile` | 2926 | 2950/2950 |
+| `tests/Spaarke.ArchTests` (full) | 2119 | 2119/2119 |
+| BFF build | 0 warnings | 0 warnings, 0 errors |
+
+**Known limits (K):**
+- **K-R2-1:** field security on `sprk_sentby`, `sprk_directrecipient` and `sprk_communicationthread` is fm 054b's and is not live yet. Until then, a principal with Write on the message row could change the pair. The Direct team has no members and the participants hold Read only, so the exposure is limited to roles with broad Write on `sprk_communication`. It closes with 054b.
+- **K-R2-2:** a participant whose `isdisabled` is not returned is retried. Dataverse always returns the selected non-null column, so this should not occur. If it does, the R4 backoff bounds the retries.
+- **K-R2-3:** a disabled participant's EXISTING share is kept: they are in the pair, so it is not revoked. Rule 4 says "not granted", not "revoked". A disabled user cannot sign in.
+- **K-R2-4:** the live grant adds one message-row read per Direct-team message (the pair). The ownership read is unchanged.
+- **C-c (Part C open) narrows:** a writer who changes a filed message's thread lookup before an unfile can no longer choose the audience. At most they decide whether the message's own stamped pair is granted (a Direct thread) or nobody is (any other thread).
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.
