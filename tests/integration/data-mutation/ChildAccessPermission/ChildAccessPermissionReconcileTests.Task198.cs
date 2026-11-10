@@ -201,6 +201,24 @@ public partial class ChildAccessPermissionReconcileTests
         reports[^1].GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue("the sweep finishes once nothing is left");
     }
 
+    [Fact(DisplayName = "198 pass 2 F2 must-not-fire: capped rows that all fit the carry are carried, nothing is left, and the sweep completes in one run")]
+    public async Task F2_CappedRowsThatFitTheCarry_LeaveNothing_AndTheSweepCompletes()
+    {
+        var job = new Harness(maxWritesPerRun: 1, maxCarriedRows: 4);
+        job.LinkColumns.Users[ExternalUser] = true;
+        var messages = Enumerable.Range(0, 5).Select(_ => job.Child("sprk_communication", Restricted)).ToArray();
+        foreach (var message in messages)
+            job.Shares.Seed("sprk_communication", message, DataversePrincipalRef.User(ExternalUser), 1);
+
+        var first = (await job.RunAsync()).GetProperty("accessPermission");
+
+        first.GetProperty("restrictedBar").GetProperty("capped").GetInt32().Should().Be(4);
+        first.GetProperty("restrictedBar").GetProperty("left").GetInt32().Should().Be(0);
+        first.GetProperty("carriedRows").GetInt32().Should().Be(4, "exactly at the cap");
+        first.GetProperty("carryOverflow").GetInt32().Should().Be(0);
+        first.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue("nothing was lost, so the cursor is not held");
+    }
+
     [Fact(DisplayName = "198 pass 2 F2 must-fire: undecidable sweep rows past the carry cap are not dropped: the cursor stays before them, and they are written once their parent reads")]
     public async Task F2_UndecidableRowsPastTheCarryCap_AreNotDropped_AndAreWrittenLater()
     {

@@ -60,8 +60,22 @@ internal sealed record ChildAccessPermissionRun
     /// <summary>Up to 200 changes (made or planned): table, id, from, to.</summary>
     public IReadOnlyList<(string Table, Guid Id, int? From, int To)> Changes { get; init; } = [];
 
-    /// <summary>Rows to look at first next run (undetermined or failed).</summary>
+    /// <summary>Rows to look at first next run (undetermined or failed). Never more than the carry cap (198 pass 2, F2).</summary>
     public IReadOnlyList<(string Table, Guid Id)> Carry { get; init; } = [];
+
+    /// <summary>
+    /// uac-r2 task 198 pass 2 (F2): undetermined, failed or concurrently changed rows NOT carried because the carry was full.
+    /// The caller holds the watermark (as before), the sweep cursor stays before any of them it read, and
+    /// <see cref="ResweepNeeded"/> covers the rest.
+    /// </summary>
+    public int CarryOverflow { get; init; }
+
+    /// <summary>
+    /// F2: a row this run neither handled nor carried was not from its sweep window (a carried row, a changed row, or one
+    /// listed under a change). The caller starts the sweep again (at once when it is complete, else when it reaches its end),
+    /// so the sweep finds it. Rows from the sweep window are covered by <see cref="SweepResumeAfter"/> instead.
+    /// </summary>
+    public bool ResweepNeeded { get; init; }
 
     /// <summary>The sweep window: rows it read, and the last row (null once it reached the end).</summary>
     public int SweepRows { get; init; }
@@ -113,8 +127,10 @@ internal sealed record ChildAccessPermissionRun
     public int RestrictedBarCapped { get; init; }
 
     /// <summary>
-    /// R3: capped rows NOT carried — listed only because something they are filed under changed (or the carry was full). They
-    /// are barred when next listed: their own change, a parent's change, or the sweep (which a restart starts again).
+    /// R3: capped rows NOT carried — listed only because something they are filed under changed, or the carry was full (198
+    /// pass 2, F2: also rows the bar did not finish when the carry was full). They are barred when next listed: their own
+    /// change, a parent's change, or the sweep (F2: the sweep cursor stays before a left sweep row, and any other left row
+    /// starts the sweep again, <see cref="ResweepNeeded"/>).
     /// </summary>
     public int RestrictedBarLeft { get; init; }
 
@@ -211,6 +227,9 @@ internal sealed class ChildAccessPermissionReconciler
     /// <summary>uac-r2 task 198 Part D: the Restricted bar for a filed communication (see the constructor). <c>null</c>: not run.</summary>
     private readonly Func<Guid, CancellationToken, Task<bool>>? _restrictedCommunicationBar;
 
+    /// <summary>uac-r2 task 198 pass 2 (F2): the most rows a run carries (the job's carry cap).</summary>
+    private readonly int _maxCarriedRows;
+
     /// <summary>
     /// Round 122 fix round 1 (K1): this run's answer to <see cref="_linkColumnsSecured"/>, asked at most once per run and only
     /// when a release is due: null = not asked yet; otherwise the reason code that refuses a release, or "" when secured.
@@ -230,12 +249,16 @@ internal sealed class ChildAccessPermissionReconciler
     /// (<see cref="RestrictedFilingShareBar.RemoveBarredSharesAsync"/>); <c>true</c> when complete. A row it leaves incomplete is
     /// carried, so the next run tries again, and the sweep (which a restart starts again) finds it after a restart. Bounded per
     /// run by the write cap (see <see cref="RunAsync"/>). Never asked in a report-only run. <c>null</c>: not run.</param>
+    /// <param name="maxCarriedRows">198 pass 2 (F2): the most rows a run carries. Default
+    /// <see cref="SecureChildReconciliationJob.MaxCarriedRows"/>.</param>
     internal ChildAccessPermissionReconciler(
         IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger,
         Func<CancellationToken, Task<bool>> linkColumnsSecured,
-        Func<Guid, CancellationToken, Task<bool>>? restrictedCommunicationBar = null)
+        Func<Guid, CancellationToken, Task<bool>>? restrictedCommunicationBar = null,
+        int maxCarriedRows = SecureChildReconciliationJob.MaxCarriedRows)
     {
         _restrictedCommunicationBar = restrictedCommunicationBar;
+        _maxCarriedRows = maxCarriedRows;
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
@@ -274,6 +297,7 @@ internal sealed class ChildAccessPermissionReconciler
         var sweepRows = 0;
         (string Table, Guid Id)? sweepResume = null;
         var sweepEnd = false;
+        IReadOnlyList<Entity> sweepWindow = []; // F2: in the order read, so the cursor can stay before a row it did not handle
         // R3: where each candidate came from, for the order the Restricted bar takes them in (see the bar phase below).
         var seedKeys = new HashSet<(string Table, Guid Id)>();
         var sweepKeys = new HashSet<(string Table, Guid Id)>();
@@ -355,6 +379,7 @@ internal sealed class ChildAccessPermissionReconciler
             if (sweepAfter is { } after && sweepCap > 0)
             {
                 var window = await SweepWindowAsync(after, sweepCap, ct).ConfigureAwait(false);
+                sweepWindow = window.Rows;
                 sweepRows = window.Rows.Count;
                 foreach (var row in window.Rows)
                 {
@@ -386,6 +411,12 @@ internal sealed class ChildAccessPermissionReconciler
         var problems = new List<string>();
         var changes = new List<(string, Guid, int?, int)>();
         var carry = new List<(string, Guid)>();
+        // 198 pass 2 (F2): every path into the carry goes through Carry, which keeps it within the cap. A row that does not
+        // fit is LOST from the carry: counted (CarryOverflow, or RestrictedBarLeft for the bar), and covered after the phases
+        // (the sweep cursor stays before it, or the sweep starts again).
+        var inCarry = new HashSet<(string Table, Guid Id)>();
+        var lost = new HashSet<(string Table, Guid Id)>();
+        var carryOverflow = 0;
         var carriedSet = carried.Select(c => (c.Table.ToLowerInvariant(), c.Id)).ToHashSet();
         // R3: the communications whose value is Restricted (own or inherited), with the order the bar takes them in.
         var barDue = new List<((string Table, Guid Id) Key, int Order)>();
@@ -416,7 +447,7 @@ internal sealed class ChildAccessPermissionReconciler
             if (answer.Status != ParentTopsStatus.Found || answer.Value is not { } inherited)
             {
                 undetermined++;
-                carry.Add((table, id));
+                CarryDecided(table, id);
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: {answer.Reason}");
                 _logger.LogWarning(
@@ -476,7 +507,7 @@ internal sealed class ChildAccessPermissionReconciler
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 failed++;
-                carry.Add((table, id));
+                CarryDecided(table, id);
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: the write failed ({ex.GetType().Name})");
                 _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: writing its inherited Access Permission {To} failed; " +
@@ -497,28 +528,22 @@ internal sealed class ChildAccessPermissionReconciler
         // written to Restricted this run (never more than maxWrites, so never capped), then carried rows, then rows listed as
         // changed, then sweep rows, then rows listed only because something above them changed. Past the budget the run logs a
         // warning, and the capped rows of the first four kinds are carried (within the job's carry cap); the last kind, and any
-        // past the carry cap, are left for their next listing (counted, never silently).
-        int barRan = 0, barIncomplete = 0, barCapped = 0, barLeft = 0;
+        // past the carry cap, are left for their next listing (counted, never silently). 198 pass 2 (F2): the carry cap holds
+        // for every kind, carried rows included, and for a row the bar did not finish; a left row is covered after this phase
+        // (the sweep cursor stays before it, or the sweep starts again), never by holding the watermark.
+        int barRan = 0, barIncomplete = 0, barCapped = 0, barLeft = 0, barCappedCarried = 0;
         if (writes && _restrictedCommunicationBar is not null && barDue.Count > 0)
         {
-            var inCarry = carry.Select(c => Key(c.Item1, c.Item2)).ToHashSet();
             foreach (var ((table, id), order) in barDue.OrderBy(d => d.Order)) // a stable sort: the decide order within a kind
             {
                 ct.ThrowIfCancellationRequested();
                 if (barRan >= maxWrites)
                 {
                     barCapped++;
-                    var mustCarry = order <= BarOrderCarried;
-                    if (!inCarry.Contains((table, id))
-                        && (mustCarry || (order <= BarOrderSwept && carry.Count < SecureChildReconciliationJob.MaxCarriedRows)))
-                    {
-                        carry.Add((table, id));
-                        inCarry.Add((table, id));
-                    }
-                    else if (!inCarry.Contains((table, id)))
-                    {
+                    if (inCarry.Contains((table, id)) || (order <= BarOrderSwept && Carry(table, id)))
+                        barCappedCarried++;
+                    else if (lost.Add((table, id)))
                         barLeft++;
-                    }
 
                     continue;
                 }
@@ -539,8 +564,8 @@ internal sealed class ChildAccessPermissionReconciler
                 if (complete)
                     continue;
                 barIncomplete++;
-                if (inCarry.Add((table, id)))
-                    carry.Add((table, id));
+                if (!Carry(table, id) && lost.Add((table, id)))
+                    barLeft++; // F2: the carry is full
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: the shares of users flagged external were not all removed yet");
             }
@@ -552,8 +577,49 @@ internal sealed class ChildAccessPermissionReconciler
                 _logger.LogWarning(
                     "[CHILD-ACCESS-PERMISSION] The Restricted filing bar reached its cap of {Cap} this run: {Capped} Restricted " +
                     "communication(s) were not barred ({Carried} carried to the next run, {Left} left for their next listing or the " +
-                    "sweep).", maxWrites, barCapped, barCapped - barLeft, barLeft);
+                    "sweep).", maxWrites, barCapped, barCappedCarried, barLeft);
             }
+        }
+
+        // F2: a row neither handled nor carried is never passed by the sweep cursor: it stays before the first such row of
+        // this run's window (in the order read). Any other such row starts the sweep again (the caller's ResweepNeeded).
+        var resweep = false;
+        if (lost.Count > 0)
+        {
+            for (var i = 0; i < sweepWindow.Count; i++)
+            {
+                if (!lost.Contains(Key(sweepWindow[i].LogicalName, sweepWindow[i].Id)))
+                    continue;
+                sweepEnd = false;
+                sweepResume = i == 0 ? sweepAfter : (sweepWindow[i - 1].LogicalName, sweepWindow[i - 1].Id);
+                break;
+            }
+
+            resweep = lost.Any(key => !sweepKeys.Contains(key));
+            _logger.LogWarning(
+                "[CHILD-ACCESS-PERMISSION] The carry is full ({Cap} rows): {Lost} row(s) were neither handled nor carried this " +
+                "run ({Overflow} undecided or failed, {Left} Restricted bar); the sweep stays before them or starts again.",
+                _maxCarriedRows, lost.Count, carryOverflow, barLeft);
+        }
+
+        // F2: the decide phase's rows go through here (the bar phase calls Carry itself, and counts its own).
+        void CarryDecided(string table, Guid id)
+        {
+            if (!Carry(table, id) && lost.Add(Key(table, id)))
+                carryOverflow++;
+        }
+
+        // F2: carries a row within the cap; false when the carry is full (the row is not carried).
+        bool Carry(string table, Guid id)
+        {
+            var key = Key(table, id);
+            if (inCarry.Contains(key))
+                return true;
+            if (carry.Count >= _maxCarriedRows)
+                return false;
+            carry.Add(key);
+            inCarry.Add(key);
+            return true;
         }
 
         void DueForBar(string table, Guid id, bool written)
@@ -596,7 +662,7 @@ internal sealed class ChildAccessPermissionReconciler
                 if (answer.Status != ParentTopsStatus.Found || answer.Value is null)
                 {
                     undetermined++;
-                    carry.Add((table, id));
+                    CarryDecided(table, id);
                     if (problems.Count < MaxProblems)
                         problems.Add($"{table} {id:D}: {answer.Reason}");
                     _logger.LogWarning(
@@ -612,7 +678,7 @@ internal sealed class ChildAccessPermissionReconciler
             if (decision.Undetermined is { } why)
             {
                 undetermined++;
-                carry.Add((table, id));
+                CarryDecided(table, id);
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: {why}");
                 if (!decision.WriteValue)
@@ -631,7 +697,7 @@ internal sealed class ChildAccessPermissionReconciler
                 // Fix round 1 (B): whether it may be released could not be decided. It was decided as not linked (fail closed:
                 // it stays Restricted), and it is carried, so the next run decides it again.
                 undetermined++;
-                carry.Add((table, id));
+                CarryDecided(table, id);
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: its save-time Restricted could not be released ({linkReason})");
             }
@@ -683,7 +749,7 @@ internal sealed class ChildAccessPermissionReconciler
                 if (!await StillAsReadAsync(table, id, stored, recordText, withRecord: !raiseOnly, ct).ConfigureAwait(false))
                 {
                     changedConcurrently++;
-                    carry.Add((table, id));
+                    CarryDecided(table, id);
                     _logger.LogInformation(
                         "[CHILD-ACCESS-PERMISSION] {Table} {Id}: it changed while it was being decided; nothing was written, " +
                         "and it is decided again next run.", table, id);
@@ -715,7 +781,7 @@ internal sealed class ChildAccessPermissionReconciler
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 failed++;
-                carry.Add((table, id));
+                CarryDecided(table, id);
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: the write failed ({ex.GetType().Name})");
                 _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] {Table} {Id}: writing its Access Permission {To} (own {Own}) " +
@@ -748,6 +814,8 @@ internal sealed class ChildAccessPermissionReconciler
             Problems = problems,
             Changes = changes,
             Carry = carry,
+            CarryOverflow = carryOverflow,
+            ResweepNeeded = resweep,
             SweepRows = sweepRows,
             SweepResumeAfter = sweepResume,
             SweepReachedEnd = sweepEnd,
