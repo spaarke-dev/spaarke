@@ -12,8 +12,8 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Spike **DA-1**: specialist declarative agents in Word (agent mode) for **NDA Review** and **Legal Hold Review** (no POML tasks; pre-pipeline spike). Owner asked (2026-11-09): spike both; refresh DA research to 2026-11-09 (done); thoroughly review the existing Spaarke AI agent (done) |
-| **Step** | Prep done: research note, inventory, `da-spike-script.md` complete (S1 = Architecture A two agents + B one agent with two skills; tests LH-1..6, N-1..7, B-1..3, R-1, FD-1, CM-1), skills in `notes/poc-e2e/da-spike/skills/` (zips also in owner OneDrive `Documents/Cowork/Test/POC-DA1/skills/`) |
-| **Status** | blocked on owner running the spike in the tenant |
+| **Step** | Setup round 1 failed (owner 2026-11-09: Agent Builder rejects `.md` knowledge, has no skills; agents built in Copilot Studio don't appear in Word; see `results.md` "Spike DA-1"). Round 2: S1 now = upload three DA **packages** (v1.9, agent skills, no knowledge) from OneDrive `Documents/Cowork/Test/POC-DA1/packages/`, built by `da-spike/Build-SpikePackages.ps1`; @-names end in " DA". Table-free playbook copies in `POC-DA1/knowledge/` |
+| **Status** | blocked on owner installing the packages and running the spike |
 | **Next Action** | When the owner reports results/screenshots (`OneDrive Documents/Cowork/Test/POC-DA1/screens/`): score N-1/N-3/B-1 against `answer-key/answer-key.md`, LH-1/LH-4/B-2 against `answer-key/legal-hold-answer-key.md`; record "Spike DA-1" in `results.md` |
 
 ### Files modified this session (uncommitted unless noted)

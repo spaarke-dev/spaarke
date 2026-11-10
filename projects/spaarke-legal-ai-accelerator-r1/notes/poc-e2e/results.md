@@ -478,3 +478,22 @@ plus the owner's in-chat screenshots of the protocol run. Scored against `answer
 sources during reviews (`Cowork/MVP-Evidence/T-02/skills-folder-copy/`, `Cowork/Skills/nda-library-review/`,
 `Microsoft Copilot Chat Files/playbook-format.md`, `Copilot/Created/_before-Act2/`). #35: the W1a findings table may
 have been inserted into draft A (W1a.4 shows it in the document body); check draft A before further tests.
+
+## Spike DA-1: specialist declarative agents (2026-11-09)
+
+Script: `da-spike-script.md`. Sources: `da-spike/` (instructions, skills, `Build-SpikePackages.ps1`).
+
+### Setup round 1 (owner, 2026-11-09): the Agent Builder route failed
+
+| # | What the owner found | What it means |
+|---|---|---|
+| 1 | The agent builder is in the Copilot desktop app; the web version offers only plugins | Record as observed; the route below avoids the builder altogether |
+| 2, 5 | Knowledge won't accept `.md` files. The owner used the four-column Word playbooks instead | Those are tables, which agents drop. Replaced by table-free Word copies: `POC-DA1/knowledge/* (text).docx` |
+| 3 | No "starters"; the field is called *Suggested prompts* | Naming only |
+| 4 | No *skills* option in the builder | Architecture B can't be built there |
+| 6, 7 | All three agents were built in **Copilot Studio** and **don't appear in Word**. Owner's view: Word lists only declarative agents | Consistent with what we know: the one agent ever seen in Word (`@Spaarke AI`) was an uploaded declarative-agent package. Microsoft's docs don't say which agents Word lists |
+
+**Change.** Use declarative-agent **packages** (manifest v1.9, the same route as Spaarke AI): three upload zips in
+`POC-DA1/packages/`, each carrying its playbook as an agent skill (no knowledge source, so no `.md` or table
+problem and no SharePoint dependency). The Copilot Studio agents become one control test (do they ever appear in
+Word?).
