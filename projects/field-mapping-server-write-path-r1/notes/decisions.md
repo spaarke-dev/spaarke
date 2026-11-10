@@ -951,3 +951,97 @@ These conditions are fixed in the design before any code, together with UAC-r2's
   - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
   - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
   - Must-fire and must-not-fire tests.
+
+## 2026-11-07 — Owner approves the 045 recommendations (in fm's session)
+
+Design: `task/fm-045` f35b4d12b1, `notes/task-045-regarding-propagation-design.md`. The owner chose "follow recommendation" for Q1–Q12:
+- **Q1 (a):** the 18 tables that carry the full pair.
+- **Q2 (a):** the id is filled from the agreement columns, never from the stamp columns, and never from mapped lookups.
+- **Q3 (a):** a warning on clear only.
+- **Q4 (b):** updates keep the pair in step with a moved typed lookup, on all pair tables.
+- **Q5 (a):** an update reports a clear by log event; the response is unchanged.
+- **Q6 (c):** id-only pairs: only the reply copy is fixed.
+- **Q7:** display columns are re-derived on a move (b), and cleared otherwise (a). Renames go to the 052 report.
+- **Q8 (a):** the invoice family is re-derived on the row's own core-lookup change.
+- **Q9 (a):** direct writes are covered by the 052 report, Repair and column audit.
+- **Q10 (a):** the connections control's unlink is left as is.
+- **Q11 (a):** no change to the timing windows.
+- **Q12 (a):** the split is 045a (create step and guard 1), 045b (update planner and wiring, guard 2), 045c (invoice re-derivation, missing display columns, reply type, client number clear), plus a 052 report line.
+
+UAC-r2 (2026-11-07): the playbook Update Record and output-mapping paths run as the user, or app-only behind authoring controls. 045b adds no AppendTo check there.
+
+## 2026-11-08 — Owner decisions on 032, the repair pass, inbound mapping, checks and NFR-02 (in fm's session)
+
+- **032: option B.** Extracted invoices get Matter→Invoice mapping, including the access-conferring Assigned Attorney and Paralegal columns, with the matching access grant. The work is coordinated with ebilling-r1. ebilling-r1's answers (2026-11-08):
+  - nothing reads the invoice-level copies, now or planned, so the grant may be queued; no ebilling decision may ever read them;
+  - build on `work/ebilling-r1` after its task 082d, in a separate task branch; it reaches master in ebilling-r1's PR;
+  - mechanism: a post-commit, resumable step in `InvoiceSubmissionAfterSteps` that writes the grant first, then the fill-only columns.
+
+  Next: a design note (`notes/task-032b-design.md`, on `task/fm-032b-design`), reviewed by ebilling-r1 and UAC-r2 together. UAC-r2 signs off the grant path, and answers the re-file question (revoke or keep).
+- **Repair pass (052):** task and account are excluded. A contact must be owned by the customer's main business-unit team.
+  - Today, a contact created in the model-driven form is owned by the creating user. Dataverse's default applies, and no server code runs on that create (ADR-002: no plugins).
+  - BFF chat creates use the resolver's team.
+  - Nothing re-owns contacts after create. On dev, contacts were moved to the "Spaarke Business Unit 1" team by a manual re-own on 2026-11-02.
+  - Proposal: a contact owner-only rule in 052b's pass. It finds the main team per environment, and refuses and logs if it can't, never falling back to the creator. No field mapping on contacts. UAC-r2 reviews it.
+  - Open: which team is "main". The root BU "Spaarke"'s team, or a configured team?
+- **Inbound mapping:** recorded as a known gap, DI-022 (#2633).
+- **Checks:** (a) PASS. In place of (c), the owner hit a push-preview defect: a table with no profile failed the whole preview. It is fixed in scope as task 076c (`task-040-notes.md`).
+- **NFR-02:** the dev r3 run (`task-021-live.md`) shows a p95 delta of +1288 ms. The owner moved the verdict to UAT: "we'll test this in UAT". No 049d work starts on the dev result.
+
+## 2026-11-08 — 032b design reviews; owner on O1/O2 and the contact team (in fm's session)
+
+Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
+- **ebilling-r1 agrees to E1–E6.**
+  - **E4 condition:** the admin note uses the existing admin-attention writer, stays within the 500-character cap, and writes no status and no other column.
+  - **E6 condition:** sprk_description and sprk_highpriority never join the external invoice ReadableColumns or the firm-facing rendering without both projects' review.
+  - **Base:** 082d is merged into work/ebilling-r1 (7cd62a1710; tip d58e3a3554).
+- **UAC-r2 approves, with two conditions.**
+  - **C1:** the job payload pins the core (table, id) from the persister's committed result. Gate 2 requires invoice core == payload core == submission core, plus a must-fire re-point test.
+  - **C2:** settle U3 before 032b-2. Enumerate who resolves membership for sprk_invoice.
+    - If no caller does, the four assignee copies confer nothing. sprk_invoice leaves the registry, the copies become display copies, and the grant machinery goes.
+    - If any caller does, the copies are cleared on a core change and on Revoked/Declined.
+  - **U1, U2, U4, U5:** approved.
+- **Owner, O2 (move the mapping gates into a shared class):** approved. The owner also asked which other create processes need the same gates. An inventory of no-caller creators is in progress.
+- **Owner, O1 (after-save job vs inline):** not decided. The owner asked:
+  - what the implications are when a process fires on the field values (a form or server trigger);
+  - and stated that this must also hold for other record types that inherit the sprk_assigned* values.
+
+  The design note's round 2 answers this with a consumer inventory. It also evaluates inline-before-the-transaction if U3 lands on (c).
+- **Owner, contact owner team:** an environment setting is acceptable. First check whether a shared mechanism already exists, and use one consistent process rather than a parallel approach. An investigation is in progress.
+- **032b round 2 (9083f5df93), UAC-r2: approved (2026-11-08).**
+  - **U3 → (c), confirmed.** Re-checked on master and on work/ebilling-r1: the only rights-granting membership callers are asked for project, matter and work assignment only, so the sprk_invoice registry entry grants nothing. Dev has no app-setting override of the registry.
+  - **U7 accepted** from the access side. It is a visible product change (Daily Briefing stops selecting invoices through these columns), so the owner decides.
+  - **E7:** no further OK needed under (c), provided every gate still runs before any value is read.
+  - **Inline placement:** fine. C1 holds by construction.
+  - **Registry removal:** done in fm's branch with UAC-r2's review, landing before or with 032b-2, together with the guard. The PR text must state the push side effect: the four columns become one-time and are never re-pushed.
+- **032b round 2, ebilling-r1: confirmed (2026-11-08).**
+  - **Inline placement:** in `PersistCoreAsync`, after `FillInvoice` and before `BuildInvoiceCreateRequest`. Values go in request 0, there is one re-commit without them, and a resume never maps. The §7 constraint is accepted.
+  - **Conditions for 032b-2:**
+    - Branch from the CURRENT origin/work/ebilling-r1 tip (verify with `merge-base --is-ancestor`), and re-anchor line numbers.
+    - Add 082d's snapshot tests (`ProcedureSnapshot*`, the add-line and correction round trips from e552c406f8) to the regression list. `sprk_findingsjson` must survive the re-commit rebuild byte for byte.
+    - T-E7 asserts that `sprk_findingsjson` is identical to an unmapped run.
+    - Send ebilling-r1 the diff before it merges into their work branch.
+  - **Owner decisions still open:** O1 (both reviewers prefer inline) and U7 (Daily Briefing).
+- **Owner (2026-11-08): O1 inline placement: yes. U7 (Daily Briefing stops selecting invoices through the copied assignee columns): accepted.** With O2 approved earlier, the 032b design (9083f5df93) is final.
+  - 032b-1 (fm branch: shared gates, registry removal with its guard, inventory of no-caller creators) merges to master first.
+  - Then 032b-2 and 032b-3 run on the current work/ebilling-r1.
+- **Contact owner team:** reuse `ExternalAccess:CustomerBusinessUnitId`, which resolves the BU's single default Owner team. It already sets the owner for the four identity-contact creates and fails closed when unset or ambiguous. The owner did not object, so it applies to the repair pass's contact rule (052b) and to the chat contact create. UAC-r2 reviews.
+
+## 2026-11-08 — Task 060: ownership matrix; outbox and gate-record exceptions kept
+
+- §5.2 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` holds the per-table ownership matrix. It has 25 rows, one per `RecordTableRules.All` entry, and I-6 points to it.
+- **Notification outbox: keep.** Recipient-owned rows are the BFF's per-user delivery key (app-only reads filtered to the caller; no target-user parameter). No Spaarke role holds any privilege on the table, and the row is filed under nothing.
+- **`DecisionRecordWriter` gate record about an unfiled communication: keep.** It is owned by the communication's own owning user and shared Read with its internal sharees (D-144 as amended, D-169). Its readers follow the communication's. It is secure-if-any first and fails closed without a readable, active user owner.
+- Contact row: today's two rules, plus "052b, pending" (every contact to the `ExternalAccess:CustomerBusinessUnitId` team).
+- Found in passing: row I-18 is stale (the Signal owner is now the resolver's team): DI-023, #2636.
+
+## 2026-11-08 — 032b-1 review by UAC-r2; invoice Assigned To targeting (owner, in fm's session); mapping-source rule
+
+- **UAC-r2 approved 032b-1 on the access side** (63fb6ce98e, 79b1aab39c, 4d24082a95). `AssignedAccessMaterializer.RegistryFor` grants on root types only, so removing the invoice entry revokes nothing.
+- **Premise correction (UAC-r2 F1):** Office quick-create writes the invoice's Assigned To to `sprk_assignedto1` (`OfficeService.InvoiceAssignedToAttribute`). U7 was accepted on the belief that nothing writes it. The `MembershipOptions` comment now states the Office writer.
+- **Owner decision (corrected U7): invoice Assigned To targets people without conferring access.** Daily Briefing and notifications also read the invoice's `sprk_assignedto1/2`, outside the access-conferring registry. No new grant path; the registry/display-copy guard still holds. Keeps the standing rule "notifications target Created By and Assigned To". Built as task 032b-1b.
+- **Mapping-source rule (UAC-r2, 2026-11-08):** a source record that is secure (the secure-if-any answer the 032b gate uses; one predicate) maps only into a create that is secure from creation. Otherwise the create maps nothing and returns a warning with a stable code; a source whose answer faults maps nothing. Enforced in the shared `MapFieldsAsync`, so every create that maps on the server gets it. The Event, To Do, Invoice, Work Assignment and Report Card wizards still map in the browser until tasks 023–027 move them onto the server route (FR-22); until then this rule does not apply to their mapped values. The Project wizard preview turns Secure on and locks it when the chosen Matter is secure (a project under a secure parent is secure). Built in task 022's fix round 2.
+
+## 2026-11-09 — Direct message audience (owner)
+
+- Option A approved: a Direct message records both participants itself, `sprk_sentby` and a new `sprk_directrecipient` (lookup to systemuser), both stamped by the BFF at create and secured in 054b together with the message's thread lookup. The audience UAC-r2 task 198 grants to is exactly that pair; it is never read from the thread. Option C (the Direct team owns threads) was rejected: "threads do not move" stands. Detail in `tasks/054-direct-message-owner-team.poml`.

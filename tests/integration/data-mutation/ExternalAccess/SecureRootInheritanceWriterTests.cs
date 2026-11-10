@@ -1912,6 +1912,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         await viaCore.Should().ThrowAsync<RecordOwnerUnresolvedException>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object, new StampWorld().Restamper,
             [
                 new FieldMappingRuleDto
@@ -1982,6 +1983,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)>
         PushMatterOnto(Guid workAssignment, Guid matter) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [
@@ -2130,6 +2132,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [

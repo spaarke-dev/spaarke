@@ -92,6 +92,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private readonly Dictionary<(string Source, string Target), FieldMappingProfileEntity> _profiles = new();
     private readonly Dictionary<(string Table, Guid Id), Entity> _sources = new();
     private readonly List<(string Table, Guid Id, string[] Columns)> _sourceReads = [];
+
+    /// <summary>Task 022 fix round 2: the ordinary user who owns every scripted source unless a row names its own owner.</summary>
+    private static readonly Guid SourceOwner = Guid.Parse("a0140000-0000-4000-8000-0000000000d1");
+
+    /// <summary>Task 022 fix round 2: sources whose owner does not come back in the read (the gate cannot tell them).</summary>
+    private readonly HashSet<Guid> _sourcesWithNoOwner = [];
     private readonly HashSet<Guid> _readable = [];
     private readonly Dictionary<Guid, AccessRights> _rights = [];
     private readonly ReadProbe _probe;
@@ -184,6 +190,13 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 var read = new Entity(table, id);
                 foreach (var column in columns.Where(row.Attributes.ContainsKey))
                     read[column] = row[column];
+
+                // Task 022 fix round 2: the mapping-source gate's columns, as the world holds them, unless the row names its
+                // own: an ordinary user owns every scripted source, and a root's secure flag is the world's (SecureMatter).
+                if (columns.Contains("ownerid") && !row.Attributes.ContainsKey("ownerid") && !_sourcesWithNoOwner.Contains(id))
+                    read["ownerid"] = new EntityReference("systemuser", SourceOwner);
+                if (columns.Contains(AccessFollowsParent.SecureFlagColumn) && !row.Attributes.ContainsKey(AccessFollowsParent.SecureFlagColumn))
+                    read[AccessFollowsParent.SecureFlagColumn] = id == SecureMatter;
                 return Task.FromResult(read);
             }));
 
@@ -784,7 +797,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
-    public async Task CreateAsync_ADefaultOnlyProfile_ReadsNoSource_SoMakesNoCallerRead_AndStillAppliesItsDefaults()
+    public async Task CreateAsync_ADefaultOnlyProfile_ReadsOnlyTheSourcesGateColumns_SoMakesNoCallerRead_AndStillAppliesItsDefaults()
     {
         Profile("sprk_matter", "sprk_event", Rule(null, "sprk_location", Text, Default, "Room 1"));
 
@@ -792,8 +805,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Room 1");
-        _sourceReads.Should().BeEmpty();
-        _callerRead.Paths.Should().BeEmpty("nothing was read app-only, so there is nothing to mask");
+        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag), nothing else.
+        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo("ownerid", AccessFollowsParent.SecureFlagColumn);
+        _callerRead.Paths.Should().BeEmpty("no mapped source column was read app-only, so there is nothing to mask");
         outcome.MappingWarnings.Should().BeEmpty();
     }
 
@@ -1154,8 +1168,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         var shares = SecureChildShareWorld.SynchronizerOver(() => _shareWorld, new FakeRecordShareTable());
 
+        IRecordOwnershipResolver resolver = new JournalingResolver(_world.Resolver(null), _journal, _ownerDelay);
+        if (_forcedOwnerTeam is { } forced)
+            resolver = new ForcedOwnerResolver(resolver, forced); // task 022 fix round 2: a seeded owner answer
+
         return new RecordCreationService(
-            new JournalingResolver(_world.Resolver(null), _journal, _ownerDelay), _appOnly.Object, _sourceReader.Object,
+            resolver, _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
             _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             _logger ?? NullLogger<RecordCreationService>.Instance)

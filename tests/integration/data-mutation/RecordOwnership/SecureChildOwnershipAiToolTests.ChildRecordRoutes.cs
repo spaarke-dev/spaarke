@@ -198,6 +198,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated_WhenTheCallerHoldsItsAppendToPrivilege()
     {
+        // Task 045a fix round 1 (F3): the catalog row names its table, as a real matter type's does (a row naming none is
+        // now cleared by step 4½); the to-do's matter then completes the pair.
+        CatalogKnowsTheMatterType();
+
         var result = await CreateChild("sprk_todo", new()
         {
             ["sprk_name"] = "Call back",
@@ -733,9 +737,13 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // PROPERTY's null bind — its logical name (sprk_regardingproject) is not a Web API property, and a body naming it
         // is refused (0x80060888), which is what broke every resolver selection on a saved host.
         var body = BodyOf(patch.Body);
+        // Task 045b (owner ruling Q7): the move clears the display column the payload did not send (the row's type is unread
+        // here, so the number cannot be re-derived) — it never keeps the old record's number.
         body.Keys.Should().BeEquivalentTo(
             "sprk_RegardingMatter@odata.bind", "sprk_RegardingProject@odata.bind",
-            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl");
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber");
+        body["sprk_regardingrecordnumber"].ValueKind.Should().Be(JsonValueKind.Null);
+        body["sprk_regardingrecordname"].GetString().Should().Be("Smith v. Jones", "a display column the payload sends is its own");
         body["sprk_RegardingProject@odata.bind"].ValueKind.Should().Be(JsonValueKind.Null);
         body["sprk_RegardingMatter@odata.bind"].GetString().Should().Be($"/sprk_matters({OrdinaryMatter:D})");
         _user.RefusedBodies.Should().BeEmpty();

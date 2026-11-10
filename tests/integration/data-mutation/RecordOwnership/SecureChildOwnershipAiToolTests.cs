@@ -807,6 +807,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
                 ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
                 ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
+                // A matter's standalone regarding type (sprk_RecordType_Ref.xml; no sprk_regardingrecordid on the matter).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_project"] = new[]
             {
@@ -845,6 +847,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
                 ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
+                // Field mapping task 045b: the communication's ADR-024 pair type (live: SpaarkeMaster sprk_Communication
+                // Entity.xml, sprk_RegardingRecordType), which the communication filing route binds on a pair move.
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_document"] = new[]
             {
@@ -884,6 +889,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
                 ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
                 ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
+                // Field mapping task 045a: the analysis's own document filing (RecordContainerResolver.ChildAncestorLinks), the
+                // second link to sprk_document beside the anchor, and its ADR-024 pair type (the analysis is polymorphic), for
+                // the type-only pair's two-candidate case.
+                ("sprk_regardingdocument", "sprk_document", "sprk_RegardingDocument"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is

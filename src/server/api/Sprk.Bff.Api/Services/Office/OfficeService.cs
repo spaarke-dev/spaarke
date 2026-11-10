@@ -2760,6 +2760,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
                 => new(refusal.Code, Forbidden, refusal.Detail),
 
+            // ── Invalid: a value copied from a secure source files the row, which would not be secure (task 022 fix round 3).
+            // The same request is refused every time: passed through with the service's words, never the generic 500. ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.MappingSourceSecureFilingCode)
+                => new(refusal.Code, StatusCodes.Status400BadRequest, refusal.Detail),
+
             // ── OwnerUnresolved (stays 403) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
@@ -2928,6 +2934,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             {
                 payload["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
             }
+
+            // The relative record URL beside the id and name (045c, gap G5): the writer holds the table and the id, and
+            // RegardingRecordType owns the format every other writer of the pair uses. The reference number needs a read of
+            // the record, which this adapter does not make, so it is left unset (never guessed).
+            payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(reg.LogicalName, regardingId.ToString("D"));
 
             // Best-effort record-type ref (the denormalized ADR-024 resolver lookup): the typed lookup above is the
             // load-bearing relationship; a missing type only affects cross-entity display.

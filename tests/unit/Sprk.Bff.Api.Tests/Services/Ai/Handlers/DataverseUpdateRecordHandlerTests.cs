@@ -179,6 +179,25 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
                 }
                 """)));
 
+        // Task 045b (owner ruling Q7): the update planner reads that same row (above), and a pair moved with no type it could
+        // re-derive from has its display columns cleared — written as null clears, so the caller's mapper reads the event's
+        // lookups (as the caller) to tell a lookup clear from a column clear.
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')") && p.Contains("ManyToOneRelationships")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "LogicalName": "sprk_event",
+                  "ManyToOneRelationships": [
+                    { "ReferencingAttribute": "sprk_regardingcommunication", "ReferencingEntityNavigationPropertyName": "sprk_RegardingCommunication", "ReferencedEntity": "sprk_communication" },
+                    { "ReferencingAttribute": "sprk_regardinginvoice", "ReferencingEntityNavigationPropertyName": "sprk_RegardingInvoice", "ReferencedEntity": "sprk_invoice" },
+                    { "ReferencingAttribute": "sprk_regardingmatter", "ReferencingEntityNavigationPropertyName": "sprk_RegardingMatter", "ReferencedEntity": "sprk_matter" },
+                    { "ReferencingAttribute": "sprk_regardingrecordtype", "ReferencingEntityNavigationPropertyName": "sprk_RegardingRecordType", "ReferencedEntity": "sprk_recordtype_ref" }
+                  ]
+                }
+                """)));
+
         // The record the untyped pair is moved onto (the invoice lookup the row keeps) costs AppendTo AS THE CALLER, asked
         // before anything is read about it app-only.
         _dataverse
@@ -278,6 +297,13 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_communications({Communication:D})?$select=")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "sprk_communicationid": "{{Communication:D}}" }""")));
+        // Task 045b: the update planner reads the row as the caller (the update moves an agreement lookup): no pair, so the
+        // pair has nothing to follow and the update is written as sent.
+        _dataverse
+            .Setup(d => d.GetAsync($"sprk_communications({Communication:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                { "sprk_communicationid": "{{Communication:D}}", "_sprk_regardingmatter_value": "{{MatterA:D}}" }
+                """)));
         int? restampPatchesWhenTheUserWrote = null;
         _dataverse
             .Setup(d => d.PatchAsync($"sprk_communications({Communication:D})", It.IsAny<string>(), It.IsAny<CancellationToken>()))

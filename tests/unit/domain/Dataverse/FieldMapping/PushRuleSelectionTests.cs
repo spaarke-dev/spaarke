@@ -109,14 +109,13 @@ public class PushRuleSelectionTests
 
     // ───────────────────── the one classifier (task 040 fix round 1) ─────────────────────
 
-    /// <summary>Every table of the registry, not only the three roots: an event, an invoice, a to-do, an analysis.</summary>
+    /// <summary>Every table of the registry, not only the three roots: an event, a to-do, an analysis.</summary>
     [Theory]
     [InlineData("sprk_matter", "sprk_assignedattorney1")]
     [InlineData("sprk_project", "sprk_assignedlawfirm1")]
     [InlineData("sprk_workassignment", "sprk_assignedto")]
     [InlineData("sprk_event", "sprk_assignedattorney1")]
     [InlineData("sprk_event", "sprk_assignedto2")]
-    [InlineData("sprk_invoice", "sprk_assignedtoattorney1")]
     [InlineData("sprk_todo", "sprk_assignedto")]
     [InlineData("sprk_analysis", "sprk_assignedparalegal2")]
     [InlineData("SPRK_EVENT", " sprk_AssignedAttorney1 ")]
@@ -130,6 +129,8 @@ public class PushRuleSelectionTests
     [InlineData("sprk_event", "sprk_clientreference")]
     [InlineData("sprk_reportcard", "sprk_assignedattorney1")] // the registry lists no report card column
     [InlineData("sprk_invoice", "sprk_assignedattorney1")]    // the invoice's columns are named sprk_assignedto*
+    [InlineData("sprk_invoice", "sprk_assignedtoattorney1")]  // task 032b-1: a display copy, not Assigned-To (U3 (c))
+    [InlineData("sprk_invoice", "sprk_assignedto1")]          // task 032b-1: sprk_invoice has no registry entry
     public void TheClassifier_AnswersNo_ForAColumnTheRegistryDoesNotList(string table, string column)
     {
         PushRuleSelection.AssignedToColumnsOf(Bound())(table, column).Should().BeFalse();
@@ -151,7 +152,7 @@ public class PushRuleSelectionTests
     public void AnUnboundRegistry_ReadsAsTheCanonicalOne_NeverAsNone()
     {
         PushRuleSelection.AssignedToColumnsOf(new AccessConferringRegistry())("sprk_event", "sprk_assignedattorney1").Should().BeTrue();
-        PushRuleSelection.AssignedToColumnsOf(null)("sprk_invoice", "sprk_assignedto1").Should().BeTrue();
+        PushRuleSelection.AssignedToColumnsOf(null)("sprk_todo", "sprk_assignedto").Should().BeTrue();
     }
 
     [Fact]
@@ -161,6 +162,59 @@ public class PushRuleSelectionTests
         registry.Entities["sprk_event"] = [new AccessConferringColumn { Field = "sprk_assignedx", IdentityType = "Team" }];
 
         PushRuleSelection.AssignedToColumnsOf(registry)("sprk_event", "sprk_assignedx").Should().BeTrue();
+    }
+
+    // ───────────── display copies (task 032b-1; U3 (c): the invoice copies confer nothing and are never re-pushed) ─────────────
+
+    private const string Invoice = "sprk_invoice";
+
+    /// <summary>
+    /// Must-fire: a Copy rule onto an invoice display copy is not pushed — not at Manual Refresh in an ordinary push, not when
+    /// the request asks for the Assigned-To rules — and it is counted with the skipped rules, so the preview says so.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_assignedtoattorney1", false)]
+    [InlineData("sprk_assignedtoattorney2", true)]
+    [InlineData("sprk_assignedtoparalegal1", false)]
+    [InlineData("SPRK_AssignedToParalegal2@odata.bind", true)]
+    public void ADisplayCopyRule_IsNeverPushed_WhateverItsSyncMode_AndIsCounted(string column, bool includeAssignedTo)
+    {
+        var plain = Rule("sprk_description");
+        var manualRefresh = Rule(column, syncMode: SyncMode.ManualRefresh);
+        var oneTime = Rule(column, syncMode: SyncMode.OneTime);
+
+        var selected = PushRuleSelection.Select(
+            [plain, manualRefresh, oneTime], Invoice, includeAssignedTo, PushRuleSelection.AssignedToColumnsOf(Bound()));
+
+        selected.Rules.Should().Equal([plain], "a display copy is written only by the create; a push never re-maps it");
+        selected.SkippedCount.Should().Be(2);
+    }
+
+    /// <summary>Must-not-fire: on the same invoice profile, a plain Manual Refresh column still pushes, with or without the opt-in.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void APlainColumnOfTheSameInvoiceProfile_StillPushes(bool includeAssignedTo)
+    {
+        var description = Rule("sprk_description");
+        var priority = Rule("sprk_highpriority");
+
+        var selected = PushRuleSelection.Select(
+            [description, priority], Invoice, includeAssignedTo, PushRuleSelection.AssignedToColumnsOf(Bound()));
+
+        selected.Rules.Should().Equal(description, priority);
+        selected.SkippedCount.Should().Be(0);
+    }
+
+    /// <summary>The display-copy skip is the invoice's: the same column name on another table is decided by its own class.</summary>
+    [Fact]
+    public void TheSameColumnNameOnAnotherTable_IsNotADisplayCopy()
+    {
+        var sameName = Rule("sprk_assignedtoattorney1");
+
+        var selected = PushRuleSelection.Select([sameName], "sprk_reportcard", includeAssignedTo: false, PushRuleSelection.AssignedToColumnsOf(Bound()));
+
+        selected.Rules.Should().Equal(sameName);
     }
 
     /// <summary>The registry as the BFF binds it: empty, then seeded by the defaults' post-configure.</summary>

@@ -255,9 +255,7 @@ internal static class CallerWriteAuthorization
                           "filed under cannot be told.");
         }
 
-        var typeRow = await user.GetAsync(
-                $"{typeEntitySet ?? RecordTypeEntitySet}({type:D})?$select={RecordTypeLogicalNameColumn}", ct)
-            .ConfigureAwait(false);
+        var (typeRow, pairTable) = await PairTypeTableAsync(user, type, typeEntitySet, ct).ConfigureAwait(false);
         if (!typeRow.IsSuccess)
         {
             return typeRow.StatusCode is 403 or 404
@@ -270,12 +268,7 @@ internal static class CallerWriteAuthorization
                 : new PairTarget(null, new Outcome { ClientFailure = typeRow });
         }
 
-        var pairTable = typeRow.Body is { } typeBody
-                    && typeBody.TryGetProperty(RecordTypeLogicalNameColumn, out var logical)
-                    && logical.ValueKind == JsonValueKind.String
-            ? logical.GetString()?.Trim().ToLowerInvariant()
-            : null;
-        if (string.IsNullOrEmpty(pairTable) || !LogicalName.IsMatch(pairTable))
+        if (pairTable is null)
             return Refuse($"The record type '{SecureRootInheritance.PairTypeColumn}' names no table, so what this row is filed under cannot be told.");
 
         // #1616: on a work assignment (an inheriting table whose pair is NOT BFF-managed) the pair names a root — a matter, a
@@ -301,6 +294,31 @@ internal static class CallerWriteAuthorization
             new DataverseWriteItemMapper.MappedLookup(SecureRootInheritance.PairIdColumn, pairTable, entitySet.EntitySet!, pairId), null);
 
         static PairTarget Refuse(string why) => new(null, new Outcome { Invalid = why });
+    }
+
+    /// <summary>
+    /// The table the pair's TYPE names: its <c>sprk_recordtype_ref</c> catalog row read AS THE CALLER, and the table that row
+    /// names (<c>sprk_recordlogicalname</c>, trimmed, lower case, a logical name), or <c>null</c> when it names none. The read's
+    /// own response is returned, so each caller answers a failed read in its own contract: <see cref="PairTargetAsync"/>
+    /// refuses; the create's type-only step (<c>RecordCreationService</c>, step 4½, task 045a) leaves the item as sent on a
+    /// 404 only (step 5's existence read then answers), treats a 403 as a type naming no table (AppendTo asked, then cleared),
+    /// and refuses any other failure as the caller's upstream one.
+    /// </summary>
+    internal static async Task<(DataverseUserResponse Row, string? Table)> PairTypeTableAsync(
+        IDataverseUserClient user, Guid typeId, string? typeEntitySet, CancellationToken ct)
+    {
+        var typeRow = await user.GetAsync(
+                $"{typeEntitySet ?? RecordTypeEntitySet}({typeId:D})?$select={RecordTypeLogicalNameColumn}", ct)
+            .ConfigureAwait(false);
+        if (!typeRow.IsSuccess)
+            return (typeRow, null);
+
+        var pairTable = typeRow.Body is { } typeBody
+                    && typeBody.TryGetProperty(RecordTypeLogicalNameColumn, out var logical)
+                    && logical.ValueKind == JsonValueKind.String
+            ? logical.GetString()?.Trim().ToLowerInvariant()
+            : null;
+        return (typeRow, string.IsNullOrEmpty(pairTable) || !LogicalName.IsMatch(pairTable) ? null : pairTable);
     }
 
     /// <summary>A table's entity set, from its metadata read AS THE CALLER (a failure is theirs; no set is invalid).</summary>

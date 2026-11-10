@@ -162,6 +162,39 @@ public class FieldMappingPushFamilyContractTests
         world.Dataverse.Queries.Should().BeEmpty();
     }
 
+    /// <summary>Task 076c: a readable source but no profile for the pair is a 404 that carries the stable code, so the Family page
+    /// can report that one table and still preview the others.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATargetWithNoProfile_Is404WithTheProfileMissingReasonCode_ForAPreviewAndAnApply(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_noprofile", preview });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        json["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ProfileMissingReasonCode);
+        json["title"]!.GetValue<string>().Should().Be("Profile Not Found");
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The source-not-found 404 stays uniform and carries NO reason code: it must not be mistaken for a missing profile
+    /// (the page treats a code-less 404 as a whole failure).</summary>
+    [Fact]
+    public async Task ASourceTheCallerCannotRead_Is404WithNoReasonCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = Guid.NewGuid(), targetEntity = "sprk_noprofile", preview = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject().ContainsKey("reasonCode")
+            .Should().BeFalse("the uniform source-not-found answer has no code, so it cannot be told from a missing profile by its absence of one");
+    }
+
     [Fact]
     public async Task IncludeAssignedTo_WithoutWriteOnTheSource_Is403_AndNothingIsReadOrWritten()
     {
@@ -302,6 +335,39 @@ public class FieldMappingPushFamilyContractTests
         json["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
     }
 
+    /// <summary>Task 076c: an active profile whose rules are all off returns no rules at all. A preview must still answer AS a
+    /// preview (the Family page throws on a 200 that is not), and an apply keeps its ordinary answer.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AProfileWithNoRules_AnswersAPreviewAsAPreview_AndAnApplyAsBefore(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA], rules: []);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["success"]!.GetValue<bool>().Should().BeTrue();
+        json["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal("Profile has no mapping rules configured.");
+        if (preview)
+        {
+            json["preview"]!.GetValue<bool>().Should().BeTrue();
+            json["changes"]!.AsArray().Should().BeEmpty();
+            json["skippedNoWriteCount"]!.GetValue<int>().Should().Be(0);
+            json["truncated"]!.GetValue<bool>().Should().BeFalse();
+        }
+        else
+        {
+            (json["preview"]?.GetValue<bool>() ?? false).Should().BeFalse("an apply keeps today's non-preview answer");
+            json["changes"].Should().BeNull();
+        }
+
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
+    }
+
     // ───────────────────────── the Assigned-To policies on a previewed change ─────────────────────────
 
     [Fact]
@@ -324,7 +390,8 @@ public class FieldMappingPushFamilyContractTests
         var response = await FieldMappingPushFamily.PreviewAsync(
             new FieldMappingPushFamily.PreviewInput(
                 "sprk_event", members, false, [rule], new Dictionary<string, object?> { ["sprk_assignedname"] = "Alex" },
-                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (table, column) => column == "sprk_assignedname"),
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (table, column) => column == "sprk_assignedname",
+                Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild()),
             "token", CallerSystemUserId, probe, dataverse, entities.Object,
             (_, ids, _) => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(new Dictionary<Guid, RootRecordFlags>
             {
@@ -346,6 +413,380 @@ public class FieldMappingPushFamilyContractTests
         FieldMappingPushFamily.FlagNames(RootRecordFlags.Unreadable).Should().Equal("secure", "restricted", "limited");
         FieldMappingPushFamily.FlagNames(new RootRecordFlags(false, false)).Should().BeEmpty();
     }
+
+    // ───────────────────────── task 022 fix round 4: the mapping-source rule, through the route ─────────────────────────
+
+    /// <summary>A secure source, children owned by a user (not its isolation owner): the route asks the rule on the apply.</summary>
+    [Fact]
+    public async Task Apply_FromASecureSource_DoesNotWriteAChildNotOwnedByItsIsolationOwner_AndGivesTheCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA, ChildB, ChildC]);
+        world.Host.ArrangeSourceGateRead("sprk_matter", secureFlag: true);
+        ArrangeChildOwner(world, new Microsoft.Xrm.Sdk.EntityReference("systemuser", Guid.NewGuid()));
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!;
+        json["updatedCount"]!.GetValue<int>().Should().Be(0);
+        json["failedCount"]!.GetValue<int>().Should().Be(1);
+        var error = json["errors"]!.AsArray().Should().ContainSingle().Which!;
+        error["recordId"]!.GetValue<string>().Should().Be(ChildA.ToString("D"));
+        error["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        error["error"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
+        world.Host.Writes.Should().BeEmpty("nothing is written to a child the rule refuses");
+    }
+
+    /// <summary>The same source and children on a preview: no value is listed for the child; it comes back with its code.</summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ListsNoValueForAChildNotOwnedByItsIsolationOwner_AndReturnsItWithTheCode()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+        world.Dataverse.Current[ChildA] = "OLD";
+        world.Host.ArrangeSourceGateRead("sprk_matter", secureFlag: true);
+        ArrangeChildOwner(world, new Microsoft.Xrm.Sdk.EntityReference("systemuser", Guid.NewGuid()));
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!;
+        json["preview"]!.GetValue<bool>().Should().BeTrue();
+        json["changes"]!.AsArray().Should().BeEmpty("the apply would write nothing to the child");
+        var skipped = json["errors"]!.AsArray().Should().ContainSingle().Which!;
+        skipped["recordId"]!.GetValue<string>().Should().Be(ChildA.ToString("D"));
+        skipped["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        world.Host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>An ordinary source through the route: unchanged, the child is written and no child owner is read.</summary>
+    [Fact]
+    public async Task Apply_FromAnOrdinarySource_IsUnchanged_AndReadsNoChildOwner()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA]);
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        JsonNode.Parse(body)!["updatedCount"]!.GetValue<int>().Should().Be(1);
+        world.Host.Writes.Should().ContainSingle().Which.Id.Should().Be(ChildA);
+        world.Host.Entities.Verify(e => e.RetrieveAsync(
+            "sprk_event", It.IsAny<Guid>(), It.Is<string[]>(c => c.Length == 1 && c[0] == "ownerid"), It.IsAny<CancellationToken>()),
+            Times.Never, "a source that is not secure is allowed for every child");
+    }
+
+    /// <summary>
+    /// The preview over a secure source owned by the Secure Record owner team: the child that team owns is listed with its
+    /// value; the child an ordinary team owns is not, and comes back with the code and the fixed text.
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ListsTheChildItsIsolationOwnerOwns_AndReturnsTheOtherWithTheCode()
+    {
+        var secureTeam = Guid.NewGuid();
+        var ordinaryTeam = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.AddRange([ChildA, ChildB]);
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", id == ChildB ? secureTeam : ordinaryTeam),
+            });
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var rule = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = Column, SourceFieldType = "Text", TargetField = Column, TargetFieldType = "Text",
+            Priority = 1, MappingType = "Copy",
+        };
+        var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
+            "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
+
+        var response = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, [rule], new Dictionary<string, object?> { [Column] = "SECURE-VALUE" },
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(), 0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA, ChildB]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        response.Changes!.Select(c => c.RecordId).Should().Equal([ChildB], "the child the isolation owner owns is listed");
+        var skipped = response.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.NotIsolatedReasonCode);
+        skipped.Error.Should().Be(FieldMappingPushSourceGate.NotIsolatedMessage);
+    }
+
+    /// <summary>
+    /// UAC-r2 (a) on the preview: a secure source's push that would change a child's filing lists no value for that child and
+    /// returns it with the re-file code; a child already filed under the pushed record is listed (both are owned by the
+    /// source's isolation owner).
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ReturnsAChildItWouldRefileWithTheRefileCode_AndListsTheOneAlreadyFiledThere()
+    {
+        var secureTeam = Guid.NewGuid();
+        var otherMatter = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.AddRange([ChildA, ChildB]);
+        dataverse.AttributeNames.Add("sprk_regardingmatter");
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", id == ChildB ? otherMatter : MatterId),
+            });
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var rule = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = "sprk_lookupsource", SourceFieldType = "Lookup", TargetField = "sprk_regardingmatter",
+            TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+        };
+        var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
+            "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
+
+        var response = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, [rule], new Dictionary<string, object?> { ["sprk_lookupsource"] = otherMatter },
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+                {
+                    [rule] = new("sprk_RegardingMatter@odata.bind", $"/sprk_matters({otherMatter:D})", null),
+                },
+                0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA, ChildB]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        response.Changes!.Select(c => c.RecordId).Should().Equal([ChildB], "the child already filed under the pushed record is listed");
+        var skipped = response.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        skipped.Error.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedMessage);
+    }
+
+    /// <summary>
+    /// The same on the preview for a lookup the pair repeats (a party lookup, one of the pair's agreement columns): a secure
+    /// source's push that would move it is returned with the re-file code; a child already holding the pushed account is listed.
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ReturnsAChildWhosePairedPartyItWouldMove_WithTheRefileCode()
+    {
+        var secureTeam = Guid.NewGuid();
+        var accountA = Guid.NewGuid();
+        var accountB = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.AddRange([ChildA, ChildB]);
+        dataverse.AttributeNames.Add("sprk_regardingaccount");
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+            {
+                var account = id == ChildB ? accountB : accountA;
+                return new Microsoft.Xrm.Sdk.Entity(table, id)
+                {
+                    ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                    ["sprk_regardingaccount"] = new Microsoft.Xrm.Sdk.EntityReference("account", account),
+                    [Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn] = account.ToString("D"),
+                };
+            });
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var rule = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = "sprk_client", SourceFieldType = "Lookup", TargetField = "sprk_regardingaccount",
+            TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+        };
+        var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
+            "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
+
+        var response = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, [rule], new Dictionary<string, object?> { ["sprk_client"] = accountB },
+                new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+                {
+                    [rule] = new("sprk_RegardingAccount@odata.bind", $"/accounts({accountB:D})", null),
+                },
+                0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA, ChildB]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        response.Changes!.Select(c => c.RecordId).Should().Equal([ChildB]);
+        var skipped = response.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    /// <summary>
+    /// Task 022 fix round 5 (review F1): a lookup rule whose planned bind writes a DIFFERENT filing lookup than the one it names
+    /// is refused per rule on a reparentable child (#2091 r4), on the preview as on the apply. So the preview asks the source
+    /// gate with the payload the apply writes — the other rules' values only — and lists the child the apply writes, instead
+    /// of hiding it with the re-file code. The apply over the same child, rules and binds writes the same values (parity).
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ARuleWhoseBindIsAnotherFilingLookup_IsRefusedPerRule_AndTheChildIsListedAsTheApplyWritesIt()
+    {
+        var secureTeam = Guid.NewGuid();
+        var otherMatter = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.Add(ChildA);
+        dataverse.Current[ChildA] = "OLD-VALUE";
+        var entities = SecureSourceWithChildFiledUnderIt(secureTeam);
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var (rules, sourceValues, binds) = ATextRuleAndALookupRuleBoundThroughTheMatterLookup(otherMatter);
+        var members = new List<RecordFamilyMember>
+        {
+            new("sprk_event", ChildA, "Event A", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1),
+        };
+
+        var preview = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, rules, sourceValues, binds, 0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        preview.Errors.Should().BeEmpty("the refused rule is left out, so nothing in the payload changes the child's filing");
+        var listed = preview.Changes.Should().ContainSingle().Which;
+        listed.RecordId.Should().Be(ChildA);
+        listed.Column.Should().Be(Column);
+        listed.To.Should().Be("SECURE-VALUE");
+
+        var writes = new List<Dictionary<string, object?>>();
+        var writer = new Mock<IFieldMappingDataverseService>();
+        writer.Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, Guid _, Dictionary<string, object?> payload, Guid? _, CancellationToken _) =>
+                writes.Add(new Dictionary<string, object?>(payload)))
+            .Returns(Task.CompletedTask);
+
+        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            gate,
+            writer.Object,
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            rules,
+            sourceValues,
+            "sprk_event",
+            [ChildA],
+            CallerSystemUserId,
+            NullLogger.Instance,
+            CancellationToken.None,
+            lookupBinds: binds,
+            appOnlyEntities: entities.Object);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0), "the apply writes the child the preview listed");
+        writes.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { [Column] = "SECURE-VALUE" }, "the same values the preview listed, and no filing bind");
+    }
+
+    /// <summary>
+    /// Must not fire: a lookup rule whose bind writes the column it names keeps its bind on the preview (the confinement leaves
+    /// it as it is), so a secure source's push that would re-file the child still returns it with the re-file code.
+    /// </summary>
+    [Fact]
+    public async Task Preview_FromASecureSource_ALookupRuleWritingTheColumnItNames_KeepsItsBind_AndARefileIsStillReturnedWithTheCode()
+    {
+        var secureTeam = Guid.NewGuid();
+        var otherMatter = Guid.NewGuid();
+        var dataverse = new ScriptedDataverse { Inner = Mock.Of<IImpersonatedCommunicationQuery>() };
+        dataverse.Children.Add(ChildA);
+        dataverse.Current[ChildA] = "OLD-VALUE";
+        dataverse.AttributeNames.Add("sprk_regardingmatter");
+        var entities = SecureSourceWithChildFiledUnderIt(secureTeam);
+        var gate = new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
+        var (rules, sourceValues, binds) = ATextRuleAndALookupRuleBoundThroughTheMatterLookup(otherMatter, lookupTarget: "sprk_regardingmatter");
+        var members = new List<RecordFamilyMember>
+        {
+            new("sprk_event", ChildA, "Event A", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1),
+        };
+
+        var preview = await FieldMappingPushFamily.PreviewAsync(
+            new FieldMappingPushFamily.PreviewInput(
+                "sprk_event", members, false, rules, sourceValues, binds, 0, (_, _) => false, SourceGate: gate),
+            "token", CallerSystemUserId, new FamilyProbe(writable: [ChildA]), dataverse, entities.Object, null,
+            CancellationToken.None);
+
+        preview.Changes.Should().BeEmpty();
+        var skipped = preview.Errors.Should().ContainSingle().Which;
+        skipped.RecordId.Should().Be(ChildA);
+        skipped.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+    }
+
+    /// <summary>A secure matter (flagged, owned by the Secure team) and an event the Secure team owns, filed under that matter.</summary>
+    private static Mock<IGenericEntityService> SecureSourceWithChildFiledUnderIt(Guid secureTeam)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+        entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+            });
+        entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
+            {
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", MatterId),
+            });
+        return entities;
+    }
+
+    /// <summary>
+    /// A text rule on <see cref="Column"/> and a lookup rule on <paramref name="lookupTarget"/> whose bind was planned through the
+    /// event's matter lookup (<c>sprk_RegardingMatter</c>), naming another matter.
+    /// </summary>
+    private static (FieldMappingRuleDto[] Rules, Dictionary<string, object?> SourceValues, IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> Binds)
+        ATextRuleAndALookupRuleBoundThroughTheMatterLookup(Guid otherMatter, string lookupTarget = "sprk_regardingproject")
+    {
+        var text = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = Column, SourceFieldType = "Text", TargetField = Column, TargetFieldType = "Text",
+            Priority = 1, MappingType = "Copy",
+        };
+        var lookup = new FieldMappingRuleDto
+        {
+            Id = Guid.NewGuid(), SourceField = "sprk_lookupsource", SourceFieldType = "Lookup", TargetField = lookupTarget,
+            TargetFieldType = "Lookup", Priority = 2, MappingType = "Copy",
+        };
+        var binds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+        {
+            [lookup] = new("sprk_RegardingMatter@odata.bind", $"/sprk_matters({otherMatter:D})", null),
+        };
+        return ([text, lookup], new Dictionary<string, object?> { [Column] = "SECURE-VALUE", ["sprk_lookupsource"] = otherMatter }, binds);
+    }
+
+    /// <summary>Each child's owner as the app-only read returns it (task 022 fix round 4).</summary>
+    private static void ArrangeChildOwner(World world, Microsoft.Xrm.Sdk.EntityReference owner) =>
+        world.Host.Entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                new Microsoft.Xrm.Sdk.Entity(table, id) { ["ownerid"] = owner });
 
     // ───────────────────────── fixtures ─────────────────────────
 

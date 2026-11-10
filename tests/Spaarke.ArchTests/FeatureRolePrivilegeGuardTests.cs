@@ -2033,6 +2033,88 @@ public class FeatureRolePrivilegeGuardTests
         }
     }
 
+    // ── G5: invoice readers are never wider than core readers (field-mapping-server-write-path-r1 task 032b-1, Q-U1) ──────
+
+    private const string InvoiceRead = "prvReadsprk_invoice";
+    private static readonly string[] CoreReads = ["prvReadsprk_matter", "prvReadsprk_project", "prvReadsprk_workassignment"];
+
+    /// <summary>
+    /// Every role whose Read on <c>sprk_invoice</c> is deeper than its shallowest Read on the three core tables (an absent core Read
+    /// is shallower than any depth): such a role would show an invoice's copies of core-record values (its description, priority
+    /// and attorney and paralegal display copies, design notes/task-032b-design.md §2) to people who cannot read the core record. An
+    /// invoice Read at a level the scan does not know is reported too (fail closed).
+    /// </summary>
+    internal static List<string> InvoiceReaderProblems(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> roles)
+    {
+        var problems = new List<string>();
+        foreach (var (role, privileges) in roles.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            if (!privileges.TryGetValue(InvoiceRead, out var invoice))
+                continue;
+            if (Rank(invoice) < 0)
+            {
+                problems.Add($"{role}: {InvoiceRead} at an unknown level '{invoice}'");
+                continue;
+            }
+
+            var shallowest = CoreReads
+                .Select(p => (Privilege: p, Level: privileges.TryGetValue(p, out var l) ? l : "none"))
+                .OrderBy(x => Rank(x.Level))
+                .First();
+            if (Rank(invoice) > Rank(shallowest.Level))
+                problems.Add($"{role}: {InvoiceRead} at {invoice} is wider than {shallowest.Privilege} at {shallowest.Level}");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "032b-1 G5: no role reads invoices more widely than it reads matters, projects and work assignments")]
+    public void InvoiceReadIsNeverWiderThanCoreRead()
+    {
+        var files = RoleFileNames(RolesDirectory);
+        var roles = LoadRoles(RolesDirectory, files);
+        Assert.Contains(roles, r => r.Value.ContainsKey(InvoiceRead)); // not vacuous: some role reads invoices
+
+        var problems = InvoiceReaderProblems(roles);
+        Assert.True(problems.Count == 0,
+            "An invoice carries copies of core-record values, so its readers must be a subset of the core record's (task 032b, "
+            + "Q-U1). Raise the core Read or lower the invoice Read with unified-access-control-r2:\n  " + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "032b-1 G5 controls: a seeded role with invoice Read at Global and matter Read at Local fails; equal depths and no invoice Read pass")]
+    public void InvoiceReadCheckFires()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            void Seed(string name, params (string Privilege, string Level)[] privileges) => File.WriteAllText(
+                Path.Combine(dir, name + ".xml"),
+                new XDocument(new XElement("Role", new XAttribute("name", name),
+                    new XElement("RolePrivileges", privileges.Select(p =>
+                        new XElement("RolePrivilege", new XAttribute("name", p.Privilege), new XAttribute("level", p.Level)))))).ToString());
+
+            Seed("Wide", ("prvReadsprk_Invoice", "Global"), ("prvReadsprk_matter", "Local"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("NoCore", ("prvReadsprk_invoice", "Basic"), ("prvReadsprk_matter", "Basic"), ("prvReadsprk_project", "Basic"));
+            Seed("Unknown", ("prvReadsprk_invoice", "Org"), ("prvReadsprk_matter", "Global"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("Equal", ("prvReadsprk_invoice", "Deep"), ("prvReadsprk_matter", "Deep"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Deep"));
+            Seed("NoInvoice", ("prvReadsprk_matter", "Basic"));
+
+            var problems = InvoiceReaderProblems(LoadRoles(dir, ["Wide", "NoCore", "Unknown", "Equal", "NoInvoice"]));
+
+            Assert.Equal(new[]
+            {
+                "NoCore: prvReadsprk_invoice at Basic is wider than prvReadsprk_workassignment at none",
+                "Unknown: prvReadsprk_invoice at an unknown level 'Org'",
+                "Wide: prvReadsprk_invoice at Global is wider than prvReadsprk_matter at Local",
+            }, problems);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ── The scan ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     internal sealed record Gap(string Feature, string Privilege, string MinDepth, string Held, string[] Roles)

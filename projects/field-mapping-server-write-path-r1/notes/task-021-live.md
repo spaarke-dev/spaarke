@@ -292,3 +292,72 @@ Numbers consumed: `MAT-000035` to `MAT-000055`. Deleting the rows does not retur
 | FMSWP-021-afterq-08 | after (queued) | 2615.2 | — | `f5827e16-e777-44fd-a34d-6e14d4cb56ca` |
 | FMSWP-021-afterq-09 | after (queued) | 2584.5 | — | `876cd928-4f96-4197-980e-cacdc4ee50f3` |
 | FMSWP-021-afterq-10 | after (queued) | 2611.0 | — | `2550c21e-48c9-4749-8094-acbf7d01d802` |
+
+---
+
+# Re-measure r3 after 049b and 049c (dev, 2026-11-08)
+
+> The owner approved this run in the main session on 2026-11-08: "Yes, run it (Recommended)". Dev ran BFF 6fbb3a7642 (049c, deployed 04:00:55Z, gate PASS to 04:30:55Z), with the RecordCreation Debug log setting. Method, parent project, profile and token handling are as in the 2026-11-06 run. The "after" body sets Assigned To (internal) to a contact other than the maker, which is the "queued" variant (`afterq` above). Interleaved ABBA, one discarded warm-up each. Window 04:57:57Z-04:58:56Z. No token is recorded here.
+
+## Result: still over budget on dev. The owner moved the NFR-02 verdict to UAT (2026-11-08).
+
+| Run | n | p50 (ms) | p95 (ms, interpolated) | min | max |
+|---|---|---|---|---|---|
+| Before (old wizard sequence, profile 200, one source read) | 20 | 648 | 1069 | 578 | 1432 |
+| After (`POST /api/v1/child-records/sprk_matter?mappingSourceEntity=sprk_project…`, queued grant) | 20 | 1803 | 2357 | 1694 | 2460 |
+| **Delta** | | +1155 | **+1288** | | |
+
+- **Progress since 2026-11-06:** the queued "after" p50 fell from 2660 to 1803 ms (about -860 ms, from 049b and 049c), and the p95 from 3509 to 2357 ms. The p95 delta is still about 2.6 times the +500 ms budget.
+- All 21 "after" calls returned 201 with no warnings. The "before" step medians (ms) were: nav-props 80, Matter Type 70, profile GET 268, source read 74, create 138.
+- **Per-step split: not available.** App Insights exported no request row and no `[RECORD-CREATE]` step lines for any of the 20 timed creates (20 of 20 lost, #2158). Out-of-request logs exported for all 21, so the creates ran. Only the cold warm-up has a split (ms): Principal 464, TableRules 479, FieldMapping 184, CallerChecks 652, Owner 328, Create 1144, PostCreate 738, service total 4000. Outside the service it took about 16 ms. That is cold and not representative (UAC-r2 export, 2026-11-08). UAC-r2 removed the Debug setting at 05:19:20Z.
+- **Owner direction (2026-11-08):** "we'll test this in UAT". No 049d cache work or dev re-run is started on the strength of this run.
+
+## Rows created: added to the owner's cleanup list
+
+- `sprk_matter` ×42, named `FMSWP-021-r3-*`. The ids are below. The "before" rows carry an old `LITG-nnnnnn` client number; the "after" rows consumed platform autonumbers.
+- Side effects of the 21 "after" creates: the queued assigned-access rows, external-access grants and shares. They are found by matter, as above.
+
+| Name | Kind | ms | Client number | sprk_matter id |
+|---|---|---|---|---|
+| FMSWP-021-r3-before-00-warmup | before | 1760.8 (warm-up, discarded) | LITG-569673 | `4c7a03f7-30db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-after-00-warmup | after | 4102.6 (warm-up, discarded) | — | `eccb0c55-73d7-4e47-8ef8-4e9422b6b66d` |
+| FMSWP-021-r3-before-01 | before | 822.8 | LITG-722137 | `a5da45f5-30db-f111-84e7-00224829aef9` |
+| FMSWP-021-r3-after-01 | after | 2023.7 | — | `b3825a9a-4e17-4565-92d0-4383b41317bc` |
+| FMSWP-021-r3-after-02 | after | 1898.8 | — | `43f8a0e6-9f38-4b78-9d75-4088611cb74f` |
+| FMSWP-021-r3-before-02 | before | 711.8 | LITG-353795 | `577a03f7-30db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-before-03 | before | 737.9 | LITG-223485 | `e96b58fa-30db-f111-84e7-002248359bb2` |
+| FMSWP-021-r3-after-03 | after | 1827.6 | — | `0f72c257-f836-4d9d-a0d4-43adbdaf4ca6` |
+| FMSWP-021-r3-after-04 | after | 1771.4 | — | `6d7e2329-aa6e-4863-a9c0-b21e7994da47` |
+| FMSWP-021-r3-before-04 | before | 702.8 | LITG-907811 | `58396cfb-30db-f111-84e7-00224829aef9` |
+| FMSWP-021-r3-before-05 | before | 592.7 | LITG-855586 | `f8292dfe-30db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-after-05 | after | 1740.9 | — | `2f41969a-9195-4791-bf88-1d465cd50101` |
+| FMSWP-021-r3-after-06 | after | 1732.4 | — | `9b436eb7-0acf-4593-9cbd-8fd7c444ac6f` |
+| FMSWP-021-r3-before-06 | before | 601.7 | LITG-776542 | `6dbb5300-31db-f111-84e7-002248359bb2` |
+| FMSWP-021-r3-before-07 | before | 642.0 | LITG-410623 | `73bb5300-31db-f111-84e7-002248359bb2` |
+| FMSWP-021-r3-after-07 | after | 1693.8 | — | `6336ce0b-971e-4e1b-875b-3d14d4eda0b9` |
+| FMSWP-021-r3-after-08 | after | 1750.2 | — | `6b03b979-1160-4491-affc-c21afbf6be9b` |
+| FMSWP-021-r3-before-08 | before | 609.3 | LITG-679032 | `48786104-31db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-before-09 | before | 774.1 | LITG-902308 | `474aef05-31db-f111-84e7-00224820fd20` |
+| FMSWP-021-r3-after-09 | after | 1890.6 | — | `c46af306-9c0a-4a61-93cb-b9ba8f489818` |
+| FMSWP-021-r3-after-10 | after | 1800.7 | — | `c52d8dd0-3d63-45af-9a4f-44d307987423` |
+| FMSWP-021-r3-before-10 | before | 776.2 | LITG-399837 | `fbed1f05-31db-f111-84e7-7ced8ddb6f85` |
+| FMSWP-021-r3-before-11 | before | 596.5 | LITG-231252 | `4f786104-31db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-after-11 | after | 2459.6 | — | `c091e9b2-ca32-43f0-a133-69bc4f577e6b` |
+| FMSWP-021-r3-after-12 | after | 1717.0 | — | `707a3543-8c99-4d92-9156-998fed3cb97b` |
+| FMSWP-021-r3-before-12 | before | 619.0 | LITG-911498 | `2cb9320b-31db-f111-84e7-7ced8ddb6f85` |
+| FMSWP-021-r3-before-13 | before | 637.4 | LITG-315614 | `01385f06-31db-f111-84e7-002248359bb2` |
+| FMSWP-021-r3-after-13 | after | 2351.2 | — | `eb10268e-3646-4d72-9758-1a12b3fd6bc2` |
+| FMSWP-021-r3-after-14 | after | 2005.7 | — | `82950903-a0dd-4ecb-84ed-2d1ba49372a8` |
+| FMSWP-021-r3-before-14 | before | 578.0 | LITG-686151 | `5a35bc0a-31db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-before-15 | before | 1432.4 | LITG-872492 | `47d5b80c-31db-f111-84e7-3833c5eb8024` |
+| FMSWP-021-r3-after-15 | after | 1747.8 | — | `f8a58439-7fa5-4d61-99ec-dd9093e73cc0` |
+| FMSWP-021-r3-after-16 | after | 1860.2 | — | `89fb937d-545f-4a28-9b12-eb8637a9d810` |
+| FMSWP-021-r3-before-16 | before | 647.0 | LITG-872617 | `0f6d8c12-31db-f111-84e7-7ced8ddb6f85` |
+| FMSWP-021-r3-before-17 | before | 640.2 | LITG-578835 | `98307111-31db-f111-84e7-7ced8dda31f8` |
+| FMSWP-021-r3-after-17 | after | 1804.8 | — | `0cde6c46-728b-4b7b-a798-f992848f17bb` |
+| FMSWP-021-r3-after-18 | after | 1697.8 | — | `4bc9b532-d33b-4302-bd20-5505761225e5` |
+| FMSWP-021-r3-before-18 | before | 786.1 | LITG-991268 | `18cd0812-31db-f111-84e7-00224820fd20` |
+| FMSWP-021-r3-before-19 | before | 648.1 | LITG-731397 | `4d108b14-31db-f111-84e7-00224829aef9` |
+| FMSWP-021-r3-after-19 | after | 1904.5 | — | `3671953a-9e99-463c-ae2d-7c6206fe201b` |
+| FMSWP-021-r3-after-20 | after | 1752.6 | — | `bf0e8b79-b9eb-4182-8b22-e5f92b37e747` |
+| FMSWP-021-r3-before-20 | before | 1049.5 | LITG-733337 | `bafb7318-31db-f111-84e7-00224820fd20` |

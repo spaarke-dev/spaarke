@@ -189,7 +189,7 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         }
         else
         {
-            sourceRead.ReturnsAsync(source);
+            sourceRead.ReturnsAsync(source.WithGate());
         }
 
         // The creation service's step-11 write (task 018b), and the number read-back of whatever id it picked.

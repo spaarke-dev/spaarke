@@ -224,9 +224,11 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
 
-        // One source read spanning every Copy field and every placeholder.
+        // One source read spanning every Copy field and every placeholder, plus the source's owner and secure flag (the
+        // mapping-source rule's own columns, read in the same request).
         requestedColumns.Single().Should().BeEquivalentTo(
-            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber");
+            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber",
+            "ownerid", "sprk_issecure");
 
         var matter = created.Entity!;
         matter.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
@@ -885,7 +887,7 @@ public class OfficeQuickCreateContractTests
         factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => requests.Add(columns))
-            .ReturnsAsync(source);
+            .ReturnsAsync(source.WithGate());
         return requests;
     }
 

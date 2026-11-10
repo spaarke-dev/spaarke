@@ -96,6 +96,13 @@ public sealed class ThreadResolver : IThreadResolver
     /// </summary>
     private readonly IServiceScopeFactory? _scopeFactory;
 
+    /// <summary>
+    /// Task 054: the POA share read a Direct message's participant stamp decides from
+    /// (<see cref="Access.DirectMessageRecipient"/>, the strict read). Optional so the test compositions keep compiling;
+    /// without it no Direct participant is stamped.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
+
     public ThreadResolver(
         IEnumerable<IThreadKeyStrategy> strategies,
         IGenericEntityService entityService,
@@ -103,8 +110,10 @@ public sealed class ThreadResolver : IThreadResolver
         ILogger<ThreadResolver> logger,
         Access.IDirectThreadAccessService? directThreadAccess = null,
         IConfiguration? configuration = null,
-        IServiceScopeFactory? scopeFactory = null)
+        IServiceScopeFactory? scopeFactory = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _entityService = entityService;
@@ -157,8 +166,10 @@ public sealed class ThreadResolver : IThreadResolver
             if (resolution.ExistingThreadId is { } existing)
             {
                 var joined = await JoinThreadAsync(
-                    _entityService, _ownership, _scopeFactory, _logger, request.CommunicationId, existing,
-                    token => AssignThreadAsync(request.CommunicationId, existing, token), joinRunsAfterRefileFor, ct);
+                    _entityService, _ownership, _scopeFactory, _logger, _recordShares, request.SenderChatIdentity,
+                    request.CommunicationId, existing,
+                    (alongside, token) => AssignThreadAsync(request.CommunicationId, existing, alongside, token),
+                    joinRunsAfterRefileFor, ct);
                 _logger.LogInformation(
                     "Joined existing thread {ThreadId} | CommunicationId: {CommunicationId}, Channel: {ChannelType}",
                     existing, request.CommunicationId, request.ChannelType);
@@ -178,12 +189,18 @@ public sealed class ThreadResolver : IThreadResolver
             // CREATE — a thin thread anchored to the message's resolved regarding (ADR-024 reuse).
             var (threadId, anchor) = await CreateThreadAsync(request, ct);
             await strategy.OnThreadCreatedAsync(threadId, request, ct);
-            await AssignThreadAsync(request.CommunicationId, threadId, ct);
+            // #1629: the grant audience is what this create wrote — the message's own regarding, or Direct.
+            var created = AssignmentFor(threadId, anchor) ?? ThreadAssignment.Direct(threadId);
+            // Task 054: a Direct message's two participants land in the write that files it into the new Direct thread.
+            await AssignThreadAsync(
+                request.CommunicationId, threadId,
+                await DirectFilingColumnsAsync(_entityService, _recordShares, request.CommunicationId, created,
+                    request.SenderChatIdentity, _logger, ct),
+                ct);
             _logger.LogInformation(
                 "Created thread {ThreadId} | CommunicationId: {CommunicationId}, Channel: {ChannelType}",
                 threadId, request.CommunicationId, request.ChannelType);
-            // #1629: the grant audience is what this create wrote — the message's own regarding, or Direct.
-            return AssignmentFor(threadId, anchor) ?? ThreadAssignment.Direct(threadId);
+            return created;
         }
         catch (Exception ex)
         {
@@ -328,6 +345,8 @@ public sealed class ThreadResolver : IThreadResolver
     /// <c>sprk_threadtype</c> says: the message is filed under that anchor), Direct only for a Direct thread with NO typed
     /// lookup, nobody otherwise (or when the thread could not be read) — so the grant never re-reads a type or lookup the
     /// thread's owner can rewrite in between.</para>
+    /// <para>Task 054: this join stamps no Direct participant; its one production caller moves an email into a record's
+    /// default thread. A message joining a Direct thread goes through <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken)"/>.</para>
     /// </summary>
     internal static Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
         IGenericEntityService entityService,
@@ -351,7 +370,9 @@ public sealed class ThreadResolver : IThreadResolver
         Func<CancellationToken, Task> assign,
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
         CancellationToken ct) =>
-        (await JoinCoreAsync(entityService, ownership, communicationId, threadId, assign, beforeRefileWrite: null, secureExitCaller, ct)
+        (await JoinCoreAsync(
+                entityService, ownership, communicationId, threadId, (_, token) => assign(token), directFilingColumns: null,
+                beforeRefileWrite: null, secureExitCaller, ct)
             .ConfigureAwait(false)).Assignment;
 
     /// <summary>
@@ -373,32 +394,41 @@ public sealed class ThreadResolver : IThreadResolver
     /// <para>The reconciler is scoped and depends on this singleton resolver, so it comes from a scope of
     /// <paramref name="scopeFactory"/>, opened only for a reparent. A host without one leaves the message's sharing as it was
     /// and logs an error, as the playbook update node does.</para>
+    /// <para>Task 054: when the join finds a Direct thread, <paramref name="assign"/> is handed the message's two participants
+    /// (<see cref="Access.DirectMessageRecipient"/>) to write in the SAME update as the thread lookup; every other join hands it
+    /// no column. <paramref name="recordShares"/> <c>null</c> stamps nothing.</para>
     /// </remarks>
     internal static Task<ThreadAssignment> JoinThreadAsync(
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IServiceScopeFactory? scopeFactory,
         ILogger logger,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares,
         Guid communicationId,
         Guid threadId,
-        Func<CancellationToken, Task> assign,
+        Func<IReadOnlyDictionary<string, object>, CancellationToken, Task> assign,
         CancellationToken ct) =>
-        JoinThreadAsync(entityService, ownership, scopeFactory, logger, communicationId, threadId, assign, EveryJoinRunsTheStep, ct);
+        JoinThreadAsync(
+            entityService, ownership, scopeFactory, logger, recordShares, senderChatIdentity: null, communicationId, threadId,
+            assign, EveryJoinRunsTheStep, ct);
 
     /// <summary>
-    /// <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Guid, Guid, Func{CancellationToken, Task}, CancellationToken)"/>,
+    /// <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken)"/>,
     /// running the step only when <paramref name="runsStepFor"/> answers <c>true</c> for the record the join files the message
     /// under (#2110). A join it answers <c>false</c> for opens no scope, reads nothing and runs no step — as
-    /// <see cref="AssignToThreadReconcilingOwnerAsync"/>.
+    /// <see cref="AssignToThreadReconcilingOwnerAsync"/>. <paramref name="senderChatIdentity"/>: an inbound message's sender
+    /// identity, mapped to the sender of a Direct message whose row has none (task 054).
     /// </summary>
     private static async Task<ThreadAssignment> JoinThreadAsync(
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IServiceScopeFactory? scopeFactory,
         ILogger logger,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares,
+        string? senderChatIdentity,
         Guid communicationId,
         Guid threadId,
-        Func<CancellationToken, Task> assign,
+        Func<IReadOnlyDictionary<string, object>, CancellationToken, Task> assign,
         Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> runsStepFor,
         CancellationToken ct)
     {
@@ -410,6 +440,8 @@ public sealed class ThreadResolver : IThreadResolver
             Func<Task<bool>>? wasIsolated = null;
             var (assignment, refiled) = await JoinCoreAsync(
                 entityService, ownership, communicationId, threadId, assign,
+                directFilingColumns: (joined, token) => DirectFilingColumnsAsync(
+                    entityService, recordShares, communicationId, joined, senderChatIdentity, logger, token),
                 beforeRefileWrite: async (filedUnder, token) =>
                 {
                     if (!runsStepFor(filedUnder))
@@ -459,14 +491,17 @@ public sealed class ThreadResolver : IThreadResolver
     /// it is filed under (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.ParentsUnchanged"/> is false).
     /// <paramref name="beforeRefileWrite"/> runs only on that reparent, inside its write and immediately before
     /// <paramref name="assign"/>, told the record the join files the message under; a join that files the message under
-    /// nothing never calls it.
+    /// nothing never calls it. <paramref name="assign"/> writes the thread lookup with the columns it is handed: on a join
+    /// that files the message under nothing, what <paramref name="directFilingColumns"/> answers for the join's audience
+    /// (task 054: a Direct message's two participants); on a reparent, none.
     /// </summary>
     private static async Task<(ThreadAssignment Assignment, bool Refiled)> JoinCoreAsync(
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Guid communicationId,
         Guid threadId,
-        Func<CancellationToken, Task> assign,
+        Func<IReadOnlyDictionary<string, object>, CancellationToken, Task> assign,
+        Func<ThreadAssignment, CancellationToken, Task<IReadOnlyDictionary<string, object>>>? directFilingColumns,
         Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, CancellationToken, Task>? beforeRefileWrite,
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
         CancellationToken ct)
@@ -488,7 +523,9 @@ public sealed class ThreadResolver : IThreadResolver
         if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
         {
-            await assign(ct);
+            await assign(
+                directFilingColumns is null ? Access.DirectMessageRecipient.None : await directFilingColumns(assignment, ct),
+                ct);
             return (assignment, false);
         }
 
@@ -522,7 +559,7 @@ public sealed class ThreadResolver : IThreadResolver
             {
                 if (beforeRefileWrite is not null)
                     await beforeRefileWrite(filedUnder, token);
-                await assign(token);
+                await assign(Access.DirectMessageRecipient.None, token);
                 wrote = true;
             },
             ct);
@@ -1869,14 +1906,53 @@ public sealed class ThreadResolver : IThreadResolver
     }
 
     private Task AssignThreadAsync(Guid communicationId, Guid threadId, CancellationToken ct) =>
-        _entityService.UpdateAsync(
-            "sprk_communication",
-            communicationId,
-            new Dictionary<string, object>
-            {
-                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-            },
-            ct);
+        AssignThreadAsync(communicationId, threadId, Access.DirectMessageRecipient.None, ct);
+
+    /// <summary>
+    /// Writes the message's thread lookup together with <paramref name="alongside"/> in one update (task 054), through the
+    /// one filing write (<see cref="Access.DirectMessageRecipient.WriteThreadFilingAsync"/>).
+    /// </summary>
+    private Task AssignThreadAsync(
+        Guid communicationId, Guid threadId, IReadOnlyDictionary<string, object> alongside, CancellationToken ct) =>
+        Access.DirectMessageRecipient.WriteThreadFilingAsync(_entityService, _logger, communicationId, threadId, alongside, ct);
+
+    /// <summary>
+    /// The one update that files a message into <paramref name="threadId"/>: the thread lookup, plus
+    /// <paramref name="alongside"/> (a Direct message's two participants, task 054; empty otherwise). Written only by
+    /// <see cref="Access.DirectMessageRecipient.WriteThreadFilingAsync"/>, which this resolver and
+    /// <see cref="CommunicationService"/>'s respond-into-thread both use, so both writers put the same columns in the same write.
+    /// </summary>
+    internal static Dictionary<string, object> ThreadFilingFields(Guid threadId, IReadOnlyDictionary<string, object> alongside)
+    {
+        var fields = new Dictionary<string, object>
+        {
+            [ThreadLookupOnCommunication] = new EntityReference("sprk_communicationthread", threadId),
+        };
+        foreach (var (column, value) in alongside)
+        {
+            if (!string.Equals(column, ThreadLookupOnCommunication, StringComparison.OrdinalIgnoreCase))
+                fields[column] = value;
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// Task 054: the columns a Direct message's filing write carries beside the thread lookup
+    /// (<see cref="Access.DirectMessageRecipient.ColumnsForDirectFilingAsync"/>); none without the share reader.
+    /// </summary>
+    private static Task<IReadOnlyDictionary<string, object>> DirectFilingColumnsAsync(
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares,
+        Guid communicationId,
+        ThreadAssignment assignment,
+        string? senderChatIdentity,
+        ILogger logger,
+        CancellationToken ct) =>
+        recordShares is null
+            ? Task.FromResult(Access.DirectMessageRecipient.None)
+            : Access.DirectMessageRecipient.ColumnsForDirectFilingAsync(
+                entityService, recordShares, communicationId, assignment, senderChatIdentity, logger, ct);
 
     private static string BuildTopic(ThreadResolutionRequest request, RegardingAnchor? anchor)
     {
