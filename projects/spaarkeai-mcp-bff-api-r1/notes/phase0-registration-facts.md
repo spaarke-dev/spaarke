@@ -50,9 +50,12 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
     - **Rejected:** the agent's "try Entra SSO as a diagnostic" — A10 forbids that connector option and it issues tokens of a different shape; it needs an owner decision first.
 
 - **Unblocked 2026-11-10 (owner).** The Dev Portal registration was deleted and re-created with Base URL = the full MCP URL and a new secret. The owner reports the connector is **linked and ready to use**.
-  - Connector display name: **`Spaarke MCP`**. This deviates from naming note §1 (`Spaarke`); the owner was told and the rename is open.
+  - Connector display name: **`Spaarke MCP`**. The owner decided on 2026-11-10 to keep it, superseding naming note §1 (`Spaarke`).
+  - New registration ID: `YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI=`, which is base64 for `a221a95e-6abc-4434-aecc-e48338a1b2f2##a121d406-4bef-4df4-b8dd-11c25b993c42`.
+  - **The first authenticated MCP traffic came at 2026-11-10 18:59Z** (App Insights): two handshakes, each with POST `/mcp/legal-operations/` → 200 (initialize, tools/list), POST → 202 (notifications/initialized) and GET → 405 (stateless, no SSE stream; expected). Then at 19:01Z one GET → 401. The admin center lists both spike tools, `spike_echo` and `spike_whoami`, with Type Read.
   - Secret, read 2026-11-10 (metadata only): exactly one password, `Teams Dev Portal OAuth – dev 2`, keyId `3f36b679-8141-4858-ac05-8b11fd1985cc`, start 2026-11-10 18:39 local, end **2028-11-09 18:39** local. The old keyId `fafba383-…`, whose value was exposed in a screenshot, is deleted. Web redirect unchanged; `isFallbackPublicClient` false.
   - App Insights, 3 hours to 18:52Z: no request to `/mcp/*` or `/.well-known/*` from Microsoft yet. Linking did not call the server.
-  - New registration ID: _tbd (owner)_ · Connector ID: _tbd (owner)_ · Date: 2026-11-10
+  - Connector ID: _tbd (owner)_ · Date: 2026-11-10
+- **First T5 attempt, 2026-11-10 (account not confirmed as non-admin; T5 requires one):** Copilot answered "couldn't call spike_whoami" because it searched the connected **Dataverse** MCP instead of Spaarke MCP. No `tools/call` reached the BFF. Retry with Spaarke MCP explicitly selected in the chat, as a non-admin user.
 
 ## (d) T5 — pending

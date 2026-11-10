@@ -16,7 +16,7 @@
 | Dev BFF base URL | `https://spaarke-bff-dev.azurewebsites.net` | `src/solutions/CopilotAgent/appPackage/env.dev.json` |
 | MCP endpoint (spike) | `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` | live only after the spike deploys |
 | Client display name | `Spaarke Copilot Connector – dev` (en dash) | naming note §1 |
-| Connector display name | `Spaarke` | naming note §1 |
+| Connector display name | `Spaarke MCP` | owner, 2026-11-10 (supersedes naming note §1 `Spaarke`) |
 
 ## (a) Entra app registration: "Spaarke Copilot Connector – dev" — run by the owner
 
