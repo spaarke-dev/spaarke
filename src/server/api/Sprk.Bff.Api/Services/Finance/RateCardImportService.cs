@@ -331,14 +331,19 @@ public class RateCardImportService
             }
 
             // 3. The workbook, as the version's source file (task 116), last: a refusal or a fault removes the rows above. The replace makes
-            // it Servable before the version's earlier source file is set Removed.
+            // it Servable before the version's earlier source file is set Removed. Fix round 1: once Servable, the version is re-read (the
+            // version-file route's re-check, through the same method); a version no longer a Draft withdraws the new file and refuses, and
+            // the refusal removes the rows above. After the file is Servable nothing here observes the request token, so a cancelled request
+            // cannot leave the rows removed and the file Servable (or the reverse).
             StoredFileCreateResult stored;
             using (var content = new MemoryStream(workbook, writable: false))
             {
+                var versionId = request.ProcedureVersionId;
                 stored = await _files.ReplaceForCallerAsync(
                     request.Caller, request.CallerBearerToken, StoredFilePurpose.ProcedureSource,
-                    new StoredFileParent(StoredFileParentKind.ProcedureVersion, request.ProcedureVersionId), SourceFileName(request.Name),
-                    XlsxMimeType, content, ct);
+                    new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), SourceFileName(request.Name),
+                    XlsxMimeType, content, ct,
+                    parentStillAccepts: token => ProcedureService.ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, token));
             }
 
             if (!stored.IsCreated)

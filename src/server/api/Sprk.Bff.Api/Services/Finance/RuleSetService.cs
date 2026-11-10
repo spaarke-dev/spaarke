@@ -268,6 +268,9 @@ public class RuleSetService
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
 
+    /// <summary>Fix round 1: the version's source file was replaced while a run drafted from the earlier one (the job retries).</summary>
+    internal const string CodeSourceChanged = "ruleset.source_changed";
+
     /// <summary>Task 116 (model 7.2, O-24): drafting runs only for a Draft Procedure Version (409).</summary>
     internal const string CodeVersionNotDraft = "procedure_version.not_draft";
 
@@ -491,20 +494,24 @@ public class RuleSetService
     /// <summary>
     /// Task 116: the not-converted list of the Procedure's HIGHEST-numbered version (the version under review), or null when it has none. The
     /// columns are pinned (the version's Procedure is re-checked on the row, so a query that lost its filter cannot answer for another
-    /// Procedure).
+    /// Procedure). Fix round 1: the list is returned only under the drafted marker (Yes): a run writes the list first and the marker last, so a
+    /// list without the marker is a run that has not finished (or a reset in progress), and the client contract says null until a run finishes.
     /// </summary>
     private async Task<string?> LatestVersionNotConvertedAsync(Guid procedureId, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.VersionEntity)
         {
-            ColumnSet = new ColumnSet(ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, VersionNotConvertedListColumn),
+            ColumnSet = new ColumnSet(
+                ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, VersionNotConvertedListColumn, VersionDraftedColumn),
             TopCount = 1,
         };
         query.Criteria.AddCondition(ProcedureEntity.VersionProcedureColumn, ConditionOperator.Equal, procedureId);
         query.Orders.Add(new OrderExpression(ProcedureEntity.VersionNumberColumn, OrderType.Descending));
         var latest = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
             .FirstOrDefault(v => v.GetAttributeValue<EntityReference>(ProcedureEntity.VersionProcedureColumn)?.Id == procedureId);
-        return latest?.GetAttributeValue<string>(VersionNotConvertedListColumn);
+        return latest?.GetAttributeValue<bool?>(VersionDraftedColumn) == true
+            ? latest.GetAttributeValue<string>(VersionNotConvertedListColumn)
+            : null;
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -536,6 +543,14 @@ public class RuleSetService
             return refusal;
         }
 
+        // Fix round 1 (K4): a finished run is decided before the source file, so a drafted version answers 409 already-drafted (and the job
+        // a no-op) whatever its files are now. A new file resets the marker (owner ruling 2026-11-10), so this never hides a redraft.
+        if (target.AlreadyDrafted)
+        {
+            return RuleSetOutcome<DraftSource>.Done(new DraftSource(
+                procedureVersionId, target.ProcedureId, target.RuleSet!.Id, Guid.Empty, "source", AlreadyDrafted: true));
+        }
+
         var files = await LoadServableSourceFilesAsync(procedureVersionId, ct);
         if (files.Count != 1)
         {
@@ -550,7 +565,7 @@ public class RuleSetService
         return RuleSetOutcome<DraftSource>.Done(new DraftSource(
             procedureVersionId, target.ProcedureId, target.RuleSet!.Id, file.Id,
             file.GetAttributeValue<string>(StoredFileSchema.Name) is { Length: > 0 } name ? name : "source",
-            target.AlreadyDrafted));
+            AlreadyDrafted: false));
     }
 
     /// <summary>A drafting target (task 116): the version's Procedure, the Procedure's rule set, the version's marker, or the refusal.</summary>
@@ -658,6 +673,46 @@ public class RuleSetService
             .ToList();
     }
 
+    /// <summary>Fix round 1: whether <paramref name="fileId"/> is still the version's ONE Servable source file.</summary>
+    private async Task<bool> IsTheSourceFileAsync(Guid procedureVersionId, Guid fileId, CancellationToken ct)
+    {
+        var files = await LoadServableSourceFilesAsync(procedureVersionId, ct);
+        return files.Count == 1 && files[0].Id == fileId;
+    }
+
+    /// <summary>
+    /// Fix round 1: the source file was replaced while a run drafted from the earlier one. A marker the run already wrote is taken back (No
+    /// first, then the list), the run's untouched drafts are removed, and the run refuses 503 <c>ruleset.source_changed</c> (retried). Runs on
+    /// <see cref="CancellationToken.None"/>; a fault in the clean-up is logged and the refusal stands (the retry compensates again).
+    /// </summary>
+    private async Task<RuleSetOutcome<DraftsAdded>> SourceChangedAsync(Guid ruleSetId, Guid procedureVersionId, bool markerWritten)
+    {
+        _logger.LogWarning("Procedure Version {ProcedureVersionId}: the source file changed while drafting; this run's drafts are withdrawn and the run retried", procedureVersionId);
+        try
+        {
+            if (markerWritten)
+            {
+                await _entities.UpdateAsync(
+                    ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = false }, CancellationToken.None);
+                await _entities.UpdateAsync(
+                    ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = DBNull.Value }, CancellationToken.None);
+            }
+
+            var removed = await RemoveDraftsAsync(ruleSetId, procedureVersionId, supersededBefore: null, CancellationToken.None);
+            if (removed.Kind != RuleSetOutcomeKind.Done)
+            {
+                _logger.LogWarning("Procedure Version {ProcedureVersionId}: this run's drafts could not all be removed ({Code}); the retry removes them", procedureVersionId, removed.ErrorCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the clean-up after a changed source file failed; the retry compensates again", procedureVersionId);
+        }
+
+        return RuleSetOutcome<DraftsAdded>.Refused(
+            StatusCodes.Status503ServiceUnavailable, CodeSourceChanged, "The source file was replaced while rules were drafted; drafting runs again.");
+    }
+
     /// <summary>
     /// Retry compensation for the drafting job (ebilling-r1 task 075, review finding F1). A run that died midway left drafts but no
     /// completion marker; the model is asked again on the retry and its output is not deterministic, so the new set would sit beside the
@@ -683,7 +738,20 @@ public class RuleSetService
     /// <c>ruleset.already_drafted</c>) and nothing is deleted: a finished run is never compensated. The version, Procedure and set checks are
     /// <see cref="GetDraftSourceAsync"/>'s.
     /// </summary>
-    public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid procedureVersionId, CancellationToken ct)
+    public virtual Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid procedureVersionId, CancellationToken ct) =>
+        RemoveUntouchedDraftsAsync(procedureVersionId, Guid.Empty, ct);
+
+    /// <summary>
+    /// <see cref="RemoveUntouchedDraftsAsync(Guid, CancellationToken)"/>, for a run that drafts from the Stored File <paramref name="sourceFileId"/>.
+    /// Fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): a draft of this version made from an EARLIER source file is removed
+    /// too, even when an administrator edited, accepted or rejected it, so a redraft after a replaced file produces no duplicates. Such a draft
+    /// is one whose policy and every version were created by this service's identity BEFORE the current source file was created, with the
+    /// drafted code prefix, no current version (never published, so never a copy-forward draft), every version a Draft
+    /// (<c>sprk_publishstate</c>) under THIS Procedure Version and never in force. A published policy, a copy-forward draft, a rule of another
+    /// version and a rule an administrator created are never removed. When the source file's creation time cannot be read, only untouched
+    /// drafts are removed (fail closed: reviewed work is kept).
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid procedureVersionId, Guid sourceFileId, CancellationToken ct)
     {
         var target = await LoadDraftTargetAsync<DraftsCompensated>(procedureVersionId, ct);
         if (target.Refusal is { } refusal)
@@ -697,7 +765,39 @@ public class RuleSetService
                 StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this Procedure Version.");
         }
 
-        var ruleSetId = target.RuleSet!.Id;
+        DateTime? sourceCreatedOn = null;
+        if (sourceFileId != Guid.Empty)
+        {
+            try
+            {
+                sourceCreatedOn = await SourceFileCreatedOnAsync(sourceFileId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the source file's creation time could not be read; nothing was cleared", procedureVersionId);
+                return RuleSetOutcome<DraftsCompensated>.Refused(
+                    StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be cleared. Try again; if it keeps failing, contact support.");
+            }
+        }
+
+        return await RemoveDraftsAsync(target.RuleSet!.Id, procedureVersionId, sourceCreatedOn, ct);
+    }
+
+    /// <summary>When the Stored File <paramref name="fileId"/> was created (Dataverse's own <c>createdon</c>), or null when it cannot be found.</summary>
+    private async Task<DateTime?> SourceFileCreatedOnAsync(Guid fileId, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet("createdon"), TopCount = 1 };
+        query.Criteria.AddCondition(StoredFileSchema.IdColumn, ConditionOperator.Equal, fileId);
+        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(f => f.Id == fileId)?.GetAttributeValue<DateTime?>("createdon");
+    }
+
+    /// <summary>
+    /// The compensation itself (task 075 F1; task 116): removes this version's untouched drafts and, when <paramref name="supersededBefore"/> is
+    /// given, its drafts made from a source file created before that time (<see cref="IsSupersededDraft"/>). Faults answer 500.
+    /// </summary>
+    private async Task<RuleSetOutcome<DraftsCompensated>> RemoveDraftsAsync(
+        Guid ruleSetId, Guid procedureVersionId, DateTime? supersededBefore, CancellationToken ct)
+    {
         try
         {
             var identity = await _entities.GetCurrentIdentityIdAsync(ct);
@@ -748,7 +848,12 @@ public class RuleSetService
 
             var codePrefix = $"{DraftCodePrefix}{ruleSetId:N}-";
             var removable = rows
-                .Where(p => IsUntouchedDraft(p, versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>(), identity, codePrefix, procedureVersionId))
+                .Where(p =>
+                {
+                    var versions = versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>();
+                    return IsUntouchedDraft(p, versions, identity, codePrefix, procedureVersionId)
+                        || (supersededBefore is { } before && IsSupersededDraft(p, versions, identity, codePrefix, procedureVersionId, before));
+                })
                 .ToList();
 
             var removed = 0;
@@ -799,6 +904,29 @@ public class RuleSetService
             && v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id == procedureVersionId
             && v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value == PublishStateDraft);
 
+    /// <summary>
+    /// Fix round 1 (owner ruling 2026-11-10): a draft of THIS version made from a source file that has since been replaced, whatever an
+    /// administrator did to it while it stayed a Draft. Never a published policy (no current version), never a copy-forward draft (those have a
+    /// current version), never a version in force, never a row another identity created, never a draft of another version. A version with no
+    /// policy versions is decided by the policy alone.
+    /// </summary>
+    private static bool IsSupersededDraft(
+        Entity policy, IReadOnlyList<Entity> versions, Guid identity, string codePrefix, Guid procedureVersionId, DateTime supersededBefore) =>
+        policy.GetAttributeValue<string>("sprk_policycode") is { } code
+        && code.StartsWith(codePrefix, StringComparison.Ordinal)
+        && policy.GetAttributeValue<EntityReference>("sprk_currentversion") is null
+        && CreatedByBefore(policy, identity, supersededBefore)
+        && versions.All(v =>
+            CreatedByBefore(v, identity, supersededBefore)
+            && v.GetAttributeValue<DateTime?>("sprk_inforceto") is null
+            && v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id == procedureVersionId
+            && v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value == PublishStateDraft);
+
+    private static bool CreatedByBefore(Entity row, Guid identity, DateTime before) =>
+        row.GetAttributeValue<EntityReference>("createdby")?.Id == identity
+        && row.GetAttributeValue<DateTime?>("createdon") is { } created
+        && created < before;
+
     private static bool CreatedByAndNeverModified(Entity row, Guid identity) =>
         row.GetAttributeValue<EntityReference>("createdby")?.Id == identity
         && row.GetAttributeValue<DateTime?>("createdon") is { } created
@@ -841,8 +969,21 @@ public class RuleSetService
     /// the reason. Re-running is safe: a rule whose type, body and clause equal one already under this version is skipped, and a run after
     /// the marker is written is refused (409 <c>ruleset.already_drafted</c>). Codes stay <c>BRD-{rule set}-{n}</c>, numbered per set.
     /// </summary>
+    public virtual Task<RuleSetOutcome<DraftsAdded>> AddDraftsAsync(
+        Guid procedureVersionId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted, Guid? callerObjectId, CancellationToken ct) =>
+        AddDraftsAsync(procedureVersionId, Guid.Empty, rules, notConverted, callerObjectId, ct);
+
+    /// <summary>
+    /// <see cref="AddDraftsAsync(Guid, IReadOnlyList{DraftedRule}, IReadOnlyList{NotConvertedClause}, Guid?, CancellationToken)"/>, for a run that
+    /// drafted from the Stored File <paramref name="draftedFromFileId"/> (fix round 1, owner ruling 2026-11-10). Before the list and the marker
+    /// are written, the version's one Servable source file is read again; after the marker, once more. If it is not that file any more (it was
+    /// replaced while the run worked), the run removes its own untouched drafts, writes no list or marker (or takes back the ones it just
+    /// wrote: the marker No first, then the list), and refuses 503 <c>ruleset.source_changed</c>, which the job retries, so the retry drafts
+    /// the new file. <see cref="Guid.Empty"/> skips the check.
+    /// </summary>
     public virtual async Task<RuleSetOutcome<DraftsAdded>> AddDraftsAsync(
-        Guid procedureVersionId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted, Guid? callerObjectId, CancellationToken ct)
+        Guid procedureVersionId, Guid draftedFromFileId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted,
+        Guid? callerObjectId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(notConverted);
@@ -933,11 +1074,23 @@ public class RuleSetService
             // 2. The not-converted list, then the marker LAST, on the VERSION (task 116, EB-D-211): two writes, so a run that dies between them
             //    has its list but no marker and is compensated and drafted again (the list is overwritten). After the marker the job is a no-op
             //    and the trigger answers 409; another version of the same Procedure has its own marker, so it can still be drafted.
+            //    Fix round 1: only while the file this run drafted from is still the version's one Servable source file.
+            if (draftedFromFileId != Guid.Empty && !await IsTheSourceFileAsync(procedureVersionId, draftedFromFileId, ct))
+            {
+                return await SourceChangedAsync(ruleSetId, procedureVersionId, markerWritten: false);
+            }
+
             var json = BuildNotConvertedJson(listed);
             await _entities.UpdateAsync(
                 ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = json }, ct);
             await _entities.UpdateAsync(
                 ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = true }, ct);
+
+            // A replace that began after the check above made its new file Servable after it reset the marker; this re-read catches it.
+            if (draftedFromFileId != Guid.Empty && !await IsTheSourceFileAsync(procedureVersionId, draftedFromFileId, CancellationToken.None))
+            {
+                return await SourceChangedAsync(ruleSetId, procedureVersionId, markerWritten: true);
+            }
 
             _logger.LogInformation(
                 "Procedure Version {ProcedureVersionId} (rule set {RuleSetId}): drafting stored {Stored} rule(s), skipped {Present} already present, listed {NotConverted} as not converted",

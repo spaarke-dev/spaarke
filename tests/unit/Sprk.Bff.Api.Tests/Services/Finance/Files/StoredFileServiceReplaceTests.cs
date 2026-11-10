@@ -2,6 +2,7 @@ using System.Data;
 using System.Text;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Tests.Finance.Files;
@@ -44,8 +45,8 @@ public sealed class StoredFileServiceReplaceTests
 
     // ── ReadRowsForProcedureVersionAsync ────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "116: the version read returns every row of that version and purpose, whatever its status, and nothing else")]
-    public async Task ReadRows_ReturnsTheVersionsRowsOfThePurpose_AnyStatus_AndNoOtherVersionsOrPurposes()
+    [Fact(DisplayName = "116 fix 1 (A5): the version read returns the SERVABLE rows of that version and purpose, and nothing else")]
+    public async Task ReadRows_ReturnsTheVersionsServableRowsOfThePurpose_AndNoOtherVersionsOrPurposes()
     {
         var rig = Rig();
         var servable = Guid.NewGuid();
@@ -57,7 +58,7 @@ public sealed class StoredFileServiceReplaceTests
 
         var rows = await rig.Service.ReadRowsForProcedureVersionAsync(VersionId, StoredFilePurpose.ProcedureSource, CancellationToken.None);
 
-        rows.Select(r => r.FileId).Should().BeEquivalentTo(new[] { servable, removed });
+        rows.Select(r => r.FileId).Should().BeEquivalentTo(new[] { servable });
         rows.Should().OnlyContain(r => r.Parent == Version);
     }
 
@@ -216,5 +217,144 @@ public sealed class StoredFileServiceReplaceTests
         rig.Dataverse.Mock.Verify(e => e.UpdateIfRowVersionMatchesAsync(
             StoredFileSchema.Entity, row, read.Single().RowVersion!,
             It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── Fix round 1 ────────────────────────────────────────────────────────
+
+    /// <summary>The stored-file query answered as Dataverse answers it: its status condition applied, at most TopCount rows, MoreRecords set.</summary>
+    private static void QueriesAnsweredLikeDataverse(StoredFileRig rig, Guid? last = null) =>
+        rig.Dataverse.Mock.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == StoredFileSchema.Entity), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                var status = q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == StoredFileSchema.Status)?.Values[0];
+                var rows = rig.Dataverse.Rows.Values
+                    .Where(r => status is null || r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value == (int)status)
+                    .OrderBy(r => r.Id == last ? 1 : 0).ThenBy(r => r.Id)
+                    .ToList();
+                var top = q.TopCount ?? 5000;
+                return new EntityCollection(rows.Take(top).ToList()) { MoreRecords = rows.Count > top };
+            });
+
+    [Fact(DisplayName = "116 fix 1 (A5) must-fire: more than 100 Removed rows cannot crowd the Servable row out of the read; it is still withdrawn")]
+    public async Task Replace_ManyRemovedRows_StillWithdrawsTheServableOne()
+    {
+        var rig = Rig();
+        var servable = Guid.NewGuid();
+        for (var i = 0; i < StoredFileService.MaxRowsPerProcedureVersion + 5; i++)
+        {
+            rig.SeedFile(Guid.NewGuid(), Version, Old, StoredFileStatus.Removed, StoredFilePurpose.ProcedureSource);
+        }
+
+        rig.SeedFile(servable, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+        QueriesAnsweredLikeDataverse(rig, last: servable);
+
+        var result = await Replace(rig);
+
+        result.IsCreated.Should().BeTrue();
+        StatusOf(rig, servable).Should().Be(StoredFileStatus.Removed);
+        StatusOf(rig, result.FileId!.Value).Should().Be(StoredFileStatus.Servable);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A5): a read that reports more Servable rows than it returned refuses before anything is staged")]
+    public async Task Replace_AnIncompleteRead_Throws_AndStagesNothing()
+    {
+        var rig = Rig();
+        for (var i = 0; i <= StoredFileService.MaxRowsPerProcedureVersion; i++)
+        {
+            rig.SeedFile(Guid.NewGuid(), Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+        }
+
+        QueriesAnsweredLikeDataverse(rig);
+        var writes = rig.Dataverse.Writes;
+        var storage = rig.Gateway.StorageCalls;
+
+        var act = () => Replace(rig);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        rig.Dataverse.Writes.Should().Be(writes);
+        rig.Gateway.StorageCalls.Should().Be(storage);
+    }
+
+    private static Task<StoredFileCreateResult> ReplaceChecked(StoredFileRig rig, Func<CancellationToken, Task<bool>> check, CancellationToken ct = default) =>
+        rig.Service.ReplaceForCallerAsync(StoredFileRig.Caller(), "token", StoredFilePurpose.ProcedureSource, Version,
+            "guidelines.pdf", "application/pdf", new MemoryStream(New), ct, parentStillAccepts: check);
+
+    [Fact(DisplayName = "116 fix 1 (A1) must-fire: a parent that stopped accepting a file once the new file is Servable withdraws the new file and refuses; the earlier stays Servable")]
+    public async Task Replace_AParentNoLongerADraft_WithdrawsTheNewFile_AndRefuses()
+    {
+        var rig = Rig();
+        var earlier = Guid.NewGuid();
+        rig.SeedFile(earlier, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+        StoredFileStatus? newStatusAtCheck = null;
+
+        var result = await ReplaceChecked(rig, _ =>
+        {
+            newStatusAtCheck = rig.Dataverse.Rows.Keys.Where(id => id != earlier).Select(id => StatusOf(rig, id)).Single();
+            return Task.FromResult(false);
+        });
+
+        result.IsCreated.Should().BeFalse();
+        result.RefusalCode.Should().Be(StoredFileRefusal.ParentNoLongerAccepts);
+        newStatusAtCheck.Should().Be(StoredFileStatus.Servable, "the parent is re-read once the new file is Servable");
+        StatusOf(rig, earlier).Should().Be(StoredFileStatus.Servable);
+        var created = rig.Dataverse.Rows.Keys.Where(id => id != earlier).Should().ContainSingle().Subject;
+        StatusOf(rig, created).Should().Be(StoredFileStatus.Removed);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A1) must-not-fire: a parent still accepting a file completes the replace")]
+    public async Task Replace_AParentStillADraft_Replaces()
+    {
+        var rig = Rig();
+        var earlier = Guid.NewGuid();
+        rig.SeedFile(earlier, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+
+        var result = await ReplaceChecked(rig, _ => Task.FromResult(true));
+
+        result.IsCreated.Should().BeTrue();
+        StatusOf(rig, earlier).Should().Be(StoredFileStatus.Removed);
+        StatusOf(rig, result.FileId!.Value).Should().Be(StoredFileStatus.Servable);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A1): a fault in the parent's re-check withdraws the new file and rethrows; the earlier stays Servable")]
+    public async Task Replace_AFaultingParentCheck_WithdrawsTheNewFile_AndRethrows()
+    {
+        var rig = Rig();
+        var earlier = Guid.NewGuid();
+        rig.SeedFile(earlier, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+
+        var act = () => ReplaceChecked(rig, _ => Task.FromException<bool>(new InvalidOperationException("simulated Dataverse 503")));
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        StatusOf(rig, earlier).Should().Be(StoredFileStatus.Servable);
+        StatusOf(rig, rig.Dataverse.Rows.Keys.Single(id => id != earlier)).Should().Be(StoredFileStatus.Removed);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A3) must-fire: a request cancelled right after the new file is Servable still withdraws the earlier file: exactly one Servable file")]
+    public async Task Replace_CancelledOnceServable_StillLeavesExactlyOneServableFile()
+    {
+        var rig = Rig();
+        var earlier = Guid.NewGuid();
+        rig.SeedFile(earlier, Version, Old, purpose: StoredFilePurpose.ProcedureSource);
+        using var request = new CancellationTokenSource();
+
+        // The earlier row's withdraw observes the token it is given, as a real Dataverse call does.
+        rig.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, earlier, It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string _, Dictionary<string, object> fields, CancellationToken token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                rig.Dataverse.Rows[id][StoredFileSchema.Status] = fields[StoredFileSchema.Status];
+                return Task.CompletedTask;
+            });
+
+        var result = await ReplaceChecked(rig, _ =>
+        {
+            request.Cancel(); // the client goes away just after the new file became Servable
+            return Task.FromResult(true);
+        }, request.Token);
+
+        result.IsCreated.Should().BeTrue();
+        StatusOf(rig, earlier).Should().Be(StoredFileStatus.Removed);
+        rig.Dataverse.Rows.Keys.Count(id => StatusOf(rig, id) == StoredFileStatus.Servable).Should().Be(1);
     }
 }

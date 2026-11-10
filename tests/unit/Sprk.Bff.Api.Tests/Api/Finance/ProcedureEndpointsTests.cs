@@ -105,6 +105,7 @@ public sealed class ProcedureEndpointsTests
         public readonly Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files = new();
         private WebApplication _app = null!;
         public HttpClient Client = null!;
+        public IServiceProvider Services => _app.Services;
 
         public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25)
         {
@@ -146,6 +147,15 @@ public sealed class ProcedureEndpointsTests
             host._app.UseRouting();
             host._app.UseAuthentication();
             host._app.UseAuthorization();
+            host._app.Use(async (context, next) =>
+            {
+                if (host.BodyOverTheServerCap)
+                {
+                    context.Request.Body = new OverTheCapBody();
+                }
+
+                await next(context);
+            });
             host._app.MapProcedureEndpoints();
             await host._app.StartAsync();
             host.Client = host._app.GetTestClient();
@@ -171,7 +181,13 @@ public sealed class ProcedureEndpointsTests
             }
 
             Access.Grant(ProcedureSet, ProcedureId, AccessRights.Read | AccessRights.Write);
+
+            // Fix round 1: the version routes ask the caller's own rights on the version first (the file store's check).
+            Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
         }
+
+        /// <summary>Fix round 1 (F4): the request body throws the server's 413 when read, as Kestrel does past its body cap.</summary>
+        public bool BodyOverTheServerCap { get; set; }
 
         private static Mock<RuleSetService> NewRuleSets()
         {
@@ -586,9 +602,30 @@ public sealed class ProcedureEndpointsTests
         return content;
     }
 
-    private static void TheVersionIsADraft(Host host) =>
+    private static void TheVersionIsADraft(Host host)
+    {
         host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Done(new ProcedureVersionView(VersionId, 1, "Draft", null, null, null)));
+        host.Service.Setup(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+    }
+
+    /// <summary>A request body that throws the server's 413 on its first read (what Kestrel does past the route's body cap).</summary>
+    internal sealed class OverTheCapBody : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw TooLarge();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(TooLarge());
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException<int>(TooLarge());
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        private static Microsoft.AspNetCore.Http.BadHttpRequestException TooLarge() => new("Request body too large.", Microsoft.AspNetCore.Http.StatusCodes.Status413PayloadTooLarge);
+    }
 
     private static StoredFileStatus Status(Host host, Guid id) =>
         (StoredFileStatus)host.Files.Dataverse.Rows[id].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value;
@@ -672,16 +709,19 @@ public sealed class ProcedureEndpointsTests
         host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact(DisplayName = "116 must-fire: PUT /file over the size limit by Content-Length is 413 before any service is asked")]
+    [Fact(DisplayName = "116 must-fire: PUT /file over the size limit by Content-Length is 413 before the body is read; nothing stored")]
     public async Task File_OverTheLimitByContentLength_Is413_BeforeAnything()
     {
         await using var host = await Host.StartAsync(maxFileMb: 1);
+        TheVersionIsADraft(host);
 
         var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody((2 * 1024 * 1024) + 10)));
 
         response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileTooLarge);
-        host.VerifyNothingReached();
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+        host.Files.Gateway.StorageCalls.Should().Be(0);
     }
 
     [Fact(DisplayName = "116 must-fire: PUT /file whose FILE is over the limit (Content-Length within the slack) is 413 and stores nothing")]
@@ -741,7 +781,7 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync();
         TheVersionIsADraft(host);
-        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Write);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
         var earlier = Guid.NewGuid();
         host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
         host.Files.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
@@ -790,7 +830,7 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync();
         TheVersionIsADraft(host);
-        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Write);
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
         var body = new MultipartFormDataContent();
         var part = new ByteArrayContent(new byte[] { 1, 2, 3 });
         part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/html");
@@ -801,5 +841,181 @@ public sealed class ProcedureEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var created = (await Json(response))["fileId"]!.GetValue<Guid>();
         host.Files.Dataverse.Rows[created].GetAttributeValue<string>(StoredFileSchema.ContentType).Should().Be("application/pdf");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 116 fix round 1
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static void TheVersionIsUnknown(Host host) =>
+        host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Refused(404, ProcedureService.CodeVersionNotFound, "The version was not found in this Procedure."));
+
+    private static void NoRightsOnTheVersion(Host host, AccessRights rights = AccessRights.None) =>
+        host.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, rights);
+
+    [Theory(DisplayName = "116 fix 1 must-fire: PUT /file on a version the caller cannot read answers exactly as an unknown version, for a non-Draft version and an oversize body")]
+    [InlineData("not-draft")]
+    [InlineData("oversize")]
+    public async Task File_AVersionTheCallerCannotRead_AnswersAsAnUnknownVersion(string shape)
+    {
+        await using var host = await Host.StartAsync(maxFileMb: 1);
+        HttpContent Body() => shape == "oversize" ? FileBody((2 * 1024 * 1024) + 10) : FileBody(10);
+
+        TheVersionIsUnknown(host);
+        var unknown = await host.Client.SendAsync(Req("PUT", FileUrl, content: Body()));
+
+        if (shape == "oversize")
+        {
+            TheVersionIsADraft(host);
+        }
+        else
+        {
+            host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Refused(409, RuleSetService.CodeVersionNotDraft, "A file can be stored only on a Draft version."));
+        }
+
+        NoRightsOnTheVersion(host);
+        var hidden = await host.Client.SendAsync(Req("PUT", FileUrl, content: Body()));
+
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        hidden.StatusCode.Should().Be(unknown.StatusCode);
+        (await hidden.Content.ReadAsStringAsync()).Should().Be(await unknown.Content.ReadAsStringAsync());
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116 fix 1 must-fire: PUT /file with Read but no Write on a non-Draft version is 403, decided before the 409")]
+    public async Task File_ReadWithoutWrite_OnANonDraftVersion_Is403()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftVersionForFileAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProcedureVersionView>.Refused(409, RuleSetService.CodeVersionNotDraft, "A file can be stored only on a Draft version."));
+        NoRightsOnTheVersion(host, AccessRights.Read);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "116 fix 1 must-fire: /draft without Write on the version is 403 and queues nothing")]
+    public async Task Draft_WithoutWriteOnTheVersion_Is403()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        NoRightsOnTheVersion(host, AccessRights.Read);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 1 must-fire: /draft on a version the caller cannot read answers exactly as an unknown version (also before a 409)")]
+    public async Task Draft_AVersionTheCallerCannotRead_AnswersAsAnUnknownVersion()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(404, ProcedureService.CodeVersionNotFound, "The Procedure Version was not found."));
+        var unknown = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(409, RuleSetService.CodeVersionNotDraft, "Rules are drafted only for a Draft version."));
+        NoRightsOnTheVersion(host);
+        var hidden = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await hidden.Content.ReadAsStringAsync()).Should().Be(await unknown.Content.ReadAsStringAsync());
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A2): PUT /file resets the drafted state BEFORE anything is staged, then re-checks once the new file is Servable")]
+    public async Task File_ResetsTheDraftedState_BeforeStaging_AndAgainOnceServable()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        var order = new List<string>();
+        host.Service.Setup(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add(host.Files.Gateway.StorageCalls == 0 ? "reset-before-staging" : "reset-after-staging");
+                return true;
+            });
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        order.Should().Equal("reset-before-staging", "reset-after-staging");
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A2) must-fire: PUT /file whose drafted-state reset fails is 500 and stages and stores nothing")]
+    public async Task File_AFailedReset_Is500_AndStoresNothing()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        var earlier = Guid.NewGuid();
+        host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        var seededCalls = host.Files.Gateway.StorageCalls;
+        host.Service.Setup(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse 503"));
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileWriteFailed);
+        host.Files.Dataverse.Writes.Should().Be(0);
+        host.Files.Gateway.StorageCalls.Should().Be(seededCalls);
+        Status(host, earlier).Should().Be(StoredFileStatus.Servable);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A1) must-fire: a version that stops being a Draft during the upload is 409 not_draft; the new file is withdrawn, the earlier stays Servable")]
+    public async Task File_AVersionPublishedDuringTheUpload_Is409_AndTheEarlierFileStays()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.Service.SetupSequence(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)    // before staging: still a Draft
+            .ReturnsAsync(false);  // once the new file is Servable: published meanwhile
+        var earlier = Guid.NewGuid();
+        host.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(RuleSetService.CodeVersionNotDraft);
+        Status(host, earlier).Should().Be(StoredFileStatus.Servable);
+        var created = host.Files.Dataverse.Rows.Keys.Where(id => id != earlier).Should().ContainSingle().Subject;
+        Status(host, created).Should().Be(StoredFileStatus.Removed);
+    }
+
+    [Fact(DisplayName = "116 fix 1 (F4) must-fire: PUT /file whose body the server stops at its cap (a chunked body) is 413 file_too_large, not 400")]
+    public async Task File_ABodyOverTheServerCap_Is413()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.BodyOverTheServerCap = true;
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileTooLarge);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "116 fix 1 (F4): PUT /file carries the submission routes' body cap, above the server's 30 MB default")]
+    public async Task File_CarriesTheRequestSizeLimit()
+    {
+        await using var host = await Host.StartAsync();
+        var endpoint = host.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText!.EndsWith("/file", StringComparison.Ordinal));
+
+        endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata>()!.MaxRequestBodySize
+            .Should().Be(InvoiceSubmissionHttp.MaxRequestBodyBytes);
     }
 }

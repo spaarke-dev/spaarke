@@ -424,7 +424,7 @@ public sealed class StoredFileService
             return StoredFileCreateResult.Refused(StoredFileRefusal.NotConfigured);
         }
 
-        var rights = await _probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, parent.EntitySet, parent.Id, ct).ConfigureAwait(false);
+        var rights = await GetCallerRightsOnParentAsync(callerBearerToken, parent, ct).ConfigureAwait(false);
         if (!rights.HasFlag(AccessRights.Write))
         {
             _logger.LogWarning("Stored file upload refused: no Write on {ParentTable} {ParentId} ({Code})",
@@ -434,6 +434,14 @@ public sealed class StoredFileService
 
         return await StageCreateFlipAsync(spec, content, RecordRequester.OfCaller(user), stepZero.SystemUserId, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The caller's own rights on <paramref name="parent"/>, asked as the user through the authorization-gate probe: the check
+    /// <see cref="UploadForCallerAsync"/> makes (task 116 fix round 1: the version routes ask it before their other answers, and the upload
+    /// keeps it as a backstop). A fault throws.
+    /// </summary>
+    internal Task<AccessRights> GetCallerRightsOnParentAsync(string? callerBearerToken, StoredFileParent parent, CancellationToken ct) =>
+        _probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, parent.EntitySet, parent.Id, ct);
 
     /// <summary>
     /// stage → row → flip for a caller that has ALREADY authorized the work (150's export files): no caller checks here. The owner
@@ -887,23 +895,38 @@ public sealed class StoredFileService
         return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
     }
 
-    /// <summary>The most rows of one Procedure Version a read takes (task 116). A version holds one Servable source file, plus Removed history.</summary>
+    /// <summary>The most Servable rows of one Procedure Version a read takes (task 116). A version holds one Servable source file.</summary>
     internal const int MaxRowsPerProcedureVersion = 100;
 
     /// <summary>
-    /// ebilling-r1 task 116 (the sibling of <see cref="ReadRowsForInvoiceAsync"/>): every Stored File row of <paramref name="purpose"/> whose
-    /// parent is the Procedure Version <paramref name="procedureVersionId"/>, whatever its status, at most <see cref="MaxRowsPerProcedureVersion"/>.
-    /// The parent and purpose are re-checked on each row, so a query that lost a filter cannot return another version's file. A fault throws.
+    /// ebilling-r1 task 116 (the sibling of <see cref="ReadRowsForInvoiceAsync"/>): the SERVABLE Stored File rows of <paramref name="purpose"/>
+    /// whose parent is the Procedure Version <paramref name="procedureVersionId"/>, at most <see cref="MaxRowsPerProcedureVersion"/> (fix round 1:
+    /// Removed history is not read, so it cannot crowd a Servable row out of the page). A read that reports more rows than it returned throws
+    /// rather than answer with a partial set. The parent, purpose and status are re-checked on each row, so a query that lost a filter cannot
+    /// return another version's file. A fault throws.
     /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <c>ProcedureService.CountServableSourceFilesAsync</c> and
+    /// <c>RuleSetService.LoadServableSourceFilesAsync</c> ask the same question (at most two rows, for "exactly one"). (2) Extension — they are not
+    /// rewired onto this method: neither service holds the file store (a new constructor dependency on both, and on every test that builds them),
+    /// and they need the "exactly one" answer, not the rows. (3) Cost of doing nothing — the replace needs the rows with their row versions to
+    /// withdraw them conditionally; the other two return none.</remarks>
     internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForProcedureVersionAsync(Guid procedureVersionId, StoredFilePurpose purpose, CancellationToken ct)
     {
         var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = MaxRowsPerProcedureVersion };
         query.Criteria.AddCondition(StoredFileSchema.ProcedureVersionTable, ConditionOperator.Equal, procedureVersionId);
         query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)purpose);
+        query.Criteria.AddCondition(StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        if (rows.MoreRecords)
+        {
+            throw new InvalidOperationException(
+                $"Procedure Version {procedureVersionId} has more than {MaxRowsPerProcedureVersion} servable files; the set was not read whole.");
+        }
+
         return rows.Entities
             .Select(e => StoredFileRow.From(e, _blobs.TenantId))
-            .Where(r => r.Purpose == purpose && r.Parent is { Kind: StoredFileParentKind.ProcedureVersion } p && p.Id == procedureVersionId)
+            .Where(r => r.Purpose == purpose && r.Status == StoredFileStatus.Servable
+                && r.Parent is { Kind: StoredFileParentKind.ProcedureVersion } p && p.Id == procedureVersionId)
             .ToList();
     }
 
@@ -915,22 +938,25 @@ public sealed class StoredFileService
     /// read). A refused upload, or one whose flip failed, returns its refusal and leaves the earlier rows untouched (still Servable). When the
     /// withdraw of an earlier row fails, the NEW row is withdrawn (best effort) so the earlier file stays the version's one Servable file, and
     /// the fault is rethrown. Blobs are never deleted here (write-once; the reconcile job owns orphans).
+    /// <para>Fix round 1: once the new row is Servable, <paramref name="parentStillAccepts"/> (when given) is asked BEFORE the earlier rows are
+    /// withdrawn. It re-reads the parent (for a Procedure Version: still a Draft, and its drafted state reset if a run marked it meanwhile);
+    /// false withdraws the new row and refuses <see cref="StoredFileRefusal.ParentNoLongerAccepts"/>, leaving the earlier file as it was; a
+    /// fault is handled as a failed withdraw. Everything after the new row is Servable (the check, the withdraw and the rollback) runs on
+    /// <see cref="CancellationToken.None"/>: a cancelled request must not stop between the two and leave two Servable files.</para>
     /// </summary>
     /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="UploadForCallerAsync"/> creates; <see cref="WithdrawForUndoAsync"/>
     /// withdraws. (2) Extension — this composes the two with one shared withdraw; no new type or service. (3) Cost of doing nothing — a second upload
     /// would leave two Servable source files, and drafting and publish refuse a version without exactly one (422 / 400).</remarks>
     public async Task<StoredFileCreateResult> ReplaceForCallerAsync(
         ClaimsPrincipal user, string? callerBearerToken, StoredFilePurpose purpose, StoredFileParent parent, string name,
-        string contentType, Stream content, CancellationToken ct)
+        string contentType, Stream content, CancellationToken ct, Func<CancellationToken, Task<bool>>? parentStillAccepts = null)
     {
         if (parent.Kind != StoredFileParentKind.ProcedureVersion)
         {
             return StoredFileCreateResult.Refused(StoredFileRefusal.InvalidRequest);
         }
 
-        var earlier = (await ReadRowsForProcedureVersionAsync(parent.Id, purpose, ct).ConfigureAwait(false))
-            .Where(r => r.Status == StoredFileStatus.Servable)
-            .ToList();
+        var earlier = await ReadRowsForProcedureVersionAsync(parent.Id, purpose, ct).ConfigureAwait(false);
         var created = await UploadForCallerAsync(user, callerBearerToken, purpose, parent, name, contentType, content, ct).ConfigureAwait(false);
         if (!created.IsCreated)
         {
@@ -940,18 +966,23 @@ public sealed class StoredFileService
         var replaced = earlier.Where(r => r.FileId != created.FileId).ToList();
         try
         {
-            await WithdrawRowsAsync(replaced, "its replacement", ct).ConfigureAwait(false);
+            if (parentStillAccepts is not null && !await parentStillAccepts(CancellationToken.None).ConfigureAwait(false))
+            {
+                _logger.LogWarning("Stored file {FileId}: {ParentTable} {ParentId} no longer accepts a file; the new file is withdrawn ({Code})",
+                    created.FileId, parent.Table, parent.Id, StoredFileRefusal.ParentNoLongerAccepts);
+                await WithdrawNewRowAsync(created.FileId!.Value, "a parent that no longer accepts it").ConfigureAwait(false);
+                return StoredFileCreateResult.Refused(StoredFileRefusal.ParentNoLongerAccepts);
+            }
+
+            await WithdrawRowsAsync(replaced, "its replacement", CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception withdrawFault) when (withdrawFault is not OperationCanceledException)
+        catch (Exception withdrawFault)
         {
             _logger.LogError(withdrawFault, "Stored file {FileId}: the earlier file(s) of {ParentTable} {ParentId} could not be withdrawn; withdrawing the new file",
                 created.FileId, parent.Table, parent.Id);
             try
             {
-                if (await ReadRowAsync(created.FileId!.Value, CancellationToken.None).ConfigureAwait(false) is { } row)
-                {
-                    await WithdrawRowsAsync([row], "a failed replace", CancellationToken.None).ConfigureAwait(false);
-                }
+                await WithdrawNewRowAsync(created.FileId!.Value, "a failed replace").ConfigureAwait(false);
             }
             catch (Exception rollbackFault)
             {
@@ -968,6 +999,15 @@ public sealed class StoredFileService
         }
 
         return created;
+    }
+
+    /// <summary>The replace's rollback of its own new row: re-read (for its row version) and withdrawn, on <see cref="CancellationToken.None"/>.</summary>
+    private async Task WithdrawNewRowAsync(Guid fileId, string why)
+    {
+        if (await ReadRowAsync(fileId, CancellationToken.None).ConfigureAwait(false) is { } row)
+        {
+            await WithdrawRowsAsync([row], why, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     /// <summary>The most copies <see cref="CountCopiesOfDocumentAsync"/> counts; any count above zero refuses a delete.</summary>

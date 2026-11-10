@@ -1148,6 +1148,46 @@ public class ProcedureService
         return RuleSetOutcome<ProcedureVersionView>.Done(version.View);
     }
 
+    /// <summary>
+    /// Task 116 fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): re-reads the version and answers whether it is still a Draft
+    /// (a missing status is not). When it is a Draft that a drafting run has marked drafted, the drafted state is reset first: the marker
+    /// <c>sprk_notconverted</c> = No, THEN the list <c>sprk_notconvertedlist</c> cleared, so a reader that trusts the list only under a Yes
+    /// never sees a list without its run. A version that is not drafted is not written. A fault throws (the caller refuses the upload).
+    /// The version-file route calls it before the new file is staged and again once the new file is Servable (<see
+    /// cref="Files.StoredFileService.ReplaceForCallerAsync"/>'s re-check, which also catches a run that marked the version meanwhile).
+    /// </summary>
+    public virtual Task<bool> ResetDraftedStateIfDraftAsync(Guid versionId, CancellationToken ct) =>
+        ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="ResetDraftedStateIfDraftAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam so the rate-card import's replace (<see cref="RateCardImportService"/>) re-checks through the same
+    /// method without holding this service.</remarks>
+    internal static async Task<bool> ResetDraftedStateIfDraftAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.VersionEntity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionStatusColumn, RuleSetService.VersionDraftedColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_procedureversionid", ConditionOperator.Equal, versionId);
+        var version = (await entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(v => v.Id == versionId);
+        if (version?.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return false;
+        }
+
+        if (version.GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn) == true)
+        {
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionDraftedColumn] = false }, ct);
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionNotConvertedListColumn] = DBNull.Value }, ct);
+            logger.LogInformation("Procedure Version {ProcedureVersionId}: drafted state reset for a new source file", versionId);
+        }
+
+        return true;
+    }
+
     private async Task<int> CountServableSourceFilesAsync(Guid versionId, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.StoredFileEntity) { ColumnSet = new ColumnSet(ProcedureEntity.StoredFileProcedureVersionColumn), TopCount = 2 };

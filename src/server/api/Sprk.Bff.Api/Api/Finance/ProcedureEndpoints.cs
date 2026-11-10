@@ -1,4 +1,7 @@
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -176,6 +179,8 @@ public static class ProcedureEndpoints
             .RequireEbillingEnabled()
             .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's rights, not a form token
             .Accepts<IFormFile>("multipart/form-data")
+            // Fix round 1: the body cap of the submission routes (the configurable ceiling plus the envelope), above Kestrel's 30 MB default.
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .WithName("PutProcedureVersionFile")
             .WithSummary("Store a Draft version's source file (replaces the earlier one)")
             .Produces<ProcedureVersionFileStored>(StatusCodes.Status200OK)
@@ -275,11 +280,22 @@ public static class ProcedureEndpoints
         Map(await service.RetireVersionAsync(procedureId, versionId, ct), http);
 
     internal static async Task<IResult> DraftVersionRules(
-        Guid procedureId, Guid versionId, RuleSetService ruleSets, JobSubmissionService jobs, HttpContext http, ILogger<RuleSetService> logger,
-        CancellationToken ct)
+        Guid procedureId, Guid versionId, RuleSetService ruleSets, JobSubmissionService jobs, StoredFileService files, HttpContext http,
+        ILogger<RuleSetService> logger, CancellationToken ct)
     {
         // The source, the version's state and a finished run are decided here, so the admin hears 404 / 409 / 422 now, not from a dead-lettered job.
+        // Fix round 1: the route checks the caller's rights on the version before its other answers (an unknown version first, then those rights).
         var found = await ruleSets.GetDraftSourceAsync(procedureId, versionId, ct);
+        if (found.Kind != RuleSetOutcomeKind.Done && found.StatusCode == StatusCodes.Status404NotFound)
+        {
+            return Map(found, http);
+        }
+
+        if (await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct) is { } denied)
+        {
+            return denied;
+        }
+
         if (found.Kind != RuleSetOutcomeKind.Done)
         {
             return Map(found, http);
@@ -312,14 +328,33 @@ public static class ProcedureEndpoints
     }
 
     /// <summary>
-    /// The size check runs before the body is buffered (Content-Length), the version check before the form is read, and the file's own length
-    /// after. The bytes go through <see cref="StoredFileService.ReplaceForCallerAsync"/> (step 0, the caller's Write on the version, owner, stage,
-    /// row, flip, then the earlier file Removed).
+    /// In this order (fix round 1): the version under this Procedure (the unknown-id 404), the caller's rights on the version (no Read is that
+    /// same 404, no Write 403), the version's state (409), then the size (Content-Length before the body is buffered, the server's cap while it
+    /// is read, the file's own length after). A drafted version's drafted state is reset before anything is staged (owner ruling 2026-11-10:
+    /// a new file makes the version draftable again); if that fails, nothing is stored. The bytes go through
+    /// <see cref="StoredFileService.ReplaceForCallerAsync"/> (step 0, the caller's Write on the version again, owner, stage, row, flip, the
+    /// version re-read, then the earlier file Removed).
     /// </summary>
     internal static async Task<IResult> PutVersionFile(
         Guid procedureId, Guid versionId, ProcedureService procedures, StoredFileService files, IOptionsMonitor<EbillingOptions> ebilling,
         HttpContext http, ILogger<StoredFileService> logger, CancellationToken ct)
     {
+        var target = await procedures.GetDraftVersionForFileAsync(procedureId, versionId, ct);
+        if (target.Kind != RuleSetOutcomeKind.Done && target.StatusCode == StatusCodes.Status404NotFound)
+        {
+            return Map(target, http);
+        }
+
+        if (await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForFile, http, logger, ct) is { } denied)
+        {
+            return denied;
+        }
+
+        if (target.Kind != RuleSetOutcomeKind.Done)
+        {
+            return Map(target, http);
+        }
+
         var request = http.Request;
         var maxMb = ebilling.CurrentValue.MaxSubmissionFileSizeMb;
         var maxBytes = (long)maxMb * 1024 * 1024;
@@ -328,16 +363,20 @@ public static class ProcedureEndpoints
             return FileTooLarge(maxMb);
         }
 
-        var target = await procedures.GetDraftVersionForFileAsync(procedureId, versionId, ct);
-        if (target.Kind != RuleSetOutcomeKind.Done)
+        // A chunked body has no Content-Length: the server stops reading it at the configured limit (the 413 below).
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } cap)
         {
-            return Map(target, http);
+            cap.MaxRequestBodySize = maxBytes + (1024 * 1024);
         }
 
         IFormCollection form;
         try
         {
             form = await request.ReadFormAsync(ct);
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return FileTooLarge(maxMb);
         }
         catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
         {
@@ -355,6 +394,24 @@ public static class ProcedureEndpoints
             return FileTooLarge(maxMb);
         }
 
+        // Owner ruling 2026-11-10 (reset and allow redraft): a drafted version is made draftable again BEFORE the new file is staged, so a
+        // later fault leaves at worst an undrafted version that still has its old file, never a new file on a version marked drafted.
+        bool stillDraft;
+        try
+        {
+            stillDraft = await procedures.ResetDraftedStateIfDraftAsync(versionId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the drafted state could not be reset; no file stored ({ExceptionType})", versionId, ex.GetType().Name);
+            return FileWriteFailed();
+        }
+
+        if (!stillDraft)
+        {
+            return NotDraft();
+        }
+
         StoredFileCreateResult stored;
         try
         {
@@ -364,7 +421,8 @@ public static class ProcedureEndpoints
             stored = await files.ReplaceForCallerAsync(
                 http.User, TokenHelper.ExtractBearerTokenOrNull(http), StoredFilePurpose.ProcedureSource,
                 new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), fileName,
-                RuleSetService.MimeTypeOf(fileName), content, ct);
+                RuleSetService.MimeTypeOf(fileName), content, ct,
+                parentStillAccepts: token => procedures.ResetDraftedStateIfDraftAsync(versionId, token));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -391,9 +449,49 @@ public static class ProcedureEndpoints
                 statusCode: StatusCodes.Status503ServiceUnavailable, detail: "The file store is not configured in this environment.",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = StoredFileRefusal.NotConfigured }),
             StoredFileRefusal.InvalidRequest => FileMissing("The file name or type is not accepted."),
+            StoredFileRefusal.ParentNoLongerAccepts => NotDraft(),
             _ => FileWriteFailed(),
         };
     }
+
+    private const string VersionNotFoundForDraft = "The Procedure Version was not found.";
+    private const string VersionNotFoundForFile = "The version was not found in this Procedure.";
+
+    /// <summary>
+    /// Fix round 1: the caller's own rights on the version, asked as the user (the file store's check, <see
+    /// cref="StoredFileService.GetCallerRightsOnParentAsync"/>). No Read answers exactly as an unknown version does (<paramref
+    /// name="notFoundDetail"/> is the route's own unknown-id text); Read without Write is 403; a fault is 403 <c>system_failure</c>. Null: go on.
+    /// </summary>
+    private static async Task<IResult?> CallerVersionRefusalAsync(
+        StoredFileService files, Guid versionId, string notFoundDetail, HttpContext http, ILogger logger, CancellationToken ct)
+    {
+        AccessRights rights;
+        try
+        {
+            rights = await files.GetCallerRightsOnParentAsync(
+                TokenHelper.ExtractBearerTokenOrNull(http), new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Procedure Version route: the caller's rights could not be read ({ExceptionType})", ex.GetType().Name);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        if (!rights.HasFlag(AccessRights.Read))
+        {
+            return Map(RuleSetOutcome<ProcedureVersionView>.Refused(StatusCodes.Status404NotFound, ProcedureService.CodeVersionNotFound, notFoundDetail), http);
+        }
+
+        return rights.HasFlag(AccessRights.Write)
+            ? null
+            : ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier);
+    }
+
+    private static IResult NotDraft() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status409Conflict, detail: "A file can be stored only on a Draft version.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = RuleSetService.CodeVersionNotDraft });
 
     private static async Task<IResult> PreviewRetire(Guid procedureId, ProcedureService service, HttpContext http, CancellationToken ct) =>
         Map(await service.PreviewRetireAsync(procedureId, TokenHelper.ExtractBearerTokenOrNull(http), ct), http);

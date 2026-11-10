@@ -143,7 +143,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
             //    asked again below and its output is not deterministic, so the earlier run's UNTOUCHED drafts of this version are removed
             //    first (the store decides what untouched means; a draft an administrator worked on is kept). A fault fails the run before the
             //    model is asked, and the next delivery compensates again.
-            var compensated = await _ruleSets.RemoveUntouchedDraftsAsync(versionId, ct);
+            var compensated = await _ruleSets.RemoveUntouchedDraftsAsync(versionId, source.FileId, ct);
             if (compensated.Kind != RuleSetOutcomeKind.Done)
             {
                 if (compensated.ErrorCode == RuleSetService.CodeAlreadyDrafted)
@@ -210,7 +210,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
             // 5. The proposals become drafted rules; the store validates every one and writes them, then the marker.
             var translated = BillingRuleDraftTranslator.Translate(proposals, extracted.Text);
             notConverted.AddRange(translated.Refused);
-            var added = await _ruleSets.AddDraftsAsync(versionId, translated.Rules, notConverted, payload.CallerObjectId, ct);
+            var added = await _ruleSets.AddDraftsAsync(versionId, source.FileId, translated.Rules, notConverted, payload.CallerObjectId, ct);
             if (added.Kind == RuleSetOutcomeKind.Done)
             {
                 _logger.LogInformation(

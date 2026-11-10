@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -72,6 +73,8 @@ public static class RateCardImportEndpoints
             .RequireWriteOnTheVersionsProcedure() // 085 (I-P5): and Write on the Procedure the version belongs to
             .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's table privileges, not a form token
             .Accepts<IFormFile>("multipart/form-data")
+            // 116 fix round 1: the body cap of the submission routes (the configurable ceiling plus the envelope), above Kestrel's 30 MB default.
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .WithName("ImportRateCard")
             .WithSummary("Import a rate card and timekeepers from a workbook as a Draft")
             .WithDescription(
@@ -345,6 +348,12 @@ public static class RateCardImportEndpoints
             return FileTooLarge(ebilling.CurrentValue.MaxSubmissionFileSizeMb);
         }
 
+        // 116 fix round 1: a chunked body has no Content-Length; the server stops reading it at the configured limit (413 below).
+        if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } cap)
+        {
+            cap.MaxRequestBodySize = maxBytes + (1024 * 1024);
+        }
+
         // A malformed multipart body (e.g. a section without Content-Disposition) is a CLIENT error: 400, not the parser's exception as a
         // 500 (as ChatDocumentEndpoints answers). The parser's message can echo request content, so it is not returned. Cancellation is
         // deliberately not caught here.
@@ -352,6 +361,11 @@ public static class RateCardImportEndpoints
         try
         {
             form = await request.ReadFormAsync(ct);
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            // The server's body cap (a chunked body has no Content-Length to check above).
+            return FileTooLarge(ebilling.CurrentValue.MaxSubmissionFileSizeMb);
         }
         catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
         {
@@ -409,6 +423,8 @@ public static class RateCardImportEndpoints
         StoredFileRefusal.NotConfigured => Refused(
             StatusCodes.Status503ServiceUnavailable, StoredFileRefusal.NotConfigured, "The file store is not configured in this environment."),
         StoredFileRefusal.InvalidRequest => InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The workbook was not accepted by the file store.") }),
+        StoredFileRefusal.ParentNoLongerAccepts => Refused(
+            StatusCodes.Status409Conflict, RuleSetService.CodeVersionNotDraft, "The Procedure Version is no longer a Draft; nothing was imported."),
         _ => Refused(
             StatusCodes.Status500InternalServerError, RateCardImportService.CodeImportFailed,
             "The rate card could not be imported and nothing was saved. Try again; if it keeps failing, contact support."),
