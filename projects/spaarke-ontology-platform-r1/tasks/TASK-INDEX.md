@@ -255,6 +255,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ 173 | [An external Assign Task assignee is emailed from the system mailbox (D-199 amendment)](173-external-assignee-email-from-system-mailbox.poml) | FULL | sonnet/high | 168 | N | Owner 2026-10-29: never the assigner's mailbox for an external party; internal unchanged **Done** 2026-10-29: #2462 merged `f4a0fc6862`. |
 | 🔄 174 | [BFF: Console decision route refuses billing Signals; worklist names each billing item's invoice](174-billing-signals-route-refusal-and-invoice-review-target.poml) | FULL | sonnet/high | — | P-207 | **D-207** (owner, EB-D-194): billing decisions only in Invoice Review |
 | 🔄 175 | [Console: Invoice decisions card; billing Work Items open Invoice Review as a pop-up](175-worklist-invoice-decisions-card-and-invoice-review-popup.poml) | FULL | sonnet/high | 174 (contract) | P-207 | **D-207**; deploy after ebilling 112 puts the page on dev |
+| 🔲 176 | [Budget inquiry email and replies filed under the inquiry AND the matter, internal-only, matter thread, archived (D-216)](176-budget-inquiry-email-filed-under-matter.poml) | FULL | **opus**/high | 070, 160 | N | Owner UAT of 161 (2026-11-09); internal-only relayed by uac-r2 2026-11-10; uac-r2 reviews · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
