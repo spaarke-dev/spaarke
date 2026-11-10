@@ -1054,6 +1054,11 @@ public sealed partial class RecordContainerResolver
                 || !IsRecordUnderResolution(l, walkRecordEntity, walkRecordId))
             .ToList();
 
+        // Task 176 (D-216): EXCEPT a service request whose own matter is the matter this row is also filed under, read live.
+        setIntermediates = await ReleaseMatchedServiceRequestAsync(
+                row, setIntermediates, sourceColumns, filingThrough, walk, ct)
+            .ConfigureAwait(false);
+
         var held = setIntermediates
             .Where(i => !sourceColumns.Contains(i.Column) && !filingThrough.Contains(i.Column))
             .Select(i => i.Column)
@@ -1190,6 +1195,197 @@ public sealed partial class RecordContainerResolver
 
         return new RowHops(own, extra);
     }
+
+    /// <summary>
+    /// Task 176 (D-216; F-176-1): the sole-root release of a HELD service request. A row filed under a service request AND a
+    /// matter (the budget inquiry email, and a reply to it) stops holding the request ONLY when ONE live read of that request
+    /// proves the row's own non-empty <c>sprk_regardingmatter</c> is the request's SOLE root: the request's
+    /// <c>sprk_regardingmatter</c> is the same id, none of its other links (<see cref="ChildAncestorLinks.LinkColumns"/> —
+    /// project, work assignment, communication, invoice, to-do) is set, and its polymorphic pair is empty or names that
+    /// same matter. The released link adds nothing: the request contributes no container, and the matter (a followed root)
+    /// decides — a secure matter gives its Secure container.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why sole root (F-176-1).</b> Once released, the request's own row is never read again — it is not a followed
+    /// hop (that would change the task-156 hold). A request regarding a non-secure matter AND a secure project (or a
+    /// communication, invoice or to-do whose chain reaches a secure root, or a pair naming a secure record) must therefore
+    /// stay held; releasing on the matter alone sent such an email to the matter's business-unit container.</para>
+    /// <para><b>Missing = null.</b> The read asks for every column in <see cref="ServiceRequestReleaseColumns"/>, derived from
+    /// the request's <see cref="ChildAncestorLinks"/> entry. Dataverse omits a null attribute from a successful Retrieve and
+    /// faults a Retrieve that names a column that does not exist, so on a SUCCEEDED read a missing other-link or pair key is
+    /// null. The one other way a key goes missing is field-level security masking it; none of these columns is field-secured
+    /// (<c>ServiceRequestReleaseColumnsUnsecuredGuardTests</c>). Securing any of these columns breaks the missing = null
+    /// reading; update the guard first. The matter itself must be PRESENT and equal (a missing matter key stays held).</para>
+    /// <para>Every other case stays held (<see cref="AncestorUnverifiableCode"/>) exactly as before: no matter on the row, a
+    /// different or missing matter on the request, another link set, a pair naming any other id or a type other than the
+    /// matter (or a type that cannot be read), a fault, a request not found, a null row, or the walk's read budget spent.
+    /// Generic: never keyed on the request's direction.</para>
+    /// <para>§11: existing — the <see cref="ChildAncestorLinks"/> hold on <c>sprk_regardingservicerequest</c>; extension — a
+    /// sole-root release on that rule; cost of doing nothing — an inquiry email with a matter can never be archived.</para>
+    /// </remarks>
+    private async Task<List<StampSourceLink>> ReleaseMatchedServiceRequestAsync(
+        Entity row,
+        List<StampSourceLink> setIntermediates,
+        IReadOnlySet<string> sourceColumns,
+        IReadOnlySet<string> filingThrough,
+        Walk walk,
+        CancellationToken ct)
+    {
+        var request = setIntermediates.FirstOrDefault(l =>
+            string.Equals(l.Column, ServiceRequestLinkColumn, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(l.Intermediate, ServiceRequestEntity, StringComparison.OrdinalIgnoreCase)
+            && !sourceColumns.Contains(l.Column)
+            && !filingThrough.Contains(l.Column));
+        var requestLinks = ChildAncestorLinks.For(ServiceRequestEntity);
+        if (request is null
+            || requestLinks is null
+            || !row.Attributes.TryGetValue(MatterLinkColumn, out var onRow)
+            || onRow is not EntityReference { Id: var matterId }
+            || matterId == Guid.Empty
+            || walk.Reads >= MaxRootReads)
+        {
+            return setIntermediates;
+        }
+
+        var columns = ServiceRequestReleaseColumns(requestLinks);
+        if (!columns.Contains(MatterLinkColumn, StringComparer.OrdinalIgnoreCase))
+        {
+            return setIntermediates;
+        }
+
+        walk.Reads++;
+        Entity? live;
+        try
+        {
+            live = await _entityService
+                .RetrieveAsync(ServiceRequestEntity, request.Id, columns, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-CONTAINER] Could not read service request {ServiceRequestId} on {Entity} {RecordId}; "
+                + "the service request stays held ({Code}).",
+                request.Id, walk.RecordEntity, walk.RecordId, AncestorUnverifiableCode);
+            return setIntermediates;
+        }
+
+        if (live is null
+            || !live.Attributes.TryGetValue(MatterLinkColumn, out var liveValue)
+            || liveValue is not EntityReference { Id: var liveMatterId }
+            || liveMatterId != matterId)
+        {
+            return setIntermediates;
+        }
+
+        // Every other link on the request: a missing key is null on this succeeded read (see remarks).
+        var otherLink = requestLinks.LinkColumns
+            .Where(c => !string.Equals(c, MatterLinkColumn, StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(c => live.Attributes.TryGetValue(c, out var value) && value switch
+            {
+                null => false,
+                EntityReference reference => reference.Id != Guid.Empty,
+                _ => true, // an unexpected shape is not proven empty
+            });
+        if (otherLink is not null)
+        {
+            _logger.LogInformation(
+                "[SECURE-CONTAINER] Service request {ServiceRequestId} on {Entity} {RecordId} also names {Column}; its matter "
+                + "is not its sole root, so it stays held ({Code}).",
+                request.Id, walk.RecordEntity, walk.RecordId, otherLink, AncestorUnverifiableCode);
+            return setIntermediates;
+        }
+
+        if (!await PairIsEmptyOrNamesMatterAsync(live, requestLinks, matterId, request.Id, walk, ct).ConfigureAwait(false))
+        {
+            return setIntermediates;
+        }
+
+        return setIntermediates.Where(l => l != request).ToList();
+    }
+
+    /// <summary>
+    /// The columns the service request release reads (task 176, F-176-1): the request entry's
+    /// <see cref="ChildAncestorLinks.LinkColumns"/> then its <see cref="ChildAncestorLinks.PairColumns"/>. The one list —
+    /// <c>ServiceRequestReleaseColumnsUnsecuredGuardTests</c> checks the same columns are not field-secured.
+    /// </summary>
+    internal static string[] ServiceRequestReleaseColumns(ChildAncestorLinks requestLinks)
+        => requestLinks.LinkColumns.Concat(requestLinks.PairColumns)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    /// <summary>
+    /// The release's pair rule on the request's live row: an empty pair (id and type both null — missing = null), or a pair
+    /// whose id is the matter's id AND whose type, read through <see cref="ReadRegardingTypeAsync"/>, is the matter. Anything
+    /// else — another id, a non-GUID id, a type with no id, an id with no type, a type other than the matter, a type read that
+    /// fails — is <see langword="false"/> (held).
+    /// </summary>
+    private async Task<bool> PairIsEmptyOrNamesMatterAsync(
+        Entity live, ChildAncestorLinks requestLinks, Guid matterId, Guid requestId, Walk walk, CancellationToken ct)
+    {
+        if (!requestLinks.HasPolymorphicRegarding)
+        {
+            return true;
+        }
+
+        live.Attributes.TryGetValue(RegardingRecordIdColumn, out var rawId);
+        object? rawType = null;
+        if (requestLinks.HasPairTypeColumn)
+        {
+            live.Attributes.TryGetValue(RegardingRecordTypeColumn, out rawType);
+        }
+
+        if (rawId is not (null or string) || rawType is not (null or EntityReference))
+        {
+            return Held("its regarding pair holds an unexpected value");
+        }
+
+        var idText = rawId as string;
+        var typeRef = rawType is EntityReference { Id: var t } && t != Guid.Empty ? t : (Guid?)null;
+
+        if (string.IsNullOrWhiteSpace(idText))
+        {
+            return typeRef is null || Held("its regarding pair names a type with no record");
+        }
+
+        if (!Guid.TryParse(idText.Trim(), out var pairId) || pairId != matterId)
+        {
+            return Held("its regarding pair names a record other than its matter");
+        }
+
+        if (typeRef is not { } typeRefId)
+        {
+            return Held("its regarding pair names its matter's id without a type");
+        }
+
+        string pairEntity;
+        try
+        {
+            pairEntity = await ReadRegardingTypeAsync(typeRefId, walk.RecordEntity, walk.RecordId, pairId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (SdapProblemException)
+        {
+            return Held("its regarding pair's type could not be read");
+        }
+
+        return string.Equals(pairEntity, MatterEntity, StringComparison.Ordinal)
+            || Held("its regarding pair names its matter's id with a type other than the matter");
+
+        bool Held(string reason)
+        {
+            _logger.LogInformation(
+                "[SECURE-CONTAINER] Service request {ServiceRequestId} on {Entity} {RecordId}: {Reason}, so its matter is not "
+                + "proven its sole root and it stays held ({Code}).",
+                requestId, walk.RecordEntity, walk.RecordId, reason, AncestorUnverifiableCode);
+            return false;
+        }
+    }
+
+    private const string ServiceRequestEntity = "sprk_servicerequest";
+    private const string ServiceRequestLinkColumn = "sprk_regardingservicerequest";
+    private const string MatterLinkColumn = "sprk_regardingmatter";
+    private const string MatterEntity = "sprk_matter";
 
     private static bool IsRecordUnderResolution(StampSourceLink link, string recordEntity, Guid recordId)
         => link.Id == recordId && string.Equals(link.Intermediate, recordEntity, StringComparison.OrdinalIgnoreCase);
@@ -2121,16 +2317,25 @@ public sealed partial class RecordContainerResolver
         public IReadOnlyList<string> PartyRegardingColumns { get; }
 
         /// <summary>Every column the row's read must carry for the decision.</summary>
-        public IEnumerable<string> AllColumns => FollowedLinks.Select(l => l.LinkColumn)
-            .Concat(IntermediateColumns.Select(i => i.Column))
-            .Concat(CarrierColumns.Select(c => c.Column))
-            .Concat(HasPolymorphicRegarding
-                ? PairColumns().Concat(PartyRegardingColumns)
-                : Array.Empty<string>());
+        public IEnumerable<string> AllColumns => LinkColumns
+            .Concat(PairColumns)
+            .Concat(HasPolymorphicRegarding ? PartyRegardingColumns : Array.Empty<string>());
 
-        private IEnumerable<string> PairColumns() => HasPairTypeColumn
-            ? [RegardingRecordIdColumn, RegardingRecordTypeColumn]
-            : [RegardingRecordIdColumn];
+        /// <summary>
+        /// Every typed link column on the row — followed, intermediate and carrier — in that order. Not the party columns
+        /// (not ownership) and not the pair (<see cref="PairColumns"/>). Task 176 (F-176-1): the service request release
+        /// reads exactly these plus the pair, so a link added to the entry is covered without a second list.
+        /// </summary>
+        public IEnumerable<string> LinkColumns => FollowedLinks.Select(l => l.LinkColumn)
+            .Concat(IntermediateColumns.Select(i => i.Column))
+            .Concat(CarrierColumns.Select(c => c.Column));
+
+        /// <summary>The polymorphic pair's columns on the row: its id, and its type when the row carries one; none without a pair.</summary>
+        public IEnumerable<string> PairColumns => !HasPolymorphicRegarding
+            ? Array.Empty<string>()
+            : HasPairTypeColumn
+                ? [RegardingRecordIdColumn, RegardingRecordTypeColumn]
+                : [RegardingRecordIdColumn];
 
         /// <summary>
         /// Whether a link from this row to <paramref name="target"/> is walked: every root, plus a type this entry

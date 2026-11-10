@@ -136,7 +136,8 @@ public sealed record DecisionCommitStep(
     IReadOnlyList<DecisionCommitRef> Written,
     IReadOnlyList<DecisionCommitRef> PossiblyWritten,
     string? ReasonCode,
-    string? Detail);
+    string? Detail,
+    string? Warning = null);
 
 /// <summary>What happened to one Signal at step 6.</summary>
 /// <param name="State">Acted, Dismissed, InquirySent (D-119: left open, Acknowledged, linked to the record) or Unchanged.</param>
@@ -1183,6 +1184,9 @@ public sealed class DecisionCommitService
                 warnings.Add(warning);
         }
 
+        // A step that finished (Done) with a warning of its own: the budget inquiry sent but its .eml was not archived (D-216).
+        warnings.AddRange(executed.Where(e => !string.IsNullOrEmpty(e.Warning)).Select(e => e.Warning!));
+
         warnings.AddRange(await _followUps.AfterRecordedAsync(p.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
         progress.FollowUpsRan = true;
 
@@ -1945,7 +1949,8 @@ public sealed class DecisionCommitService
             outcome.Written.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList(),
             outcome.PossiblyWritten.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList(),
             outcome.ReasonCode,
-            outcome.Detail);
+            outcome.Detail,
+            outcome.Warning);
 
     private static IReadOnlyList<DecisionRecordStep> ProjectedSteps(Prepared p) =>
         p.Offered.Select(o => new DecisionRecordStep(

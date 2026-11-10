@@ -1025,6 +1025,84 @@ public class ExternalMessageEndpointsTests
         messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
     }
 
+    [Fact]
+    public async Task RegressionGuard_HandBuiltInternalOnlyInquiryRows_UnderTheMatter_StayHiddenFromAnExternalContact()
+    {
+        // Ontology task 176 (D-216). A REGRESSION GUARD, not a proof of the send: the rows are hand-built already internal-only,
+        // so this passed before task 176 and keeps passing whatever the send writes. It pins the read side: an internal-only
+        // inquiry email and reply filed under the MATTER (so in the matter's thread) are hidden from a partner holding the
+        // matter (an internal user sees internal-only rows: SystemUserCaller_ReceivesInternalOnlyMessages). That the real send
+        // persists the row this way is proven by
+        // ExternalContactOnTheMatter_NeverSeesTheInquiryEmail_AsTheRealSendPathPersistedIt below.
+        var matter = Guid.NewGuid();
+        var visible = Guid.NewGuid();
+        var inquiry = Guid.NewGuid();
+        var reply = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(visible, "sprk_regardingmatter", matter, internalOnly: false, "2026-11-01T09:00:00Z"),
+            MessageRow(inquiry, "sprk_regardingmatter", matter, internalOnly: true, "2026-11-02T09:00:00Z", "Budget inquiry: Q3", Outgoing),
+            MessageRow(reply, "sprk_regardingmatter", matter, internalOnly: true, "2026-11-03T09:00:00Z", "Re: Budget inquiry: Q3"));
+
+        Messages(await Get("matters", matter, Ciam(matter: matter)))
+            .Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExternalContactOnTheMatter_NeverSeesTheInquiryEmail_AsTheRealSendPathPersistedIt()
+    {
+        // Task 176 review round 2, item 3c: the row is what the REAL send path persisted (InquiryEmailSender.Build ->
+        // CommunicationService.SendAsync; BudgetInquiryEmailFilingTests.SendHarness doubles only Dataverse and the channel),
+        // turned into the columns the app-only query returns. It sits in the shared Open thread, so D7 does not hide it and only
+        // what the send persisted decides. The control clears that row's internal-only flag and nothing else: the same row is
+        // then visible, so the hide is the persisted flag's and not another column's.
+        var matter = Sprk.Bff.Api.Tests.Services.Communication.BudgetInquiryEmailFilingTests.MatterId;
+        var harness = new Sprk.Bff.Api.Tests.Services.Communication.BudgetInquiryEmailFilingTests.SendHarness();
+        await harness.Service.SendAsync(Sprk.Bff.Api.Tests.Services.Communication.BudgetInquiryEmailFilingTests.InquirySend(), harness.SignedInUser());
+        var persisted = harness.Communication();
+        persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue("the send's own flag, not one this test sets");
+        var inquiry = PersistedRow(persisted, "2026-11-02T09:00:00Z");
+        var other = Guid.NewGuid();
+        var otherRow = MessageRow(other, "sprk_regardingmatter", matter, internalOnly: false, "2026-11-01T09:00:00Z");
+
+        SetupMessages(otherRow, inquiry);
+        Messages(await Get("matters", matter, Ciam(matter: matter)))
+            .Select(m => m.SprkCommunicationid).Should().Equal(other.ToString("D"));
+
+        SetupMessages(otherRow, new Dictionary<string, JsonElement>(inquiry) { ["sprk_isinternalonly"] = El(false) });
+        Messages(await Get("matters", matter, Ciam(matter: matter)))
+            .Select(m => m.SprkCommunicationid).Should().Equal(other.ToString("D"), persisted.Id.ToString("D"));
+    }
+
+    /// <summary>
+    /// A persisted <c>sprk_communication</c> entity as the Web API returns it: a lookup as <c>_{column}_value</c>, a choice as
+    /// its integer, plus the row id and the <c>createdon</c> Dataverse stamps.
+    /// </summary>
+    private static Dictionary<string, JsonElement> PersistedRow(Microsoft.Xrm.Sdk.Entity entity, string createdOn)
+    {
+        var row = new Dictionary<string, JsonElement>
+        {
+            ["sprk_communicationid"] = El(entity.Id.ToString("D")),
+            ["createdon"] = El(createdOn),
+        };
+        foreach (var (column, value) in entity.Attributes)
+        {
+            switch (value)
+            {
+                case Microsoft.Xrm.Sdk.EntityReference reference:
+                    row[$"_{column}_value"] = El(reference.Id.ToString("D"));
+                    break;
+                case Microsoft.Xrm.Sdk.OptionSetValue choice:
+                    row[column] = El(choice.Value);
+                    break;
+                case string or bool or int or DateTime:
+                    row[column] = JsonSerializer.SerializeToElement(value, value.GetType());
+                    break;
+            }
+        }
+
+        return row;
+    }
+
     // ── isMine: the caller-relative author flag (task 034, review fix) ─────────────────────────────
 
     /// <summary>A message row authored by the given contact (a task-034 external post) or sent by the given systemuser.</summary>
