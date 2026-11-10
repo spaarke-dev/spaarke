@@ -313,6 +313,56 @@ internal static class ServiceRequestParityCase
 }
 
 /// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2 (F1): the families whose rows have an invoice link of their own (null here) and are
+/// filed under an invoice-linked row, for the assistant tools' handler tests (the REST plane: <c>ExternalInvoiceLinkedFamilyRouteTests</c>).
+/// Rows are made in the <see cref="InvoiceWorld"/> the tools' real seam reads.
+/// </summary>
+internal static class InvoiceLinkedFamilyCase
+{
+    /// <summary>The hop bound the invoice walk reads (<see cref="InvoiceLinks"/>); every bound test builds its chain from this.</summary>
+    public static int WalkBound => ExternalDocumentNarrowing.MaxHops;
+
+    /// <summary>Each family: "child-parent".</summary>
+    public static TheoryData<string> Keys => new()
+    {
+        "analysis-document", "event-event", "todo-event", "document-communication", "todo-servicerequest",
+    };
+
+    /// <summary>The child (its own link column named, left null), the edge column and the parent table of <paramref name="key"/>.</summary>
+    public static (InvoiceLinkedCase Child, string Column, string ParentTable) Of(string key) => key switch
+    {
+        "analysis-document" => (InvoiceLinkedCase.Of("analysis"), "sprk_documentid", "sprk_document"),
+        "event-event" => (InvoiceLinkedCase.Of("event"), "sprk_regardingevent", "sprk_event"),
+        "todo-event" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingevent", "sprk_event"),
+        "document-communication" => (InvoiceLinkedCase.Of("document-invoice"), "sprk_relatedcommunication", "sprk_communication"),
+        "todo-servicerequest" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingservicerequest", "sprk_servicerequest"),
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown family (test)."),
+    };
+
+    /// <summary>A row of <paramref name="table"/> linked to <paramref name="invoice"/> (none: unlinked).</summary>
+    public static Guid Row(InvoiceWorld world, string table, Guid? invoice) => invoice is { } i
+        ? world.LinkedChildRow(table, (InvoiceLinks.LinkColumnsOf(table)[0], i))
+        : world.LinkedChildRow(table);
+
+    /// <summary>A child of <paramref name="key"/> (its own link null) under a parent linked to <paramref name="invoice"/>.</summary>
+    public static Guid ChildUnder(InvoiceWorld world, string key, Guid? invoice)
+    {
+        var (child, column, parentTable) = Of(key);
+        return world.LinkedChildRow(child.Table, (column, Row(world, parentTable, invoice)));
+    }
+
+    /// <summary>A to-do under a chain of <paramref name="length"/> events (each regarding the next); the TOP one links to
+    /// <paramref name="topInvoice"/>.</summary>
+    public static Guid TodoUnderEventChain(InvoiceWorld world, int length, Guid? topInvoice)
+    {
+        var above = Row(world, "sprk_event", topInvoice);
+        for (var i = 1; i < length; i++)
+            above = world.LinkedChildRow("sprk_event", ("sprk_regardingevent", above));
+        return world.LinkedChildRow("sprk_todo", ("sprk_regardingevent", above));
+    }
+}
+
+/// <summary>
 /// Task 130-0b step 2: one class of CHILD row with an invoice link, as the handler tests name it: its table and the one link column
 /// the test sets (a document twice: through <c>sprk_invoice</c> and through <c>sprk_relatedinvoice</c>). The read shape comes from
 /// <see cref="InvoiceLinks.Tables"/>, never from the test.

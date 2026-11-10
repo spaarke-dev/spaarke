@@ -1209,6 +1209,78 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             : new[] { "Request" });
     }
 
+    // ── F3b fix round 1, step 2 (F1): a row whose own link is null follows the invoice of the row it is filed under ──
+
+    [Theory(DisplayName = "F3b fix round 1 read_query (must fire / must not fire): a row whose own invoice link is null is hidden when the row it is filed under links to another firm's invoice; shown when that row links to the caller's own firm's invoice or to none")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase))]
+    public async Task ExecuteChatAsync_F3b_F1_ARowFollowsTheInvoiceOfTheRowAbove(string key)
+    {
+        var (child, _, _) = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var underOther = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        var underOwn = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        var underUnlinked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(firms.World, key, invoice: null);
+        ArrangeLinkedTable(child, (underOther, "Other"), (underOwn, "Own"), (underUnlinked, "Unlinked"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(child);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own", "Unlinked");
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 read_query (bound): a to-do under a chain of events as long as the bound is decided by the top; one hop past the bound is hidden, even for the caller's own firm's invoice")]
+    [InlineData(0, true, false)]
+    [InlineData(0, false, true)]
+    [InlineData(1, false, false)]
+    public async Task ExecuteChatAsync_F3b_F1_TheChainIsBounded(int pastTheBound, bool topIsOtherFirms, bool shown)
+    {
+        var todo = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(topIsOtherFirms
+            ? Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm
+            : Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var chained = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.TodoUnderEventChain(
+            firms.World, Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.WalkBound + pastTheBound, invoice);
+        var plain = firms.UnlinkedRow(todo);
+        ArrangeLinkedTable(todo, (chained, "Chained"), (plain, "Plain"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(todo);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(shown ? new[] { "Chained", "Plain" } : new[] { "Plain" });
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 C2 pin (read_query): a to-do under a chain of events as long as the bound, the top one filed under a matter, with no invoice anywhere, is decided 'no invoice' and shown - the matter is not a hop")]
+    public async Task ExecuteChatAsync_F3b_C2_ACoreRecordAboveTheChain_IsNotAHop()
+    {
+        var todo = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var chained = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.TodoUnderEventChain(
+            firms.World, Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.WalkBound, topInvoice: null);
+        // Every event on the chain (and the to-do) also names a matter, as filed events do.
+        foreach (var read in new[] { ("sprk_events", "sprk_eventid"), ("sprk_todos", "sprk_todoid") })
+        {
+            foreach (var id in firms.World.Ids(read.Item1, read.Item2))
+                firms.World.SetRow(read.Item1, read.Item2, id, "_sprk_regardingmatter_value", Guid.NewGuid().ToString());
+        }
+
+        ArrangeLinkedTable(todo, (chained, "Chained"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(todo);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Chained");
+        firms.World.Urls.Should().NotContain(u => u.Contains("/sprk_matters", StringComparison.Ordinal), "a core record is never read by the walk");
+    }
+
     [Theory(DisplayName = "130-0b step 2 read_query must fire: a link that cannot be decided (not a GUID, or a row the app-only read does not return) hides the row")]
     [InlineData("not-a-guid")]
     [InlineData("not-returned")]

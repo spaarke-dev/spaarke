@@ -2135,6 +2135,13 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             _sets[set].Single(r => (string?)r[idColumn] == id.ToString())[column] = value;
     }
 
+    /// <summary>F3b fix round 1, step 2: the id of every seeded row of <paramref name="set"/>.</summary>
+    public IReadOnlyList<Guid> Ids(string set, string idColumn)
+    {
+        lock (_sets)
+            return _sets.TryGetValue(set, out var rows) ? rows.Select(r => Guid.Parse((string)r[idColumn]!)).ToList() : new List<Guid>();
+    }
+
     /// <summary>Task 130-0 fix round 3c: the document <paramref name="id"/> as a read that did not return <paramref name="column"/> answers it.</summary>
     public void DropDocumentColumn(Guid id, string column)
     {

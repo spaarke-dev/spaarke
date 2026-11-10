@@ -657,6 +657,52 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
             : new[] { MatterHit.ToString("D"), row.ToString("D") });
     }
 
+    [Theory(DisplayName = "F3b fix round 1 search_data (must fire / must not fire): a hit whose own invoice link is null is hidden when the row it is filed under links to another firm's invoice; shown when that row links to the caller's own firm's invoice or to none")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase))]
+    public async Task ExecuteChatAsync_F3b_F1_AHitFollowsTheInvoiceOfTheRowAbove(string key)
+    {
+        var (child, _, _) = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var underOther = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        var underOwn = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        var underUnlinked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(firms.World, key, invoice: null);
+        ArrangeLinkedHits((child, underOther), (child, underOwn), (child, underUnlinked));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(MatterHit.ToString("D"), underOwn.ToString("D"), underUnlinked.ToString("D"));
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 search_data (bound): a to-do hit under a chain of events as long as the bound is decided by the top; one hop past the bound is hidden, even for the caller's own firm's invoice")]
+    [InlineData(0, true, false)]
+    [InlineData(0, false, true)]
+    [InlineData(1, false, false)]
+    public async Task ExecuteChatAsync_F3b_F1_TheChainIsBounded(int pastTheBound, bool topIsOtherFirms, bool shown)
+    {
+        var todo = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(topIsOtherFirms
+            ? Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm
+            : Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var chained = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.TodoUnderEventChain(
+            firms.World, Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.WalkBound + pastTheBound, invoice);
+        ArrangeLinkedHits((todo, chained));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(shown
+            ? new[] { MatterHit.ToString("D"), chained.ToString("D") }
+            : new[] { MatterHit.ToString("D") });
+    }
+
     [Theory(DisplayName = "130-0b step 2 search_data must not fire: a child hit linked to the caller's own firm's invoice is shown")]
     [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.SearchableKeys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
     public async Task ExecuteChatAsync_Task130_0b_S2_AChildHitOfTheCallersOwnInvoice_IsShown(string key)
