@@ -83,7 +83,7 @@
          Microsoft.Extensions.Hosting.Abstractions 10.0.11. Pinned to prevent
          NU1605 downgrade — mirrors sibling Sprk.Provisioning.ControlPlane.Tests
          (which pins to 10.0.9; we track the same floor here). -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>

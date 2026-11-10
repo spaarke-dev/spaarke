@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.Ontology;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Api.Mcp.Spike;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Platform;
@@ -235,6 +236,7 @@ public static class EndpointMappingExtensions
         app.MapRecordFamilyEndpoints();
         app.MapEventEndpoints();
         // Ontology platform R1 task 036: a Signal's decision plan resolved against the closed action catalog.
+        app.MapSpikeMcp(); // SPIKE (spaarkeai-mcp-bff-api-r1 task 001, spike branch only): /mcp/legal-operations + /mcp/spike-area-b
         app.MapDecisionPlanEndpoints();
         // Ontology platform R1 task 043: the decision commit route (one review, record last, idempotent per review id).
         app.MapDecisionCommitEndpoints();
