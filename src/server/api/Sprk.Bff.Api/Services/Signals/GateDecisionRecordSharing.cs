@@ -474,8 +474,25 @@ public sealed class GateDecisionRecordSharing
     /// </summary>
     private async Task GrantAndConfirmAsync(Guid communicationId, GateRecord record, IReadOnlyList<Guid> principals, Guid? acceptedTeam = null)
     {
+        // 198 pass 2 F3: the record's current shares first (as ReownToDirectAsync reads them). Only the missing are granted, so a rejected
+        // read-back revokes only what THIS call granted, never a share held before it (one a filing kept, D-215 rule 4). A read fault grants
+        // nothing; the next grant or re-file retries.
+        HashSet<Guid> holding;
+        try
+        {
+            holding = (await _shares.GetPrincipalAccessOrThrowAsync(Table, record.Id, CancellationToken.None).ConfigureAwait(false))
+                .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & ReadAccessMask) == ReadAccessMask)
+                .Select(s => s.Principal.Id)
+                .ToHashSet();
+        }
+        catch (Exception ex)
+        {
+            ShareFailed(ex, "the record's shares could not be read before the participant grants; nothing is granted", record.Id, communicationId);
+            return;
+        }
+
         var granted = new List<Guid>();
-        foreach (var principal in principals)
+        foreach (var principal in principals.Where(p => !holding.Contains(p)))
         {
             try
             {
