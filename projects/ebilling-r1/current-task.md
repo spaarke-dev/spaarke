@@ -63,10 +63,36 @@ Wait for the agent notifications below and act on each:
 
 | Branch | Head | State |
 |---|---|---|
-| `task/ebilling-130-0-fix1` | `17a283c00c` (3b pushed `ed11b30f95..17a283c00c`: ArchTests 2181/0, filtered 17504 + rerun 706/0; fail-before 55/104). **Round 3c running** (`LiveParentsOf` absent column → unreadable + select pins), then ONE scoped re-check over `ed11b30f95..<3c tip>`, then 3c diff to uac-r2 → 130-0 done. Agent worktrees `agent-ad9cdf00a103ae635` (+3c) to remove at batch. Earlier: | Round 3 pushed (`7a7f5d2808..ed11b30f95`; ArchTests 2181/0, filtered 7130/0). uac-r2 approved round 3 (subject to re-check no F). **Round 3b** (Sonnet) running on `task/ebilling-130-0-fix3b` → ff fix1 from `ed11b30f95`: DocumentRootLinks absent column → malformed/unreadable; `/data/record/{entity}/{id}` uniform refusal (missing / gone / out-of-set). Then scoped re-check, then the 3b diff to uac-r2 → 130-0 done. Round 3 re-check DONE: no F (uac-r2's condition met). Folded into 3b: uniform per-invoice fault notion (AnyFaulted/IsFaultedFor on lists, submission single read, redaction); confirm the `/data/record` gate applies the per-invoice decision; registry validator early-return gap. For the batch note to spa-r4: `ProjectPage.tsx:~465` 404 branch is now dead (stale grant → 403). Agent worktree `agent-a56d6943daafbbf5e` to remove at batch. |
+| `task/ebilling-130-0-fix1` | `17a283c00c` (3b pushed `ed11b30f95..17a283c00c`: ArchTests 2181/0, filtered 17504 + rerun 706/0; fail-before 55/104). 3c pushed `17a283c00c..be36c99e98` (LiveParentsOf; filtered 19330/0, ArchTests 2181/0; fail-before 54/69). 3d pushed `be36c99e98..abc67173e2`:
+- 11 sites fixed.
+- Guard `ExternalLookupAbsentReadGuardTests`: 51 entries, `KnownOpenSites = 4`.
+- ArchTests 2208/0; rerun 1211/0.
+
+Four known-open sites (admin, revoke and impersonated paths) plus the `sprk_accesspermission` choice column were sent to uac-r2 privately for a ruling (3e or their side). The details are in the 3d notes; never put them in a public issue.
+
+**Now:**
+- uac-r2 ruled (privately): every open site is fixed in **round 3e**, which takes `KnownOpenSites` to 0 unless a site is proven unreachable. 3e is running (Sonnet xhigh) from `abc67173e2`.
+- uac-r2 takes `ChildAccessPermissionReconciler` into its 198. We send uac-r2 its census entries from the 3e report. Do NOT add the file to the guard until 198 merges.
+- Re-check A (`ed11b30f95..abc67173e2`) is DONE with no F. Folded into 3e:
+  - `ExternalGrantRow` reclassified, with typed-row presence and a `RowSelect` pin.
+  - Select pins added for the membership, NoAccess, thread-regarding and `SelectColumns` reads.
+  - Guard: member resolution for expression-bodied members, repo-relative keys, and `CommunicationOpenThreadGate` added.
+  - Census additions.
+  - Notes and allow-list reasons rewritten as neutral hardening.
+- **3e part 1** is pushed as `abc67173e2..21bdb6076e`. It covers rulings 1/2/3/5. `KnownOpenSites` is 0, ArchTests 2208/0, and fail-before is 34.
+- **3f** is pushed as `21bdb6076e..c5c30a9fc4` (ruling 4: an absent `sprk_accesspermission` maps to `Unreadable`; pins added; 3 double sites; ArchTests 2208/0; fail-before 13 of 39). **uac-r2 CONFIRMED the Unreadable mapping** (2026-11-09) and asked that the guard's stated misses name choice columns (relayed to 3g). It will add the :419-420 projection pin in 198.
+- **3g** is running (Sonnet high, agent worktree) from `c5c30a9fc4`. It pushes FF to `task/ebilling-130-0-fix1`.
+- **Then 3g:**
+  - `ExternalGrantRow` presence plus a `RowSelect` pin.
+  - Guard re-keying: real member names, repo-relative keys, and an expression-bodied control.
+  - Census additions: `RightsThroughParents`, `CommunicationOpenThreadGate`, and a note on `LookupValueAttribute`.
+  - Neutral rewording of the remaining "gives fewer grants" reasons.
+  - Pin the `ReadVisibleThreadRegardingAsync` select.
+- **Then:** re-check B over `abc67173e2..<3g tip>`. Then send uac-r2 `ed11b30f95..<3g tip>`. Then 130-0 is done.
+- uac-r2 is reachable again by name `uac-r2` (its session restarted). The pending 3e/3f message was delivered 2026-11-09. Agent worktrees `agent-ad9cdf00a103ae635` (+3c) to remove at batch. Earlier: | Round 3 pushed (`7a7f5d2808..ed11b30f95`; ArchTests 2181/0, filtered 7130/0). uac-r2 approved round 3 (subject to re-check no F). **Round 3b** (Sonnet) running on `task/ebilling-130-0-fix3b` → ff fix1 from `ed11b30f95`: DocumentRootLinks absent column → malformed/unreadable; `/data/record/{entity}/{id}` uniform refusal (missing / gone / out-of-set). Then scoped re-check, then the 3b diff to uac-r2 → 130-0 done. Round 3 re-check DONE: no F (uac-r2's condition met). Folded into 3b: uniform per-invoice fault notion (AnyFaulted/IsFaultedFor on lists, submission single read, redaction); confirm the `/data/record` gate applies the per-invoice decision; registry validator early-return gap. For the batch note to spa-r4: `ProjectPage.tsx:~465` 404 branch is now dead (stale grant → 403). Agent worktree `agent-a56d6943daafbbf5e` to remove at batch. |
 | `task/ebilling-130-0b` | `0f6b49b5ab` | FINAL, approved |
 | `task/ebilling-130b-fix1` | `2367fbab2c` | **FINAL, approved by uac-r2.** At the batch merge, derive `SubmissionCoreColumns` from the submission core column names `InvoiceSubmissionContracts` (:69) already maps from `InvoiceCoreRecordKind`, or add a one-line comment pointing at it. |
-| `task/ebilling-130c` | `a357a5c7e1` | Built on `ecf694a8d1`. **Done:** both Opus passes and 3 fix rounds; uac-r2 approved with no F. Round 3 adds the catalogue-driven value-boundary guard, and its diff has been sent. Agent worktree `agent-a0af46b7a8db4e045` to remove at batch. It will need 130b's later fixes merged at batch time. |
+| `task/ebilling-130c` | `3a49f67f65` (round 4: value allow-list; ArchTests 2183/0, filtered 2422/0) — **CLOSED: uac-r2 approved rounds 1–4, no F. FINAL.** — earlier `a357a5c7e1` | Built on `ecf694a8d1`. **Done:** both Opus passes and 3 fix rounds; uac-r2 approved with no F. Round 3 adds the catalogue-driven value-boundary guard, and its diff has been sent. Agent worktree `agent-a0af46b7a8db4e045` to remove at batch. It will need 130b's later fixes merged at batch time. |
 
 ## Rulings in force (uac-r2, 2026-11-09)
 
