@@ -515,7 +515,24 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         firms.FirmReads.Should().Be(1);
     }
 
-    [Theory(DisplayName = "130-0b search_data must fire: a caller with no usable firm (no linked contact, a contact-binding fault, an inactive contact) gets no invoice-family hit")]
+    [Theory(DisplayName = "F3b search_data must fire: a caller whose firms cannot be read (a contact-binding fault) gets a tool error and no data")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithUnknownFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_F3b_ACallerWithUnknownFirms_FailsTheCall(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(HitsJson(("sprk_invoice", own)))));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeFalse("firms that cannot be read fail the call; they are not 'no firm'");
+        result.Data.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "130-0b search_data must fire: a caller who is a member of no firm (no linked contact, an inactive contact) gets no invoice-family hit")]
     [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithNoFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
     public async Task ExecuteChatAsync_Task130_0b_ACallerWithNoUsableFirm_GetsNoInvoiceFamilyHit(string caller)
     {

@@ -131,8 +131,12 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
     /// <summary>A firm that is not the caller's.</summary>
     public static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
 
-    /// <summary>The caller kinds with no usable firm: no linked contact, a contact-binding read fault, an inactive linked contact.</summary>
-    public static TheoryData<string> CallersWithNoFirm => new() { "no-contact", "contact-binding-fault", "inactive-contact" };
+    /// <summary>The caller kinds known to be a member of NO firm: no linked contact, an inactive linked contact. They see no invoice.</summary>
+    public static TheoryData<string> CallersWithNoFirm => new() { "no-contact", "inactive-contact" };
+
+    /// <summary>F3b: the caller kinds whose firms are UNKNOWN (the contact-binding read failed). The call fails (a tool error) instead
+    /// of answering "no invoice": an unknown firm read is not a caller with no firm.</summary>
+    public static TheoryData<string> CallersWithUnknownFirm => new() { "contact-binding-fault" };
 
     private readonly Guid _systemUser;
     private readonly Guid _contact = Guid.NewGuid();

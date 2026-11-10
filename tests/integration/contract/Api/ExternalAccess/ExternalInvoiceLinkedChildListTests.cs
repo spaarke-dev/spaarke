@@ -279,16 +279,24 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
             .ToList();
         children.Should().NotBeEmpty("the pin is not vacuous");
         children.Select(m => m.RecordEntity).Should().Contain("sprk_document");
+        // F3b: a service request follows the child rule too; its module scopes to the requester (a workforce contact always qualifies).
+        children.Select(m => m.RecordEntity).Should().Contain("sprk_servicerequest");
 
         foreach (var module in children)
         {
             string? executed = null;
             var data = _fixture.Data.NewService();
             var idColumn = InvoiceLinks.Tables[module.RecordEntity].IdColumn;
+            var moduleCaller = module.RecordEntity == "sprk_servicerequest"
+                ? new CallerPrincipal
+                {
+                    Plane = CallerPrincipalPlane.Workforce, ContactId = CallerContact, Email = caller.Email, ProjectAccess = caller.ProjectAccess,
+                }
+                : caller;
             await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
                 new FetchRequestDto(
                     module.RecordEntity, $"<fetch><entity name='{module.RecordEntity}'><attribute name='{idColumn}'/></entity></fetch>", PagingCookie: null),
-                caller, registry, new FetchXmlEntityExtractor(),
+                moduleCaller, registry, new FetchXmlEntityExtractor(),
                 (request, _) =>
                 {
                     executed = request.FetchXml;
