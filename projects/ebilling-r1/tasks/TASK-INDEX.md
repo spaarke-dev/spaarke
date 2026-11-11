@@ -151,11 +151,12 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 130-0 | 🔄 [in progress; uac-r2 approved four edit points: ExternalAccessModule binding, ExternalDataService.HideInvoicesForAsync, ExternalInvoiceVisibility, one guard-test entry] | External invoices: apply the firm rule on every path (design.md:414) | FULL | opus / high | none | 044, 051 |
-| 130-0b | 🔲 [open; shape to uac-r2 before coding; must land before the batch carrying 130-0 reaches dev] | Assistant tools' seam: apply the same firm rule for external callers | FULL | opus / high | none | 130-0 |
-| 130a | 🔄 [built on task/ebilling-130a 60a2b64dc0; merges with 130b after two passes] | Firm findings projection service (no routes) | FULL | sonnet / high | none | 083, 100 |
-| 130b | 🔄 [in progress, on 130a] | Firm outcome external GET routes: firm-scope 403 filter, ledger entries, auth tests; line reasons only from writer-created records | FULL | sonnet / high | none | 130a |
-| 130c | 🔲 [open; after 130b] | FR-18: a rejected submission projects its findings from the submission's own stored findings (line, values read, rule, clause through GetFirmClauseAsync, flag-gated) | FULL | sonnet / high | none | 130b |
+| 130-0 | ✅ [done; fix1 tip 79f5d1a508 and F3b 8b413d3d22 merged in merge/ebilling-batch-130, uac-r2 approved] | External invoices: apply the firm rule on every path (design.md:414) | FULL | opus / high | none | 044, 051 |
+| 130-0b | ✅ [done; 0f6b49b5ab merged in merge/ebilling-batch-130, uac-r2 approved] | Assistant tools' seam: apply the same firm rule for external callers | FULL | opus / high | none | 130-0 |
+| 130a | ✅ [done; merged with 130b (2367fbab2c) in merge/ebilling-batch-130, uac-r2 approved] | Firm findings projection service (no routes) | FULL | sonnet / high | none | 083, 100 |
+| 130b | ✅ [done; fix1 tip 2367fbab2c merged in merge/ebilling-batch-130, uac-r2 approved] | Firm outcome external GET routes: firm-scope 403 filter, ledger entries, auth tests; line reasons only from writer-created records | FULL | sonnet / high | none | 130a |
+| 130c | ✅ [done; 3a49f67f65 merged in merge/ebilling-batch-130, uac-r2 approved] | FR-18: a rejected submission projects its findings from the submission's own stored findings (line, values read, rule, clause through GetFirmClauseAsync, flag-gated) | FULL | sonnet / high | none | 130b |
+| 130d | ✅ [done; 69a8b2db72 merged in merge/ebilling-batch-130, uac-r2 approved] | Firm-safe reason text: every rejection a firm sees carries its reason code and a firm-safe description (table per reject-capable code, catalogue-driven guard) | FULL | sonnet / high | none | 130c |
 | 130 | 🔲 [open; amended by EB-D-202: In Review shows reviewer-added and decided lines with reasons] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | 🔲 [open] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 132 | 🔲 [open] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 133, 024, 103, 104 |
