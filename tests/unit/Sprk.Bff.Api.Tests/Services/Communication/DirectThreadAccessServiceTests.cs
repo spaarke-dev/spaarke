@@ -110,9 +110,8 @@ public class DirectThreadAccessServiceTests
     public async Task FindOrCreateDirectThreadAsync_ExistingThreadOwnedByCallerSharedToOther_ReusesWithoutCreatingDuplicate()
     {
         SetupCandidates(ownerId: Caller, candidateThreadIds: new[] { ThreadId });
-        _accessGrant
-            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Shares(Other));
+        // 198b: reuse reads the thread row too (fm's strict-pair rule): a Direct, Open thread with no typed regarding.
+        PairThread(ThreadId, Caller, Shares(Other));
 
         var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
 
@@ -132,9 +131,7 @@ public class DirectThreadAccessServiceTests
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => HasOwnerCondition(q, Other)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { new("sprk_communicationthread") { Id = ThreadId } }));
-        _accessGrant
-            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Shares(Caller));
+        PairThread(ThreadId, Other, Shares(Caller)); // 198b: the strict-pair rule reads the thread row too
 
         var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
 
@@ -338,6 +335,231 @@ public class DirectThreadAccessServiceTests
         var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
 
         result.Should().Be(newThreadId);
+    }
+
+    // ── uac-r2 198b: the pair lookup reuses only a STRICT 1:1 thread (fm 054a piece 2b's one rule,
+    // DirectMessageRecipient.ReadStrictPairShapeAsync), and scans the owner's Direct threads newest-first in pages to a stated
+    // bound, warning when the bound is hit (NFR-03: never a silent duplicate) ──────────────────────────────────────────────
+
+    private const int PrivacyStateOpen = 100000000;
+    private const int PrivacyStateNotOpen = 100000001;
+
+    /// <summary>
+    /// A Direct thread row as the strict-pair reader reads it: typed Direct, confirmed Open, owned by <paramref name="owner"/>,
+    /// no typed regarding unless <paramref name="shape"/> adds one; and its POA rows (the strict read) are <paramref name="shares"/>.
+    /// </summary>
+    private void PairThread(Guid threadId, Guid owner, IReadOnlyList<DataversePrincipalAccess> shares, Action<Entity>? shape = null)
+    {
+        var thread = new Entity("sprk_communicationthread")
+        {
+            Id = threadId,
+            ["sprk_threadtype"] = new OptionSetValue(ThreadTypeDirect),
+            ["sprk_privacystate"] = new OptionSetValue(PrivacyStateOpen),
+            ["ownerid"] = new EntityReference("systemuser", owner),
+        };
+        shape?.Invoke(thread);
+        _entityService
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", threadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(shares);
+    }
+
+    /// <summary>
+    /// The Direct threads <paramref name="ownerId"/> owns, newest first, answered as Dataverse pages a query: by
+    /// <see cref="PagingInfo"/> (page number and size, MoreRecords, a cookie) or, for a query that sets only a top count, its
+    /// first <see cref="QueryExpression.TopCount"/> rows. The queries are kept for the order assertion.
+    /// </summary>
+    private List<QueryExpression> CandidatePages(Guid ownerId, IReadOnlyList<Guid> newestFirst)
+    {
+        var queries = new List<QueryExpression>();
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => HasOwnerCondition(q, ownerId)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                queries.Add(q);
+                IEnumerable<Guid> rows;
+                var more = false;
+                if (q.TopCount is { } top)
+                {
+                    rows = newestFirst.Take(top);
+                }
+                else
+                {
+                    var size = q.PageInfo?.Count is > 0 ? q.PageInfo.Count : 5000;
+                    var page = q.PageInfo?.PageNumber is > 0 ? q.PageInfo.PageNumber : 1;
+                    rows = newestFirst.Skip((page - 1) * size).Take(size);
+                    more = newestFirst.Count > page * size;
+                }
+
+                return new EntityCollection(rows.Select(id => new Entity("sprk_communicationthread") { Id = id }).ToList())
+                {
+                    MoreRecords = more,
+                    PagingCookie = more ? $"cookie-{Guid.NewGuid():N}" : null,
+                };
+            });
+        return queries;
+    }
+
+    private Guid CreatesANewThread()
+    {
+        var newThreadId = Guid.NewGuid();
+        _entityService
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newThreadId);
+        return newThreadId;
+    }
+
+    [Theory(DisplayName = "198b must-fire: a candidate shared to the other user AND a third user is not reused; a new thread is created")]
+    [InlineData(0, DirectPairShapeReason.ExtraPrincipal)]           // the third user's row grants no Read: an extra principal
+    [InlineData(1, DirectPairShapeReason.NotTwoReadParticipants)]   // the third user reads it too: three readers
+    public async Task F198b_ACandidateWithAThirdPrincipal_IsNotReused(int thirdUserMask, string reason)
+    {
+        var candidate = Guid.NewGuid();
+        CandidatePages(Caller, new[] { candidate });
+        CandidatePages(Other, Array.Empty<Guid>());
+        PairThread(candidate, Caller, new[] { ShareRow(Other, 1), ShareRow(ThirdUser, thirdUserMask) });
+        var newThreadId = CreatesANewThread();
+        var log = new CapturingLogger<DirectThreadAccessService>();
+
+        var result = await DirectTeamSut(logger: log).FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(newThreadId, "a thread a third user reads is not the pair's 1:1 thread");
+        _entityService.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains(candidate.ToString(), StringComparison.OrdinalIgnoreCase)
+            && e.Message.Contains(reason, StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "198b must-fire: a candidate with a typed regarding, or not confirmed Open, is not reused")]
+    [InlineData("typed_regarding")]
+    [InlineData("not_open")]
+    [InlineData("no_privacy")]
+    public async Task F198b_ACandidateThatIsNotAStrictDirectShape_IsNotReused(string variant)
+    {
+        var candidate = Guid.NewGuid();
+        CandidatePages(Caller, new[] { candidate });
+        CandidatePages(Other, Array.Empty<Guid>());
+        PairThread(candidate, Caller, Shares(Other), thread =>
+        {
+            switch (variant)
+            {
+                case "typed_regarding":
+                    thread[ThreadResolver.ThreadRegardingColumns[0]] = new EntityReference("sprk_matter", MatterA);
+                    break;
+                case "not_open":
+                    thread["sprk_privacystate"] = new OptionSetValue(PrivacyStateNotOpen);
+                    break;
+                default:
+                    thread.Attributes.Remove("sprk_privacystate");
+                    break;
+            }
+        });
+        var newThreadId = CreatesANewThread();
+
+        var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(newThreadId);
+        _entityService.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory(DisplayName = "198b must-not-fire: a strict-pair candidate is reused in both directions, past a non-strict one")]
+    [InlineData(true)]  // owner = caller, shared to the other user
+    [InlineData(false)] // owner = the other user, shared to the caller
+    public async Task F198b_AStrictPairCandidate_IsReused_InBothDirections(bool ownedByCaller)
+    {
+        var owner = ownedByCaller ? Caller : Other;
+        var sharee = ownedByCaller ? Other : Caller;
+        var widened = Guid.NewGuid();
+        var strict = Guid.NewGuid();
+        CandidatePages(owner, new[] { widened, strict });
+        CandidatePages(sharee, Array.Empty<Guid>());
+        PairThread(widened, owner, new[] { ShareRow(sharee, 1), new DataversePrincipalAccess(DataversePrincipalRef.Team(TeamId), 1, DateTimeOffset.UtcNow) });
+        PairThread(strict, owner, Shares(sharee));
+
+        var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(strict);
+        _entityService.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory(DisplayName = "198b must-fire: a candidate whose read faults is skipped with a Warning, never a match and never a throw")]
+    [InlineData(true)]  // the thread's shares cannot be read
+    [InlineData(false)] // the thread row itself cannot be read
+    public async Task F198b_ACandidateWhoseReadFaults_IsSkipped_WithAWarning(bool shareReadFaults)
+    {
+        var candidate = Guid.NewGuid();
+        CandidatePages(Caller, new[] { candidate });
+        CandidatePages(Other, Array.Empty<Guid>());
+        PairThread(candidate, Caller, Shares(Other));
+        if (shareReadFaults)
+        {
+            ThreadShareReadFaults(candidate);
+        }
+        else
+        {
+            _entityService
+                .Setup(s => s.RetrieveAsync("sprk_communicationthread", candidate, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Simulated 503 reading the thread."));
+        }
+
+        var newThreadId = CreatesANewThread();
+        var log = new CapturingLogger<DirectThreadAccessService>();
+
+        var act = () => DirectTeamSut(logger: log).FindOrCreateDirectThreadAsync(Caller, Other);
+
+        (await act.Should().NotThrowAsync()).Subject.Should().Be(newThreadId);
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains(candidate.ToString(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact(DisplayName = "198b must-fire: the pair's thread past the old 50-candidate window (the 60th newest) is found, scanning newest-first")]
+    public async Task F198b_ThePairsThreadPastTheOld50Window_IsFound()
+    {
+        var newestFirst = Enumerable.Range(0, 70).Select(_ => Guid.NewGuid()).ToList();
+        var match = newestFirst[59];
+        var queries = CandidatePages(Caller, newestFirst);
+        CandidatePages(Other, Array.Empty<Guid>());
+        foreach (var other in newestFirst.Where(id => id != match))
+            PairThread(other, Caller, Shares(ThirdUser)); // strict pairs with someone else
+        PairThread(match, Caller, Shares(Other));
+
+        var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(match, "an owner with more than 50 Direct threads must not get a duplicate thread");
+        _entityService.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        queries.Should().OnlyContain(q => q.Orders.Count > 0
+            && q.Orders[0].AttributeName == "createdon" && q.Orders[0].OrderType == OrderType.Descending);
+    }
+
+    [Theory(DisplayName = "198b must-fire/must-not-fire: hitting the scan bound with no match logs a Warning naming the bound; exactly the bound does not")]
+    [InlineData(520, true)]
+    [InlineData(500, false)]
+    public async Task F198b_TheScanBound_IsVisible(int ownedThreads, bool boundHit)
+    {
+        var newestFirst = Enumerable.Range(0, ownedThreads).Select(_ => Guid.NewGuid()).ToList();
+        CandidatePages(Caller, newestFirst);
+        CandidatePages(Other, Array.Empty<Guid>());
+        foreach (var id in newestFirst)
+            PairThread(id, Caller, Shares(ThirdUser));
+        var newThreadId = CreatesANewThread();
+        var log = new CapturingLogger<DirectThreadAccessService>();
+
+        var result = await DirectTeamSut(logger: log).FindOrCreateDirectThreadAsync(Caller, Other);
+
+        result.Should().Be(newThreadId);
+        var boundWarnings = log.Entries.Where(e => e.Level == LogLevel.Warning
+            && e.Message.Contains("500", StringComparison.Ordinal)
+            && e.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (boundHit)
+            boundWarnings.Should().ContainSingle("the cap is visible (NFR-03)");
+        else
+            boundWarnings.Should().BeEmpty("every thread was read; nothing was left unscanned");
+        _entityService.Verify(
+            s => s.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(500), "the scan reads at most the bound's candidates");
     }
 
     // ── GrantMessageAccessAsync: the CRITICAL RISK fix — grants both participants, no-op otherwise ─
