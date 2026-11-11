@@ -1519,6 +1519,79 @@ public class ThreadResolverTests
         ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.MessageReadFault);
     }
 
+    /// <summary>Dataverse refusing a read because <paramref name="column"/> does not exist on sprk_communication.</summary>
+    private static Exception MissingColumnFault(string column, bool typed) => typed
+        ? new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault
+            {
+                ErrorCode = unchecked((int)0x80041103),
+                Message = $"'sprk_communication' entity doesn't contain attribute with Name = '{column}'.",
+            },
+            new System.ServiceModel.FaultReason($"'sprk_communication' entity doesn't contain attribute with Name = '{column}'."))
+        : new InvalidOperationException($"400: Could not find a property named '{column}' on type 'Microsoft.Dynamics.CRM.sprk_communication'.");
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AnOrdinaryDirectEmailThread_IsStillAnchored(bool typed)
+    {
+        // Must-not-fire: an environment without sprk_directrecipient. A column that does not exist holds no stamp, so the
+        // inbound email conversation's Direct thread follows its record as on an environment with the column.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_directrecipient", typed));
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", a.ThreadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        ((OptionSetValue)writes[0]["sprk_threadtype"]).Value.Should().Be(ThreadTypeRecordAnchored);
+        ((EntityReference)writes[0]["sprk_regardingmatter"]).Id.Should().Be(a.Matter);
+        VerifyAssigned(a.CommunicationId, a.RecordThread, Times.Never());
+        log.Entries.Should().NotContain(e => e.EventId.Id == 5413);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileThreadForFiling_A1_AMissingColumnFaultAboutAnotherColumn_StillDeclines(bool typed)
+    {
+        // Must-fire: only the recipient column's absence means "none stamped"; any other fault still fails closed.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_somethingelse", typed));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.MessageReadFault);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AStrictPairThread_IsStillNotAnchored()
+    {
+        // Must-fire: the strict-pair shape is read first and does not depend on the recipient column.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        SetupPairShares(PairOther);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_directrecipient", typed: true));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.StrictPair);
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_A1_WithNoShareReadWired_TheDirectThreadIsNotAnchored()
     {

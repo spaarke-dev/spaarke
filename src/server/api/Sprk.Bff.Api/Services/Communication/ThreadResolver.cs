@@ -1194,8 +1194,11 @@ public sealed class ThreadResolver : IThreadResolver
     /// A1 (owner decision 2026-11-11): rule 2 never anchors a thread typed Direct when it is a strict 1:1 pair
     /// (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>) or when any of its messages carries a
     /// non-empty <c>sprk_directrecipient</c>. It fails closed: a fault reading the pair shape or the messages, or no share
-    /// read to ask, also answers <c>false</c>. A Direct-typed thread that is neither (an inbound email conversation's
-    /// thread, owner clarification 2026-10-11) and any thread not typed Direct answer <c>true</c>. Never throws, except
+    /// read to ask, also answers <c>false</c>. The one exception is the message read refused because
+    /// <c>sprk_directrecipient</c> does not exist in the environment (<see cref="CommunicationService.IsMissingColumnFault"/>):
+    /// a column that does not exist holds no stamp, so that read answers "none stamped". A Direct-typed thread that is
+    /// neither (an inbound email conversation's thread, owner clarification 2026-10-11) and any thread not typed Direct
+    /// answer <c>true</c>. Never throws, except
     /// the caller's cancellation; a <c>false</c> answer logs <see cref="DirectPairNotAnchoredEventCode"/> with its reason.
     /// </summary>
     private async Task<bool> DirectPairThreadMayBeAnchoredAsync(
@@ -1248,6 +1251,12 @@ public sealed class ThreadResolver : IThreadResolver
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (Exception ex) when (CommunicationService.IsMissingColumnFault(ex, Access.DirectMessageRecipient.RecipientColumn))
+        {
+            // The recipient column does not exist in this environment, so no message can carry a stamp. The strict-pair
+            // shape above still declines a pair.
+            return true;
         }
         catch (Exception ex)
         {
