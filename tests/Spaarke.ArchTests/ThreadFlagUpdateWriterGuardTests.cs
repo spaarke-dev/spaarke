@@ -13,11 +13,13 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// <para><b>The signal.</b> A source scan of <c>src/server/**</c> for every write of either column: an indexer assignment, an
-/// <c>Add</c>/<c>TryAdd</c>/<c>SetAttributeValue</c>, a collection-initializer entry, a JSON writer call, or an anonymous member
-/// assignment. Each goes through the literal or a constant that holds it (<see cref="KnownAliases"/>, discovered and pinned).
+/// <c>Add</c>/<c>TryAdd</c>/<c>SetAttributeValue</c>, a collection-initializer entry, a JSON writer call, a
+/// <c>[JsonPropertyName(...)]</c> member, or an anonymous member assignment. Each goes through the literal or a constant that holds
+/// it (<see cref="KnownAliases"/>, discovered to a fixed point — a constant defined from a known constant is one too — and pinned).
 /// A write inside the initializer of <c>new Entity("...")</c> or <c>new DataverseEntity("...")</c>, with no statement end
-/// between, is a <b>create</b>, which is allowed. Every other write is an <b>update</b>. It must be the sanctioned member, or an
-/// <see cref="InMemoryOnly"/> entry with its reason.</para>
+/// between and no <c>Id =</c> in that initializer, is a <b>create</b>, which is allowed. Every other write is an <b>update</b>. It
+/// must be the sanctioned member, or an <see cref="InMemoryOnly"/> entry with its reason. No type in <c>src/server</c> carries a
+/// flag column as a JSON name, so none is listed.</para>
 /// <para><b>Limits.</b> A key held in a local variable, a caller-supplied payload (refused at run time) and writes outside
 /// <c>src/server</c> are not seen. A create built across statements (an entity filled after its constructor) is reported as an
 /// update, which fails closed.</para>
@@ -73,9 +75,9 @@ public class ThreadFlagUpdateWriterGuardTests
     [Fact(DisplayName = "fm 054b: every constant that holds a thread flag is one the scan matches")]
     public void EveryConstantHoldingAThreadFlagIsListed()
     {
-        var found = SourceScan.ServerSourceFiles()
-            .SelectMany(f => AliasesIn(File.ReadAllLines(f)).Select(name => (File: Normalize(SourceScan.Relative(f)), Name: name)))
-            .ToList();
+        var found = AliasFixedPoint(SourceScan.ServerSourceFiles()
+            .Select(f => (File: Normalize(SourceScan.Relative(f)), Lines: (IReadOnlyList<string>)File.ReadAllLines(f)))
+            .ToList());
 
         var problems = found.Except(KnownAliases).Select(a => $"NEW constant {a.Name} in {a.File}: list it in KnownAliases")
             .Concat(KnownAliases.Except(found).Select(a => $"STALE alias {a.Name} in {a.File}: remove it"))
@@ -86,7 +88,9 @@ public class ThreadFlagUpdateWriterGuardTests
     [Fact(DisplayName = "fm 054b guard control: an update dictionary, an indexer on a row and SetAttributeValue fire; a create initializer, a select and a read do not")]
     public void Detector_MustFireAndMustNotFire()
     {
-        var writes = ScanFile("control.cs", ControlSource.Split('\n'), AliasesIn(ControlSource.Split('\n')).ToArray()).ToList();
+        var controlLines = ControlSource.Split('\n');
+        var aliases = AliasFixedPoint(new[] { (File: "control.cs", Lines: (IReadOnlyList<string>)controlLines) }).Select(a => a.Name).ToArray();
+        var writes = ScanFile("control.cs", controlLines, aliases).ToList();
         var problems = Judge(writes, ("control.cs", "AnchorAsync"), new[] { ("control.cs", "Project", "control") });
 
         // Must fire: each update shape outside the sanctioned member.
@@ -96,13 +100,34 @@ public class ThreadFlagUpdateWriterGuardTests
         Assert.Contains(problems, p => p.Contains(" TupleAsync:"));
         Assert.Contains(problems, p => p.Contains(" AfterConstructorAsync:"));
         Assert.Contains(problems, p => p.Contains(" AnonymousAsync:"));
-        Assert.Equal(6, problems.Count);
+        // F4 (i): a constant defined from another known constant, resolved to a fixed point (two hops).
+        Assert.Contains(problems, p => p.Contains(" DerivedAliasAsync:"));
+        // F4 (ii): a JSON-named member that serializes as a flag column.
+        Assert.Contains(problems, p => p.Contains("JsonPropertyName(\"sprk_threadtype\")"));
+        Assert.Contains(problems, p => p.Contains("JsonPropertyName(DerivedKey)"));
+        // F4 (iii): an entity initializer that sets Id names an existing row: an update, not a create.
+        Assert.Contains(problems, p => p.Contains(" IdInitializerAsync:"));
+        Assert.Equal(10, problems.Count);
 
         // Must not fire: the sanctioned update, the create initializers (literal and alias), the in-memory projection, the reads.
         Assert.Contains(writes, w => !w.IsCreate && w.Member == "AnchorAsync");
         Assert.Equal(2, writes.Count(w => w.IsCreate && w.Member == "CreateAsync"));
         Assert.DoesNotContain(writes, w => w.Member is "Reads");
-        Assert.Equal(new[] { "FlagKey" }, AliasesIn(ControlSource.Split('\n')).ToArray());
+        Assert.Equal(new[] { "FlagKey" }, AliasesIn(controlLines).ToArray());
+        Assert.Equal(new[] { "DerivedKey", "FlagKey", "TwiceDerivedKey" }, aliases.OrderBy(a => a, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact(DisplayName = "fm 054b guard control: the alias fixed point does not take a constant defined from an unrelated one")]
+    public void AliasFixedPoint_MustNotFire_OnAnUnrelatedDerivedConstant()
+    {
+        var lines = new[]
+        {
+            "private const string FlagKey = \"sprk_isdefaultthread\";",
+            "private const string NameKey = \"sprk_name\";",
+            "private const string OtherKey = Control.NameKey;",
+        };
+
+        Assert.Equal(new[] { "FlagKey" }, AliasFixedPoint(new[] { (File: "c.cs", Lines: (IReadOnlyList<string>)lines) }).Select(a => a.Name));
     }
 
     // ── the scan ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -132,6 +157,8 @@ public class ThreadFlagUpdateWriterGuardTests
             new Regex(@"\.(?:Add|TryAdd|SetAttributeValue)\(\s*" + key + @"\s*,"),
             new Regex(@"(?:^|[{,])\s*\{\s*" + key + @"\s*,"),
             new Regex(@"\.Write\w*\(\s*" + key),
+            // F4 (ii): a member serialized under a flag column's name (a DTO a writer posts).
+            new Regex(@"\[\s*(?:[\w.]+\.)?JsonPropertyName(?:Attribute)?\(\s*" + key + @"\s*\)"),
         };
 
         var code = lines.Select(SourceScan.StripLineComment).ToList();
@@ -165,11 +192,43 @@ public class ThreadFlagUpdateWriterGuardTests
             if (between.Contains(';'))
                 return false;
             var depth = between.Count(c => c == '{') - between.Count(c => c == '}');
-            return depth > 0;
+            if (depth <= 0)
+                return false;
+
+            // F4 (iii): an initializer that sets Id names an existing row, so the write is an update.
+            return !InitializerSetsId(bare, j, match.Index);
         }
 
         return false;
     }
+
+    /// <summary>Whether the object initializer opened after <c>new Entity(...)</c> at line <paramref name="start"/> assigns <c>Id</c>.</summary>
+    private static bool InitializerSetsId(IReadOnlyList<string> bare, int start, int column)
+    {
+        var text = new System.Text.StringBuilder();
+        var depth = 0;
+        var opened = false;
+        for (var k = start; k < bare.Count && k <= start + 60; k++)
+        {
+            var line = k == start ? bare[k][column..] : bare[k];
+            foreach (var c in line)
+            {
+                if (c == '{') { depth++; opened = true; }
+                else if (c == '}') depth--;
+                if (opened && depth == 0)
+                    return InitializerId.IsMatch(text.ToString());
+                if (opened)
+                    text.Append(c);
+            }
+
+            text.Append('\n');
+        }
+
+        return InitializerId.IsMatch(text.ToString());
+    }
+
+    /// <summary>An <c>Id = ...</c> member assignment at the start of an initializer entry.</summary>
+    private static readonly Regex InitializerId = new(@"(?:^|[{,\n])\s*Id\s*=(?![=>])", RegexOptions.Compiled);
 
     private static readonly Regex EntityCreate = new(@"\bnew\s+(?:[\w.]+\.)?(?:Dataverse)?Entity\s*\(\s*[^,()]*\)", RegexOptions.Compiled);
 
@@ -182,6 +241,44 @@ public class ThreadFlagUpdateWriterGuardTests
 
     private static IEnumerable<string> AliasesIn(IReadOnlyList<string> lines) =>
         lines.Select(SourceScan.StripLineComment).SelectMany(l => Alias.Matches(l).Select(m => m.Groups[1].Value));
+
+    /// <summary>A constant defined from another constant (<c>const string F = X.DefaultThreadColumn;</c>): its name and the source's.</summary>
+    private static readonly Regex DerivedAlias = new(
+        @"\b(?:const|static\s+readonly)\s+string\s+(\w+)\s*=\s*(?:[\w.]+\.)?(\w+)\s*;", RegexOptions.Compiled);
+
+    /// <summary>
+    /// F4 (i): every constant holding a flag — one holding the literal (<see cref="AliasesIn"/>), then, to a fixed point, one defined
+    /// from a constant already found. Matched by name across files, so a same-named unrelated source over-reports (fails closed).
+    /// </summary>
+    private static List<(string File, string Name)> AliasFixedPoint(IReadOnlyList<(string File, IReadOnlyList<string> Lines)> files)
+    {
+        var stripped = files.Select(f => (f.File, Lines: f.Lines.Select(SourceScan.StripLineComment).ToList())).ToList();
+        var found = new List<(string File, string Name)>();
+        foreach (var (file, lines) in stripped)
+            found.AddRange(AliasesIn(lines).Select(name => (file, name)));
+
+        bool grew;
+        do
+        {
+            grew = false;
+            var names = found.Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
+            foreach (var (file, lines) in stripped)
+            {
+                foreach (Match m in lines.SelectMany(l => DerivedAlias.Matches(l)))
+                {
+                    var alias = (file, m.Groups[1].Value);
+                    if (names.Contains(m.Groups[2].Value) && !found.Contains(alias))
+                    {
+                        found.Add(alias);
+                        grew = true;
+                    }
+                }
+            }
+        }
+        while (grew);
+
+        return found.Distinct().ToList();
+    }
 
     private static readonly Regex Declaration = new(
         @"^\s*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|new|partial|readonly)\s+)*" +
@@ -236,6 +333,8 @@ public class ThreadFlagUpdateWriterGuardTests
         internal sealed class Control
         {
             private const string FlagKey = "sprk_isdefaultthread";
+            private const string DerivedKey = Control.FlagKey;
+            private static readonly string TwiceDerivedKey = DerivedKey;
 
             public async Task<Guid> CreateAsync(CancellationToken ct)
             {
@@ -281,6 +380,31 @@ public class ThreadFlagUpdateWriterGuardTests
             }
 
             public object AnonymousAsync() => new { sprk_threadtype = 100000001 };
+
+            public async Task DerivedAliasAsync(Guid id, CancellationToken ct)
+            {
+                var fields = new Dictionary<string, object> { [TwiceDerivedKey] = false };
+                await _entities.UpdateAsync("sprk_communicationthread", id, fields, ct);
+            }
+
+            public async Task IdInitializerAsync(Guid id, CancellationToken ct)
+            {
+                var thread = new DataverseEntity("sprk_communicationthread")
+                {
+                    ["sprk_threadtype"] = new OptionSetValue(100000000),
+                    Id = id,
+                };
+                await _entities.UpdateAsync(thread, ct);
+            }
+
+            public sealed class FlagPayload
+            {
+                [JsonPropertyName("sprk_threadtype")]
+                public int ThreadType { get; init; }
+
+                [JsonPropertyName(DerivedKey)]
+                public bool IsDefault { get; init; }
+            }
 
             public void Project(Entity node, int type) => node["sprk_threadtype"] = new OptionSetValue(type);
 
