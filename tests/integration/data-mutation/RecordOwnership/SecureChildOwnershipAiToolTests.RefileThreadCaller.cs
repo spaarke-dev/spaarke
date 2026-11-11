@@ -769,7 +769,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
             new Sprk.Bff.Api.Tests.TestInfrastructure.UserFlagDirectoryDouble(), SecureChildShareWorld.CoreAncestorsOver(() => ShareWorld));
         return new ThreadResolver(
             strategies ?? Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
-            grants);
+            grants,
+            // 054b A1: the strict share read the host always injects; rule 2 asks it whether a Direct thread is a pair.
+            recordShares: _shareTable);
     }
 
     /// <summary>A default-thread lookup (FindDefaultThreadAsync: keyed on <c>sprk_regardingrecordid</c>) answers the matter's thread.</summary>
