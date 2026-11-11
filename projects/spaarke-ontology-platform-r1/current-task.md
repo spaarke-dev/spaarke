@@ -13,7 +13,7 @@
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active task** | None in progress. **177 is ✅** (PR #2666 squash-merged to docs as `52d02a66f3`; completion record + TASK-INDEX committed). |
 | **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | 1) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 2) After the next dev BFF deploy (contains #2695 if from master ≥ `25ac8ea931`): send a new email from Spaarke and check its "Related to" panel shows confirmed. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
+| **Next Action** | 1) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 2) uac-r2 puts #2695 in the next dev BFF deploy (after ebilling 116 merges; they send the SHA). Once it is live: send a new email from Spaarke and check its "Related to" panel shows confirmed. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
 | **Uncommitted** | None. |
 
 ## Open items
