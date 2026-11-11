@@ -662,6 +662,45 @@ N1/N3/N4 fail-first: 4 fail, 3 pass (the controls).
 - **Publish size:** +0.06 MB against fresh master `534a0e36b4` (39.32 → 39.38 MB, 191/191 files).
 - **CVE:** none.
 
+### §7.8 F-198-1 (post-merge, ontology review)
+
+Branch `task/uac-198c-direct-reown-recheck`, cut from master `c71414c7a0`.
+
+**Defect.** `GateDecisionRecordSharing.ReownToDirectAsync` (reached from `ReownAfterFilingAsync`, ~:377, and from `ShareDirectAsync` for a record the Direct team does not own yet) read the Direct audience and the record's shares once, then granted Read to each missing participant and revoked every other share, with no owner check after either write. In the assign branch the owner read-back ran before the grants, never after. The race: a message is unfiled back to Direct while it is re-filed into a secure record. The Secure reconciler re-owns the gate record to the Secure owner team and mirrors the Secure members; the unfile pass, on its stale reads, then grants the two participants Read and revokes the Secure members' shares. A non-member could read a Decision Record whose message sits on a secure record.
+
+**Fix.** After the audience read (a fault, or an invalid pair, still writes nothing), `ReownToDirectAsync` calls the two helpers `ShareDirectAsync` already uses, which re-read the owner after writing and fail closed:
+- `GrantAndConfirmAsync(..., acceptedTeam: directTeam)`: reads the record's shares strictly, grants only the missing participants, reads the owner back, and revokes this call's grants unless the owner is still the Direct team (or a user).
+- `RevokeOutsideAudienceAsync(..., directTeam, everyPrincipal: true)`: reads the shares strictly, and revokes the leftovers only when the owner reads back as exactly the Direct team.
+
+`everyPrincipal` is a new optional parameter, default `false`, on that private helper. The old revoke loop also revoked a team's share on the record; the helper revoked only user shares. With the flag, the unfile path keeps revoking every non-participant share, and `ShareDirectAsync`'s mirror is unchanged. The old summary log line is replaced by the helpers' own lines; ShareFailed/ReownFailed and their failure counters are raised for the same faults as before. A grant undone because the owner moved is logged at Information ("the {Count} grant(s) are revoked"), as on the mirror path. No new service, DI registration or public surface.
+
+**Tests** (`GateDecisionRecordSharingDirectTests`, `F198_1_*`): the race fires on the pass's first strict share read of the record, where the owner moves to the Secure team and a Secure member is shared.
+1. Must-fire: a Direct-owned record. No participant grant survives, the Secure member's share is not revoked, and the undo is logged.
+2. Must-fire, assign branch: a matter-team-owned record is re-owned to Direct in this pass, then raced. Only this pass's grant is undone; no share it found is revoked.
+3. Must-not-fire: the owner stays Direct. The participants are granted, and Third and a team share are revoked, as before.
+
+Fail-before / pass-after: 2 failed, 1 passed on the unfixed code (both must-fire tests failed for the defect itself: the participants kept Read, and the Secure member's share was revoked). 3/3 pass after.
+
+**Gates:** BFF build 0 warnings, 0 errors. Filter `GateDecisionRecord|DirectThread|DirectMessage|SecureChildShare`: 496/496. ArchTests 2144/2144. `dotnet format whitespace --verify-no-changes` on both changed files: clean.
+
+**K-N2, widened to the write-time path.** A failed write-time grant (`GateDecisionRecordSharing.cs` ~:247-250 for the Direct at-write share, ~:574-577 inside `GrantAndConfirmAsync`) is logged and counted, and never retried. The share job mirrors the gate records only after a pass that granted on the message (`SecureChildShareReconciliationJob.cs` ~:431). The record stays under-shared until the next re-file or grant.
+
+**Known limits.** Only K3 can expose anything:
+- **K2:** one Direct check that cannot be answered (~:352-358) returns before the record loop. That also skips the D-169 re-own of user-owned records for that communication. It is logged, and happens only when Direct is misconfigured.
+- **K3:** secure filing leaves the participant shares for the Secure reconciler to remove (~:632-638, ~:660-666). If that reconcile is incomplete, the participants keep Read until it retries.
+- **K4:** the leftover revoke spares a stamped pair on any filed message, not only one that was Direct (~:399, ~:783-799). The result is fewer revokes, limited to people who can read the message.
+- **K5:** a participant flagged external after the grant keeps Read on the record until the next mirror or re-file, the same as on the message share.
+
+**What the fix leaves open (K-F3 / K-N3 class, the mirror path's own window).** The fix shrinks the race window, but it does not close it. A re-own can still land in two places:
+- between `GrantAndConfirmAsync`'s owner read-back and the end of the pass, which leaves the grants;
+- between `RevokeOutsideAudienceAsync`'s owner read-back and its revokes.
+
+Neither is a new exposure. In the first case, the Secure reconciler's own pass runs after its re-own and revokes the user shares outside the Secure audience. The share job's 5-minute sweep is the backstop when that pass read the shares before the grant landed. Dataverse has no compare-and-set on the owner, so this is the floor for any read-back check (`ShareDirectAsync` has the same window).
+
+**This path assumes a team-owned gate record is never re-owned to a user** (ontology re-check, 2026-11-11). `GrantAndConfirmAsync` keeps its grants on a user owner, which is right for its D-169 branch. If a team-owned gate record could ever be re-owned to a user, this pass's participant grants would stand on it. No path does that today, because filing and the Secure reconciler re-own to teams (D-11). A change that adds such a path must revisit this assumption.
+
+**Test gap:** no guest-domain case on the Direct path (`InternalUsersAsync` filters a guest domain name, but only the D-169 tests exercise it).
+
 ### §7.9 198b (FindExistingAsync on the strict-pair rule)
 
 Branch `task/uac-198b-direct-find-existing`, cut from `43f4f12525` (fm 054a piece 2b, PR #2675, plus master `c71414c7a0`).
