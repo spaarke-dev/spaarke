@@ -462,7 +462,10 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   );
   // The openable emails' attachments, by communication id, read once per email on open (the same single-query read the
   // flow itself uses). Decides whether the Invoice tab is offered; best-effort: a failed read offers no tab.
-  const [invoiceAttachmentsById, setInvoiceAttachmentsById] = React.useState<Record<string, MarkableAttachment[]>>({});
+  // `| undefined`: an email not read yet has no entry (the type must say so, or the has-it-been-read guard looks dead).
+  const [invoiceAttachmentsById, setInvoiceAttachmentsById] = React.useState<
+    Record<string, MarkableAttachment[] | undefined>
+  >({});
   // Ids whose attachment read is in flight, so a re-render (or a second open) of the same email never starts a second read.
   const invoiceReadsInFlight = React.useRef<Set<string>>(new Set());
 

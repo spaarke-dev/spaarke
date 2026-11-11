@@ -262,7 +262,7 @@ export const SubmitInvoiceFromEmail: React.FC<SubmitInvoiceFromEmailProps> = ({
   }, []);
 
   const handleSubmit = (): void => {
-    if (!canSubmit || !chosenRecord) return;
+    if (!canSubmit) return;
     const invoiceDocumentId = attachmentList.find(a => marking[a.id] === 'invoice')?.id;
     if (!invoiceDocumentId) return;
     const supportingDocumentIds = attachmentList
@@ -285,6 +285,7 @@ export const SubmitInvoiceFromEmail: React.FC<SubmitInvoiceFromEmailProps> = ({
         // Outside the mounted guard: the server did accept, so the host refreshes even if the dialog was closed meanwhile.
         try {
           onAcceptedRef.current?.();
+          // eslint-disable-next-line no-restricted-syntax -- deliberate: the server accepted the invoice, so a throwing host refresh callback must not surface as a refusal
         } catch {
           // A host refresh that fails must not turn an accepted submission into a shown refusal.
         }
