@@ -4,7 +4,7 @@
     <title>5(c) Knowledge-refresh staleness watchdog</title>
     <phase>5 Quality tooling</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies a CI workflow (integration) under explicit constraints (FR-11)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -81,6 +81,8 @@
     <criterion testable="true">REFRESH-PROCEDURE.md and ci-cd-workflow.md name the check.</criterion>
     <criterion testable="true">Negative: no scheduled agent or new workflow file is added.</criterion>
   </acceptance-criteria>
+
+  <completion-notes>Completed 2026-11-11 (commit 15d42bb5b8). workflow_dispatch on the branch (run 43058895412) concluded success: the decide step reported the newest REFRESH-LOG entry 2026-08-26, 77 days old (limit 35), and "Alert monthly/knowledge-refresh" logged only "[dry-run] gh issue create ... --label quality-alert" (no issue created off master). Fires on landing day as intended. rework: none task 041</completion-notes>
 
   <notes>Task 020 edits the same two files later and depends on this task.</notes>
 

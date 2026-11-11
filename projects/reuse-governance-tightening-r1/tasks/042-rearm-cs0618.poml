@@ -4,7 +4,7 @@
     <title>5(e) Re-arm the CS0618 obsolete-API check</title>
     <phase>5 Quality tooling</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies build configuration and .cs callers across the solution, possibly tests</rigor-reason>
     <model-tier>opus</model-tier>
@@ -94,6 +94,8 @@
     <criterion testable="true">Negative: adding a new call to an [Obsolete] Spaarke member fails the build (verify once locally, then revert).</criterion>
     <criterion testable="true">Affected test projects pass; if BFF files changed, publish-size delta is recorded.</criterion>
   </acceptance-criteria>
+
+  <completion-notes>Completed 2026-11-11 (commits fa057eacdd, 2179669ada). CS0618 removed from WarningsNotAsErrors; clean Release build had 0 CS0618 errors (the downgrade hid nothing). The private BuildExecutionPrompt caller pair now suppresses only SPRK001 with a reason; the obsolete no-op ExcludeSharedTokenCacheCredential set was removed. Seeding proof: 3 seeds failed the build, reverted. ArchTests 2145/2145; full BFF unit suite 40,659 passed with 468 load timeouts (TaskCanceledException, known issue #1724), all of whose 165 classes then passed in 12-class chunks (3,574 passed, 0 failed). Publish-size delta +0.001 MB, no package change. code-review 0 F-class (3 K-class), adr-check 0 violations. Details: notes/042-cs0618.md. rework: none task 042</completion-notes>
 
   <notes>The negative criterion is the one seeding proof for this guard: it is the whole point of the change.</notes>
 

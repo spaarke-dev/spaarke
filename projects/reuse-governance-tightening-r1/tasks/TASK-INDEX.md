@@ -18,8 +18,8 @@
 | 034 | File the six remaining package actions and report defects | 4 | 🔲 [open] | 030 | Group C | MINIMAL | sonnet / medium |
 | 035 | Deploy SpaarkeAi and SemanticSearch to DEV and smoke-test | 4 | 🔲 [open] | 031, 032, 033 | — (deploy, owner OK) | STANDARD | sonnet / high |
 | 040 | 5(a) Microsoft Learn MCP server for the researcher | 5 | 🔲 [open] | none | — (.claude, main) | STANDARD | sonnet / high |
-| 041 | 5(c) Knowledge-refresh staleness watchdog | 5 | 🔲 [open] | none | Group A | STANDARD | sonnet / high |
-| 042 | 5(e) Re-arm the CS0618 obsolete-API check | 5 | 🔲 [open] | none | Group A | FULL | opus / high |
+| 041 | 5(c) Knowledge-refresh staleness watchdog | 5 | ✅ [done] | none | Group A | STANDARD | sonnet / high |
+| 042 | 5(e) Re-arm the CS0618 obsolete-API check | 5 | ✅ [done] | none | Group A | FULL | opus / high |
 | 043 | 5(f) Per-session C# language-server A/B trial | 5 | 🔲 [open] | none | — (operator, machine load) | STANDARD | sonnet / high |
 | 080 | Adversarial review of items 1-4 and their PRs | 6 | 🔲 [open] | 002, 012, 020, 021, 033, 034, 035 | — (.claude, main) | FULL | opus / high |
 | 090 | Project wrap-up | 6 | 🔲 [open] | 080, 040, 041, 042, 043 | — (final) | STANDARD | sonnet / high |
