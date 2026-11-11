@@ -691,6 +691,12 @@ Fail-before / pass-after: 2 failed, 1 passed on the unfixed code (both must-fire
 - **K4:** the leftover revoke spares a stamped pair on any filed message, not only one that was Direct (~:399, ~:783-799). The result is fewer revokes, limited to people who can read the message.
 - **K5:** a participant flagged external after the grant keeps Read on the record until the next mirror or re-file, the same as on the message share.
 
+**What the fix leaves open (K-F3 / K-N3 class, the mirror path's own window).** The fix shrinks the race window, but it does not close it. A re-own can still land in two places:
+- between `GrantAndConfirmAsync`'s owner read-back and the end of the pass, which leaves the grants;
+- between `RevokeOutsideAudienceAsync`'s owner read-back and its revokes.
+
+Neither is a new exposure. In the first case, the Secure reconciler's own pass runs after its re-own and revokes the user shares outside the Secure audience. The share job's 5-minute sweep is the backstop when that pass read the shares before the grant landed. Dataverse has no compare-and-set on the owner, so this is the floor for any read-back check (`ShareDirectAsync` has the same window).
+
 **Test gap:** no guest-domain case on the Direct path (`InternalUsersAsync` filters a guest domain name, but only the D-169 tests exercise it).
 
 ## Open questions
