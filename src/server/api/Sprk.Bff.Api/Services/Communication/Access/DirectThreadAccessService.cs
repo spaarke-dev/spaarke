@@ -708,7 +708,9 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         }
         else
         {
-            _logger.LogInformation(
+            // Debug, not Information (fm review): the lookup runs on every routed send, so the same old non-strict threads would
+            // log on every message. A read fault stays a Warning.
+            _logger.LogDebug(
                 "Direct thread {ThreadId} is not a strict 1:1 thread ({Reason}); it is not reused for the pair lookup.",
                 threadId, shape.Reason);
         }

@@ -428,7 +428,7 @@ public class DirectThreadAccessServiceTests
 
         result.Should().Be(newThreadId, "a thread a third user reads is not the pair's 1:1 thread");
         _entityService.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
-        log.Entries.Should().Contain(e => e.Level == LogLevel.Information
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Debug
             && e.Message.Contains(candidate.ToString(), StringComparison.OrdinalIgnoreCase)
             && e.Message.Contains(reason, StringComparison.Ordinal));
     }
