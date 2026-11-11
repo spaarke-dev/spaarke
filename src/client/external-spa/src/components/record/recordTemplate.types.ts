@@ -117,6 +117,14 @@ export interface RecordSectionContext extends RecordViewContext {
    * (`refreshSection`). A section with its own reads re-reads then.
    */
   refreshSignal: number;
+  /**
+   * Task 004 (FR-03). For a section that owns a create dialog (Documents: `upload`; Messages: `newMessage`; Tasks & events:
+   * `addTodo` / `addEvent`): the reporter through which it offers that toolbar action, or `undefined` when this record's
+   * toolbar does not list the action. A section that receives a reporter shows no create button of its own and renders its
+   * dialog itself (so the dialog is a React descendant of the record modal); one that receives `undefined` keeps its own
+   * button. The stable reporter per action id is the action hosts' one (`onActionChange`).
+   */
+  offerAction: (actionId: RecordToolbarActionId) => ((action: RecordHostAction | null) => void) | undefined;
 }
 
 /** A toolbar action an action host offers: hidden unless `visible` (hide, don't disable). */

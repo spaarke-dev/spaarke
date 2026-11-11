@@ -17,6 +17,7 @@ export const FilesSection: React.FC<RecordSectionContext> = ({
   callerContext,
   caller,
   refreshSignal,
+  onBusyChange,
 }) => {
   if (!detail.documentsRoot) return null;
   return (
@@ -27,6 +28,7 @@ export const FilesSection: React.FC<RecordSectionContext> = ({
         callerContext={callerContext}
         caller={caller}
         refreshSignal={refreshSignal}
+        onBusyChange={onBusyChange}
       />
     </RecordSectionCard>
   );

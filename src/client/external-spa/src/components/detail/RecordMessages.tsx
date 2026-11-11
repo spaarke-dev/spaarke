@@ -27,6 +27,13 @@
  *
  * No attachment control and no file input exist here by design (FR-11); the body is capped at 10,000 characters.
  *
+ * NEW MESSAGE DIALOG (R4 task 004, FR-03). In the record template the toolbar's New message is the entry point: the host
+ * passes `onCreateActionChange`, the inline compose box is not drawn, and the same box (same label, counter, errors, draft
+ * handling and send) renders in a `FormModal` that this thread owns, so the dialog is a descendant of the record modal.
+ * A send in flight holds the host (`onSendingChange`), a failed send leaves the dialog open with the draft and the same
+ * error text, and a sent message closes it and re-reads the thread. Without `onCreateActionChange` (R3's own page) the
+ * inline box is unchanged.
+ *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
  * light, dark and the Teams themes work. ADR-012: composes Fluent primitives and the shared sanitizer; the shared
  * EmailComposer / NewThreadModal are internal-plane and Xrm-bound, so only their look is mirrored.
@@ -45,6 +52,7 @@ import {
   Textarea,
 } from '@fluentui/react-components';
 import { SendRegular } from '@fluentui/react-icons';
+import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { sanitizeEmailHtml } from '@spaarke/ui-components/utils/sanitizeEmailHtml';
 import {
   BODY_FORMAT_HTML,
@@ -58,6 +66,7 @@ import {
 import { ApiError } from '../../types';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../auth/BffAccessState';
 import { TruncatedListNotice } from '../TruncatedListNotice';
+import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from '../createAction';
 
 // ---------------------------------------------------------------------------
 // Copy
@@ -66,6 +75,7 @@ import { TruncatedListNotice } from '../TruncatedListNotice';
 const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
 const EMPTY_TEXT = 'No messages yet. Write the first one below.';
+const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message in the toolbar to write the first one.';
 const LOAD_FAILED = 'The existing messages could not be loaded just now.';
 const NOT_AVAILABLE = 'Messages are not available for this record.';
 const DENIED_TEXT = 'You do not have permission to view messages on this record.';
@@ -296,6 +306,7 @@ interface MessageThreadProps {
   onSendingChange?: (sending: boolean) => void;
   refreshSignal?: number;
   embedded?: boolean;
+  onCreateActionChange?: CreateActionReporter;
 }
 
 const MessageThread: React.FC<MessageThreadProps> = ({
@@ -304,6 +315,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   onSendingChange,
   refreshSignal = 0,
   embedded = false,
+  onCreateActionChange,
 }) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
@@ -312,6 +324,8 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   const [draft, setDraft] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const [sendError, setSendError] = React.useState<SendError | null>(null);
+  // The New message dialog (record template only): its open state and the control that opened it.
+  const composeDialog = useChildDialog();
 
   // Only the latest read may update the thread, and none may once this record is left (stale / out-of-order reads).
   const readSeq = React.useRef(0);
@@ -404,11 +418,63 @@ const MessageThread: React.FC<MessageThreadProps> = ({
     setDraft('');
     sendLock.current = false;
     setSending(false);
+    composeDialog.hide();
     await read('refresh');
   };
 
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
+
+  // In the record template the toolbar's New message replaces the inline box: offered under the same rule (the thread
+  // has not been refused or found unavailable), and the dialog stays here. The draft is kept when it is cancelled.
+  const composeInDialog = onCreateActionChange !== undefined;
+  useOfferCreateAction(onCreateActionChange, showCompose, composeDialog.show);
+  const closeCompose = (): void => {
+    if (sendLock.current) return;
+    composeDialog.hide();
+  };
+  // The thread read can turn the offer off while the dialog is open (a read that answers 403 or "unavailable"): the dialog
+  // then unmounts with the offer, so close it through hide() too, which resets the open state and returns focus (to the
+  // record dialog, the toolbar button having gone) instead of leaving it on the page body.
+  const { open: composeOpen, hide: hideCompose } = composeDialog;
+  React.useEffect(() => {
+    if (composeInDialog && !showCompose && composeOpen) hideCompose();
+  }, [composeInDialog, showCompose, composeOpen, hideCompose]);
+
+  const counter = (
+    <Text
+      size={200}
+      className={mergeClasses(styles.counter, tooLong && styles.counterOver)}
+      role={tooLong ? 'alert' : undefined}
+      data-testid="record-messages-counter"
+    >
+      {tooLong
+        ? `${overBy.toLocaleString()} over the ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()} character limit`
+        : `${text.length.toLocaleString()} / ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()}`}
+    </Text>
+  );
+  const textarea = (
+    <Textarea
+      className={styles.textarea}
+      aria-label="Write a message"
+      placeholder="Write a message..."
+      resize="vertical"
+      rows={3}
+      value={draft}
+      disabled={sending}
+      onChange={(_e, data) => setDraft(data.value)}
+    />
+  );
+  const sendErrors = (
+    <>
+      {sendError?.kind === 'signin' && <BffAccessState failure="signin" />}
+      {sendError?.kind === 'text' && (
+        <MessageBar intent="error" role="alert" data-testid="record-messages-send-error">
+          <MessageBarBody>{sendError.text}</MessageBarBody>
+        </MessageBar>
+      )}
+    </>
+  );
 
   // Embedded in a host's section card (the record template), the card is the region and draws the heading.
   const Root = embedded ? 'div' : 'section';
@@ -461,7 +527,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
           {thread.messages.length === 0 && !thread.truncated ? (
             <div className={styles.empty} role="status" data-testid="record-messages-empty">
-              {EMPTY_TEXT}
+              {composeInDialog ? EMPTY_TEXT_DIALOG : EMPTY_TEXT}
             </div>
           ) : (
             <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
@@ -473,29 +539,11 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         </>
       )}
 
-      {showCompose && (
+      {showCompose && !composeInDialog && (
         <div className={styles.compose} data-testid="record-messages-compose">
-          <Textarea
-            className={styles.textarea}
-            aria-label="Write a message"
-            placeholder="Write a message..."
-            resize="vertical"
-            rows={3}
-            value={draft}
-            disabled={sending}
-            onChange={(_e, data) => setDraft(data.value)}
-          />
+          {textarea}
           <div className={styles.composeFooter}>
-            <Text
-              size={200}
-              className={mergeClasses(styles.counter, tooLong && styles.counterOver)}
-              role={tooLong ? 'alert' : undefined}
-              data-testid="record-messages-counter"
-            >
-              {tooLong
-                ? `${overBy.toLocaleString()} over the ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()} character limit`
-                : `${text.length.toLocaleString()} / ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()}`}
-            </Text>
+            {counter}
             <Button
               appearance="primary"
               icon={sending ? <Spinner size="tiny" /> : <SendRegular />}
@@ -506,13 +554,28 @@ const MessageThread: React.FC<MessageThreadProps> = ({
             </Button>
           </div>
 
-          {sendError?.kind === 'signin' && <BffAccessState failure="signin" />}
-          {sendError?.kind === 'text' && (
-            <MessageBar intent="error" role="alert" data-testid="record-messages-send-error">
-              <MessageBarBody>{sendError.text}</MessageBarBody>
-            </MessageBar>
-          )}
+          {sendErrors}
         </div>
+      )}
+
+      {/* The record template's New message (task 004): a FormModal, Cancel left, Send right. Esc does nothing (modal
+          standard: an explicit dialog keeps a draft). */}
+      {composeInDialog && showCompose && (
+        <FormModal
+          open={composeDialog.open}
+          onClose={closeCompose}
+          onSubmit={() => void handleSend()}
+          title="New message"
+          submitLabel={sending ? 'Sending...' : 'Send'}
+          submitDisabled={!canSend}
+          busy={sending}
+        >
+          <div className={styles.compose} data-testid="record-messages-compose">
+            {textarea}
+            {counter}
+            {sendErrors}
+          </div>
+        </FormModal>
       )}
     </Root>
   );
@@ -536,6 +599,12 @@ export interface RecordMessagesProps {
    * own, so the page has one "Messages" region and one heading. Default false (its own section and heading).
    */
   embedded?: boolean;
+  /**
+   * Record template only (task 004, FR-03): the toolbar's New message is the entry point. The thread then draws no inline
+   * compose box, offers the action through this callback (available exactly when the inline box would have been shown) and
+   * renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
+   */
+  onCreateActionChange?: CreateActionReporter;
 }
 
 export const RecordMessages: React.FC<RecordMessagesProps> = ({
@@ -544,6 +613,7 @@ export const RecordMessages: React.FC<RecordMessagesProps> = ({
   onSendingChange,
   refreshSignal,
   embedded,
+  onCreateActionChange,
 }) => {
   const root = messageRootFor(entity);
   if (!root) return null;
@@ -554,6 +624,7 @@ export const RecordMessages: React.FC<RecordMessagesProps> = ({
       onSendingChange={onSendingChange}
       refreshSignal={refreshSignal}
       embedded={embedded}
+      onCreateActionChange={onCreateActionChange}
     />
   );
 };

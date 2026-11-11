@@ -12,7 +12,7 @@
 | 002 | BFF matter/WA event routes + delete-409 ProblemDetails (FR-08, FR-09) | 1 | ✅ [done] | none | Group A | opus / high |
 | 003 | RecordTemplateConfig + template shell (FR-01, FR-02) | 1 | ✅ [done] | 001 | — | opus / high |
 | 005 | Section renderers for six types; retire R3 modal (FR-01) | 1 | ✅ [done] | 003 | — | opus / high |
-| 004 | Child dialogs inside the parent SprkModal (FR-03) | 1 | 🔲 [open] | 005 | — | sonnet / high |
+| 004 | Child dialogs inside the parent SprkModal (FR-03) | 1 | ✅ [done] | 005 | — | sonnet / high |
 | 006 | Per-record access, hide-don't-disable, "Your access" (FR-06, FR-07) | 1 | 🔲 [open] | 002, 004 | — | opus / high |
 | 007 | Submit invoice record action (FR-10) | 1 | 🔲 [open] | 006 | — | sonnet / high |
 | 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) | 1 | 🔲 [open] | 002, 004, 005, 006, 007 | — (live) | sonnet / high |

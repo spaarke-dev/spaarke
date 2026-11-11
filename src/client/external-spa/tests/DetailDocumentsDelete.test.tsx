@@ -1068,7 +1068,7 @@ describe('the record detail view', () => {
       await within(events).findByText('My call');
       await within(events).findByText('My task');
 
-      expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
       // Delete appears exactly on the caller's rows - once the identity read (/me) has returned.
       await waitFor(() => expect(within(dialog).getAllByRole('button', { name: /^Delete / })).toHaveLength(3));
       expect(within(dialog).getByRole('button', { name: 'Delete Mine.pdf' })).toBeTruthy();
@@ -1103,7 +1103,7 @@ describe('the record detail view', () => {
       await within(docs).findByText('Mine.pdf');
 
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
     },
     SLOW
@@ -1119,7 +1119,7 @@ describe('the record detail view', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(0);
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1132,7 +1132,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
 
-      expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
       expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/matters/${MATTER}/documents`);
     },
@@ -1147,7 +1147,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
 
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
     },
@@ -1161,14 +1161,14 @@ describe('the record detail view', () => {
       const viewOnly = await openDetail('wa');
       const docs = await within(viewOnly).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(viewOnly).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       cleanup();
 
       installDetailNet('wa', emptyNet({ documents: mixedDocs(), documentsCanCreate: true }));
       const collaborate = await openDetail('wa');
       const docs2 = await within(collaborate).findByTestId('record-detail-documents');
       await within(docs2).findByText('Mine.pdf');
-      expect(within(docs2).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(collaborate).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
     },
     SLOW
   );
@@ -1180,7 +1180,7 @@ describe('the record detail view', () => {
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText(/No documents have been uploaded to this matter yet\.$/);
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1192,7 +1192,7 @@ describe('the record detail view', () => {
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1212,7 +1212,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1241,7 +1241,7 @@ describe('the record detail view', () => {
       // /me has returned once the caller's own Delete shows.
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
 
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ }) !== null).toBe(offered);
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' }) !== null).toBe(offered);
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
     },
     SLOW

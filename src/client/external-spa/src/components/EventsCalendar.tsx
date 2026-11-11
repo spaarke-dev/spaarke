@@ -30,12 +30,6 @@ import {
   Button,
   Badge,
   Divider,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
   Field,
   Input,
   Textarea,
@@ -45,6 +39,7 @@ import {
   MessageBarActions,
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
+import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import {
   getRootEvents,
@@ -58,6 +53,7 @@ import {
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from './createAction';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
@@ -363,9 +359,11 @@ interface CreateEventDialogProps {
   open: boolean;
   onClose: () => void;
   onCreated: (event: ODataEvent) => void;
+  /** Called with `true` while the create is in flight and `false` otherwise (and on unmount), so a host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
-const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, onClose, onCreated }) => {
+const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, onClose, onCreated, onBusyChange }) => {
   const styles = useStyles();
 
   const [title, setTitle] = React.useState<string>('');
@@ -377,6 +375,20 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
 
   // Validation state
   const [titleError, setTitleError] = React.useState<string>('');
+
+  // The record template holds browsing, Close and Refresh while the post is in flight (task 004). The latest callback is
+  // read through a ref so a new function identity never re-fires the effect, and unmount always reports "not busy".
+  const onBusyChangeRef = React.useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  React.useEffect(() => {
+    onBusyChangeRef.current?.(submitting);
+  }, [submitting]);
+  React.useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
 
   // Reset form when dialog opens
   React.useEffect(() => {
@@ -435,90 +447,79 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
     }
   };
 
+  // Never closes mid-post (Cancel and the FormModal's busy state already refuse it; the × and Esc route here too).
+  const handleClose = () => {
+    if (submitting) return;
+    onClose();
+  };
+
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Create Event on the right. Esc does nothing
+  // (modal standard: an explicit dialog keeps a draft).
   return (
-    <Dialog open={open} onOpenChange={(_ev, data) => !data.open && onClose()}>
-      <DialogSurface>
-        <DialogTitle>Create Event</DialogTitle>
+    <FormModal
+      open={open}
+      onClose={handleClose}
+      onSubmit={() => void handleSubmit()}
+      title="Create Event"
+      submitLabel={submitting ? 'Creating...' : 'Create Event'}
+      submitDisabled={!title.trim()}
+      busy={submitting}
+    >
+      <div className={styles.dialogForm}>
+        {/* Submit error */}
+        {submitError && (
+          <MessageBar intent="error" className={styles.errorBar}>
+            <MessageBarBody>{submitError}</MessageBarBody>
+          </MessageBar>
+        )}
 
-        <DialogBody>
-          <DialogContent>
-            <div className={styles.dialogForm}>
-              {/* Submit error */}
-              {submitError && (
-                <MessageBar intent="error" className={styles.errorBar}>
-                  <MessageBarBody>{submitError}</MessageBarBody>
-                </MessageBar>
-              )}
+        {/* Title (required) */}
+        <Field
+          label="Title"
+          required
+          validationMessage={titleError || undefined}
+          validationState={titleError ? 'error' : 'none'}
+        >
+          <Input
+            value={title}
+            onChange={(_ev, data) => setTitle(data.value)}
+            placeholder="Enter event title"
+            disabled={submitting}
+            maxLength={200}
+          />
+        </Field>
 
-              {/* Title (required) */}
-              <Field
-                label="Title"
-                required
-                validationMessage={titleError || undefined}
-                validationState={titleError ? 'error' : 'none'}
-              >
-                <Input
-                  value={title}
-                  onChange={(_ev, data) => setTitle(data.value)}
-                  placeholder="Enter event title"
-                  disabled={submitting}
-                  maxLength={200}
-                />
-              </Field>
+        {/* Event type */}
+        <Field label="Type">
+          <Select value={eventType} onChange={(_ev, data) => setEventType(data.value)} disabled={submitting}>
+            <option value="meeting">Meeting</option>
+            <option value="deadline">Deadline</option>
+            <option value="milestone">Milestone</option>
+            <option value="task">Task</option>
+            <option value="reminder">Reminder</option>
+            <option value="filing">Filing</option>
+            <option value="other">Other</option>
+          </Select>
+        </Field>
 
-              {/* Event type */}
-              <Field label="Type">
-                <Select value={eventType} onChange={(_ev, data) => setEventType(data.value)} disabled={submitting}>
-                  <option value="meeting">Meeting</option>
-                  <option value="deadline">Deadline</option>
-                  <option value="milestone">Milestone</option>
-                  <option value="task">Task</option>
-                  <option value="reminder">Reminder</option>
-                  <option value="filing">Filing</option>
-                  <option value="other">Other</option>
-                </Select>
-              </Field>
+        {/* Due date */}
+        <Field label="Due Date">
+          <Input type="date" value={dueDate} onChange={(_ev, data) => setDueDate(data.value)} disabled={submitting} />
+        </Field>
 
-              {/* Due date */}
-              <Field label="Due Date">
-                <Input
-                  type="date"
-                  value={dueDate}
-                  onChange={(_ev, data) => setDueDate(data.value)}
-                  disabled={submitting}
-                />
-              </Field>
-
-              {/* Description */}
-              <Field label="Description">
-                <Textarea
-                  value={description}
-                  onChange={(_ev, data) => setDescription(data.value)}
-                  placeholder="Optional description or notes"
-                  disabled={submitting}
-                  rows={3}
-                  maxLength={2000}
-                />
-              </Field>
-            </div>
-          </DialogContent>
-
-          <DialogActions>
-            <Button appearance="secondary" onClick={onClose} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button
-              appearance="primary"
-              onClick={() => void handleSubmit()}
-              disabled={submitting || !title.trim()}
-              icon={submitting ? <Spinner size="tiny" /> : undefined}
-            >
-              {submitting ? 'Creating...' : 'Create Event'}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+        {/* Description */}
+        <Field label="Description">
+          <Textarea
+            value={description}
+            onChange={(_ev, data) => setDescription(data.value)}
+            placeholder="Optional description or notes"
+            disabled={submitting}
+            rows={3}
+            maxLength={2000}
+          />
+        </Field>
+      </div>
+    </FormModal>
   );
 };
 
@@ -540,6 +541,15 @@ export interface EventsCalendarProps {
   writeAccessPerRecord?: boolean;
   /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
   caller?: CallerIdentity | null;
+  /**
+   * Record template only (task 004, FR-03). When given, the toolbar's Add event is the entry point: this list shows no
+   * "Create Event" button of its own, offers its action through this callback (shown exactly when its own button would
+   * have been) and renders the create dialog itself, so the dialog is a descendant of the host that owns the toolbar.
+   * Omit it everywhere else (the project page keeps its button).
+   */
+  onCreateActionChange?: CreateActionReporter;
+  /** Called with `true` while a create is in flight and `false` otherwise (and on unmount), so the host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -560,6 +570,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   accessLevel,
   caller,
   writeAccessPerRecord = false,
+  onCreateActionChange,
+  onBusyChange,
 }) => {
   const styles = useStyles();
 
@@ -570,7 +582,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   const [events, setEvents] = React.useState<ODataEvent[]>([]);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
+  const createDialog = useChildDialog();
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
   // A 401/403 on the list is the shared sign-in / denied state; "Try again" re-runs the read (task 057).
@@ -590,6 +602,10 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
     (writeAccessPerRecord
       ? listCanCreate === true
       : accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
+  // In the record template the toolbar's Add event replaces this list's button (task 004): offered under the same rule (the
+  // main view is showing and the caller may create), and the dialog stays here.
+  const ownCreateButton = onCreateActionChange === undefined;
+  useOfferCreateAction(onCreateActionChange, canCreate && !loading && !accessFailure && !loadError, createDialog.show);
 
   // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataEvent>({
@@ -717,8 +733,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
           Upcoming Events
         </Text>
 
-        {canCreate && (
-          <Button appearance="primary" icon={<AddRegular />} onClick={() => setDialogOpen(true)} size="small">
+        {canCreate && ownCreateButton && (
+          <Button appearance="primary" icon={<AddRegular />} onClick={createDialog.show} size="small">
             Create Event
           </Button>
         )}
@@ -738,7 +754,9 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
             </Text>
             <Text size={300} className={styles.emptyStateText}>
               {canCreate
-                ? `No events have been added to this ${noun}. Use the Create Event button to add the first event.`
+                ? ownCreateButton
+                  ? `No events have been added to this ${noun}. Use the Create Event button to add the first event.`
+                  : `No events have been added to this ${noun}. Use Add event in the toolbar to add the first event.`
                 : `No events have been added to this ${noun} yet.`}
             </Text>
           </div>
@@ -763,9 +781,10 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
       {canCreate && (
         <CreateEventDialog
           projectId={projectId}
-          open={dialogOpen}
-          onClose={() => setDialogOpen(false)}
+          open={createDialog.open}
+          onClose={createDialog.hide}
           onCreated={handleEventCreated}
+          onBusyChange={onBusyChange}
         />
       )}
     </div>

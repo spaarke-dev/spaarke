@@ -46,12 +46,6 @@ import {
   Textarea,
   Spinner,
   Badge,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogContent,
-  DialogActions,
   MessageBar,
   MessageBarBody,
   MessageBarActions,
@@ -67,6 +61,7 @@ import {
   DeleteRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
+import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
 import {
@@ -81,6 +76,7 @@ import {
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from './createAction';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
@@ -490,100 +486,89 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
     [handleSubmit]
   );
 
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Create Task on the right. Esc does nothing
+  // (modal standard: an explicit dialog keeps a draft); onDismiss refuses while submitting.
   return (
-    <Dialog
+    <FormModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) onDismiss();
-      }}
+      onClose={onDismiss}
+      onSubmit={() => void handleSubmit()}
+      title="Create Task"
+      submitLabel={isSubmitting ? 'Creating...' : 'Create Task'}
+      submitDisabled={!isTitleValid}
+      busy={isSubmitting}
     >
-      <DialogSurface aria-label="Create Task dialog">
-        <DialogBody>
-          <DialogTitle>Create Task</DialogTitle>
-          <DialogContent>
-            {submitError && (
-              <MessageBar intent="error" className={styles.errorBanner}>
-                <MessageBarBody>{submitError}</MessageBarBody>
-              </MessageBar>
-            )}
+      {submitError && (
+        <MessageBar intent="error" className={styles.errorBanner}>
+          <MessageBarBody>{submitError}</MessageBarBody>
+        </MessageBar>
+      )}
 
-            <div className={styles.dialogForm} onKeyDown={handleKeyDown}>
-              {/* Title — required */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>
-                  Title
-                  <span className={styles.fieldLabelRequired} aria-hidden="true">
-                    *
-                  </span>
-                </label>
-                <Input
-                  value={title}
-                  onChange={(_ev, data) => setTitle(data.value)}
-                  placeholder="Enter task title..."
-                  autoFocus
-                  aria-required="true"
-                  aria-invalid={!isTitleValid && title.length > 0}
-                />
-              </div>
+      <div className={styles.dialogForm} onKeyDown={handleKeyDown}>
+        {/* Title — required */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>
+            Title
+            <span className={styles.fieldLabelRequired} aria-hidden="true">
+              *
+            </span>
+          </label>
+          <Input
+            value={title}
+            onChange={(_ev, data) => setTitle(data.value)}
+            placeholder="Enter task title..."
+            autoFocus
+            aria-required="true"
+            aria-invalid={!isTitleValid && title.length > 0}
+          />
+        </div>
 
-              {/* Description — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Description</label>
-                <Textarea
-                  value={description}
-                  onChange={(_ev, data) => setDescription(data.value)}
-                  placeholder="Add a description (optional)..."
-                  resize="vertical"
-                  rows={3}
-                />
-              </div>
+        {/* Description — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Description</label>
+          <Textarea
+            value={description}
+            onChange={(_ev, data) => setDescription(data.value)}
+            placeholder="Add a description (optional)..."
+            resize="vertical"
+            rows={3}
+          />
+        </div>
 
-              {/* Due Date — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Due Date</label>
-                <Input type="date" value={dueDate} onChange={ev => setDueDate(ev.target.value)} />
-              </div>
+        {/* Due Date — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Due Date</label>
+          <Input type="date" value={dueDate} onChange={ev => setDueDate(ev.target.value)} />
+        </div>
 
-              {/* Priority — optional */}
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Priority</label>
-                <div className={styles.priorityRow}>
-                  {PRIORITY_OPTIONS.map(option => (
-                    <Badge
-                      key={option.value}
-                      className={styles.priorityBadge}
-                      appearance={selectedPriority === option.value ? 'filled' : 'tint'}
-                      color={option.color}
-                      size="large"
-                      onClick={() => setSelectedPriority(option.value)}
-                      role="radio"
-                      aria-checked={selectedPriority === option.value}
-                      tabIndex={0}
-                      onKeyDown={ev => {
-                        if (ev.key === ' ' || ev.key === 'Enter') {
-                          setSelectedPriority(option.value);
-                        }
-                      }}
-                    >
-                      {option.label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-
-          <DialogActions>
-            <Button appearance="secondary" onClick={onDismiss} disabled={isSubmitting}>
-              Cancel
-            </Button>
-            <Button appearance="primary" onClick={handleSubmit} disabled={!isTitleValid || isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create Task'}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+        {/* Priority — optional */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Priority</label>
+          <div className={styles.priorityRow}>
+            {PRIORITY_OPTIONS.map(option => (
+              <Badge
+                key={option.value}
+                className={styles.priorityBadge}
+                appearance={selectedPriority === option.value ? 'filled' : 'tint'}
+                color={option.color}
+                size="large"
+                onClick={() => setSelectedPriority(option.value)}
+                role="radio"
+                aria-checked={selectedPriority === option.value}
+                tabIndex={0}
+                onKeyDown={ev => {
+                  if (ev.key === ' ' || ev.key === 'Enter') {
+                    setSelectedPriority(option.value);
+                  }
+                }}
+              >
+                {option.label}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      </div>
+    </FormModal>
   );
 };
 
@@ -607,6 +592,15 @@ export interface SmartTodoProps {
    * of the list (owner round 59), so a refused toggle reverts and says so.
    */
   writeAccessPerRecord?: boolean;
+  /**
+   * Record template only (task 004, FR-03). When given, the toolbar's Add to-do is the entry point: this list shows no
+   * "Add Task" button of its own, offers its action through this callback (shown exactly when its own button would have
+   * been) and renders the create dialog itself, so the dialog is a descendant of the host that owns the toolbar. Omit it
+   * everywhere else (the project page keeps its button).
+   */
+  onCreateActionChange?: CreateActionReporter;
+  /** Called with `true` while a create is in flight and `false` otherwise (and on unmount), so the host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -623,6 +617,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   accessLevel: levelProp,
   caller,
   writeAccessPerRecord = false,
+  onCreateActionChange,
+  onBusyChange,
 }) => {
   // Create and the status toggle are project routes' actions: a matter or work assignment list is read-only here whatever
   // level the host passes (task 057). Delete-own is independent of the level.
@@ -644,9 +640,23 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   const [toggleError, setToggleError] = React.useState<string | null>(null);
 
   // Create dialog state
-  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const createDialog = useChildDialog();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+
+  // The record template holds browsing, Close and Refresh while the post is in flight (task 004). The latest callback is
+  // read through a ref so a new function identity never re-fires the effect, and unmount always reports "not busy".
+  const onBusyChangeRef = React.useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  React.useEffect(() => {
+    onBusyChangeRef.current?.(isSubmitting);
+  }, [isSubmitting]);
+  React.useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
 
   const allowEdit = canEdit(accessLevel);
   // Task 036 fix round 1: the BFF's `canCreate` on this list (null = not said). With per-record write access it decides
@@ -746,17 +756,24 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   // Create to-do
   // ---------------------------------------------------------------------------
 
+  const showDialog = createDialog.show;
+  const hideDialog = createDialog.hide;
   const handleOpenDialog = React.useCallback(() => {
     if (!allowCreate) return;
     setSubmitError(null);
-    setIsDialogOpen(true);
-  }, [allowCreate]);
+    showDialog();
+  }, [allowCreate, showDialog]);
+
+  // In the record template the toolbar's Add to-do replaces this list's "Add Task" button (task 004): offered under the same
+  // rule (the caller may create), and the dialog stays here.
+  const ownCreateButton = onCreateActionChange === undefined;
+  useOfferCreateAction(onCreateActionChange, allowCreate, handleOpenDialog);
 
   const handleDismissDialog = React.useCallback(() => {
     if (isSubmitting) return;
-    setIsDialogOpen(false);
+    hideDialog();
     setSubmitError(null);
-  }, [isSubmitting]);
+  }, [isSubmitting, hideDialog]);
 
   const handleCreateTask = React.useCallback(
     async (formData: { title: string; description: string; dueDate: string; priority: number }) => {
@@ -778,7 +795,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
         // Add new to-do to the top of the list
         setTasks(prev => [newTodo, ...prev]);
-        setIsDialogOpen(false);
+        hideDialog();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create task';
         setSubmitError(message);
@@ -786,7 +803,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
         setIsSubmitting(false);
       }
     },
-    [projectId]
+    [projectId, hideDialog]
   );
 
   // ---------------------------------------------------------------------------
@@ -802,17 +819,18 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
   const cardTitle = totalCount > 0 ? `Tasks (${pendingCount} of ${totalCount} pending)` : 'Tasks';
 
-  const cardActions = allowCreate ? (
-    <Button
-      appearance="primary"
-      icon={<AddRegular />}
-      size="small"
-      onClick={handleOpenDialog}
-      aria-label="Create new task"
-    >
-      Add Task
-    </Button>
-  ) : undefined;
+  const cardActions =
+    allowCreate && ownCreateButton ? (
+      <Button
+        appearance="primary"
+        icon={<AddRegular />}
+        size="small"
+        onClick={handleOpenDialog}
+        aria-label="Create new task"
+      >
+        Add Task
+      </Button>
+    ) : undefined;
 
   return (
     <>
@@ -858,7 +876,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
               <Text>No tasks yet</Text>
               {allowCreate && (
                 <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-                  Use "Add Task" to create the first task for this project.
+                  {ownCreateButton
+                    ? 'Use "Add Task" to create the first task for this project.'
+                    : `Use "Add to-do" in the toolbar to create the first task for this ${noun}.`}
                 </Text>
               )}
             </div>
@@ -920,7 +940,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
       {/* Create task dialog — only rendered when allowCreate */}
       {allowCreate && (
         <CreateTaskDialog
-          open={isDialogOpen}
+          open={createDialog.open}
           onDismiss={handleDismissDialog}
           onSubmit={handleCreateTask}
           isSubmitting={isSubmitting}

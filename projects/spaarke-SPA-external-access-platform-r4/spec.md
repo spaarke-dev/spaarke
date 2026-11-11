@@ -121,7 +121,8 @@ Spaarke External Access is the external SPA (`src/client/external-spa`). R3 left
   - *Acceptance:* Each state renders. The layout is correct at 1440px, 1000px and 375px. Content scrolls while the chrome stays fixed.
 
 - **FR-03 Child dialogs inside the parent.** Upload, new message, add to-do, add event, and confirm dialogs mount inside the parent SprkModal, as SprkModal presets (`FormModal`, `ConfirmModal`).
-  - *Acceptance:* A test proves keyboard focus stays inside the parent and the child while a child dialog is open. Esc closes the child first, then the parent. Cancel is on the left (ADR-050).
+  - *Acceptance:* A test proves keyboard focus stays inside the parent and the child while a child dialog is open. While a form or confirm child is open, Esc closes neither the child nor the parent and keeps what the user typed (the presets' `explicit`/`alert` dismiss, MODAL-DESIGN-SYSTEM); Cancel or × closes the child and returns focus to the control that opened it, and Esc then closes the parent. Cancel is on the left (ADR-050).
+  - *Amended 2026-11-11 (owner, task 004):* the original text said "Esc closes the child first". That conflicts with the modal standard (an accidental Esc must not discard a draft); the owner chose to comply (§6.5 Path C).
 
 - **FR-04 Shared `RecordCommandBar`.** It lives in `@spaarke/ui-components` and takes action descriptors as props (id, label, icon, onClick, visible, tooltip, optional overflow).
   - It composes `HeaderToolbar` and Fluent v9 primitives, without duplicating them.

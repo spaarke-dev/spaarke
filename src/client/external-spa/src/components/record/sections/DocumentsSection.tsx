@@ -6,6 +6,11 @@
  * needs only Read, which opening the record already required. The props, the requests and the texts are R3's.
  *
  * Refresh (or Try again) remounts the library, which re-reads the list.
+ *
+ * UPLOAD (task 004, FR-03). When the record's toolbar lists Upload, the toolbar button is the entry point: the library
+ * offers it through `offerAction('upload')` (shown under the same rule as its own button, which it then does not draw) and
+ * renders the upload dialog (a `FormModal`) itself, inside this section, so the dialog is a descendant of the record
+ * modal. An upload in flight holds browsing, Close and Refresh (`onBusyChange`).
  */
 import * as React from 'react';
 import type { CallerIdentity } from '../../../api/delete-own';
@@ -13,6 +18,7 @@ import type { DocumentRoot } from '../../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
 import { canUpload as levelCanUpload, mapAccessLevelString } from '../../../hooks/useAccessLevel';
 import { DocumentLibrary } from '../../DocumentLibrary';
+import type { CreateActionReporter } from '../../createAction';
 import type { RecordSectionContext } from '../recordTemplate.types';
 import { RecordSectionCard } from './RecordSectionCard';
 
@@ -40,6 +46,10 @@ export interface RecordDocumentListProps {
   callerContext: ExternalUserContextResponse | null;
   caller: CallerIdentity | null;
   refreshSignal: number;
+  /** Offer the toolbar's Upload instead of drawing the library's own button (the record template, task 004). */
+  onCreateActionChange?: CreateActionReporter;
+  /** Report an upload in flight, so the record modal holds. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Shared by Documents and (P1) Files. */
@@ -49,6 +59,8 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
   callerContext,
   caller,
   refreshSignal,
+  onCreateActionChange,
+  onBusyChange,
 }) => (
   <div data-testid="record-detail-documents">
     <DocumentLibrary
@@ -59,6 +71,8 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
       canDownload
       caller={caller}
       writeAccessPerRecord={callerContext?.writeAccessPerRecord === true}
+      onCreateActionChange={onCreateActionChange}
+      onBusyChange={onBusyChange}
     />
   </div>
 );
@@ -69,6 +83,8 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   callerContext,
   caller,
   refreshSignal,
+  onBusyChange,
+  offerAction,
 }) => {
   // A record with no documents route has no Documents section (no config lists one; this keeps a wrong config inert).
   if (!detail.documentsRoot) return null;
@@ -80,6 +96,8 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
         callerContext={callerContext}
         caller={caller}
         refreshSignal={refreshSignal}
+        onCreateActionChange={offerAction('upload')}
+        onBusyChange={onBusyChange}
       />
     </RecordSectionCard>
   );

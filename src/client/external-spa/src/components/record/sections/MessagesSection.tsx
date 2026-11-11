@@ -4,6 +4,11 @@
  * GET/POST /api/v1/external/{root}/{id}/messages for project, matter, work assignment, invoice and service request. A send
  * in flight is reported as busy (`onBusyChange`), which holds browsing, Close and Refresh until it settles (review 051 K3).
  * `refreshSignal` re-reads the thread without losing the draft: Refresh, and the service request recall post.
+ *
+ * NEW MESSAGE (task 004, FR-03). When the record's toolbar lists New message, the toolbar button is the entry point: the
+ * thread offers it through `offerAction('newMessage')` (available exactly when its inline compose box would have been
+ * shown, which it then does not draw) and renders the compose box in a `FormModal` inside this section, so the dialog is a
+ * descendant of the record modal.
  */
 import * as React from 'react';
 import { messageRootFor } from '../../../api/messages-client';
@@ -11,7 +16,13 @@ import { RecordMessages } from '../../detail/RecordMessages';
 import type { RecordSectionContext } from '../recordTemplate.types';
 import { RecordSectionCard } from './RecordSectionCard';
 
-export const MessagesSection: React.FC<RecordSectionContext> = ({ detail, recordId, onBusyChange, refreshSignal }) => {
+export const MessagesSection: React.FC<RecordSectionContext> = ({
+  detail,
+  recordId,
+  onBusyChange,
+  refreshSignal,
+  offerAction,
+}) => {
   // A document has no thread (the server answers 404 for it): no section and no read.
   if (!messageRootFor(detail.entity)) return null;
   return (
@@ -22,6 +33,7 @@ export const MessagesSection: React.FC<RecordSectionContext> = ({ detail, record
         onSendingChange={onBusyChange}
         refreshSignal={refreshSignal}
         embedded
+        onCreateActionChange={offerAction('newMessage')}
       />
     </RecordSectionCard>
   );

@@ -4,7 +4,7 @@
     <title>Record actions open child dialogs inside the parent SprkModal + focus/Esc test (FR-03)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 005</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx components and adds tests (tags frontend, fluent-ui, unit-test)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -18,7 +18,7 @@
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
-  <prompt>Make the template's Upload, New message, Add to-do and Add event toolbar actions open their dialogs as SprkModal presets mounted inside the parent record modal, convert the SPA's remaining raw Fluent `Dialog`s used from a record (upload, versions, create event, create task) to presets, and prove with a test that focus stays inside the parent and child and that Esc closes the child first.</prompt>
+  <prompt>Make the template's Upload, New message, Add to-do and Add event toolbar actions open their dialogs as SprkModal presets mounted inside the parent record modal, convert the SPA's remaining raw Fluent `Dialog`s used from a record (upload, versions, create event, create task) to presets, and prove with a test that focus stays inside the parent and child and that Esc never closes a form/confirm child or reaches the parent (owner 2026-11-11, Path C; spec FR-03 as amended).</prompt>
   <role>SPAARKE platform developer. Expert in Fluent UI v9 dialogs, focus management and React Testing Library. Follow ADRs strictly.</role>
   <goal>No record child dialog is a raw Fluent `Dialog`; each is FormModal/ConfirmModal/BrowseModal rendered as a descendant of the parent `RecordTemplateModal`; the four toolbar actions open them; a vitest test proves focus containment, Esc order and Cancel-left.</goal>
 
@@ -82,7 +82,7 @@
     <step order="1">Convert `UploadDialog`, `VersionHistoryPanel`, `CreateEventDialog` and `CreateTaskDialog` to presets; give each a controlled `open` the host can drive.</step>
     <step order="2">Add a New-message FormModal that reuses the message client and texts of `RecordMessages`.</step>
     <step order="3">Wire the four toolbar actions in `RecordTemplateModal` to open the dialogs rendered inside the template tree; hide the sections' own create buttons inside the template only.</step>
-    <step order="4">Write `tests/RecordTemplateChildDialogs.test.tsx`: for one form dialog and one confirm dialog — Tab and Shift+Tab never move focus outside the child while it is open; Esc closes the child and leaves the parent open with focus back on the invoking toolbar button; a second Esc closes the parent; Cancel renders in the left footer slot.</step>
+    <step order="4">Write `tests/RecordTemplateChildDialogs.test.tsx`: for one form dialog and one confirm dialog — Tab and Shift+Tab never move focus outside the child while it is open; Esc (owner 2026-11-11, Path C) leaves the child and the parent open with typed input kept; Cancel closes the child with focus back on the invoking toolbar button; Esc then closes the parent; Cancel renders in the left footer slot.</step>
     <step order="5">Run the existing DocumentLibrary, SmartTodo, EventsCalendar and ProjectPage tests to prove the non-template hosts are unchanged.</step>
     <step order="6">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa`.</step>
     <step order="7">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
@@ -103,8 +103,8 @@
   <ui-tests>
     <test name="Child dialog focus and Esc order">
       <url>{spa-dev-url}/?record=project:{project-id}</url>
-      <steps><step>As a Collaborate user, open a project; click Add to-do.</step><step>Tab repeatedly, then Shift+Tab repeatedly.</step><step>Press Esc, then Esc again.</step></steps>
-      <expected>Focus cycles inside the to-do dialog only; first Esc closes the dialog with focus back on Add to-do; second Esc closes the record.</expected>
+      <steps><step>As a Collaborate user, open a project; click Add to-do.</step><step>Tab repeatedly, then Shift+Tab repeatedly.</step><step>Type a title, press Esc; then Cancel; then Esc.</step></steps>
+      <expected>Focus cycles inside the to-do dialog only; Esc changes nothing (dialog and title stay); Cancel closes the dialog with focus back on Add to-do; Esc then closes the record.</expected>
     </test>
     <test name="Each action opens its dialog">
       <steps><step>On a project, use Upload, New message, Add to-do and Add event in turn; cancel each.</step><step>Check the console.</step></steps>
@@ -132,7 +132,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Upload, New message, Add to-do and Add event, when visible, each open a SprkModal preset rendered inside the parent record modal.</criterion>
-    <criterion testable="true">A test proves focus stays inside the child while it is open (Tab and Shift+Tab), Esc closes the child first and leaves the parent open, and a second Esc closes the parent.</criterion>
+    <criterion testable="true">A test proves focus stays inside the child while it is open (Tab and Shift+Tab), Esc leaves both the child and the parent open with typed input kept, Cancel closes the child and returns focus to the invoking button, and Esc then closes the parent (owner 2026-11-11, Path C; was "Esc closes the child first").</criterion>
     <criterion testable="true">Every touched dialog has Cancel in the left footer slot (ADR-050).</criterion>
     <criterion testable="true">Negative: a grep of `DocumentLibrary.tsx`, `EventsCalendar.tsx` and `SmartTodo.tsx` finds no `&lt;Dialog` from `@fluentui/react-components`.</criterion>
     <criterion testable="true">Submitting each dialog sends the same request as before and refreshes the same list; a failed submit keeps the dialog open with the existing error text.</criterion>

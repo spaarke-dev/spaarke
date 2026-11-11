@@ -8,7 +8,9 @@
  * header facts, tabs, the left / right sections and the toolbar actions. Nothing here branches on the entity name. Each
  * section id renders through `sections/` (`renderRecordSection`); a toolbar action whose flow has its own dialogs or
  * notices (Download, Delete request) is an action host in `actions/`, mounted in the record's content for every action
- * id the config lists, which offers or withdraws its action.
+ * id the config lists, which offers or withdraws its action. The four create actions (Upload, New message, Add to-do, Add
+ * event) are offered by the section that owns the list and its dialog (`offerAction`); that section renders the dialog (a
+ * `FormModal`) itself, so the dialog is a React descendant of this modal (FR-03, task 004).
  *
  * ENVELOPE (ADR-050). A thin config of the canonical `SprkModal`, size `lg`: its own header carries "‹ N of M ›", the
  * title, the window controls and ×; its footer carries Close only. No nested `RecordNavigationModalShell`.
@@ -31,8 +33,8 @@
  * `RECORD_DETAIL_ENTITIES` description: the same id-filtered module fetch, the same columns. The caller's `/me` context
  * (who they are, their project levels) is read once per opening, as R3 did, and handed to every section. Refresh re-runs
  * the record read, keeps the record on screen until the new answer arrives, and changes `refreshSignal`, on which every
- * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. The create actions (Upload, New message, Add
- * to-do, Add event) and Submit invoice stay hidden until tasks 004/006 wire them (hide, don't disable).
+ * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. Submit invoice stays hidden until task 006 wires it
+ * (hide, don't disable).
  *
  * ADR-021: Fluent UI v9 semantic tokens via `makeStyles` only; the modal inherits the host FluentProvider.
  */
@@ -376,8 +378,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   };
 
   // The modal's own actions: Refresh (hidden while an operation holds the view, so its result is never replaced) and Copy
-  // link. An action with a host is shown while its host offers it. The rest are hidden, not disabled, until tasks 004/006
-  // wire them.
+  // link. An action with a host, or one a section offers (Upload, New message, Add to-do, Add event: task 004), is shown
+  // while its owner offers it; the rest are hidden, not disabled. Task 006 changes who may be offered what.
   const handlers: Partial<Record<RecordToolbarActionId, () => void | Promise<void>>> = {
     ...(holdNavigation ? {} : { refresh: handleRefresh }),
     copyLink: handleCopyLink,
@@ -420,6 +422,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     full,
     refreshSignal: attempt + (sectionSignals[section] ?? 0),
     onBusyChange: busyCallbackFor(`section:${section}`),
+    // A section that owns a create dialog offers its toolbar action here, only if this record's toolbar lists it (FR-03).
+    offerAction: actionId => (config.toolbar.includes(actionId) ? hostActionCallbackFor(actionId) : undefined),
   });
 
   const hostContext = (actionId: RecordToolbarActionId, row: DetailRecord, rowId: string): RecordActionHostContext => ({

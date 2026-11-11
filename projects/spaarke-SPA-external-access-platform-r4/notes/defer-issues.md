@@ -11,6 +11,9 @@ marker with the issue number.
 | D-3 | 2026-11-11, task 002 review pass 2 (K4) | Documents-list `canCreate` ceiling is tested for service requests only | Test gap | #2688 |
 | D-4 | 2026-11-11, task 003 review (K2, owner question) | Copy link omits the `?customer=` key the grant email carries | UX (multi-customer users) | #2693 |
 | D-5 | 2026-11-11, task 005 review (K4, pre-existing) | external-spa test files are never type-checked | Tooling gap | #2699 |
+| D-6 | 2026-11-11, task 004 (pre-existing) | Create Event dialog collects an event type that is never sent | Defect (user-visible) | #2703 |
+| D-7 | 2026-11-11, task 004 (shared library gap) | SprkModal presets give no focus return for a controlled child dialog | Component gap (shared) | #2707 |
+| D-8 | 2026-11-11, task 004 review (K-class, pre-existing) | A child dialog opened within ~250 ms of its parent modal is left aria-hidden | Accessibility (shared) | #2704 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -100,3 +103,57 @@ more pre-existing errors that need a ratchet baseline.
 **Fix shape.** Add a `tsconfig.test.json` (extends `tsconfig.json`, includes `tests`) and a `typecheck:tests` script;
 run it in the SPA CI job with a baseline of the existing errors (new errors fail, known ones listed and worked down),
 per root `CLAUDE.md` §16 enforcement ladder.
+
+## D-6 — Create Event dialog collects an event type that is never sent
+
+**Issue: #2703**
+
+**Where.** `src/client/external-spa/src/components/EventsCalendar.tsx`, `CreateEventDialog` (the `eventType` state and
+its `Select`; identical at the commit before task 004), and the `POST .../events` body built in `handleSubmit`.
+
+**What.** The dialog shows an Event Type select (default `meeting`) but the request body carries only `sprk_name`,
+`sprk_duedate` and the regarding lookup. The choice is dropped.
+
+**Effect.** A user who picks "Deadline" (or any non-default type) gets an event with no type. Task 004 keeps the request
+payload unchanged by rule, so this is carried over, not introduced.
+
+**Why deferred.** Sending the type changes the request payload and needs the BFF create endpoint to accept it (it does
+not today): a contract change outside task 004.
+
+**Fix shape.** Either send the type and have `BuildEventCreatePayload` map it to the event-type column, or remove the
+select. Owner question: which.
+
+## D-7 - SprkModal presets give no focus return for a controlled child dialog
+
+**Issue: #2707**
+
+**Where.** `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/` (the presets); worked around locally in
+`src/client/external-spa/src/components/createAction.tsx` (`useChildDialog`, `restoreFocusTo`, `currentFocusTarget`).
+
+**What.** A controlled dialog opened from a toolbar button (not a `DialogTrigger`) returns focus to the page body when it
+closes, so the next Esc reaches no dialog and the Esc that should close the record does nothing. (Esc itself is settled:
+the owner chose Path C on 2026-11-11, so `FormModal` / `ConfirmModal` keep ignoring Esc per the modal standard and the
+earlier local Esc override was removed.)
+
+**Effect.** Without the local workaround a keyboard user who cancels a child loses their place. The workaround lives in
+external-spa only; any other host nesting a preset inside a modal from a plain button has the same gap.
+
+**Why deferred.** `src/client/shared/**` is out of scope for task 004 (no edits allowed).
+
+**Fix shape.** Make SprkModal restore focus to the opener on close (and, when the opener is gone, to the enclosing dialog),
+then delete the local `useChildDialog` / `restoreFocusTo` helpers.
+
+## D-8 - A child dialog opened within ~250 ms of its parent modal is left aria-hidden
+
+**Issue: #2704**
+
+**Where.** Shared SprkModal / Fluent tabster modalizer; seen with the record modal's child dialogs (task 004).
+
+**What.** When the parent modal opens, tabster's delayed pass (~250 ms) sets `aria-hidden` outside the active modal. A
+child opened before that pass finishes is hidden by it. Pre-existing (R3's recall dialog shows it too); tests wait 350 ms
+before opening a child and assert the child is not aria-hidden.
+
+**Effect.** Only a very fast keyboard/AT user who opens a child within ~250 ms of the record opening hits it.
+
+**Fix shape.** Confirm in a real browser (task 018 ui-tests); if reproducible, fix in the shared SprkModal with a test that
+an immediately opened child is not aria-hidden.

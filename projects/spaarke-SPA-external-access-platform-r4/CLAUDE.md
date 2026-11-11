@@ -67,6 +67,7 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 - 2026-11-09 — #2269 503: SPA auto-retries 3× (1 s/2 s/4 s), then a message with Retry.
 - 2026-11-09 — staged delivery: each phase ends with a dev deploy and E2E.
 - 2026-11-10 — **no task execution before the owner reviews the final plan and tasks.**
+- 2026-11-11 — **Esc in a child dialog follows the modal standard (§6.5 Path C):** with a form or confirm child open, Esc closes neither the child nor the record and keeps the draft; Cancel/× close the child. Spec FR-03 amended. No local Esc handlers on presets.
 
 ## 4. Coordination
 
@@ -77,7 +78,7 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 **ebilling-r1**
 - R4 consumes the 082c-2 deploy (`sprk_reviewdetail` readable) and the `/invoices/{id}/files` routes, which ship first and back to back with FR-13.
 - R4 reviews ebilling's master PR (082c-3 `08702087cb`, 114 `c4b8d43e8f`, task-130 batch).
-- **Merge order (agreed 2026-11-11):** ebilling's master PR #2689 merges first; R4 then merges master and resolves the five files task 002 shares with it (`ExternalProjectDataEndpoints.cs`, `ExternalDataService.cs`, `ExternalMessageEndpoints.cs`, `WorkforceRoleCeilingGate.cs`, `ExternalProjectDtos.cs`). When resolving `ExternalDataService.cs`, keep `Truncated = … || pastBound || chainDropped` (uac-r2 #2679 narrowing + ebilling's invoice-ancestor walk). Test helpers that call `ExecuteScopedFetchCoreAsync` must pass `readDocumentChains`, as the production route does; without it every row with a parent counts as undecidable. ebilling-r1 sends the merge SHA when it lands. R4's review of #2689 waits on the owner's go.
+- **Merge order (agreed 2026-11-11):** ebilling's master PR #2689 merges first; R4 then merges master and resolves the five files task 002 shares with it (`ExternalProjectDataEndpoints.cs`, `ExternalDataService.cs`, `ExternalMessageEndpoints.cs`, `WorkforceRoleCeilingGate.cs`, `ExternalProjectDtos.cs`). When resolving `ExternalDataService.cs`, keep `Truncated = … || pastBound || chainDropped` (uac-r2 #2679 narrowing + ebilling's invoice-ancestor walk). Test helpers that call `ExecuteScopedFetchCoreAsync` must pass `readDocumentChains`, as the production route does; without it every row with a parent counts as undecidable. **Done:** #2689 merged (2fc434c912); R4 merged master in `8ec9cff1aa`. A post-merge R4 look at ebilling's `src/client/external-spa/**` changes waits on the owner's go.
 - Task-130 (`work/ebilling-r1` `017a965312`, 2026-11-10): a stale grant answers 403, not 404, so `ProjectPage.tsx`'s 404 branch dies (folded in task 043). Lists may set `truncated` for invoice-linked chains; the SPA already shows `TruncatedListNotice`.
 
 **Other projects**
@@ -99,7 +100,8 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 
 ## 6. Gotchas — do not re-learn
 
-- 2026-11-11 — **RecordDetailModal.tsx is deleted (task 005).** Records open in components/record/RecordTemplateModal.tsx; a section is a file in ecord/sections/ registered in sections/index.ts, and a toolbar action with its own dialog is a host in ecord/actions/. Older POMLs, the spec and ebilling's task 134 still cite the deleted file: read those references as the matching section.
+- 2026-11-11 — **record create actions (task 004).** Upload / New message / Add to-do / Add event are offered to the toolbar by the lists themselves through a `CreateActionReporter` (`components/createAction.tsx`): inside the template the list renders no create button and keeps rendering its dialog (so the dialog is a React descendant of the record modal); outside it (ProjectPage) nothing changes. Child dialogs open with `useChildDialog` (focus returns to the opener, else to the record dialog). Tests that open a child must wait ~350 ms after the record opens (tabster's aria-hidden pass, D-8 #2704) and install `tests/jsdomLayout.ts`.
+- 2026-11-11 — **`RecordDetailModal.tsx` is deleted (task 005).** Records open in `components/record/RecordTemplateModal.tsx`; a section is a file in `record/sections/` registered in `sections/index.ts`, and a toolbar action with its own dialog is a host in `record/actions/`. Older POMLs, the spec and ebilling's task 134 still cite the deleted file: read those references as the matching section.
 - 2026-11-10 — **project-only create gates are in more places than the two ViewOnly hard-codes** (since task 005: `record/sections/TasksEventsSection.tsx` ~`:46-47`; `SmartTodo.tsx` ~`:629`): also `EventsCalendar.tsx` ~`:588-592`, `SmartTodo.tsx` ~`:655/:659`, and the SPA create clients (`web-api-client.ts` ~`:721-729`, `:796-798`). Task 006 removes all of them.
 - 2026-11-10 — **`/me` carries access levels for projects only**, and the to-do/event/message lists don't return `canCreate` for matters and WAs. Task 002 adds `canCreate` to those lists (modelled on the documents list), so FR-06 can hide actions correctly.
 - 2026-11-10 — **requesting a column that isn't on the allow-list fails the whole read** with 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED`; the column doesn't just come back blank. Keep `sprk_reviewdetail` out of every read until ebilling's 082c-2 is live (tasks 020/028).
