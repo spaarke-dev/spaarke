@@ -12,7 +12,7 @@
     form commands plus the HideCustomActions). This script packs it into the dedicated ribbon-only solution BillingExportRibbons (the shell
     infrastructure/dataverse/ribbon/BillingExportRibbons holds the sprk_billingexport root component with behavior 2 = no subcomponents; the
     RibbonDiff.xml is copied in at pack time, so there is one copy). The import REPLACES the table's RibbonDiffXml, which is why the diff is the
-    whole file, not only the hides. Scoped publish only: sprk_billingexport, never PublishAllXml (scripts/lib/Publish-SolutionComponents.ps1).
+    whole file, not only the hides. Scoped publish only: sprk_billingexport, never a tenant-wide publish (scripts/lib/Publish-SolutionComponents.ps1).
 
     MODES
       (default)  Dry run. Reads the live EFFECTIVE ribbon (RetrieveEntityRibbon) and the stored ribbon customization rows (read-only), checks every
@@ -175,7 +175,7 @@ if (-not $Apply) {
     # Read-only: the component-type check and the pending-collateral check the import would run, and the publish it would send.
     $info = Invoke-ImportPreflight -Context $context -ZipPath $zip -SolutionUniqueName $SolutionName -RerunCommand "pwsh scripts/ebilling/Deploy-EbillingBillingExportRibbon.ps1 -Apply"
     Write-Host "Zip: unique name $($info.UniqueName); root entities: $($info.RootEntities -join ', '); fully owned entities: $(@($info.FullEntities).Count); unknown parts: $(@($info.UnknownParts).Count)"
-    Write-Host "PublishXml ParameterXml that -Apply would send (scoped to this entity, never PublishAllXml):"
+    Write-Host "PublishXml ParameterXml that -Apply would send (scoped to this entity, never a tenant-wide publish):"
     Write-Host (New-PublishParameterXml -Entities $info.RootEntities)
     Write-Host "DRY RUN: would import $SolutionName and hide $($present.Count) control(s). Nothing was written. Re-run with -Apply." -ForegroundColor Cyan
     exit 0
