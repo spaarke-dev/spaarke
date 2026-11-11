@@ -141,11 +141,8 @@ public static class OntologyWriterCredentialFactory
             ExcludeBrokerCredential = true,
         };
 
-        // Obsolete since Azure.Identity 1.15 (the source no longer joins the chain, and the default is already
-        // true), set explicitly anyway so the exclusion is stated rather than inherited from a default.
-#pragma warning disable CS0618
-        options.ExcludeSharedTokenCacheCredential = true;
-#pragma warning restore CS0618
+        // ExcludeSharedTokenCacheCredential is not set: it is [Obsolete] since Azure.Identity 1.15 (the source no
+        // longer joins the chain) and already defaults to true. The reflection test still asserts it is true.
 
         return options;
     }
