@@ -458,9 +458,11 @@ and h touch the BFF and carry the §10 publish-size delta.
 
 ---
 
-# Appendix A: decision record (v1, 2026-10-21 to 2026-10-28, verbatim)
+# Appendix A: decision record (v1, 2026-10-21 to 2026-10-28)
 
-The sections below were written against the v1 recommendation and master `1cc7b39ff3`. Where they refer to "§3" or "the
+The sections below were written against the v1 recommendation and master `1cc7b39ff3`. They are kept as written, except
+that statements of specific identities' role holdings and business-unit placement were made generic on 2026-11-11
+(public-repo rule); the decisions are unchanged. Where they refer to "§3" or "the
 recommendation above", they mean v1 (in git history at `656e00f66d`). The v2 body supersedes v1 where they differ.
 
 ## A.1 Owner decisions (rounds 114–115, 2026-10-21) — these supersede the recommendation above where they differ
@@ -500,11 +502,11 @@ Raw output: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191a/` (not in the repo); r
 
 - **Hierarchy security: off.** `ishierarchicalsecuritymodelenabled = false`; 0 `hierarchysecurityconfigurations`. Not a leak path on dev (closes the §7 open item for dev; every other environment must be read the same way).
 - **Matrix business units: on.** `EnableOwnershipAcrossBusinessUnits = true`. `DoNotRemoveRolesOnChangeBusinessUnit` and `AlwaysMoveRecordToOwnerBusinessUnit` are unset, so the defaults apply: a business-unit change **removes the user's roles** and **moves the records they own** (Learn, *create-edit-business-units*). S2 confirms this live.
-- **Today's leak, measured.** The 2 flagged users (1 enabled) are guests in the root business unit. They get Spaarke Basic User, Office Add In User and Console User through the root default team (inherited roles), and Spaarke Basic User directly. Spaarke Basic User reads document, event, matter and to-do at **Deep from the root business unit, which is org-wide**. Office Add In User grants Write, Assign and Share on matter at Deep. Neither user owns any row, and no "External Collaborators" business unit or team exists.
+- **The leak path, confirmed.** Flagged users can hold roles whose depth reaches internal rows through their business unit, directly or through the unit's default team (the role-depth and default-team paths, §1.2). Deep anchored at a high business unit reaches every unit below it. No "External Collaborators" business unit or team exists yet.
 - **Design change (§3.2):** `prvReadUser` and `prvWriteUser` are not Basic-capable (`canbebasic = false`).
   - The external role holds `prvReadUser` at **Local**: it sees the users of its own business unit only. Lookup display names still render from the parent row's formatted values, and S1 verifies this.
   - The role holds **no** `prvWriteUser`. The platform Basic User role doesn't hold it either, so a flagged user can't edit their own systemuser row or clear the flag.
-- **S3 baseline:** 5 share rows for the flagged users (self-shares plus 1 activity). The org has 1,980 share rows in total. Table sizes: document 600, communication 319, event 83, to-do 66, matter 62, project 23. Mirroring every non-secure, non-Restricted row to one team is roughly 1,100 share rows on dev.
+- **S3 baseline:** the org has 1,980 share rows in total. Table sizes: document 600, communication 319, event 83, to-do 66, matter 62, project 23. Mirroring every non-secure, non-Restricted row to one team is roughly 1,100 share rows on dev.
 - **S4 (docs only):** SPE item sharing with a non-member is documented (`driveItem invite` / permission create; "sharing an item doesn't grant access to the container"). App-only invites work for existing guests (`sendInvitation:false`). Office web edit is implied but not stated. Two things are open live: whether the restrictive sharing model blocks app-only invites, and the tenant's guest-sharing policy.
 - **The writes that remain** (S1 setup and negatives, S2 move, S3 about 1,000 shares, S4 invite) are listed with undo steps in the researcher's report. They need the owner's in-session approval (POA constraint).
 
@@ -512,11 +514,11 @@ Raw output: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191a/` (not in the repo); r
 
 ## A.4 T191a live spike results (dev, 2026-10-22, round 121; all undone)
 
-Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (not in the repo). Test user `e44317a0…`. Teardown verified against the snapshot: business unit, roles (11f93c04 only), teams (root default only), 3 share rows, owned rows. The spike business unit, team and role are deleted (404).
+Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (not in the repo). A test flagged user played the external user. Teardown restored it to its pre-spike snapshot (business unit, roles, teams, shares, owned rows), verified against the snapshot. The spike business unit, team and role are deleted (404).
 
 | Spike | Verdict | Facts |
 |---|---|---|
-| S2: business-unit move under matrix | **Go** | The move (PATCH `businessunitid`) strips the direct role and swaps the root default team for the new business unit's default team. Rows the user owns do **not** move (2 mailboxes, a queue, a notification row) (F4). |
+| S2: business-unit move under matrix | **Go** | The move (PATCH `businessunitid`) strips the direct role and swaps the root default team for the new business unit's default team. Rows the user owns do **not** move; system rows such as mailboxes, queues and notifications stay where they are (F4). |
 | S1: role and shares | **Go, with F1** | **Role:** 30 privileges at Basic (Read, Write, Append, AppendTo and Create on matter, project, document, communication, event, to-do), plus `prvReadUser` at Local, plus `prvRead/WriteUserSettings` at Basic. The platform adds 9 Global system-table reads itself.<br>**Reads:** exactly the 8 shared rows. Unshared rows and users outside the business unit get 403. Lookup names render.<br>**Blocked writes:** re-linking or unlinking `sprk_relatedcommunication` / `sprk_parentdocument` (field security from task 188, or AppendTo); re-filing to an unshared matter; writing an unshared row; clearing its own `sprk_isexternal` (no `prvWriteUser`).<br>**Not blocked:** lowering `sprk_accesspermission` on a shared row it can write (**F1**).<br>**Creates:** document, to-do and event under the shared matter: 204. |
 | S3: about 1,000 shares | **Go** | Grant: 987 rows in 78 s (12.7 rows/s, batches of 100, no 429). Revoke: 76.6 s. The user saw exactly the granted set, then nothing. **F2:** `RevokeAccess` leaves the share row at mask 0, so the share-row count rose 1,980 → 2,975 and can't measure the mirror. |
 | S4: SPE item invite | **Blocked** | The az CLI Graph token gets 403 on the container and the item. It needs the BFF managed identity, which only works on Azure-hosted compute (for example the App Service SSH console), or an interactive delegated sign-in through an app registered on the container type. |
@@ -529,7 +531,7 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
 ## A.5 ebilling 088 input (ontology review, 2026-10-22)
 
 - **Constraint for 191 (and ebilling 086).** The External Collaborator role gets **no** privilege on `sprk_storedfile`.
-- **Why it matters.** One flagged-external user on dev sits in the "Spaarke" BU, which is in 088's reader-profile BU set. That gives column read only, with no table privilege, the same exposure that already exists on the secured `sprk_document` columns.
+- **Why it matters.** A flagged-external user placed in a business unit that is in 088's reader-profile BU set gets column read only, with no table privilege: the same exposure that already exists on the secured `sprk_document` columns. The External Collaborators unit must stay out of that set.
 - **What 191 checks.** It keeps the table privilege at none, and its role test (T191) asserts that.
 
 ## A.6 D-185 input (owner via ontology and ebilling, 2026-10-23)
@@ -542,7 +544,7 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
 - **Depth correction (2026-10-23, after ontology's #1911 review K1).** The input above originally said "org depth, O-6" for all three tables. That is right for `sprk_ruleset`, which has no matter lookup, but wrong for `sprk_policy` and `sprk_policyversion`.
   - Under round 102 item 4 (D-123), a matter-scoped rule and its versions are re-owned into the secure BU when the matter turns Secure, and Global Read always reaches that BU.
   - UAC's recommendation is therefore Deep on those two tables. It is assigned only to users whose BU is not an ancestor of the secure BU.
-  - ebilling takes this to the owner. Nobody holds the role on dev (read-only check, 2026-10-23).
+  - ebilling takes this to the owner before the role is assigned.
 - **UAC impact.** No UAC surface reads those tables as the caller. `SecureChildLineage` and `RecordOwnershipResolver` read them app-only.
 
 ## A.7 Inputs from the ebilling 086 review (2026-10-28): `sprk_storedfile`
