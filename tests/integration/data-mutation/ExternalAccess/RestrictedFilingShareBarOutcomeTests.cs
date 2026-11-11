@@ -126,6 +126,20 @@ public class RestrictedFilingShareBarOutcomeTests
     private static CancellationToken TokenFor(FaultKind kind) =>
         kind == FaultKind.CallerCancelled ? new CancellationToken(canceled: true) : CancellationToken.None;
 
+    /// <summary>
+    /// The caller's cancellation ENDS the pass where it surfaced: it is not logged as a fault, and no later step (the user read,
+    /// a revoke) runs. A catch that swallowed it would log an error and carry on — and a later step that also honours the token
+    /// would hide that, so the later steps are asserted not to have run.
+    /// </summary>
+    /// <param name="usersReadBefore">The user read runs before the step that was cancelled (or is that step).</param>
+    private void CallerCancellationEndedThePass(bool usersReadBefore = false)
+    {
+        _log.At(LogLevel.Error).Should().BeEmpty("the caller's cancellation is not a fault");
+        RevokeCount.Should().Be(0);
+        if (!usersReadBefore)
+            _users.Queries.Should().BeEmpty("the pass stopped before the user read");
+    }
+
     // ════════════════════════ AfterFilingAsync: whether the target is Restricted ════════════════════════
 
     [Fact]
@@ -240,6 +254,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass();
             return;
         }
 
@@ -289,6 +304,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass(usersReadBefore: true);
             return;
         }
 
@@ -423,6 +439,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass(usersReadBefore: true);
             return;
         }
 
@@ -463,6 +480,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass();
             return;
         }
 
@@ -563,6 +581,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass();
             return;
         }
 
@@ -594,6 +613,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass();
             return;
         }
 
@@ -630,6 +650,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass(usersReadBefore: true);
             return;
         }
 
@@ -684,6 +705,7 @@ public class RestrictedFilingShareBarOutcomeTests
         if (kind == FaultKind.CallerCancelled)
         {
             await act.Should().ThrowAsync<OperationCanceledException>();
+            CallerCancellationEndedThePass(usersReadBefore: true);
             return;
         }
 
