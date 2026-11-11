@@ -1,10 +1,20 @@
 # reuse-governance-tightening-r1 — Design
 
-> **Status**: Design draft for owner review. Do **not** run `/design-to-spec` or `/project-pipeline` until the owner has answered the Open Questions (§11).
-> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-16 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds. Then OQ-1 to OQ-7 and OQ-9 decided; the reuse scan moved to `/design-to-spec` (OQ-6); OQ-8 decided (alert at ≥ 100 tokens and ≥ 10 lines across areas). All open questions are now decided.
+> **Status**: Design complete; all open questions are decided and the ROI review trims are applied. Awaiting the owner's final approval before `/design-to-spec`.
+> **Revised**: 2026-11-10 — added workstream 5, "Quality tooling quick wins" (§7), at the owner's request: the low-priority review items that are not large-effort tickets. Revised again the same day with owner answers: OQ-10 to OQ-16 decided; 5(e) rewritten as a full superseded-API process; 5(f) now explains how the language server would be used and fixes the go/no-go thresholds. Then OQ-1 to OQ-7 and OQ-9 decided; the reuse scan moved to `/design-to-spec` (OQ-6); OQ-8 decided (alert at ≥ 100 tokens and ≥ 10 lines across areas). All open questions are now decided. Then trimmed by an independent Fable ROI and complexity review (owner-approved, same day). Each cut is recorded with its reason in §10.7. In summary: no new ArchTests, baselines or scheduled routines; 5(b) deferred; 5(e) reduced to re-arming `CS0618`; item 4 executes at most three packages; and the reuse scan is gated on its dry-run.
 > **Created**: 2026-11-10 (recreated; the 2026-09-02 draft was lost: it was in no worktree and never committed).
 > **Sources**: the owner's 2026-11-10 evaluation of an external "Claude Code Quality Recommendations" document (items B1, B2, B4, B7, B8); the Sept 2026 owner decision recorded in auto-memory `project_reuse-governance-tightening-r1.md` (the only surviving summary of the lost draft); the current repo at `d64a45071b`.
-> **Hot-path surfaces**: skill-directives (Y — `task-create`, `project-pipeline`, `.claude/agents/adversarial-reviewer.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `[Obsolete]` attributes and `Directory.Build.props`; no new surface), SpaarkeAi (N), root CLAUDE.md (Y — one pointer line in §11, OQ-7). **Portfolio**: Epic #427, the code-quality program (OQ-9).
+> **Hot-path surfaces**: skill-directives (Y — `design-to-spec`, `task-create`, `project-pipeline`, `code-review`, `.claude/agents/adversarial-reviewer.md`, `.claude/agents/researcher.md`), ci-workflows (Y — the sweep job and the knowledge-refresh watchdog), BFF (Y — item 5(e) edits `Directory.Build.props` and may migrate obsolete-API callers; no new surface), SpaarkeAi (Y — item 4's three executed actions change `src/solutions/SpaarkeAi`, which consumes `@spaarke/ai-context`, `@spaarke/document-operations` and `@spaarke/legal-workspace`; corrected at `/design-to-spec`, 2026-11-10), root CLAUDE.md (Y — one pointer line in §11, OQ-7). **Portfolio**: Epic #427, the code-quality program (OQ-9).
+
+```xml
+<hot-path-declaration>
+  <bff>Y</bff>
+  <spaarkeai>Y</spaarkeai>
+  <ci-workflows>Y</ci-workflows>
+  <skill-directives>Y</skill-directives>
+  <root-claude-md>Y</root-claude-md>
+</hot-path-declaration>
+```
 
 ---
 
@@ -24,7 +34,7 @@ What is still weak is narrower than the external review suggested:
 | **G3 — nobody observes duplication after merge.** There is no signal when two projects land the same capability in parallel worktrees (13 of 17 worktrees touched the BFF in one count). | Nothing today |
 | **G4 — the 9 grandfathered packages have no decision path.** The census stops new ones; it does not resolve the existing ones. | ADR-012 census |
 
-This project closes G1–G4 with the lightest mechanism that works for each. It deliberately does **not** add a blocking duplication gate (§10). A fifth workstream (§7) bundles six small quality-tooling items from the same review that the owner asked to include because none is a large-effort ticket.
+This project closes G1–G4 with the lightest mechanism that works for each. It deliberately does **not** add a blocking duplication gate (§10). A fifth workstream (§7) bundles small quality-tooling items from the same review that the owner asked to include because none is a large-effort ticket. Five of the six stay in r1; one is deferred (§7.2).
 
 ## 2. Goals and non-goals
 
@@ -33,14 +43,14 @@ This project closes G1–G4 with the lightest mechanism that works for each. It 
 2. A project's design is checked for capability duplication once, before tasks are generated, and the result is a file that later steps cite.
 3. Duplication that lands anyway becomes visible within a week, as one alert, without blocking anyone's build.
 4. Each grandfathered shared package gets an owner decision: sanction, consolidate or retire.
-5. Six small tooling items (§7) land with the same posture: census-and-ratchet where a rule can be checked, a measured trial where the answer is unknown.
+5. Five small tooling items (§7) land with the same posture: use the existing mechanism where one does the job, and run a measured trial where the answer is unknown.
 
 **Non-goals**
 - No change to the §11 three questions or to the `<justification>` schema.
 - No blocking gate on duplication counts (§10.2).
 - No generated or exhaustive capability catalogue (§10.4).
 - No executing the consolidations themselves inside r1 beyond the ones the owner marks cheap (OQ-5); larger consolidations are filed as their own projects.
-- No new BFF surface. Item 5(e) does touch BFF and shared-library source: it changes the existing `[Obsolete]` attributes, marks backfilled superseded members, and edits `Directory.Build.props`. It adds no endpoint, service, registration or package, so the publish-size delta should be zero; the task still measures it, per root CLAUDE.md §10, because it edits files under `Sprk.Bff.Api`.
+- No new BFF surface. Item 5(e) edits `Directory.Build.props` and may touch BFF source: it migrates callers of obsolete members and, where needed, adds a `DiagnosticId` to an existing `[Obsolete]`. It adds no endpoint, service, registration or package, so the publish-size delta should be zero; the task still measures it, per root CLAUDE.md §10, because it edits files under `Sprk.Bff.Api`.
 
 ## 3. Item 1 — Capability index (B1)
 
@@ -99,6 +109,7 @@ Row 30 is deliberate: where the index cannot name one canonical component, the r
 
 ### 3.3 Wiring
 
+- Every canonical-component path and every ADR in the index is written as a plain backticked repo path, e.g. `` `.claude/adr/ADR-028-spaarke-auth-architecture.md` ``. A package is named by its folder (`` `src/client/shared/...` ``), not only by its `@spaarke/*` name, and a symbol goes in its own cell, not on the path. This puts the file under the existing path checker (§3.5).
 - `task-create` Step 3.5.6: `<existing>` **consults the capability index first**, then Greps. The answer cites either `CAPABILITY-INDEX row N` plus file:line, or `CAPABILITY-INDEX: no row` plus the Grep command shown (today's rule).
 - `code-review` Step 6.6 and the adversarial reviewer (item 3) use the same index.
 - Root `CLAUDE.md` §11 gets one line pointing at the index ("`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`"). **Decided (OQ-7).** This makes root CLAUDE.md a hot-path touch; the edit follows the maintainer notes in that file's header comment (root §18).
@@ -112,8 +123,8 @@ A generated manifest was rejected earlier and stays rejected (§10.4): the BFF a
 
 | Concern | Rung | Mechanism |
 |---|---|---|
-| Rows point at paths that no longer exist | **ArchTest / source-scan guard** | New `tests/Spaarke.ArchTests/CapabilityIndexTests.cs`: parse the table; every canonical-component path exists on disk; every ADR cited exists in `.claude/adr/`. Must-fire control: a seeded row with a missing path fails. Must-not-fire control: the real file passes. Runs in the `Stop` hook and CI with the other ArchTests. |
-| `<existing>` ignores the index | **Lint** (script) | `scripts/Validate-TaskPoml.ps1`: when a task has a `role="new"` file, `<existing>` must contain `CAPABILITY-INDEX row` or `CAPABILITY-INDEX: no row`. **Warning only** (OQ-3). A later change can promote it to an error once warnings show it is followed. |
+| Rows point at paths that no longer exist | **Existing source-scan guard** (no new test) | `scripts/quality/Test-InstructionPaths.ps1` already checks every backticked repo path in `.claude/patterns/*.md` and `.claude/adr/*.md` (line 41). It runs ratcheted in CI (`ci-tier2-advisory.yml`) and in `doc-drift-audit`. Writing the index's paths and ADRs as backticked repo paths puts the index under that check. The task proves it once: a seeded dead path in a local copy is reported. |
+| `<existing>` ignores the index | **Prose**, checked by `code-review` 6.6 | Not linted. The existing `<justification>` check in `Validate-TaskPoml.ps1` is already warning-only, so a second warning nobody reads adds nothing (ROI review 2026-11-10; revises OQ-3). |
 | Whether the row chosen is the *right* one | **Prose** | Judgment; reason it cannot be mechanised: choosing the canonical component for a concept is semantic. Checked by `code-review` 6.6. |
 
 ## 4. Item 2 — Reuse scan, first in `/design-to-spec`, confirmed in `project-pipeline` Step 2 (B2, B4)
@@ -122,10 +133,12 @@ A generated manifest was rejected earlier and stays rejected (§10.4): the BFF a
 
 The scan runs **once, in `/design-to-spec` Step 3**. There it replaces the "quick Grep/Glob for an existing component" exception that step already makes for the spec's §11 table. That is the cheapest point to catch a duplicating design, before the spec is written around it.
 - **Two or more candidates** become a question in design-to-spec's review step (Step 5), recorded under the spec's "Owner Clarifications".
-- **`project-pipeline` Step 2 item 5** then *confirms* the scan instead of repeating it. It checks that `notes/reuse-scan.md` exists, and it scans only capabilities that the spec added or renamed after the scan ran.
-- **A project that arrives with a hand-written `spec.md`** and no scan gets the full scan in Step 2.
+- **`project-pipeline` Step 2 item 5** runs the full scan **only when `notes/reuse-scan.md` does not exist** (for example, a project that arrives with a hand-written `spec.md`). Otherwise it cites the file. There is no partial re-scan of changed capabilities (ROI review 2026-11-10).
+- **design-to-spec's own contract changes.** Its SKILL.md says it "MUST NOT do comprehensive resource discovery" and that Step 3 loads ADR constraints only (lines 40 and 162). The task rewrites both lines: the one `code-mapper` scan is the single allowed discovery pass, and everything else stays with project-pipeline.
 
 The cost stays at one scan per project.
+
+**Go/no-go before wiring (ROI review).** The dry-run (§9) runs first, against two closed projects with known duplication. If a `low`-effort scan misses both, the skill edits in this item are not made. The result goes to the owner with the token cost, per OQ-2.
 
 ### 4.1 What
 
@@ -159,8 +172,8 @@ A second consequence: both skills run their discovery in Plan Mode (read-only). 
 
 | Concern | Rung | Mechanism |
 |---|---|---|
-| The scan is skipped | **Script lint** at the pipeline's existing Completeness Lint gate | `project-pipeline` Step 3 does not start if `notes/reuse-scan.md` is absent for a project whose spec introduces new surface (the §11 table in the spec is non-empty). Checked by the same lint pass that already gates Step 3, so a scan skipped in design-to-spec is still caught before tasks exist. |
-| `<existing>` does not cite the scan | **Lint** | `Validate-TaskPoml.ps1` accepts `reuse-scan.md` as a valid `<existing>` citation (alongside the index row). |
+| The scan is skipped | **Built-in fallback** (no lint) | A missing `notes/reuse-scan.md` makes project-pipeline Step 2 run the full scan, so a project cannot reach Step 3 without one. A separate absence lint would never fire. |
+| `<existing>` does not cite the scan | **Prose**, checked by `code-review` 6.6 | Same reasoning as §3.5: no new lint rule. |
 | The ≥ 2-candidate human decision | **Prose + gate** | A judgment call by definition; the gate is that the pipeline stops, not that a tool decides. |
 
 ## 5. Item 3 — Weekly duplication sweep (B7, B8)
@@ -171,9 +184,9 @@ A second consequence: both skills run their discovery in Plan Mode (read-only). 
 
 1. **Syntactic sweep**: `jscpd` (exact version pinned, run via `npx`, no `package.json` change) over `src/**` for TS/TSX and C#, `--exitCode 0`. It writes a JSON + Markdown report as a workflow artifact.
 2. **Exclusions**: `**/node_modules/**`, build output, generated code, `**/*.test.*`, `tests/**`, and **`.claude/worktrees/agent-*/**`**. Agent worktrees hold full source-tree copies and would report every file as duplicated. In CI that folder is absent (`.claude/worktrees/` is gitignored), but the exclusion lives in the shared `.jscpd.json` so that a local run gives the same answer as CI.
-3. **Baseline**: a committed `scripts/quality/duplication-baseline.json` lists the known clone clusters (fingerprinted by file pair + hash, not by line number). This is a ratchet baseline in the §16 sense, but **observing, not gating**.
-4. **One alert**: the sweep calls `.github/actions/quality-alert` with check `weekly/duplication-sweep`. Status `failing` when the run finds clone clusters **not in the baseline** above a size floor (≥ 100 tokens **and** ≥ 10 lines, in ≥ 2 files in different top-level areas — decided OQ-8; the full report keeps jscpd's 50 / 5 defaults for browsing); status `ok` otherwise, which closes the alert. A permanently open alert would be noise in the `SessionStart` quality banner, so "new since baseline" — not "any duplication" — is the trigger. The summary names each new cluster with its two paths and the capability-index row it most likely belongs to, if any.
-5. **Reviewer item**: `.claude/agents/adversarial-reviewer.md` gains one check: *"New surface that duplicates a capability in `.claude/patterns/CAPABILITY-INDEX.md` (same concept under another name, or a new package/service where the row says extend). Class F4 when it adds a second implementation of an indexed capability; K-class when it is a judgment call."* This is the capability-level half that jscpd cannot see.
+3. **No baseline file (ROI review 2026-11-10).** A committed baseline of known clusters, fingerprinted by hash, would raise a false "new" cluster every time someone edits a file that is already cloned. Instead, the trigger is stateless: a cluster is **new** when at least one of its files changed in the last 7 days (`git log --since=7.days --name-only`). "Changed", not only "added", so code pasted into an existing file still shows up.
+4. **One alert**: the sweep calls `.github/actions/quality-alert` with check `weekly/duplication-sweep`. Status `failing` when the run finds a **new** cluster above a size floor (≥ 100 tokens **and** ≥ 10 lines, in ≥ 2 files in different top-level areas — decided OQ-8; the full report keeps jscpd's 50 / 5 defaults for browsing). Otherwise the status is `ok`, which closes the alert. A permanently open alert would be noise in the `SessionStart` quality banner, so "new this week", not "any duplication", is the trigger. The summary names each new cluster with its two paths and the capability-index row it most likely belongs to, if any.
+5. **Reviewer item**: `.claude/agents/adversarial-reviewer.md` gains one check: *"New surface that duplicates a capability in `.claude/patterns/CAPABILITY-INDEX.md` (same concept under another name, or a new package/service where the row says extend). Class F2 ('duplicates an existing mechanism', task-execute's class table) when it adds a second implementation of an indexed capability; K-class when it is a judgment call."* This is the capability-level half that jscpd cannot see.
 
 Where it runs: **extend `nightly-health.yml`** with a weekly-cadence job rather than adding a workflow (root §11 "extension"), reusing its quality-alert matrix plumbing. **Decided (OQ-4).**
 
@@ -183,22 +196,22 @@ Where it runs: **extend `nightly-health.yml`** with a weekly-cadence job rather 
 |---|---|---|
 | Syntactic clones landing | **CI observation** (deliberately below the "lint rule" rung) | Weekly job, exit 0, one quality-alert issue. Not a gate: §10.2. |
 | Capability-level duplication in a change set | **Prose** in the reviewer definition | Reason it cannot be mechanised: "same capability under a different name" is semantic; jscpd and ArchTests see only shape. |
-| Phantom duplication from agent worktrees | **Config** | Exclusion in `.jscpd.json`, with a must-not-fire control: the sweep's own test run on a fixture tree containing a `.claude/worktrees/agent-x/` copy reports zero clusters from it. |
+| Phantom duplication from agent worktrees | **Config** | Exclusion in `.jscpd.json`. No fixture control: `.claude/worktrees/` is gitignored and absent in CI; the exclusion exists only so a local run agrees with CI. |
 
 ## 6. Item 4 — Review backlog for the 9 grandfathered packages
 
 ### 6.1 What
 
-For each package between the `shared-package-census` markers in `.claude/adr/ADR-012-shared-components.md` with status *Grandfathered — under review*, produce a one-page decision record in `projects/reuse-governance-tightening-r1/notes/package-reviews/{package}.md` with the evidence for ADR-012's three tests (distinct contract, quarantine-worthy dependency, cross-surface reuse), its consumer count, and one recommendation:
+For each package between the `shared-package-census` markers in `.claude/adr/ADR-012-shared-components.md` with status *Grandfathered — under review*, write a decision record as one section of a single file, `projects/reuse-governance-tightening-r1/notes/package-reviews.md` (nine sections, not nine files). Each section gives the evidence for ADR-012's three tests (distinct contract, quarantine-worthy dependency, cross-surface reuse), its consumer count, and one recommendation:
 
 - **Sanction** → an ADR-012 amendment (Path B, §6.5) that names the package and its contract outside the census table; flip the row and the `SharedPackageCensusTests` entry to Sanctioned with the ADR citation (the test checks both).
-- **Consolidate** → into a named sanctioned package; a migration plan (consumers' `package.json`, import paths, PCF deep-import paths, build config). Cheap ones execute in r1; others are filed as their own projects.
+- **Consolidate** → into a named sanctioned package; a migration plan (consumers' `package.json`, import paths, PCF deep-import paths, build config). Only those in r1's execution scope (below) run in r1; the others are filed as their own projects.
 - **Retire** → no remaining reason to exist (1 consumer, or a pure re-export); fold into its consumer.
 
 The owner decides each one. Evidence gathering is `code-mapper` work (sonnet, low); the recommendation is planning-tier judgment.
 
-**Scope rule — decided (OQ-5), with a guard against burying issues.** r1 decides all 9 packages and carries out consolidations only for packages with three or fewer consumers; the rest are filed. That threshold limits **effort only, never significance**:
-- Each decision record has a **Findings** section, graded by severity. Examples: two packages implement the same capability with different behaviour (a user could see different results on two surfaces), a duplicate that has already drifted, or a shared package that breaks an ADR-012 MUST.
+**Scope rule — decided (OQ-5), narrowed by the ROI review (2026-11-10), with a guard against burying issues.** r1 decides all 9 packages. It carries out at most three of the resulting actions: the two single-consumer packages (`ai-context`, `legal-workspace`) and `document-operations`. Every other consolidation or retirement is filed as its own project. The original "≤ 3 consumers" rule would have covered 6 of the 9 by `package.json` count (`ai-context` 1, `legal-workspace` 1, `compose-components` 2, `document-operations` 3, `ai-outputs` 3, `daily-briefing-components` 3). That is up to five consolidations, not a cheap tail. The task re-verifies these counts before acting. The limit is on **effort only, never significance**:
+- Each decision record has a **Findings** subsection, graded by severity. Examples: two packages implement the same capability with different behaviour (a user could see different results on two surfaces), a duplicate that has already drifted, or a shared package that breaks an ADR-012 MUST.
 - Any finding that is a defect on a real path is **fixed in this project or reported to the owner by name** in the project report and the PR, per root CLAUDE.md §8.5 ("every defect found is fixed in scope, or filed and reported"). Filing it is not enough; the owner sees it.
 - A filed consolidation's GitHub issue carries the decision record's findings and severity, so the backlog says *why* it matters, not just "consolidate X".
 
@@ -224,7 +237,12 @@ Already at the **ArchTest** rung: `SharedPackageCensusTests` treats the grandfat
 
 ## 7. Item 5 — Quality tooling quick wins
 
-Added at the owner's request: the low-priority items from the 2026-11-10 review that are not large-effort tickets. Sizes are the owner's (S / M). Each sub-item is independent of items 1–4 and of the others, and can run in parallel.
+Added at the owner's request: the low-priority items from the 2026-11-10 review that are not large-effort tickets. Sizes are the owner's (S / M). Each sub-item is independent of items 1–4 and of the others, and can run in parallel. **ROI review (2026-11-10):**
+- (b) is deferred until item 4 lands.
+- (c) keeps only its watchdog.
+- (e) shrinks to re-arming `CS0618`.
+- (f) cuts its gates to three and is time-boxed.
+- Each sub-item ships as its own PR, so the reuse work's review is not mixed with unrelated tooling.
 
 ### 7.1 (a) Microsoft Learn MCP server for research — S
 
@@ -243,7 +261,14 @@ If the owner later wants hard scoping, the place for it is the researcher's topi
 
 **Enforcement rung: prose.** "Prefer Learn over web search" is a choice about research order, so a check cannot enforce it. The tool-list half is enforced by the platform: without the entry, the call fails.
 
-### 7.2 (b) TypeScript strictness ratchet — M
+### 7.2 (b) TypeScript strictness ratchet — DEFERRED (not in r1)
+
+**Deferred by the ROI review (2026-11-10); revises OQ-10.** Three reasons:
+- It does not address G1–G4.
+- Item 4 may merge or retire up to 9 of the 15 shared packages it would convert, so doing it first spends effort on packages that may disappear.
+- Its census scope is unsettled: the review counted 118 `tsconfig*.json` under `src/`, against the 76 below.
+
+It runs after item 4, on the packages that remain, as a follow-up project (§12). The design below is kept for that project.
 
 **What.** In the owner's 2026-11-10 count, 49 of 76 tsconfigs are strict and 4 configs use type-aware ESLint.
 1. Add a census ArchTest, `TsconfigStrictnessCensusTests.cs`. It enumerates every `tsconfig*.json` under `src/` (excluding `node_modules`, build output and `.claude/worktrees/**`). It resolves each `extends` chain, parsing the files as JSONC because tsconfig allows comments, and lists those where `strict` is not true. The list is a **ratchet baseline**: a new non-strict tsconfig fails, and a file that becomes strict must be removed from the baseline, so the list can only shrink. Each baseline entry carries a one-line reason, per the `tests/CLAUDE.md` census rules.
@@ -252,60 +277,42 @@ If the owner later wants hard scoping, the place for it is the researcher's topi
 
 **Enforcement rung: ArchTest + ratchet baseline.** It has must-fire controls (a seeded non-strict tsconfig, and a strict file that is still listed in the baseline) and a must-not-fire control (a tsconfig that inherits `strict` through `extends`).
 
-### 7.3 (c) Scheduled draft of the monthly `knowledge/` refresh — S–M
+### 7.3 (c) Staleness watchdog for the `knowledge/` refresh — S
 
-**What.** `knowledge/REFRESH-PROCEDURE.md` prescribes a monthly refresh. `knowledge/REFRESH-LOG.md` shows that no full monthly refresh has run since the initial curation on 2026-05-14; only interim updates have (2026-07-14 and 2026-08-26). A scheduled routine runs Steps 1–5 of the procedure (re-clone, diff, update the topics, check the 6 skills) and opens a **draft** PR with the log entry. The owner reviews and merges it; the routine never merges. Sign-off stays with a human, as the procedure requires.
+**What.** `knowledge/REFRESH-PROCEDURE.md` prescribes a monthly refresh. `knowledge/REFRESH-LOG.md` has never recorded a full monthly refresh after the initial curation on 2026-05-14. Topics have instead been refreshed on demand, by projects that needed them (2026-07-14, 2026-08-26). A small job in `nightly-health.yml` reads the newest dated `## YYYY-MM-DD` heading in `REFRESH-LOG.md`, of any kind. It reports `quality-alert` check `monthly/knowledge-refresh` as failing when that date is more than 35 days old. It uses the existing alert plumbing. The alert appears in the `SessionStart` quality banner, and whoever acts on it runs the procedure by hand. On the day it lands it fires, because the newest entry is 2026-08-26; that is intended. `REFRESH-PROCEDURE.md` gets one line naming the watchdog.
 
-**Where it runs — decided (OQ-12): a Claude Code scheduled cloud routine.** It runs on Anthropic's cloud on a monthly cron. **No server, timer or refresh script of ours is needed** (owner Q2): the routine's schedule is the timer, and `REFRESH-PROCEDURE.md` is the script it follows. What the setup needs:
-- a cloud environment connected to the `spaarke-dev/spaarke` GitHub repository, so the routine can clone it, push a branch and open a draft PR;
-- the routine itself, created with `/schedule`, with its model and effort stated (the procedure's diff-and-update steps are judgment work: sonnet at `high`);
-- a line in `REFRESH-PROCEDURE.md` naming the routine and its schedule, because the routine is defined outside the repo and would otherwise be invisible to anyone reading the procedure.
+**Cloud routine dropped (ROI review 2026-11-10; revises OQ-12, makes OQ-16 moot).** A monthly scheduled routine (Sonnet at `high`) needs a cloud environment set up outside the repo and a draft PR for the owner to review every month. That is a recurring cost for work the on-demand pattern already does when a project needs it. The alert gives the prompt; a person or a session runs the refresh. If the alert stays open and ignored for two months, the routine can be reconsidered with that evidence.
 
-The routine opens a draft PR in this repo and does nothing else; it never merges.
-
-**Watchdog.** A routine that silently stops running is the failure that left the procedure unused since May. A small job in `nightly-health.yml` reads the newest "Monthly refresh" date in `knowledge/REFRESH-LOG.md` and reports `quality-alert` check `monthly/knowledge-refresh` as failing when it is older than 35 days. This uses the existing alert plumbing and does not depend on the routine itself working.
-
-**Enforcement rung: scheduled automation + CI watchdog.** It replaces a prose cadence that has not been followed for six months.
+**Enforcement rung: CI watchdog (quality-alert).** It replaces a prose cadence that has not been followed for six months with a visible signal; the content update stays a person's job.
 
 ### 7.4 (d) Requirements-trace check in the adversarial reviewer — S
 
-**What.** One check is added to `.claude/agents/adversarial-reviewer.md`. When the caller supplies the task POML or `spec.md`, map each acceptance criterion (`<acceptance-criteria>` or the spec's Success Criteria) to the diff hunk and test that satisfy it. Report each criterion as *met (file:line + test)*, *not met* or *not verifiable from the diff*. A *not met* criterion inside the change set's scope is **F1**; *not verifiable* is K-class with a reason. The definition also tells the caller to pass the POML/spec path, because the reviewer cannot trace criteria it was not given. `task-execute` Step 9.5, which launches the reviewer, passes it.
+**What.** One check is added to `.claude/agents/adversarial-reviewer.md`. When the caller supplies the task POML or `spec.md`, map each acceptance criterion (`<acceptance-criteria>` or the spec's Success Criteria) to the diff hunk and test that satisfy it. Report each criterion as *met (file:line + test)*, *not met* or *not verifiable from the diff*. A *not met* criterion inside the change set's scope is **F4** (task-execute's class for an unmet acceptance criterion); *not verifiable* is K-class with a reason. The definition also tells the caller to pass the POML/spec path, because the reviewer cannot trace criteria it was not given. `task-execute` Step 9.5, which launches the reviewer, passes it.
 
 **Enforcement rung: prose** in the agent definition. Whether a hunk satisfies a criterion is semantic. The Completeness Lint already guarantees that criteria exist and are a closed set (`task-create` Step 3.5.5b), which is what makes the trace possible.
 
 Items (d) and 3's capability-duplication check edit the same file; they land in one change.
 
-### 7.5 (e) The superseded-API process, fixed properly — M
+### 7.5 (e) Re-arm the obsolete-API check — S
 
-Revised at the owner's request ("let's properly fix the superseded api process"). The first draft proposed only a hand-kept census. The repo's actual state calls for fixing the process end to end.
+**Revised by the ROI review (2026-11-10).** The earlier draft built a full superseded-API process: two Spaarke diagnostic IDs, an IL caller-ratchet ArchTest with its baseline, an ADR backfill, and new marking steps in `task-create` and `code-review`. The review found that the reason for the problem no longer exists. Once one setting is fixed, the compiler does most of that work.
 
 **What is broken today (verified 2026-11-10).**
-1. **The `[Obsolete]` check is switched off for everything.** `Directory.Build.props` sets `TreatWarningsAsErrors=true`, but line 41 adds `CS0618` to `WarningsNotAsErrors`. The reason is one blocked refactor: 14 callers of the obsolete `DemoProvisioningOptions.Environments`/`DefaultEnvironment`, waiting on the DemoExpirationService migration. The side effect is repo-wide: a *new* call to *any* obsolete API, including framework or NuGet obsoletions, is a warning nobody sees in a green build.
-2. **Marking is ad hoc.** `src/server` has about 6 `[Obsolete]` attributes with free-text messages (e.g. `GenericAnalysisHandler.cs:535` "Use PromptSchemaRenderer.Render() instead…", `EmailProcessingOptions.cs:199`, `ApproveRequestDto.cs:9`). None says which ADR made the call, none tracks its callers, and none has a removal trigger.
-3. **Two different meanings share one attribute.** The provisioning rejection-code files use `[Obsolete]` for constants *retained for external compatibility* (e.g. `BffDeployRejectionCodes.cs:70`: "Kept so external filters on the string keep compiling"). These have no replacement to migrate to. They are not "superseded" in the same sense as an API with a successor.
-4. **Nothing in the workflow says when to mark.** A task that introduces a replacement has no step requiring the old API to be marked, so most superseded APIs are known only from ADR prose.
+- `Directory.Build.props` sets `TreatWarningsAsErrors=true`, but line 41 adds `CS0618` to `WarningsNotAsErrors`. A new call to any obsolete API, whether Spaarke, framework or NuGet, is therefore a warning nobody sees in a green build.
+- The comment that justifies it (line 18: "14x obsolete `DemoProvisioningOptions.Environments`/`DefaultEnvironment`") is stale. `DemoProvisioningOptions.cs` no longer has any `[Obsolete]` member.
+- `src/` has 21 `[Obsolete]` attributes in 15 files. 17 are provisioning rejection-code constants kept for external compatibility; about 4 are true supersessions. None uses `DiagnosticId`.
 
 **The fix.**
-1. **Two Spaarke diagnostic IDs on the standard attribute.** .NET lets `[Obsolete]` carry its own `DiagnosticId` and `UrlFormat`:
-   - `[Obsolete("Use X — ADR-0NN", DiagnosticId = "SPRK001", UrlFormat = "<ADR link>")]` means **superseded**: callers must migrate to X.
-   - `[Obsolete("…", DiagnosticId = "SPRK002")]` means **retained for compatibility**: do not call; there is no replacement and it is never deleted on a schedule.
+1. Remove `CS0618` from `WarningsNotAsErrors`, along with the stale comment at line 18. Run a clean Release build of `Spaarke.sln`.
+2. Fix what breaks:
+   - A Spaarke caller of a superseded member migrates to the replacement.
+   - Framework and NuGet obsoletions that take under an hour each are fixed. The rest are filed and listed in the PR (OQ-15).
+3. Some callers cannot migrate now: a filed framework obsoletion, or an in-repo caller of a compatibility constant. Only for those, give the member a `DiagnosticId` (for example `SPRK001`) and suppress that one ID narrowly, with a one-line reason. The suppression goes at the call site, or in `WarningsNotAsErrors` by that ID. The blanket `CS0618` suppression does not come back.
+4. A comment beside the setting in `Directory.Build.props` says that marking a member `[Obsolete]` now fails every existing caller, so the change that marks it must migrate the callers or use step 3. The comment sits where the rule bites, so there are no new skill steps.
 
-   Callers get warning `SPRK001`/`SPRK002` instead of `CS0618`, with a strikethrough and the ADR link in the IDE. Both IDs go in `WarningsNotAsErrors`, so existing callers keep building, and the IDs are named rather than hiding behind the generic code.
-2. **Re-arm `CS0618`.** Convert the 6 existing markers and the `DemoProvisioningOptions` ones to SPRK001/SPRK002, then remove `CS0618` from `WarningsNotAsErrors`. A framework or NuGet obsoletion becomes a build error again, which is the behaviour `TreatWarningsAsErrors` intends. The task first re-counts CS0618 on a clean Release build. If framework obsoletions are hidden behind the suppression (the 2026-08-15 count says all 14 are DemoProvisioning, but that is three months old), each one is fixed, or listed with a reason and filed.
-3. **Caller ratchet ArchTest (`SupersededApiTests.cs`).** It reflects over the Spaarke assemblies for every member marked `SPRK001`; **the attribute is the census**, so there is no separate hand list to drift. It then uses `IlCallScan` to find the types that call each one. The callers are compared with a committed baseline: a new caller fails the build; a removed caller must be dropped from the baseline; a member with zero callers fails until it is **deleted** (the end state of a supersession is deletion, not a permanent marker). `SPRK002` members must have zero callers in Spaarke code. Any `[Obsolete]` in Spaarke code *without* one of the two IDs fails, so the convention cannot be skipped.
-4. **The workflow hook.**
-   - `task-create` Step 3.5.6: when a task's `<justification>` introduces a replacement for an existing API, the task's steps include marking the old one `SPRK001` with the ADR or design link.
-   - `code-review` Step 6.6 checks that marking.
-   - The capability-index row (item 1) moves to the new component and names the superseded one.
-5. **Backfill.** The planning tier reads the ADRs and architecture docs for explicit "replaces / superseded by / use X instead of Y" statements, plus the existing `[Obsolete]` messages, and marks those APIs `SPRK001`.
+**Scope.** C# only. TypeScript's `@deprecated` needs type-aware ESLint (`@typescript-eslint/no-deprecated`), which is out of this project (OQ-11, §12).
 
-**Decided: no approval step (owner Q8 / OQ-13).** Agreed: if an ADR or merged design names the replacement, the API is superseded, and that is a fact to record, not a decision to approve. The only judgment is reading the text correctly. Wording like "prefer X" or "new code should use X" without saying Y is replaced is *not* treated as a supersession. Those cases are listed in the PR as "not marked, and why", so they are visible rather than silently skipped.
-
-**Scope.** C# only. TypeScript has the equivalent `@deprecated` JSDoc tag, but enforcing it needs type-aware ESLint (`@typescript-eslint/no-deprecated`), which is out of this project (OQ-11). It is listed under §12.
-
-**Enforcement rung: attribute (compiler) + ArchTest (IL) + ratchet.** The attribute puts the warning at the call site in the IDE and the build, and the ArchTest blocks new callers. Controls:
-- must-fire: a seeded new call to an `SPRK001` member; an `[Obsolete]` with no ID; an `SPRK001` member with zero callers;
-- must-not-fire: a call to the replacement API; a baseline caller.
+**Enforcement rung: compiler.** With `TreatWarningsAsErrors`, a plain `[Obsolete]` fails any new caller at compile time. That is a higher rung than an ArchTest, with no new test, baseline or diagnostic convention to maintain. The publish-size delta is still measured if the fix touches `Sprk.Bff.Api` (root §10).
 
 ### 7.6 (f) Per-session C# language-server trial — S
 
@@ -319,19 +326,17 @@ The expected gain is fewer wrong answers and fewer tool calls on navigation ques
 
 **Making sure it is actually useful.** The trial is an A/B comparison, not an impression. Ten fixed questions are taken from real recent sessions: 4 find-references, 3 find-implementations, 2 receiver-type/definition, and 1 "what breaks if I change this signature". The same model answers each twice in one worktree, once Grep-only and once with the LSP tool allowed. The trial records correctness against a hand-checked answer, tool calls, tokens and wall time. The result goes in `notes/csharp-lsp-trial.md` with the owner's decision. Adoption is then a separate change: the plugin setting, plus a one-time install of the language-server binary on each machine.
 
-**Go / no-go thresholds — decided (OQ-14: "use the recommended best practices").** There is no published industry standard for an agent-side language server, so these follow common practice for Roslyn-based servers on large solutions and the ~17-worktree reality of this machine. All must hold:
+**Time-box: half a day (ROI review 2026-11-10).** If the plugin cannot be made to answer on `Sprk.Bff.Api` within that time, the result is "no-adopt, not workable today", and the trial stops.
+
+**Go / no-go thresholds — decided (OQ-14), cut to three by the ROI review.** These are the three gates that decide adoption. Tool calls, tokens, wall time and cold-start time are still recorded for context, but they are not gates. All three must hold:
 
 | Gate | Threshold |
 |---|---|
 | Correctness | ≥ 9 of 10 questions correct with LSP, and none worse than the Grep answer |
 | False "no references" | **Zero.** A false negative is the dangerous failure for reuse decisions, because it says "nothing exists" when something does |
-| Efficiency | ≥ 30% fewer tool calls or tokens on the reference/implementation questions |
-| Cold start | ≤ 90 s to the first correct answer on `Sprk.Bff.Api`; ≤ 3 min on `Spaarke.sln` |
 | Memory | ≤ 2 GB resident per session at steady state; with 3 concurrent sessions, ≥ 25% of machine RAM still free |
-| Idle CPU | < 5% once indexing finishes |
-| Edit diagnostics | Reported within 10 s of a save and agree with `dotnet build` |
 
-If cost fails but usefulness passes, the fallback is opt-in per session (enabled only for navigation-heavy work such as item 2's scans), not a project-wide setting.
+If memory fails but usefulness passes, the fallback is opt-in per session (enabled only for navigation-heavy work such as item 2's scans), not a project-wide setting.
 
 **Relation to the rejected shared index (§10.6).** The September rejection was about one **shared** index serving about 17 worktrees, which is stale for all but one of them. A per-session plugin indexes only its own worktree, so it does not have that staleness problem. Its open risk is cost: N concurrent sessions run N language servers on one machine. The trial measures exactly that cost, and does not reopen the shared-index decision.
 
@@ -342,10 +347,10 @@ If cost fails but usefulness passes, the fallback is opt-in per session (enabled
 | Sub-item | Rung | Why not higher |
 |---|---|---|
 | (a) Learn MCP | Platform (tool allow-list) + prose | Research order is judgment |
-| (b) TS strictness | ArchTest + ratchet | Already near the top; a compiler flag cannot ratchet across 76 configs |
-| (c) Knowledge refresh | Scheduled automation + CI watchdog (quality-alert) | The content update needs review by a person |
+| (b) TS strictness | Deferred (follow-up project) | — |
+| (c) Knowledge refresh | CI watchdog (quality-alert) | The content update needs a person; the alert is the prompt |
 | (d) Requirements trace | Prose (reviewer) | Semantic mapping |
-| (e) Superseded APIs | Attribute (compiler warning) + ArchTest (IL) + ratchet; `CS0618` re-armed as a build error | A hard error on SPRK001 would break every existing caller at once; the ratchet blocks new ones instead |
+| (e) Obsolete APIs | Compiler: `CS0618` re-armed under `TreatWarningsAsErrors` | Already the top rung |
 | (f) C# LSP | n/a (trial) | Decision, not rule |
 
 ## 8. Root CLAUDE.md §11 justification for each new surface
@@ -353,17 +358,16 @@ If cost fails but usefulness passes, the fallback is opt-in per session (enabled
 | New surface | Existing | Extension | Cost of doing nothing |
 |---|---|---|---|
 | `.claude/patterns/CAPABILITY-INDEX.md` | `.claude/patterns/INDEX.md` and its 94 pointer files (verified 2026-11-10) map *task type → pattern*, not *concept/synonym → canonical component*. | No: the pattern files are capped at 25 lines each and organised by domain, so no file can hold a cross-domain concept lookup; a 30-row table added to `INDEX.md` would double its length and mix two lookups. | `<existing>` keeps depending on the author guessing the right name: `task-create` 3.5.6 passes with "none found" for a capability that exists under another name (G1). |
-| `tests/Spaarke.ArchTests/CapabilityIndexTests.cs` | `SharedPackageCensusTests.cs` parses an ADR table between markers. | Partly: copy its table-parsing approach; it cannot be the same class, because it asserts a different invariant over a different file. | The index rots silently: a row points at a moved or deleted component and sends agents to a dead path, which is worse than no index. |
 | Reuse scan in `/design-to-spec` Step 3 (confirmed in `project-pipeline` Step 2) + `notes/reuse-scan.md` | design-to-spec Step 3 already makes a "quick Grep/Glob" exception for the spec's §11 table; pipeline Step 2 item 5 already asks for the §11 "Existing" answer per new surface. | Yes — this **extends both existing steps** rather than adding one: it changes *how* the answer is found (concept/synonym/interface search by one agent) and *where it is recorded* (a file later steps cite). | A design that re-implements an existing capability passes every per-task gate (G2), because each task's `<existing>` is answered locally after the plan is fixed. |
 | Weekly sweep job | `nightly-health.yml` (8 quality-alert checks), `scripts/report-large-server-files.ps1` (observation-only size report). | Yes — a job inside `nightly-health.yml` on a weekly cron, reusing its quality-alert step. | Parallel worktrees can land the same code twice and nothing reports it until someone trips over it (G3). |
-| `.jscpd.json` + `scripts/quality/duplication-baseline.json` | None found (a repo-wide `jscpd` Grep timed out at 20 s; to re-check in task 1 with a scoped search). | No: configuration and baseline for a tool the repo does not use yet. | Without the baseline every week's run alerts on known clusters and the alert is ignored; without the shared config local and CI runs disagree (agent-worktree phantoms). |
+| `.jscpd.json` | None found (a repo-wide `jscpd` Grep timed out at 20 s; to re-check in task 1 with a scoped search). | No: configuration for a tool the repo does not use yet. No baseline file (§5.1.3). | Without the shared config, local and CI runs disagree (agent-worktree phantoms) and the size floor lives only in the workflow. |
 | One check in `adversarial-reviewer.md` | The definition's checklist. | Yes — a line added to the existing list (modification of existing surface). | Capability-level duplication in a change set is invisible to every syntactic tool. |
-| `notes/package-reviews/*.md` | ADR-012 census "reason" column (one line each). | No: one line cannot hold the three-test evidence and a migration plan. | The 9 grandfathered packages stay grandfathered indefinitely (G4); "under review" with no review is the old "etc." again. |
+| `notes/package-reviews.md` (one file, nine sections) | ADR-012 census "reason" column (one line each). | No: one line cannot hold the three-test evidence and a migration plan. | The 9 grandfathered packages stay grandfathered indefinitely (G4); "under review" with no review is the old "etc." again. |
 | (a) Learn MCP entry in `.mcp.json` + `researcher.md` tool list | `.mcp.json` (one server: `dataverse`); `researcher.md` already prefers `learn.microsoft.com`, reached through `WebFetch`. | Yes — one entry added to the existing file and one tool-list and prose change to the existing agent; no new file. | The researcher scrapes Learn pages through generic web fetch, which returns whole pages instead of targeted doc chunks and loses to a moved URL (REFRESH-PROCEDURE.md recorded 14+ moved Learn URLs in four months). |
-| (b) `TsconfigStrictnessCensusTests.cs` | The census tests (`SharedPackageCensusTests`, `CredentialCensusTests`, …) in `tests/Spaarke.ArchTests/`; there is no tsconfig check today (Grep of ArchTests for `tsconfig`: no match). | No: it asserts a new invariant over a different file set; it copies the census structure. | New tsconfigs can land non-strict (27 of 76 are today) and nothing stops the count from growing, so strictness moves backwards silently. |
-| (c) Scheduled refresh routine + watchdog job | `knowledge/REFRESH-PROCEDURE.md` (a manual monthly ritual); `nightly-health.yml` quality-alert matrix. | Yes — the routine automates that procedure's Steps 1–5 and leaves Step 6 sign-off to a person; the procedure doc gets a pointer, not a rewrite; the watchdog is one more check in the existing matrix. | The procedure has not run in six months (last full curation 2026-05-14), so the 6 knowledge-base skills serve guidance that the procedure itself says drifts within four months. |
+| (b) `TsconfigStrictnessCensusTests.cs` | — | Deferred to a follow-up project (§7.2); no surface in r1. | — |
+| (c) Watchdog job | `knowledge/REFRESH-PROCEDURE.md` (a manual monthly ritual); `nightly-health.yml` quality-alert matrix. | Yes — one more check in the existing matrix; the procedure doc gets a one-line pointer. | The procedure has not run in six months (last full curation 2026-05-14), so the 6 knowledge-base skills serve guidance that the procedure itself says drifts within four months, and nothing says so. |
 | (d) Requirements-trace check | `adversarial-reviewer.md` checklist; Completeness Lint (criteria exist). | Yes — a line in the existing definition. | A change set can pass review while an acceptance criterion has no implementation, because nothing maps criteria to the diff. |
-| (e) `SPRK001`/`SPRK002` diagnostic IDs + `SupersededApiTests.cs` + `Directory.Build.props` change | `[Obsolete]` (about 6 ad-hoc uses in `src/server`); `IlCallScan.cs` (the IL reference scanner); the blanket `CS0618` downgrade in `Directory.Build.props:41`. | Yes for the mechanism — it extends the standard `[Obsolete]` attribute with its built-in `DiagnosticId` instead of inventing an attribute, and reuses `IlCallScan`; a new test class is needed only for the new invariant. | With `CS0618` downgraded repo-wide, a new call to *any* obsolete API, including framework obsoletions, passes a green build unseen; superseded APIs keep gaining callers until a migration finds them. |
+| (e) `Directory.Build.props` change (remove the `CS0618` downgrade) | `TreatWarningsAsErrors=true` and the standard `[Obsolete]` attribute (21 uses in `src/`). | Yes — pure modification of existing configuration; no new surface. A `DiagnosticId` is added only to members whose callers cannot migrate now. | With `CS0618` downgraded repo-wide, a new call to *any* obsolete API, including framework obsoletions, passes a green build unseen. |
 | (f) `notes/csharp-lsp-trial.md` | Rejected shared index (§10.6). | n/a — a trial record inside this project, not repo surface. Adoption would be a separate, justified change. | The per-session question stays open indefinitely and keeps being re-argued without numbers. |
 
 No new service, endpoint, DI registration, package reference or Dataverse column.
@@ -372,9 +376,10 @@ No new service, endpoint, DI registration, package reference or Dataverse column
 
 - **Sub-agent write boundary (root §3).** Items 1, 2, 3, 5(a) and 5(d) edit `.claude/`; those tasks run in the main session, not in sub-agents (`project-pipeline` "MUST NOT dispatch a task that touches `.claude/`").
 - **Agent cost (§8.5).** Every agent call names its model: `code-mapper` (sonnet) for the scan and package evidence; the one `adversarial-reviewer` pass (fable) at project close. No fan-out beyond that; the workflow size guideline is small.
-- **Order.** Item 1 first (items 2 and 3 cite the index). Item 4 and the item-5 sub-items are independent and can run in parallel; 5(d) lands in the same change as item 3's reviewer check (same file). 5(b) and 5(e) add ArchTests, so per root §8 they run code-review + adr-check whatever their rigor level.
-- **Recurring cost.** 5(c) adds a monthly scheduled agent run; its model and effort are stated in the routine definition (`.claude/constraints/agent-cost.md`). 5(f) is a one-off measurement in one worktree. Item 2 changes the pipeline that will build *this* project's tasks, so this project's own tasks are generated with the old Step 2; that is fine.
-- **Validation.** The first project to run the new Step 2 after merge is the real test; r1 dry-runs the scan against two closed projects with known duplication (candidates: the set-regarding/field-mapping r1→r2 history and the RichTextEditor/Compose pair) and records whether it would have caught them.
+- **Order.** Item 1 first (items 2 and 3 cite the index). Item 2's dry-run comes before its skill edits and decides whether they are made (§4.0). Item 4 and the item-5 sub-items are independent and can run in parallel. 5(d) lands in the same change as item 3's reviewer check, because they edit the same file. 5(e) changes the build configuration, so it runs code-review + adr-check whatever its rigor level.
+- **PRs.** Items 1–4 form the reuse change set and get the project's one `adversarial-reviewer` pass. Each item-5 sub-item ships as its own PR with its own `code-review`, so unrelated tooling does not dilute that review.
+- **Recurring cost.** None beyond the weekly sweep and the nightly watchdog check: no scheduled agent runs. 5(f) is a one-off, half-day measurement in one worktree. Item 2 changes the pipeline that will build *this* project's tasks, so this project's own tasks are generated with the old Step 2; that is fine.
+- **Validation.** The dry-run runs the scan against two closed projects with known duplication and records whether it would have caught them and its token use. Candidates: the set-regarding/field-mapping r1→r2 history, and the RichTextEditor/Compose pair. It is the go/no-go for item 2's wiring. After merge, the first project to run the new design-to-spec Step 3 is the real test.
 - **Docs.** `docs/procedures/ci-cd-workflow.md` "Quality alerts" gains the new check; `.claude/skills/INDEX.md` / `docs/INDEX.md` pointers as needed.
 
 ## 10. Rejected alternatives
@@ -388,39 +393,70 @@ Do not re-adopt these without new evidence.
 5. **A `PreToolUse` deny hook on new files** (e.g. refuse `Write` of a new `*Service.cs` without a justification). §16 requires hooks to be narrow, under 5 seconds and free of false positives; "is this new file a duplicate?" is semantic, so the hook would either be a name heuristic (false positives on every legitimate new file, then disabled) or slow. The `<justification>` gate sits at the right point — task authoring — already.
 6. **A shared LSP / semantic-index MCP sidecar.** With ~17 active worktrees, one shared index is stale for every worktree but one, and N indices cost N builds. **Separate, still open:** a *per-session* C# LSP plugin (go-to-definition and find-references inside one worktree) is a different question — it helps navigation, not cross-project reuse. Item 5(f) runs a measured trial of it; this rejection does not cover it.
 
+### 10.7 Trimmed in the ROI review (Fable, 2026-11-10; owner-approved)
+
+These were in an earlier version of this design and were cut because an existing mechanism already does the job or the return did not justify the cost. Do not re-add them without new evidence.
+
+| Cut | Why | What does the job instead |
+|---|---|---|
+| `CapabilityIndexTests.cs` | Duplicates `scripts/quality/Test-InstructionPaths.ps1`, which already checks backticked paths in `.claude/patterns/*.md` | The existing path checker (§3.5) |
+| `Validate-TaskPoml.ps1` citation warnings (index row, reuse-scan) | The existing justification check is already warning-only; a second unread warning adds nothing | `code-review` 6.6 |
+| Pipeline delta re-scan and Step 3 absence lint | The fallback (full scan when the file is missing) makes absence impossible, and partial re-scans add a third code path | One scan per project (§4.0) |
+| `duplication-baseline.json` and its hash fingerprints | Any edit to a cloned file changes its hash, so every week raises false "new" clusters | Stateless "changed in the last 7 days" trigger (§5.1) |
+| Sweep fixture control | `.claude/worktrees/` is absent in CI | Config exclusion only |
+| Nine package-review files | One file with nine sections reads the same | `notes/package-reviews.md` |
+| Executing up to five consolidations | The "≤ 3 consumers" rule covered 6 of 9 packages | Execute three at most; file the rest (§6.1) |
+| 5(b) strictness census and migration in r1 | Unrelated to G1–G4; item 4 may remove the packages it would convert | Follow-up project after item 4 (§12) |
+| 5(c) monthly cloud routine | Recurring agent cost, an external cloud environment and a monthly PR review, for work done on demand anyway | The watchdog alert (§7.3) |
+| 5(e) `SPRK001`/`SPRK002` convention, `SupersededApiTests`, caller baseline, ADR backfill, marking steps | The blocker behind the `CS0618` downgrade is gone; the compiler fails new callers once it is re-armed | `CS0618` under `TreatWarningsAsErrors` (§7.5) |
+| 5(f) four of the seven gates | A one-off measurement does not need seven gates | Three gates and a half-day time-box (§7.6) |
+
 ## 11. Open questions for the owner
 
 | # | Question | Recommendation |
 |---|---|---|
 | OQ-1 | The brief has the `code-mapper` agent *write* `reuse-scan.md` and *judge* plan duplication; its definition forbids both. Keep the split (agent finds, orchestrator judges and writes), or create a new agent definition that writes? | **Decided 2026-11-10**: keep the split (§4.2). |
 | OQ-2 | `code-mapper` runs at effort `low`. Concept/synonym/interface search is harder than "where is X used". Accept `low`, or run this one call at `medium` via a workflow `agent()` (the definition fixes effort for the Agent tool)? | **Decided 2026-11-10**: `low`. If the dry-run shows a raise is needed, the measured token and cost impact goes to the owner before any change (§4.2). |
-| OQ-3 | Should `Validate-TaskPoml.ps1` require the `CAPABILITY-INDEX row` / `no row` citation as an error immediately, or warn for a shadow window first? | **Decided 2026-11-10**: warning. |
+| OQ-3 | Should `Validate-TaskPoml.ps1` require the `CAPABILITY-INDEX row` / `no row` citation as an error immediately, or warn for a shadow window first? | **Decided 2026-11-10**: warning. **Revised by the ROI review**: no lint rule at all; `code-review` 6.6 checks it (§3.5, §10.7). |
 | OQ-4 | Sweep placement: a weekly job inside `nightly-health.yml` (extension, recommended by root §11) or a separate `weekly-duplication-sweep.yml` (simpler cron, isolates a new tool)? | **Decided 2026-11-10**: extension, inside `nightly-health.yml`. |
-| OQ-5 | Item 4 scope: does r1 only *decide* the 9 packages (records + ADR amendments for sanctions), or also *execute* the cheap consolidations? | **Decided 2026-11-10**: decide all 9; execute those with ≤ 3 consumers; file the rest. The threshold limits effort, never significance: defects found are fixed or reported to the owner by name (§6.1). |
-| OQ-6 | Should the reuse scan also run earlier, in `design-to-spec`, where re-scoping a duplicate is cheapest? | **Decided 2026-11-10**: yes. It runs in design-to-spec Step 3; pipeline Step 2 confirms it and re-scans only what changed (§4.0). |
+| OQ-5 | Item 4 scope: does r1 only *decide* the 9 packages (records + ADR amendments for sanctions), or also *execute* the cheap consolidations? | **Decided 2026-11-10**: decide all 9; execute those with ≤ 3 consumers; file the rest. **Narrowed by the ROI review**: execute only `ai-context`, `legal-workspace` and `document-operations`; file the rest. The limit is on effort, never significance: defects found are fixed or reported to the owner by name (§6.1). |
+| OQ-6 | Should the reuse scan also run earlier, in `design-to-spec`, where re-scoping a duplicate is cheapest? | **Decided 2026-11-10**: yes. It runs in design-to-spec Step 3; pipeline Step 2 runs the full scan only when none exists (no delta re-scan, per the ROI review; §4.0). |
 | OQ-7 | Root `CLAUDE.md` §11 names the three questions but not the index. Add a one-line pointer there? | **Decided 2026-11-10**: yes, one line (§3.3). |
 | OQ-8 | jscpd new-cluster floor (tokens, lines, cross-area rule) for the alert. | **Decided (owner, 2026-11-10)**: ≥ 100 tokens **and** ≥ 10 lines, across different top-level areas. The full report keeps jscpd's default (50 tokens / 5 lines) for browsing. 50 is jscpd's out-of-the-box default, not an alerting recommendation; PMD CPD, the other common detector, defaults to 100 tokens. Tune after four weekly reports. |
 | OQ-9 | Epic and portfolio registration. | **Decided 2026-11-10**: Epic #427, the code-quality program. |
-| OQ-10 | 5(b): which shared packages move to `strict` in r1? | **Decided 2026-11-10**: all shared packages whose strict build shows fewer than ~100 errors; the rest are split off and filed. |
+| OQ-10 | 5(b): which shared packages move to `strict` in r1? | **Decided 2026-11-10**: all shared packages whose strict build shows fewer than ~100 errors; the rest are split off and filed. **Superseded by the ROI review**: 5(b) is deferred to a follow-up project after item 4 (§7.2); this decision carries over to it. |
 | OQ-11 | 5(b): extend type-aware ESLint beyond the packages made strict in r1? | **Decided 2026-11-10**: not in this project (§12). |
-| OQ-12 | 5(c): cloud routine or GitHub Action? | **Decided 2026-11-10**: Claude Code scheduled cloud routine, opening a draft PR only; plus the CI watchdog (§7.3). |
-| OQ-13 | 5(e): does the superseded-API list need approval? | **Decided 2026-11-10**: no. A supersession named in an ADR or merged design is a fact; ambiguous wording is listed as "not marked, and why" (§7.5). |
-| OQ-14 | 5(f): go/no-go thresholds for the language-server trial. | **Decided 2026-11-10**: common-practice thresholds in §7.6, fixed before the trial runs. |
+| OQ-12 | 5(c): cloud routine or GitHub Action? | **Decided 2026-11-10**: Claude Code scheduled cloud routine, opening a draft PR only; plus the CI watchdog. **Revised by the ROI review**: the routine is dropped; only the watchdog ships (§7.3). |
+| OQ-13 | 5(e): does the superseded-API list need approval? | **Decided 2026-11-10**: no. **Moot after the ROI review**: there is no superseded-API list or backfill in r1 (§7.5). |
+| OQ-14 | 5(f): go/no-go thresholds for the language-server trial. | **Decided 2026-11-10**: common-practice thresholds in §7.6, fixed before the trial runs. **Cut to three gates and a half-day time-box by the ROI review.** |
 | OQ-15 | 5(e): when `CS0618` is re-armed, a fresh count may show framework or NuGet obsoletions hidden behind the suppression (the last count is from 2026-08-15). Fix them within this project, or list them with reasons and file them? | **Decided 2026-11-10**: fix those that take under an hour each; file the rest, with the suppression narrowed to their diagnostic IDs only. |
-| OQ-16 | 5(c): the cloud routine needs a cloud environment connected to the GitHub repo. Does one exist, or is creating it part of this project? | **Decided 2026-11-10**: creating it is the owner's one-time setup step; the task supplies the exact steps. |
+| OQ-16 | 5(c): the cloud routine needs a cloud environment connected to the GitHub repo. Does one exist, or is creating it part of this project? | **Decided 2026-11-10**: creating it is the owner's one-time setup step. **Moot after the ROI review**: no cloud routine (§7.3). |
 
 ## 12. Out of scope / future
 
 - **Coding-agent eval set** (15–20 replayable tasks with known-good outcomes, used to compare models, effort levels and procedure changes). It came from the same review, but its effort is L, so the owner left it out of r1. It is the natural next project once items 2 and 5(d) have changed how reviews and plans are checked, because it would measure whether they work.
-- Repo-wide type-aware ESLint (OQ-11), and with it the TypeScript half of the superseded-API process (`@deprecated` + `@typescript-eslint/no-deprecated`).
-- Executing large package consolidations from item 4 (filed as their own projects).
+- **TypeScript strictness ratchet (5(b))**, deferred by the ROI review. It runs after item 4, on the shared packages that survive it, and settles the tsconfig census scope first (76 vs 118). The design in §7.2 and the OQ-10 decision carry over.
+- Repo-wide type-aware ESLint (OQ-11), and with it the TypeScript half of obsolete-API checking (`@deprecated` + `@typescript-eslint/no-deprecated`).
+- Executing the package consolidations that item 4 files (each its own project).
 
 ## 13. Success criteria
 
-1. `.claude/patterns/CAPABILITY-INDEX.md` exists with ~30 rows; `CapabilityIndexTests` passes and its must-fire control fails on a seeded dead path.
-2. `task-create` 3.5.6 and `code-review` 6.6 cite the index; `Validate-TaskPoml.ps1` warns when the citation is missing; root CLAUDE.md §11 carries the one-line pointer.
-3. `/design-to-spec` Step 3 runs the reuse scan, writes `notes/reuse-scan.md`, and raises ≥ 2 candidates as owner questions; `project-pipeline` Step 2 confirms the scan, re-scans only changed capabilities, and runs the full scan when none exists; the dry-run against two closed projects records what it caught, what it missed and its token use.
-4. The weekly sweep runs, exits 0, excludes `.claude/worktrees/agent-*`, and opens/closes exactly one `quality-alert` issue (`weekly/duplication-sweep`) based on clusters not in the baseline.
-5. `adversarial-reviewer.md` carries the capability-duplication check pointing at the index.
-6. Each of the 9 grandfathered packages has an owner-approved decision record; every *sanction* has landed as an ADR-012 amendment with the census table and `SharedPackageCensusTests` updated in the same PR; consolidations are executed or filed per OQ-5.
-7. (a) `.mcp.json` carries the Learn MCP server, and one `researcher` run cites a Learn MCP result. (b) `TsconfigStrictnessCensusTests` passes with its controls, and the baseline is smaller than 27 at project close. (c) The scheduled routine has produced at least one draft refresh PR that the owner reviewed, `REFRESH-PROCEDURE.md` names the routine, and the watchdog check exists in `nightly-health.yml`. (d) The reviewer reports a per-criterion trace when given a POML. (e) Every `[Obsolete]` in Spaarke code carries `SPRK001` or `SPRK002`; `CS0618` is no longer in `WarningsNotAsErrors`; `SupersededApiTests` passes with its controls; `task-create` 3.5.6 and `code-review` 6.6 carry the marking step; the backfill PR lists both what was marked and what was not marked, and why. (f) `notes/csharp-lsp-trial.md` records the A/B results against the §7.6 thresholds and the owner's adopt or no-adopt decision.
+1. `.claude/patterns/CAPABILITY-INDEX.md` exists with ~30 rows. Its paths and ADRs are backticked repo paths, and `scripts/quality/Test-InstructionPaths.ps1` reports no new missing path for it; a seeded dead path in a local copy is reported once, as proof.
+2. `task-create` 3.5.6 and `code-review` 6.6 cite the index, and root CLAUDE.md §11 carries the one-line pointer.
+3. The dry-run against two closed projects records what the scan caught, what it missed and its token use, and the owner sees the result. If it passes:
+   - `/design-to-spec` Step 3 runs the scan, writes `notes/reuse-scan.md`, and raises ≥ 2 candidates as owner questions.
+   - design-to-spec's "no comprehensive discovery" lines are rewritten to allow it.
+   - `project-pipeline` Step 2 runs the full scan only when the file is missing.
+4. The weekly sweep runs, exits 0, excludes `.claude/worktrees/agent-*`, and opens or closes exactly one `quality-alert` issue (`weekly/duplication-sweep`). It alerts only on clusters above the OQ-8 floor that touch a file changed in the last 7 days. There is no baseline file.
+5. `adversarial-reviewer.md` carries the capability-duplication check (F2) and the requirements-trace check (F4), both pointing at the right inputs.
+6. `notes/package-reviews.md` has an owner-approved decision for each of the 9 grandfathered packages.
+   - Every *sanction* has landed as an ADR-012 amendment, with the census table and `SharedPackageCensusTests` updated in the same PR.
+   - The actions for `ai-context`, `legal-workspace` and `document-operations` are executed; the rest are filed with their findings.
+   - Every defect found is fixed or named to the owner.
+7. Item 5, each sub-item in its own PR:
+   - **(a)** `.mcp.json` carries the Learn MCP server, and one `researcher` run cites a Learn MCP result.
+   - **(b)** Deferred (§12).
+   - **(c)** The `monthly/knowledge-refresh` watchdog check exists in `nightly-health.yml`, and `REFRESH-PROCEDURE.md` names it.
+   - **(d)** The reviewer reports a per-criterion trace when given a POML.
+   - **(e)** `CS0618` is no longer in `WarningsNotAsErrors`, and the stale comment is gone. A clean Release build passes. Any remaining suppression is by named `DiagnosticId` with a reason. The PR lists the framework obsoletions that were fixed or filed.
+   - **(f)** `notes/csharp-lsp-trial.md` records the result against the three §7.6 gates (or "not workable" at the half-day limit) and the owner's decision.
