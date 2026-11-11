@@ -4,6 +4,8 @@ The steps for each test are in [`owner-hands-on-checklist-2026-10-08.md`](owner-
 
 ## A. Decisions
 
+**Owner answer, 2026-11-11, typed in the uac-r2 session: "Accept all".** Every recommendation below, D-1 to D-12 with D-2 as revised, is the decision. Live steps under D-2 and D-10 still go one at a time as each comes due: D-10 waits for U-3 to pass, and each D-2 step waits for the one before it.
+
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | D-1 | Close the tasks whose code is merged, deployed and server-gated, and move their browser checks to this table (036, 099, 135, 136, 037, 039, 013, 141, 140, 153, 165, 171) | (a) close now, UAT carried here; (b) keep each open until its UAT passes | **(a).** This is the round-90 rule. Each failed UAT is fixed or filed as a defect |
