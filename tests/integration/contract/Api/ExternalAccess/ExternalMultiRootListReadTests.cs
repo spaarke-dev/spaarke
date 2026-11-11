@@ -645,8 +645,21 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             new RootLookup("sprk_relatedmatter", ExternalGrantRootType.Matter),
             new RootLookup("sprk_relatedworkassignment", ExternalGrantRootType.WorkAssignment),
         });
-        foreach (var other in new[] { "sprk_invoice", "sprk_project", "sprk_matter", "sprk_workassignment" })
+        foreach (var other in new[] { "sprk_project", "sprk_matter", "sprk_workassignment" })
             Registry().FindByEntity(other)!.AdditionalRootLookups.Should().BeEmpty($"{other} keeps its rule");
+        // ebilling-r1 task 130-0 fix round 3: the invoice's work assignment (D-28) is a root of the rule through its scope dimension,
+        // which RootLinks types; it is no longer also declared as an extra root lookup, and is projected once.
+        var invoices = Registry().FindByEntity("sprk_invoice")!;
+        invoices.AdditionalRootLookups.Should().BeEmpty();
+        invoices.RootRuleAttributes.Should().Contain(new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment" });
+        // Fix round 3g (census): ExternalMessageEndpoints.RightsThroughParents reads these three from the gate's row; the row is an SDK row,
+        // which omits an unset attribute, so the rights are read only where the projection is pinned (here and in
+        // ExternalLookupAbsentColumnReadTests). The rights are a union: an unread parent adds no rights.
+        invoices.RootRuleAttributes.Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalMessageEndpoints.InvoiceWorkAssignmentColumn);
+        invoices.RootRuleAttributes.Count(a => a == "sprk_regardingworkassignment").Should().Be(1);
+        var workAssignment = Guid.NewGuid();
+        invoices.RootLinks(new Dictionary<string, object?> { ["sprk_regardingworkassignment"] = workAssignment })
+            .Should().ContainSingle(l => l.Root == ExternalGrantRootType.WorkAssignment).Which.LookupValue.Should().Be(workAssignment.ToString());
     }
 
     [Fact]
@@ -955,7 +968,9 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         var module = Registry().FindByEntity("sprk_invoice")!;
 
         module.RequireReadOnSecureRoots.Should().BeTrue("D2: an invoice behind a secure root's wall is withheld");
-        module.RootRuleAttributes.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project", "sprk_regardingagreement" });
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work assignment (a scope dimension; since fix round 3 listed once).
+        module.RootRuleAttributes.Distinct(StringComparer.OrdinalIgnoreCase).Should().BeEquivalentTo(
+            new[] { "sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_regardingagreement" });
     }
 
     [Fact]
@@ -1092,6 +1107,25 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         body.Truncated.Should().BeTrue("rows were dropped because a read failed");
     }
 
+    // Task 130-0 fix round 3b: one notion of a fault. A decision that failed for one invoice alone drops that row and says truncated;
+    // a row decided hidden is dropped without it, and the other row is listed either way.
+    [Theory(DisplayName = "130-0 fix3b module list (must fire / must not fire): a per-invoice decision fault says truncated; a decided hidden invoice does not")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InvoicesModuleFetch_APerInvoiceDecisionFault_DropsThatRow_AndSaysTruncated(bool fault)
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var affected = InvoiceRow("Affected", project: RecordA);
+        var other = InvoiceRow("Other", project: RecordA);
+        var affectedId = (Guid)affected["sprk_invoiceid"]!;
+        var stub = fault ? InvoiceHidingStub.PerInvoiceFault(affectedId) : InvoiceHidingStub.Hiding(affectedId);
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new[] { affected, other }, stub.Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Other");
+        body.Truncated.Should().Be(fault, "a fault for one invoice must not read as 'there are no more rows'");
+    }
+
     [Fact]
     public async Task InvoicesModuleFetch_NoPredicate_HidesEveryRow_AndSaysTruncated_FailClosed()
     {
@@ -1113,6 +1147,54 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             new IReadOnlyDictionary<string, object?>[] { noId, InvoiceRow("Fine", project: RecordA) }, InvoiceHidingStub.NoneHidden().Seam);
 
         body.Entities.Select(r => r["sprk_name"]).Should().Equal("Fine");
+    }
+
+    // ---- ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms, through the REAL seam ----
+
+    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "130-0 module list (must fire / must not fire): on a shared record, another firm's invoice is absent and the caller's own firm's invoice is listed")]
+    public async Task InvoicesModuleFetch_OwnFirms_AnotherFirmsInvoiceIsAbsent_TheCallersOwnIsListed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        var hiding = InvoiceHidingStub.Real(world);
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?>(InvoiceRow("Own firm", project: RecordA)) { ["sprk_invoiceid"] = own },
+            new Dictionary<string, object?>(InvoiceRow("Other firm", project: RecordA)) { ["sprk_invoiceid"] = other },
+        }, hiding.Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Own firm");
+        body.Truncated.Should().BeFalse("a row the own-firms rule hides is not a read failure");
+        world.CallerFirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0 /record read (must fire): another firm's invoice is refused, as every invoice id is on this route, before any read")]
+    public async Task InvoicesModule_SingleRecordRead_OwnFirms_AnotherFirmsInvoiceIsRefused_BeforeAnyRead()
+    {
+        // The route never returns an invoice to an external caller (task 098 classification above), so the own-firms rule holds
+        // there without the seam: the answer for another firm's invoice is the same 403 as for any id, and nothing is read.
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        var reads = 0;
+        Task<IReadOnlyDictionary<string, object?>> Read(string _, Guid __, string[]? ___, CancellationToken ____)
+        {
+            reads++;
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
+        }
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_invoice", other, select: null, caller, Registry(), Read, NullLogger.Instance, CancellationToken.None);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
+        reads.Should().Be(0);
     }
 
     private static IReadOnlyDictionary<string, object?> InvoiceRow(

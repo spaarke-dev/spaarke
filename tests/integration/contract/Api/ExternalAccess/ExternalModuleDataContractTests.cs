@@ -41,7 +41,16 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
     {
         _fixture = fixture;
         _fixture.Reset();
+        _fixture.DataverseServiceMock.Invocations.Clear();
     }
+
+    /// <summary>
+    /// The app-only record reads the host made (<c>IDataverseService.RetrieveAsync</c>). Task 130-0 fix round 3b: a record that is
+    /// in the caller's set but does not exist answers the same 403 as one outside the set, so "the read happened" is observed
+    /// here, not in the status.
+    /// </summary>
+    private int RecordReads(string entity) => _fixture.DataverseServiceMock.Invocations
+        .Count(i => i.Method.Name == "RetrieveAsync" && i.Arguments.Count > 0 && Equals(i.Arguments[0], entity));
 
     private static string ProjectFetchXml =>
         "<fetch><entity name=\"sprk_project\"><attribute name=\"sprk_projectid\"/></entity></fetch>";
@@ -320,12 +329,14 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
 
         // The fixture's IDataverseService double returns no entity, so a request that clears the column
-        // check AND the Tier-2 gate surfaces as 404 from the read itself. A column check that refused
-        // everything would answer 400 here instead.
+        // check AND the Tier-2 gate reaches the read, finds nothing, and answers the route's one refusal (403, the same as a
+        // record outside the set: task 130-0 fix round 3b). A column check that refused everything would answer 400 here
+        // instead, and the read count shows the request got past both checks.
         var response = await client.GetAsync(
             $"/api/v1/external/api/dataverse/record/sprk_project/{ProjectA}?$select=sprk_projectname");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        RecordReads("sprk_project").Should().Be(1, "the request passed the column check and the Tier-2 gate and reached the read");
     }
 
     // ── Tier-2 record deny (NFR-08) — a non-participant caller is denied ─────────────────────────
@@ -398,6 +409,8 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
             .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (matter)");
         (await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_workassignment/{NullLevelWorkAssignment}"))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (work assignment)");
+        RecordReads("sprk_matter").Should().Be(0, $"{plane}: the gate refuses before any read");
+        RecordReads("sprk_workassignment").Should().Be(0, $"{plane}: the gate refuses before any read");
     }
 
     [Theory]
@@ -413,7 +426,8 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         var response = await client.GetAsync(
             $"/api/v1/external/api/dataverse/record/sprk_matter/{LevelledMatter}?$select=sprk_mattername");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "past the Tier-2 gate the offline read finds nothing (404); a refusal would be 403");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the offline read finds nothing, and a record that is gone answers the route's one refusal");
+        RecordReads("sprk_matter").Should().Be(1, "past the Tier-2 gate the request reached the read (a matter the gate refuses is never read)");
     }
 }

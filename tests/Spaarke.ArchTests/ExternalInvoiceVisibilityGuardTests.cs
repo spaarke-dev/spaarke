@@ -47,7 +47,7 @@ public class ExternalInvoiceVisibilityGuardTests
     /// <summary>External-plane types outside those namespaces, by name (they need not exist yet), with their owning task.</summary>
     private static readonly IReadOnlyDictionary<string, string> NamedExternalTypes = new Dictionary<string, string>
     {
-        ["Sprk.Bff.Api.Api.Finance.FirmOutcomeEndpoints"] = "ebilling-r1 task 130: the firm findings routes (external).",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints"] = "ebilling-r1 task 130: the firm findings routes (external).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection"] = "ebilling-r1 task 130: the firm-visible findings projection.",
     };
 
@@ -95,12 +95,14 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::IsInvoiceCreate"] =
             "Whether a chat create names sprk_invoice, so the create is refused (ebilling-r1 task 096b); reads no row.",
         // ── parts of the predicate's application (inputs and the decision's consequence) ──
-        [$"{typeof(ExternalMessageEndpoints).FullName}::RegardingInvoicesOf"] =
-            "Extracts a message page's regarding invoice ids FOR the predicate (SecureRootsFilter → RegardingInvoicesVisibleAsync).",
         [$"{typeof(ExternalMessageEndpoints).FullName}::RightsFromGate"] =
             "Turns the record gate's answer into rights; the gate (EvaluateRecordGateAsync) applied the predicate first.",
         [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceFamilyKeyAttributes"] =
             "Projects sprk_invoiceid so the predicate can key each row (ExecuteScopedFetchCoreAsync applies it).",
+        [$"{typeof(InvoiceLinks).FullName}::IsInvoice"] =
+            "Picks the registry edges whose parent is sprk_invoice (ebilling-r1 task 130-0b), so the invoice ids a row links to can be decided BY the predicate; reads no row.",
+        [$"{typeof(InvoiceLinks).FullName}::BuildDescendants"] =
+            "Derives, once at type load, which tables are filed under an invoice-linked row but carry no link of their own (ebilling-r1 task 130-0 F3b); uses the family test only to leave the invoice family to its own (a') step; reads no row.",
         [$"{typeof(ExternalInvoiceReviewDetail).FullName}::Applies"] =
             "Decides whether a module is the invoice module for the review-detail projection (082c-2 fix round 3, U1); reads no row. The projection runs on rows the route already hid.",
         // ── reads that return no invoice-family row ──
@@ -112,6 +114,75 @@ public class ExternalInvoiceVisibilityGuardTests
             "Creates the caller's own submission and returns its receipt (tracking number); a new submission has no invoice yet.",
         [$"{typeof(ExternalUserContextEndpoint).FullName}::HandleAsync"] =
             "Reads the caller's active firm NAMES for the SPA header; no family row.",
+        // ── the firm outcome (ebilling-r1 task 130b, FR-38): the predicate is applied by the route's filter, once, before the handler ──
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetInvoiceOutcomeAsync"] =
+            "Reviewed 130b. Reads the projection only for the invoice id FirmOutcomeAuthorizationFilter admitted (stored in the request's items; "
+            + "a handler without that decision answers 403). The filter, which precedes every handler on the route, applies THE (a') predicate "
+            + "(ExternalInvoiceHiding) to this one invoice and fails closed: asking it again here would double the reads for the same answer.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetSubmissionOutcomeAsync"] =
+            "Reviewed 130b. As GetInvoiceOutcomeAsync, for the submission id the filter admitted after ExternalInvoiceSubmissionEndpoints."
+            + "VisibleSubmissionsAsync (the submission seam) AND, when the submission's derived invoice existed at the filter, after the same "
+            + "invoice decision the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1). It passes the "
+            + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
+            + "that invoice is read (in progress: no billed total; Accepted: 503).",
+        ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::.cctor"] =
+            "Reviewed 130b fix rounds 5 and 6. Static column lists (the invoice's and the submission's own lookups, incl. the parents the "
+            + "secure-roots rule takes in); reads nothing.",
+        // The projection is the reader BEHIND those two handlers. It takes an id and returns what a firm may see (ADR-008: it makes no
+        // caller decision); its only external caller is FirmOutcomeEndpoints, and no other route may use it without the same filter
+        // (the ratchet: a method here that starts reaching the predicate, or stops being a surface, is removed).
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::.cctor"] =
+            "Reviewed 130b. Static column lists naming the family tables; reads nothing.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForInvoiceAsync"] =
+            "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetInvoiceOutcomeAsync: the invoice id was admitted by the route's filter, "
+            + "which applied the (a') predicate to it. Fails closed (a fault is a status-only Degraded outcome).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::GetForSubmissionAsync"] =
+            "Reviewed 130b. Entry point behind FirmOutcomeEndpoints.GetSubmissionOutcomeAsync: the submission id was admitted by the route's filter "
+            + "(the submission seam). It reads the submission's derived invoice (its billed total while Received or Processing, its outcome once "
+            + "Accepted) ONLY when invoiceDecided is true, i.e. the filter decided that invoice by the invoice rule (fix round 2, the InvoiceDecided "
+            + "rule). With it false (the invoice did not exist at the filter) it reads nothing of the invoice: in progress is status only with no "
+            + "billed total, Accepted is Unavailable (503).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSubmissionAsync"] =
+            "Reviewed 130b. Reads the status of the submission GetForSubmissionAsync was given (already admitted); returns its processing status and tracking number only.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildItemsAsync"] =
+            "Reviewed 130b. Builds the firm view of the admitted invoice's lines; it takes only the admitted invoice's id.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadDecisionRecordsAsync"] =
+            "Reviewed 130b. Reads Decision Records linked to the admitted invoice's lines, only those the BFF writer created (WriterCreatedRecord).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadSignalsAsync"] =
+            "Reviewed 130b. Reads the Signals of the admitted invoice's Decision Records for their policy version and firm-facing reason; nothing internal is projected.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRulesAsync"] =
+            "Reviewed 130b. Reads the rule names and rule sets of the cited versions; a citation is shown only as the clause reader's gate "
+            + "publishes it (fix round 2).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Candidate"] =
+            "Reviewed 130b. A private record (the join of a line and its Decision Record); no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Cite"] =
+            "Reviewed 130b. A private helper shaping a citation from rows already read; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadClauseAsync"] =
+            "Reviewed 130b fix round 2. Asks the clause reader (the flag and the snapshot) about one version on the admitted invoice; a fault is "
+            + "no clause, so the citation is omitted. Reads no invoice-family row itself.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::CitableVersionsAsync"] =
+            "Reviewed 130b fix round 2. Decides which published versions of the admitted invoice may be cited: reads only the rule set's "
+            + "Procedure link and the Procedure's type (never a name), and drops an InternalStandard Procedure's rule; fails closed to no citation.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadByIdsAsync"] =
+            "Reviewed 130b fix round 2. A private helper reading one column of rule sets or Procedures by id for CitableVersionsAsync; no "
+            + "invoice-family row.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::Excerpt"] =
+            "Reviewed 130b. An internal static helper trimming the line description to the excerpt a firm sees; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::RuleRead"] =
+            "Reviewed 130b. A private record of a rule's name, number and rule set; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ProjectRejectionAsync"] =
+            "Reviewed 130c. A Rejected submission's findings, behind GetForSubmissionAsync: the submission id was admitted by the route's filter. "
+            + "Reads only that submission's own stored findings; a fault is a status-only Degraded outcome. It reads nothing of the derived invoice "
+            + "unless invoiceDecided is true (the filter decided that invoice by the invoice rule).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildRejectionItemsAsync"] =
+            "Reviewed 130c. Shapes the stored findings; asks the clause reader, the rule names and the Signals of the derived invoice ONLY when "
+            + "invoiceDecided is true (otherwise no citation and no firm reason), and reads no live invoice line.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadFindingsJsonAsync"] =
+            "Reviewed 130c. Reads the findings text of the one admitted submission, app-only (the column is field-secured to the BFF identity); "
+            + "no invoice-family row beyond that submission.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =
+            "Reviewed 130c. Reads the firm reasons of Signals the BFF writer created (WriterCreatedRecord) for the derived invoice the caller "
+            + "decided, only after BuildRejectionItemsAsync's invoiceDecided check; a Signal naming another invoice is dropped.",
     };
 
     /// <summary>
@@ -225,7 +296,7 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.False(NamesAFamilyTable("sprk_documents"));
     }
 
-    // ── The 093 / 130 / 152 entries (not on this branch): named so they fail until they reach the predicate ─────────────
+    // ── The 093 / 152 entries (not on this branch): named so they fail until they reach the predicate (130 landed in 130b) ───
 
     /// <summary>
     /// The model 9.1 surfaces later tasks build, each with what makes the guard see it. They are not on this branch; when they
@@ -236,26 +307,26 @@ public class ExternalInvoiceVisibilityGuardTests
     {
         ["093"] = "The firm file routes (GET /api/v1/external/invoices/{id}/files and …/content) in ExternalInvoiceSubmissionEndpoints / "
             + "ExternalInvoiceSubmissionAuthorizationFilter: external-plane namespace; they read sprk_storedfile through StoredFileService.",
-        ["130"] = "The firm findings projection (FirmFindingsProjection, FirmOutcomeEndpoints): named external types; they read "
-            + "sprk_signal / sprk_decisionrecord.",
         ["152"] = "External invoice-index retrieval: InvoiceSearchService is a family reader; a call from the external plane is a surface.",
     };
 
-    [Fact(DisplayName = "Task 098: the 093, 130 and 152 surfaces are covered by the guard's primitives before they land")]
+    [Fact(DisplayName = "Task 098: the 093 and 152 surfaces are covered by the guard's primitives before they land")]
     public void TheLaterSurfaces_AreCoveredByThePrimitives()
     {
-        Assert.Equal(new[] { "093", "130", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "093", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("Sprk.Bff.Api.Services.Finance.Files.StoredFileService", FamilyReaderTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Services.Finance.InvoiceSearchService", FamilyReaderTypes.Keys);
         Assert.Contains(typeof(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService), FamilyReaderInterfaces.Value); // F3: 152 calls it so
         Assert.Contains("Sprk.Bff.Api.Services.Finance.FirmFindingsProjection", NamedExternalTypes.Keys);
-        Assert.Contains("Sprk.Bff.Api.Api.Finance.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
+        Assert.Contains("Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace.");
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionAuthorizationFilter)), "093's gate lives in the external-plane namespace.");
 
-        // The readers named before their owners land must name real types where they exist (a typo would hide a surface).
-        foreach (var reader in FamilyReaderTypes.Keys.Where(r => !r.EndsWith(".FirmFindingsProjection", StringComparison.Ordinal)))
+        // The readers named must name real types (a typo would hide a surface); 130's projection has landed, so it is checked too.
+        foreach (var reader in FamilyReaderTypes.Keys)
             Assert.True(typeof(Program).Assembly.GetType(reader) is not null, $"{reader} should exist in the BFF — check the name.");
+        foreach (var named in NamedExternalTypes.Keys)
+            Assert.True(typeof(Program).Assembly.GetType(named) is not null, $"{named} should exist in the BFF — check the name.");
     }
 
     // ── 090's flagged-external refusals (model 4.3, 5.3; uac-r2 F1-3, F1-e): listed and verified, not reimplemented ───────
@@ -797,14 +868,15 @@ internal sealed class InvoiceGuardControlNamesStepZero
 /// <summary>MUST FIRE (family seam): takes the seam.</summary>
 internal sealed class FamilySeamControlTakesTheSeam(AppOnlyInvoiceFamilyHiding hide)
 {
-    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide("sprk_invoice", new[] { id }, ct);
+    internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, CancellationToken ct) => hide(new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, ct);
 }
 
 /// <summary>MUST FIRE (family seam): calls the app-only reader's entry directly.</summary>
 internal sealed class FamilySeamControlCallsTheReaderDirectly(ExternalDataService data)
 {
     internal Task<IReadOnlySet<Guid>> HideAsync(Guid id, EffectiveRootFlagReader flags, CancellationToken ct) =>
-        data.HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { id }, flags, ct);
+        data.HideInvoiceFamilyRowsAsync(
+            new InvoiceFamilyCaller(null), "sprk_invoice", new[] { id }, flags, (_, _) => Task.FromResult(CallerFirms.NoFirm), ct);
 }
 
 /// <summary>MUST FIRE (family seam): resolves the seam by name.</summary>
@@ -878,7 +950,7 @@ internal sealed class ToolDecisionControlToolDecidesWithTheInvoiceSeam(ExternalI
 internal sealed class ToolDecisionControlToolUsesTheFamilySeam(AppOnlyInvoiceFamilyHiding hide)
 {
     internal async Task<bool> ExecuteChatAsync(Guid row, CancellationToken ct) =>
-        !(await hide("sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
+        !(await hide(new InvoiceFamilyCaller(null), "sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
 }
 
 /// <summary>Control (one function): the shared decision; it invokes the seam.</summary>

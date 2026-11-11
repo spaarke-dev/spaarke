@@ -570,10 +570,13 @@ public class ExternalDataServiceTests
     {
         var (service, handler) = NewService();
         Guid requesterA = Guid.NewGuid(), requesterB = Guid.NewGuid(), requestId = Guid.NewGuid(), unnamedId = Guid.NewGuid();
+        // F3b fix round 1 (F2): the read selects the request's invoice link columns; the Web API answers each selected lookup that is not
+        // set as an explicit null.
+        var noLinks = string.Concat(InvoiceLinks.Tables["sprk_servicerequest"].ValueColumns.Select(c => $",\"{c}\":null"));
         handler.GetResponder = _ => JsonOk(
             "{\"value\":[" +
-            $"{{\"sprk_servicerequestid\":\"{requestId}\",\"sprk_name\":\"Please review\",\"_sprk_requestedby_value\":\"{requesterA}\"}}," +
-            $"{{\"sprk_servicerequestid\":\"{unnamedId}\",\"_sprk_requestedby_value\":\"{requesterB}\"}}," +
+            $"{{\"sprk_servicerequestid\":\"{requestId}\",\"sprk_name\":\"Please review\",\"_sprk_requestedby_value\":\"{requesterA}\"{noLinks}}}," +
+            $"{{\"sprk_servicerequestid\":\"{unnamedId}\",\"_sprk_requestedby_value\":\"{requesterB}\"{noLinks}}}," +
             // No requester: not attributable to anyone, dropped.
             $"{{\"sprk_servicerequestid\":\"{Guid.NewGuid()}\",\"sprk_name\":\"orphan\"}}" +
             "]}");
@@ -591,8 +594,32 @@ public class ExternalDataServiceTests
         decoded.Should().Contain("$orderby=createdon desc");
         url.Should().NotContain("$top");
         read.Requests.Should().HaveCount(2);
-        read.Requests[0].Should().Be(new ExternalDataService.RequestedServiceRequest(requestId, "Please review", requesterA));
-        read.Requests[1].Should().Be(new ExternalDataService.RequestedServiceRequest(unnamedId, null, requesterB));
+        read.Requests[0].Should().Be(new ExternalDataService.RequestedServiceRequest(
+            requestId, "Please review", requesterA, read.Requests[0].InvoiceLinks));
+        read.Requests[1].Should().Be(new ExternalDataService.RequestedServiceRequest(unnamedId, null, requesterB, read.Requests[1].InvoiceLinks));
+        read.Requests.Should().OnlyContain(r => r.InvoiceLinks != null && r.InvoiceLinks.Count == 0, "explicit nulls are 'no invoice'");
+        foreach (var column in InvoiceLinks.Tables["sprk_servicerequest"].ValueColumns)
+            decoded.Should().Contain(column, "the feed decides the request by its invoice links (F2)");
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 (F2): a requested service request carries its invoice link; an absent link column is unreadable")]
+    public async Task GetServiceRequestsRequestedBy_CarriesTheInvoiceLinks_AndAnAbsentColumnIsUnreadable()
+    {
+        var (service, handler) = NewService();
+        Guid requester = Guid.NewGuid(), linked = Guid.NewGuid(), absent = Guid.NewGuid(), invoice = Guid.NewGuid();
+        var columns = InvoiceLinks.Tables["sprk_servicerequest"].ValueColumns;
+        var linkedColumns = string.Concat(columns.Select((c, i) => i == 0 ? $",\"{c}\":\"{invoice}\"" : $",\"{c}\":null"));
+        handler.GetResponder = _ => JsonOk(
+            "{\"value\":[" +
+            $"{{\"sprk_servicerequestid\":\"{linked}\",\"_sprk_requestedby_value\":\"{requester}\"{linkedColumns}}}," +
+            // Must fire: the link column did not come back (masked or not read): never "no invoice".
+            $"{{\"sprk_servicerequestid\":\"{absent}\",\"_sprk_requestedby_value\":\"{requester}\"}}" +
+            "]}");
+
+        var read = await service.GetServiceRequestsRequestedByAsync(new[] { requester });
+
+        read.Requests.Single(r => r.Id == linked).InvoiceLinks.Should().Equal(invoice);
+        read.Requests.Single(r => r.Id == absent).InvoiceLinks.Should().Contain(ExternalDocumentNarrowing.UnreadableLink);
     }
 
     [Fact]
@@ -710,7 +737,15 @@ public class ExternalDataServiceTests
     private static string DocumentRowJson(string id, string typeJson)
     {
         var typeProps = typeJson.Length == 0 ? "" : "," + typeJson;
-        return $"{{\"sprk_documentid\":\"{id}\",\"sprk_documentname\":\"Doc {id}\",\"_sprk_project_value\":\"{DocumentRoot}\"{typeProps}}}";
+        // Task 130-0 fix round 3b: the Web API returns every selected root link, an unset one as an explicit null; a root link
+        // column that is absent from a row reads as unreadable.
+        // Fix round 3c: the same for every live-parent lookup column.
+        // Fix round 3f: and the document narrowing's own Access Permission (an unset choice is an explicit null too).
+        var otherRoots = string.Concat(ExternalDataService.DocumentRootLinks.SelectColumns
+            .Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+            .Concat(ExternalDocumentNarrowing.SelectColumns)
+            .Where(c => c != "_sprk_project_value").Distinct().Select(c => $",\"{c}\":null"));
+        return $"{{\"sprk_documentid\":\"{id}\",\"sprk_documentname\":\"Doc {id}\",\"_sprk_project_value\":\"{DocumentRoot}\"{otherRoots}{typeProps}}}";
     }
 
     private static HttpResponseMessage DocumentsOnly(string url, string body) =>

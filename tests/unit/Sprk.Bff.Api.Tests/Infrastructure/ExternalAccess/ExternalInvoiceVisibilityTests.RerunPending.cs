@@ -121,10 +121,10 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.FirmHold(invoice, InvoiceFirmHold.InvoiceRerunPendingValue);
         var service = _world.NewService(_identity.Object);
 
-        var invoices = await service.HideInvoiceFamilyRowsAsync("sprk_invoice", new[] { invoice }, _world.RootFlags);
-        var lines = await service.HideInvoiceFamilyRowsAsync("sprk_billingevent", new[] { line }, _world.RootFlags);
+        var invoices = await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoice", new[] { invoice }, _world.RootFlags, _world.SystemUserFirms);
+        var lines = await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_billingevent", new[] { line }, _world.RootFlags, _world.SystemUserFirms);
         _world.FirmHold(invoice, null);
-        var after = await service.HideInvoiceFamilyRowsAsync("sprk_billingevent", new[] { line }, _world.RootFlags);
+        var after = await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_billingevent", new[] { line }, _world.RootFlags, _world.SystemUserFirms);
 
         invoices.Should().Contain(invoice);
         lines.Should().Contain(line);
@@ -165,7 +165,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.SetSubmissions(pendingInvoice, "sprk_outcomereasoncode", SubmissionReasonCodes.FirmMissing);
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { pending, decided }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { pending, decided }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().Contain(pending);
         hidden.Should().NotContain(decided, "control: a submission decided with its firm is decided by its invoice, as before");
@@ -173,7 +173,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         // uac-r2 2026-11-06 C1: the reason edited away while the invoice's marker is pending: still hidden.
         _world.SetSubmissions(pendingInvoice, "sprk_outcomereasoncode", SubmissionReasonCodes.Blocked);
         _world.FirmHold(pendingInvoice, InvoiceFirmHold.InvoiceRerunPendingValue);
-        (await _world.NewService(_identity.Object).HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { pending }, _world.RootFlags))
+        (await _world.NewService(_identity.Object).HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { pending }, _world.RootFlags, _world.SystemUserFirms))
             .Should().Contain(pending, "the invoice's marker decides, not the submission's reason");
         _world.Reads("sprk_invoicesubmissions").Should().Contain(u => u.Contains("sprk_outcomereasoncode", StringComparison.Ordinal),
             "the tools' read of the rows carries the stored reason");

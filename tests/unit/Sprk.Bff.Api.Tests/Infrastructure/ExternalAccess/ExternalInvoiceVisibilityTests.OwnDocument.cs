@@ -59,7 +59,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var own = _world.PendingSubmission(readable, InvoiceWorld.InternalChannel);
 
         var hidden = await _world.NewService(_identity.Object, _events)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { notOwn, own }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { notOwn, own }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { notOwn }, "control: the row derived from the document is decided by it (readable: visible)");
         _events.DocumentNotOwnAt(LogLevel.Warning).Should().ContainSingle().Which.Should().Be((notOwn, readable));
@@ -94,17 +94,17 @@ public sealed partial class ExternalInvoiceVisibilityTests
         decision.IsVisible(spa).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "165f reader 1: the assistant tools' read of the rows faulting gives the tool no data (fail closed)")]
-    public async Task Reader1_TheToolsRowReadFaults_Throws()
+    [Fact(DisplayName = "165f reader 1 (F3b ruling): the assistant tools' read of the rows faulting hides the asked rows and never throws (fail closed)")]
+    public async Task Reader1_TheToolsRowReadFaults_HidesTheRow()
     {
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
         var submission = _world.PendingSubmission(document, InvoiceWorld.InternalChannel);
         _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
 
-        var act = () => _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+        var hidden = await _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
-        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>("the failed read of the submission rows is the cause, not a setup error");
+        hidden.Should().BeEquivalentTo(new[] { submission }, "the failed read of the submission rows hides them: the tool gets no data for them");
     }
 
     // ── Reader 2: the invoice predicate's submission read ───────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var pending = _world.PendingSubmission(null, InvoiceWorld.SpaChannel); // no invoice yet
 
         var hidden = await _world.NewService(_identity.Object)
-            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { hiddenRow, pending }, _world.RootFlags);
+            .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { hiddenRow, pending }, _world.RootFlags, _world.SystemUserFirms);
 
         hidden.Should().BeEquivalentTo(new[] { hiddenRow }, "control: one whose invoice does not exist yet is decided by its channel");
     }
