@@ -697,6 +697,8 @@ Fail-before / pass-after: 2 failed, 1 passed on the unfixed code (both must-fire
 
 Neither is a new exposure. In the first case, the Secure reconciler's own pass runs after its re-own and revokes the user shares outside the Secure audience. The share job's 5-minute sweep is the backstop when that pass read the shares before the grant landed. Dataverse has no compare-and-set on the owner, so this is the floor for any read-back check (`ShareDirectAsync` has the same window).
 
+**This path assumes a team-owned gate record is never re-owned to a user** (ontology re-check, 2026-11-11). `GrantAndConfirmAsync` keeps its grants on a user owner, which is right for its D-169 branch. If a team-owned gate record could ever be re-owned to a user, this pass's participant grants would stand on it. No path does that today, because filing and the Secure reconciler re-own to teams (D-11). A change that adds such a path must revisit this assumption.
+
 **Test gap:** no guest-domain case on the Direct path (`InternalUsersAsync` filters a guest domain name, but only the D-169 tests exercise it).
 
 ## Open questions
