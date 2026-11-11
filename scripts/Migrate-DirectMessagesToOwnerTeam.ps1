@@ -7,8 +7,9 @@
 
 .DESCRIPTION
     A Direct message is a Message row (sprk_communicationtype = Message) whose thread (sprk_communicationthread) is typed
-    Direct (sprk_threadtype), is not the per-user master thread (sprk_isdefaultthread), and which carries no typed regarding
-    lookup (sprk_regarding*). A Direct message carries its own two participants: sprk_sentby and sprk_directrecipient.
+    Direct (sprk_threadtype), is not the per-user master thread (sprk_isdefaultthread), whose thread carries no typed
+    regarding lookup (sprk_regarding*), and which carries none itself. A Direct message carries its own two participants:
+    sprk_sentby and sprk_directrecipient.
 
     PRECONDITION (both phases, every mode; checked by this script, not only by the deploy order)
       Task 054b's field security is live on this environment: the five columns sprk_communicationthread.sprk_threadtype,
@@ -26,9 +27,12 @@
       team share is never a participant, a share without the Read bit is not one. The BFF's recipient stamp reads the same
       rule (DirectMessageRecipient.ReadParticipantsAsync). The recipient is the other systemuser. The write is
       sprk_DirectRecipient@odata.bind, then a read-back.
+      A thread whose owner is a team has no owner participant, whatever its user-owner column reads. A thread with any
+      typed regarding lookup set (the thread's own columns, the set the BFF's ThreadResolver.ThreadRegardingColumns reads) is
+      not a Direct thread.
       Every other selected row goes to the manual-review list (-ReviewPath) with a reason and is NOT touched:
-        no_sentby, thread_default_flag_unread, not_two_participants, sender_not_a_participant, participant_disabled,
-        participant_application_user, participant_missing, read_fault, thread_shares_changed_after_create
+        no_sentby, thread_default_flag_unread, thread_has_regarding, not_two_participants, sender_not_a_participant,
+        participant_disabled, participant_application_user, participant_missing, read_fault, thread_shares_changed_after_create
         (a current share row on the thread whose changedon is later than the thread's createdon plus
         -ShareChangeToleranceSeconds; the audit log is not read), changed_since_selection (-Apply only).
 
@@ -37,15 +41,20 @@
       checks (DirectMessageOwnerTeam): exactly one unit by that name, not the root, a direct child of the root, not the Secure
       Record unit (by id), exactly one named non-default Owner team there that is not the Secure Record team (by id) and not
       the unit's default team, the team has no members, the unit has no users. Any failure refuses (exit 1).
+      Then, before anything is selected, the Assign cascade of sprk_communication and of each content table below is read from
+      the relationship metadata: an Assign cascade to a child table that -AcceptedAssignCascade does not list refuses
+      (exit 1), and every -GateRecordWriterApplicationIds id must have an application user here.
       Selects Direct messages with a VALID STAMPED PAIR (sprk_sentby and sprk_directrecipient: two distinct, non-empty
       systemusers). A row without one stays with its current owner and is listed (no_valid_pair). Then, per message, its
       content rows: sprk_communicationattachment, sprk_communicationparticipant and sprk_emailreviewlog (by their
       sprk_communication lookup), sprk_document (by sprk_relatedcommunication) and the gate sprk_decisionrecord (by
-      sprk_regardingcommunication, unconfirmed, created by a -BffApplicationIds user). Rows owned by the Direct team or the
+      sprk_regardingcommunication, unconfirmed, created by a -GateRecordWriterApplicationIds user). Rows owned by the Direct team or the
       Secure Record team are not moved. Content rows move before their message, so a resumed run still finds them.
       Per row (-Apply): re-read organization.sharetopreviousowneronassign (stop when true), count the row's shares, assign
       it to the Direct team, read the owner back (stop when it did not land), count again (stop when the count fell; a rise
-      is reported). Before a message's rows move, its pair is read again; a pair no longer valid moves nothing of it.
+      is reported). Before a message's rows move, the message and its thread are read again; a pair no longer valid, a
+      message now owned by the Secure Record team, or a regarding lookup now set on the message or its thread moves nothing
+      of it (it is listed). If a write throws, the review list gathered so far is written before the error is rethrown.
 
     MODES
       -DryRun   (default) every check, the selection, the plan and the review list; writes nothing to Dataverse.
@@ -67,8 +76,17 @@
     Stamp or Move.
 
 .PARAMETER BffApplicationIds
-    Application (client) ids of the BFF's Dataverse application users: the only allowed members of the writer profile,
-    and the creators of gate Decision Records. A comma-separated string is accepted.
+    Application (client) ids of the BFF's Dataverse application users: the only allowed members of the writer profile.
+    A comma-separated string is accepted; at least one id is required.
+
+.PARAMETER GateRecordWriterApplicationIds
+    Application (client) ids of the identities that create gate Decision Records (the ontology writer's managed identity;
+    OntologyWriterDataverseClient). Mandatory for -Phase Move, used only to recognise gate-record creators; it never feeds
+    the writer-profile membership check. A comma-separated string is accepted. Ignored by -Phase Stamp.
+
+.PARAMETER AcceptedAssignCascade
+    Child tables (logical names) whose Assign cascade from sprk_communication or a content table is accepted (the owner's
+    answer). Default none: any Assign cascade refuses -Phase Move.
 
 .PARAMETER ReviewPath
     Where the manual-review list is written (.json for JSON, anything else for CSV). Written in every mode; a local file.
@@ -109,7 +127,7 @@
 
 .EXAMPLE
     .\Migrate-DirectMessagesToOwnerTeam.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Phase Move `
-        -BffApplicationIds <bff-app-id> -ReviewPath .\move-review.csv `
+        -BffApplicationIds <bff-app-id> -GateRecordWriterApplicationIds <ontology-writer-app-id> -ReviewPath .\move-review.csv `
         -DirectMessageBusinessUnitName '<unit>' -DirectMessageOwnerTeamName '<team>' -Apply
 
 .NOTES
@@ -125,6 +143,8 @@ param(
     [Parameter(Mandatory)][ValidateSet('Stamp', 'Move')][string]$Phase,
     [Parameter(Mandatory)][string[]]$BffApplicationIds,
     [Parameter(Mandatory)][string]$ReviewPath,
+    [string[]]$GateRecordWriterApplicationIds = @(),
+    [string[]]$AcceptedAssignCascade = @(),
     [switch]$DryRun,
     [switch]$Apply,
     [switch]$Verify,
@@ -141,8 +161,16 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if (@($DryRun, $Apply, $Verify | Where-Object { $_.IsPresent }).Count -gt 1) { throw '-DryRun, -Apply and -Verify are separate modes; pass one.' }
 $Mode = if ($Apply) { 'Apply' } elseif ($Verify) { 'Verify' } else { 'DryRun' }
 # `pwsh -File` passes "a,b" as ONE string; accept both shapes.
-$BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+function Split-List([string[]]$Values) { @($Values | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+$BffApplicationIds = Split-List $BffApplicationIds
+if ($BffApplicationIds.Count -eq 0) { throw '-BffApplicationIds names no application id (an empty list would leave the writer profile with no allowed member).' }
 foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
+$GateRecordWriterApplicationIds = Split-List $GateRecordWriterApplicationIds
+if ($Phase -eq 'Move' -and $GateRecordWriterApplicationIds.Count -eq 0) {
+    throw '-Phase Move needs -GateRecordWriterApplicationIds (the application id of the identity that creates gate Decision Records). It has no default and is not the BFF id list.'
+}
+foreach ($id in $GateRecordWriterApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-GateRecordWriterApplicationIds: '$id' is not a GUID." } }
+$AcceptedAssignCascade = Split-List $AcceptedAssignCascade
 if ($Phase -eq 'Move' -and ([string]::IsNullOrWhiteSpace($DirectMessageBusinessUnitName) -or [string]::IsNullOrWhiteSpace($DirectMessageOwnerTeamName))) {
     throw '-Phase Move needs -DirectMessageBusinessUnitName and -DirectMessageOwnerTeamName (the BFF settings DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName). They have no default.'
 }
@@ -166,6 +194,12 @@ $SecuredColumns = @(
 $RegardingColumns = @('sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardinginvoice', 'sprk_regardingservicerequest',
     'sprk_regardingworkassignment', 'sprk_regardingevent', 'sprk_regardingbudget', 'sprk_regardingreportcard',
     'sprk_regardinganalysis', 'sprk_regardingorganization', 'sprk_regardingaccount', 'sprk_regardingperson')
+# The THREAD's own typed regarding lookups: ThreadResolver.ThreadRegardingColumns = RegardingFieldMap.All minus
+# sprk_regardingreportcard (the thread table has no such column, and selecting it faults the whole read). A Direct-typed
+# thread with any one of these set is filed under a record: not a Direct thread.
+$ThreadRegardingColumns = @($RegardingColumns | Where-Object { $_ -ne 'sprk_regardingreportcard' })
+# The built-in "System Administrator" field security profile, matched by its fixed id (a profile of that NAME is not it).
+$SystemAdministratorProfileId = '572329c1-a042-4e22-be47-367c6374ea45'
 # The content rows that follow a Direct message (RestrictedFilingShareBar.ContentRows + the gate Decision Record), equal to
 # the Direct role's tables (config/direct-message-owner-role.json).
 $ContentTables = @(
@@ -203,9 +237,13 @@ function Invoke-DvPatch([string]$Path, [hashtable]$Body) {
     $h = $headers.Clone(); $h['If-Match'] = '*'
     Invoke-RestMethod -Uri "$Api/$Path" -Headers $h -Method Patch -Body ([Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Compress))) | Out-Null
 }
-function Esc([string]$s) { $s.Replace("'", "''") }
+# An OData string literal inside a URL: quotes doubled (OData), then percent-encoded so a name with &, #, + or a space cannot
+# end the query value or change its meaning.
+function Esc([string]$s) { [Uri]::EscapeDataString($s.Replace("'", "''")) }
 function Lc($g) { if ($null -eq $g -or "$g" -eq '') { $null } else { "$g".ToLowerInvariant() } }
 function NonEmpty($g) { $v = Lc $g; if ($v -and $v -ne '00000000-0000-0000-0000-000000000000') { $v } else { $null } }
+# True when any of the named typed regarding lookups (columns) is set on the row.
+function HasRegarding($Row, [string[]]$Columns) { [bool]($Columns | Where-Object { NonEmpty $Row."_$($_)_value" }) }
 
 $gaps = New-Object System.Collections.Generic.List[string]
 function Report([string]$State, [string]$What) {
@@ -274,7 +312,9 @@ foreach ($c in $SecuredColumns) {
     $r = @($perms | Where-Object { $reader -and (Lc $_._fieldsecurityprofileid_value) -eq (Lc $reader.fieldsecurityprofileid) }) | Select-Object -First 1
     if (-not ($w -and $w.canread -eq 4 -and $w.canupdate -eq 4)) { Report 'FAIL' "writer profile does not read and update $($c.Table).$($c.Column)" }
     if (-not ($r -and $r.canread -eq 4)) { Report 'FAIL' "reader profile does not read $($c.Table).$($c.Column)" }
-    foreach ($o in $perms | Where-Object { ($_.cancreate -eq 4 -or $_.canupdate -eq 4) -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' }) {
+    # The writer profile and the built-in System Administrator profile are exempt, each by id, never by name.
+    $exemptIds = @($SystemAdministratorProfileId) + @($(if ($writer) { Lc $writer.fieldsecurityprofileid }))
+    foreach ($o in $perms | Where-Object { ($_.cancreate -eq 4 -or $_.canupdate -eq 4) -and (Lc $_._fieldsecurityprofileid_value) -notin $exemptIds }) {
         Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $($c.Table).$($c.Column); only the BFF may"
     }
 }
@@ -287,7 +327,9 @@ Report 'OK' 'the five columns are field-secured and only the BFF identities can 
 # ── Shared selection: the Direct threads and the candidate messages (run by each phase after its own gates) ─
 $threads = @{}
 function Select-DirectMessages {
-    foreach ($t in @(Get-All "sprk_communicationthreads?`$select=sprk_communicationthreadid,sprk_isdefaultthread,_owninguser_value,_owningteam_value,createdon&`$filter=sprk_threadtype eq $ThreadTypeDirect")) {
+    $threadSelect = (@('sprk_communicationthreadid', 'sprk_isdefaultthread', '_owninguser_value', '_owningteam_value', 'createdon') +
+        @($ThreadRegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
+    foreach ($t in @(Get-All "sprk_communicationthreads?`$select=$threadSelect&`$filter=sprk_threadtype eq $ThreadTypeDirect")) {
         $threads[(Lc $t.sprk_communicationthreadid)] = $t
     }
     $messageSelect = (@('sprk_communicationid', 'sprk_name', '_sprk_communicationthread_value', '_sprk_sentby_value', '_sprk_directrecipient_value',
@@ -297,11 +339,12 @@ function Select-DirectMessages {
     if ($NamePrefix) { $messageFilter += " and startswith(sprk_name,'$(Esc $NamePrefix)')" }
     $messages = @(Get-All "sprk_communications?`$select=$messageSelect&`$filter=$messageFilter")
 
-    # A Direct message: its thread is a Direct thread, and it carries no typed regarding lookup.
+    # A Direct message: its thread is a Direct thread, and it carries no typed regarding lookup. (A thread that carries
+    # one is judged per phase, after this selection: it goes to review.)
     return @($messages | Where-Object {
             $m = $_
             $threads.ContainsKey((Lc $m._sprk_communicationthread_value)) -and
-            -not ($RegardingColumns | Where-Object { NonEmpty $m."_$($_)_value" })
+            -not (HasRegarding $m $RegardingColumns)
         })
 }
 
@@ -333,7 +376,9 @@ if ($Phase -eq 'Stamp') {
         $answer = [pscustomobject]@{ Participants = @(); Fault = $null; SharesChangedLater = $false; Detail = '' }
         try {
             $ids = New-Object System.Collections.Generic.List[string]
-            if (NonEmpty $thread._owninguser_value) { $ids.Add((NonEmpty $thread._owninguser_value)) }
+            # The owner counts only when it is a user: a team-owned thread has no owner participant, whatever its
+            # user-owner column reads (the BFF counts ownerid only when it is a systemuser).
+            if (-not (NonEmpty $thread._owningteam_value) -and (NonEmpty $thread._owninguser_value)) { $ids.Add((NonEmpty $thread._owninguser_value)) }
             $shares = @(Get-All "principalobjectaccessset?`$select=principalid,principaltypecode,accessrightsmask,changedon&`$filter=objectid eq $ThreadId")
             foreach ($s in $shares) {
                 $p = NonEmpty $s.principalid
@@ -368,6 +413,7 @@ if ($Phase -eq 'Stamp') {
         $threadId = Lc $m._sprk_communicationthread_value
         $thread = $threads[$threadId]
         if ($thread.sprk_isdefaultthread -eq $true) { continue }   # the per-user master thread: never a Direct message
+        if (HasRegarding $thread $ThreadRegardingColumns) { Add-Review $m 'thread_has_regarding' 'the thread is filed under a record'; continue }
         if ($thread.sprk_isdefaultthread -ne $false) { Add-Review $m 'thread_default_flag_unread'; continue }
         $senderId = NonEmpty $m._sprk_sentby_value
         if (-not $senderId) { Add-Review $m 'no_sentby'; continue }
@@ -398,21 +444,24 @@ if ($Phase -eq 'Stamp') {
     if ($Mode -eq 'DryRun') { Write-Review; Write-Host "`nDRY RUN: nothing was written to Dataverse."; exit 0 }
 
     $stamped = 0
-    foreach ($p in $plan) {
-        $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
-        if ((NonEmpty $now._sprk_directrecipient_value) -or (NonEmpty $now._sprk_sentby_value) -ne $p.Sender -or (Lc $now._sprk_communicationthread_value) -ne $p.ThreadId) {
-            Add-Review ([pscustomobject]@{ sprk_communicationid = $p.MessageId; sprk_name = $p.Name; _sprk_communicationthread_value = $p.ThreadId; _sprk_sentby_value = $p.Sender }) 'changed_since_selection'
-            continue
+    try {
+        foreach ($p in $plan) {
+            $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
+            if ((NonEmpty $now._sprk_directrecipient_value) -or (NonEmpty $now._sprk_sentby_value) -ne $p.Sender -or (Lc $now._sprk_communicationthread_value) -ne $p.ThreadId) {
+                Add-Review ([pscustomobject]@{ sprk_communicationid = $p.MessageId; sprk_name = $p.Name; _sprk_communicationthread_value = $p.ThreadId; _sprk_sentby_value = $p.Sender }) 'changed_since_selection'
+                continue
+            }
+            Invoke-DvPatch "sprk_communications($($p.MessageId))" @{ 'sprk_DirectRecipient@odata.bind' = "/systemusers($($p.Recipient))" }
+            $back = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
+            if ((Lc $back._sprk_directrecipient_value) -ne $p.Recipient) {
+                Write-Review
+                Stop-Run "read-back of $($p.MessageId): sprk_directrecipient is '$($back._sprk_directrecipient_value)', expected $($p.Recipient). Stopped after $stamped row(s)."
+            }
+            $stamped++
+            Write-Host "   stamped $($p.MessageId): recipient verified"
         }
-        Invoke-DvPatch "sprk_communications($($p.MessageId))" @{ 'sprk_DirectRecipient@odata.bind' = "/systemusers($($p.Recipient))" }
-        $back = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
-        if ((Lc $back._sprk_directrecipient_value) -ne $p.Recipient) {
-            Write-Review
-            Stop-Run "read-back of $($p.MessageId): sprk_directrecipient is '$($back._sprk_directrecipient_value)', expected $($p.Recipient). Stopped after $stamped row(s)."
-        }
-        $stamped++
-        Write-Host "   stamped $($p.MessageId): recipient verified"
     }
+    catch { Write-Review; throw }   # a request that throws: the review list gathered so far is kept, then the error goes on
     Write-Review
     Write-Host "`nAPPLIED: $stamped row(s) stamped. Re-run without -Apply: the plan must be empty. Then -Verify."
     exit 0
@@ -474,6 +523,36 @@ if ($refusal) {
     exit 1
 }
 Report 'OK' "Direct team $directTeamId in unit $directBuId (a direct child of the root, no members, no users, not Secure Record)"
+
+# The gate-record creators: the -GateRecordWriterApplicationIds application users (never the BFF list).
+$gateWriterUserIds = @()
+foreach ($appId in $GateRecordWriterApplicationIds) {
+    $u = @(Get-All "systemusers?`$select=systemuserid&`$filter=applicationid eq $appId") | Select-Object -First 1
+    if ($u) { $gateWriterUserIds += (Lc $u.systemuserid) } else { $refusal = "gate_record_writer_not_found (no application user for appId $appId in this environment)" }
+}
+if ($refusal) {
+    Write-Host "`nREFUSED: the gate record writer is not usable ($refusal). Nothing was selected and nothing was written." -ForegroundColor Red
+    exit 1
+}
+
+# The Assign cascade of sprk_communication and of each content table (what an assign of one of its rows re-owns): a cascade to
+# a child table that -AcceptedAssignCascade does not list refuses, before anything is selected.
+$cascading = @()
+foreach ($table in @('sprk_communication') + @($ContentTables | ForEach-Object { $_.Table })) {
+    $rels = (Invoke-DvGet "EntityDefinitions(LogicalName='$table')/OneToManyRelationships?`$select=SchemaName,ReferencingEntity,ReferencingAttribute,CascadeConfiguration").value
+    foreach ($rel in @($rels | Where-Object { $_.CascadeConfiguration.Assign -ne 'NoCascade' })) {
+        $cascading += [pscustomobject]@{ Parent = $table; Child = $rel.ReferencingEntity; Attribute = $rel.ReferencingAttribute; Assign = $rel.CascadeConfiguration.Assign }
+    }
+}
+Write-Host "Assign-cascading relationships from the tables this script assigns: $($cascading.Count)"
+foreach ($c in $cascading) {
+    Write-Host ("   {0,-30} -> {1}.{2}  Assign={3}  {4}" -f $c.Parent, $c.Child, $c.Attribute, $c.Assign, $(if ($AcceptedAssignCascade -contains $c.Child) { 'ACCEPTED' } else { 'NOT ACCEPTED' }))
+}
+$unaccepted = @($cascading | Where-Object { $AcceptedAssignCascade -notcontains $_.Child } | ForEach-Object { "$($_.Parent)->$($_.Child)" } | Sort-Object -Unique)
+if ($unaccepted.Count -gt 0) {
+    Write-Host "`nREFUSED: an Assign cascade is not accepted ($($unaccepted -join ', ')). Assigning a row would re-own those children as a side effect. Pass the child tables the owner accepts as -AcceptedAssignCascade. Nothing was selected and nothing was written." -ForegroundColor Red
+    exit 1
+}
 Write-Host "sharetopreviousowneronassign = $($org.sharetopreviousowneronassign)"
 if ($org.sharetopreviousowneronassign -ne $false -and $Mode -eq 'Apply') {
     Stop-Run 'organization.sharetopreviousowneronassign is not false: every assign would share the row back to its previous owner. Nothing was written.'
@@ -488,7 +567,7 @@ function Get-ContentRows([string]$MessageId) {
         $filter = "_$($ct.Lookup)_value eq $MessageId"
         if ($ct.Gate) { $filter += ' and _sprk_confirmedby_value eq null' }
         foreach ($row in @(Get-All "$($ct.Set)?`$select=$($ct.Id),_owningteam_value,_owninguser_value,_createdby_value&`$filter=$filter")) {
-            if ($ct.Gate -and $bffUserIds -notcontains (Lc $row._createdby_value)) { continue }   # not a gate record
+            if ($ct.Gate -and $gateWriterUserIds -notcontains (Lc $row._createdby_value)) { continue }   # not a gate record
             $rows += [pscustomobject]@{ Table = $ct.Table; Set = $ct.Set; Id = (Lc $row.($ct.Id)); Owner = (OwnerOf $row); Excluded = (IsExcludedOwner $row) }
         }
     }
@@ -500,6 +579,7 @@ $candidates = @(Select-DirectMessages)
 foreach ($m in $candidates) {
     $thread = $threads[(Lc $m._sprk_communicationthread_value)]
     if ($thread.sprk_isdefaultthread -eq $true) { continue }
+    if (HasRegarding $thread $ThreadRegardingColumns) { Add-Review $m 'thread_has_regarding' 'the thread is filed under a record'; continue }
     if ($thread.sprk_isdefaultthread -ne $false) { Add-Review $m 'thread_default_flag_unread'; continue }
     if ($secureTeamId -and (NonEmpty $m._owningteam_value) -eq $secureTeamId) { continue }   # Secure-owned: never this script's
     if (-not (ValidPair $m)) { Add-Review $m 'no_valid_pair' "sentby=$(NonEmpty $m._sprk_sentby_value) recipient=$(NonEmpty $m._sprk_directrecipient_value)"; continue }
@@ -545,13 +625,26 @@ function Move-Row([string]$Set, [string]$Table, [string]$Id) {
     $script:moved++
     Write-Host "   moved $Table ${Id}: owner verified, shares $before -> $after"
 }
-foreach ($p in $plan) {
-    # The assign invariant, at write time: a message without a valid stamped pair moves nothing.
-    $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=sprk_communicationid,sprk_name,_sprk_communicationthread_value,_sprk_sentby_value,_sprk_directrecipient_value,_owningteam_value,_owninguser_value"
-    if (-not (ValidPair $now)) { Add-Review $now 'no_valid_pair' 'changed since selection'; continue }
-    foreach ($c in $p.Content) { Move-Row $c.Set $c.Table $c.Id }
-    if ((NonEmpty $now._owningteam_value) -ne $directTeamId) { Move-Row 'sprk_communications' 'sprk_communication' $p.MessageId }
+$messageRecheckSelect = (@('sprk_communicationid', 'sprk_name', '_sprk_communicationthread_value', '_sprk_sentby_value', '_sprk_directrecipient_value',
+        '_owningteam_value', '_owninguser_value') + @($RegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
+$threadRecheckSelect = (@('sprk_communicationthreadid') + @($ThreadRegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
+try {
+    foreach ($p in $plan) {
+        # The assign invariant, at write time: a message that is no longer a Direct message with a valid stamped pair moves
+        # nothing of it, content rows included.
+        $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=$messageRecheckSelect"
+        if (-not (ValidPair $now)) { Add-Review $now 'no_valid_pair' 'changed since selection'; continue }
+        if ($secureTeamId -and (NonEmpty $now._owningteam_value) -eq $secureTeamId) { Add-Review $now 'changed_since_selection' 'now owned by the Secure Record team'; continue }
+        if (HasRegarding $now $RegardingColumns) { Add-Review $now 'changed_since_selection' 'now carries a typed regarding lookup'; continue }
+        $threadNowId = NonEmpty $now._sprk_communicationthread_value
+        if (-not $threadNowId) { Add-Review $now 'changed_since_selection' 'now has no thread'; continue }
+        $threadNow = Invoke-DvGet "sprk_communicationthreads($threadNowId)?`$select=$threadRecheckSelect"
+        if (HasRegarding $threadNow $ThreadRegardingColumns) { Add-Review $now 'changed_since_selection' 'its thread now carries a typed regarding lookup'; continue }
+        foreach ($c in $p.Content) { Move-Row $c.Set $c.Table $c.Id }
+        if ((NonEmpty $now._owningteam_value) -ne $directTeamId) { Move-Row 'sprk_communications' 'sprk_communication' $p.MessageId }
+    }
 }
+catch { Write-Review; throw }   # a request that throws: the review list gathered so far is kept, then the error goes on
 Write-Review
 Write-Host "`nAPPLIED: $moved row(s) moved to the Direct team. Re-run without -Apply: the plan must be empty. Then -Verify."
 exit 0

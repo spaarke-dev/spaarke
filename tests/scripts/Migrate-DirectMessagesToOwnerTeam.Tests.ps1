@@ -5,7 +5,9 @@
 # Pins: the precondition refusal (task 054b's field security, both phases); the Stamp selection; the pair rule (exactly two
 # distinct, enabled, non-application systemusers including the sender, from the thread's user owner and its Read shares; a
 # team share and a share without the Read bit are not participants); the Move assign invariant (no valid stamped pair, no
-# move); the Direct team checks; the per-row stops; idempotence and -Verify.
+# move); the Direct team checks; the Assign-cascade refusal; the gate-record creator list (separate from the BFF list); the
+# thread's own regarding lookups; a team-owned thread has no owner participant; the write-time re-read; a write that throws
+# keeps the review list; OData literals are percent-encoded; the per-row stops; idempotence and -Verify.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -15,11 +17,12 @@ BeforeAll {
 
     function global:MdmId([int]$n) { '00000000-0000-4000-8000-{0:d12}' -f $n }
     $global:MdmBffAppId = 'aaaaaaaa-0000-4000-8000-000000000001'
+    $global:MdmGateAppId = 'cccccccc-0000-4000-8000-000000000003'   # the ontology writer's identity: in neither the BFF list nor the writer profile
     $global:MdmIds = @{
-        Bff = MdmId 1; Alice = MdmId 2; Bob = MdmId 3; Carol = MdmId 4; Dave = MdmId 5; AppUser = MdmId 6; Disabled = MdmId 7
+        Bff = MdmId 1; Alice = MdmId 2; Bob = MdmId 3; Carol = MdmId 4; Dave = MdmId 5; AppUser = MdmId 6; Disabled = MdmId 7; GateWriter = MdmId 8
         Root = MdmId 10; SecureBu = MdmId 11; DirectBu = MdmId 12; CustomerBu = MdmId 13
         SecureTeam = MdmId 20; DirectTeam = MdmId 21; SomeTeam = MdmId 22; DirectDefault = MdmId 23
-        Reader = MdmId 30; Writer = MdmId 31
+        Reader = MdmId 30; Writer = MdmId 31; Other = MdmId 32
     }
 
     # The world every mocked request reads (global: the mock body runs from the script under test).
@@ -31,6 +34,13 @@ BeforeAll {
             WriterUsers  = @([pscustomobject]@{ systemuserid = $i.Bff; fullname = 'BFF'; applicationid = $global:MdmBffAppId })
             WriterTeams  = @()
             OtherWriter  = $null # 'table.column' a third profile can update
+            OtherWriterName = 'Someone Else'
+            OtherWriterId   = $global:MdmIds.Other
+            DuplicateProfile = $null   # a profile name returned twice
+            ReaderMissingTeams = @()    # default team ids left off the reader profile
+            WriterCanRead = 4; WriterCanUpdate = 4; ReaderCanRead = 4
+            Cascades     = @{}          # table -> @(@{ Child; Attribute; Assign })
+            PatchFault   = $null       # regex: a PATCH whose URI matches throws
             Users        = @(
                 [pscustomobject]@{ systemuserid = $i.Bff; isdisabled = $false; applicationid = $global:MdmBffAppId; bu = $i.Root }
                 [pscustomobject]@{ systemuserid = $i.Alice; isdisabled = $false; applicationid = $null; bu = $i.CustomerBu }
@@ -39,6 +49,7 @@ BeforeAll {
                 [pscustomobject]@{ systemuserid = $i.Dave; isdisabled = $false; applicationid = $null; bu = $i.CustomerBu }
                 [pscustomobject]@{ systemuserid = $i.AppUser; isdisabled = $false; applicationid = 'bbbbbbbb-0000-4000-8000-000000000002'; bu = $i.Root }
                 [pscustomobject]@{ systemuserid = $i.Disabled; isdisabled = $true; applicationid = $null; bu = $i.CustomerBu }
+                [pscustomobject]@{ systemuserid = $i.GateWriter; isdisabled = $false; applicationid = $global:MdmGateAppId; bu = $i.Root }
             )
             Units        = @(
                 [pscustomobject]@{ businessunitid = $i.Root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
@@ -65,8 +76,14 @@ BeforeAll {
         }
     }
 
-    function global:Add-MdmThread([string]$Id, [string]$OwnerUser, [string]$OwnerTeam, [object[]]$Shares = @(), [object]$IsDefault = $false, [int]$Type = 100000001, [string]$CreatedOn = '2026-01-01T00:00:00Z') {
-        $global:MdmWorld.Threads += [pscustomobject]@{ sprk_communicationthreadid = $Id; sprk_threadtype = $Type; sprk_isdefaultthread = $IsDefault; _owninguser_value = $OwnerUser; _owningteam_value = $OwnerTeam; createdon = $CreatedOn }
+    function global:Add-MdmThread([string]$Id, [string]$OwnerUser, [string]$OwnerTeam, [object[]]$Shares = @(), [object]$IsDefault = $false, [int]$Type = 100000001, [string]$CreatedOn = '2026-01-01T00:00:00Z', [string]$Regarding) {
+        $row = [pscustomobject]@{ sprk_communicationthreadid = $Id; sprk_threadtype = $Type; sprk_isdefaultthread = $IsDefault; _owninguser_value = $OwnerUser; _owningteam_value = $OwnerTeam; createdon = $CreatedOn }
+        # The thread's own typed regarding lookups (no sprk_regardingreportcard: the thread table has no such column).
+        foreach ($c in 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardinginvoice', 'sprk_regardingservicerequest', 'sprk_regardingworkassignment',
+            'sprk_regardingevent', 'sprk_regardingbudget', 'sprk_regardinganalysis', 'sprk_regardingorganization', 'sprk_regardingaccount', 'sprk_regardingperson') {
+            $row | Add-Member -NotePropertyName "_$($c)_value" -NotePropertyValue $(if ($Regarding -eq $c) { MdmId 998 } else { $null })
+        }
+        $global:MdmWorld.Threads += $row
         foreach ($s in $Shares) {
             $global:MdmWorld.Poa += [pscustomobject]@{ objectid = $Id; principalid = $s.P; principaltypecode = $(if ($s.Team) { 'team' } else { 'systemuser' }); accessrightsmask = $s.Mask; changedon = $(if ($s.ChangedOn) { $s.ChangedOn } else { $CreatedOn }) }
         }
@@ -74,7 +91,7 @@ BeforeAll {
     function global:Add-MdmMessage([string]$Id, [string]$Thread, [string]$SentBy, [string]$Recipient, [string]$OwnerUser = $global:MdmIds.Alice, [string]$OwnerTeam, [int]$Type = 100000004, [string]$Regarding) {
         $row = [pscustomobject]@{
             sprk_communicationid = $Id; sprk_name = "FMSWP-$Id"; sprk_communicationtype = $Type; _sprk_communicationthread_value = $Thread
-            _sprk_sentby_value = $SentBy; _sprk_directrecipient_value = $Recipient; _owninguser_value = $(if ($OwnerTeam) { $null } else { $OwnerUser }); _owningteam_value = $OwnerTeam
+            _sprk_sentby_value = $SentBy; _sprk_directrecipient_value = $Recipient; _owninguser_value = $OwnerUser; _owningteam_value = $OwnerTeam
         }
         foreach ($c in 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardinginvoice', 'sprk_regardingservicerequest', 'sprk_regardingworkassignment',
             'sprk_regardingevent', 'sprk_regardingbudget', 'sprk_regardingreportcard', 'sprk_regardinganalysis', 'sprk_regardingorganization', 'sprk_regardingaccount', 'sprk_regardingperson') {
@@ -83,24 +100,51 @@ BeforeAll {
         $global:MdmWorld.Messages += $row
     }
     function global:Add-MdmContent([string]$Set, [string]$Id, [string]$Message, [string]$OwnerUser = $global:MdmIds.Alice, [string]$OwnerTeam, [string]$CreatedBy = $global:MdmIds.Bff, [string]$ConfirmedBy) {
-        $global:MdmWorld.Content += [pscustomobject]@{ Set = $Set; Id = $Id; Message = $Message; _owninguser_value = $(if ($OwnerTeam) { $null } else { $OwnerUser }); _owningteam_value = $OwnerTeam; _createdby_value = $CreatedBy; _sprk_confirmedby_value = $ConfirmedBy }
+        $global:MdmWorld.Content += [pscustomobject]@{ Set = $Set; Id = $Id; Message = $Message; _owninguser_value = $OwnerUser; _owningteam_value = $OwnerTeam; _createdby_value = $CreatedBy; _sprk_confirmedby_value = $ConfirmedBy }
         $global:MdmWorld.Poa += [pscustomobject]@{ objectid = $Id; principalid = $global:MdmIds.Bob; principaltypecode = 'systemuser'; accessrightsmask = 1; changedon = '2026-01-01T00:00:00Z' }
+    }
+
+    # What a server does with a request URL: the fragment never arrives, the query splits on '&', each value is decoded ('+' is a
+    # space). A literal built without percent-encoding therefore breaks here the way it would break against Dataverse.
+    function global:ConvertFrom-MdmUri([string]$u) {
+        $q = $u.IndexOf('?')
+        if ($q -lt 0) { return $u }
+        $query = $u.Substring($q + 1)
+        $h = $query.IndexOf('#'); if ($h -ge 0) { $query = $query.Substring(0, $h) }
+        $parts = @($query -split '&' | ForEach-Object {
+                $eq = $_.IndexOf('=')
+                if ($eq -lt 0) { $_ } else { $_.Substring(0, $eq + 1) + [Uri]::UnescapeDataString($_.Substring($eq + 1).Replace('+', ' ')) }
+            })
+        return $u.Substring(0, $q + 1) + ($parts -join '&')
     }
 
     function global:Invoke-MdmGet([string]$u) {
         $w = $global:MdmWorld
+        $u = ConvertFrom-MdmUri $u
         $wrap = { param($rows) [pscustomobject]@{ value = @($rows) } }
         if ($u -match '/organizations\?') { return & $wrap @($w.Org) }
         if ($u -match "EntityDefinitions\(LogicalName='([^']+)'\)/Attributes\(LogicalName='([^']+)'\)") {
             return [pscustomobject]@{ IsSecured = ($w.Unsecured -notcontains "$($Matches[1]).$($Matches[2])") }
         }
+        if ($u -match "EntityDefinitions\(LogicalName='([^']+)'\)/OneToManyRelationships") {
+            $table = $Matches[1]
+            $rels = @([pscustomobject]@{ SchemaName = "x_$table"; ReferencingEntity = 'sprk_unrelated'; ReferencingAttribute = "sprk_$table"; CascadeConfiguration = [pscustomobject]@{ Assign = 'NoCascade' } })
+            foreach ($c in @($w.Cascades[$table])) {
+                if ($c) { $rels += [pscustomobject]@{ SchemaName = "c_$table"; ReferencingEntity = $c.Child; ReferencingAttribute = $c.Attribute; CascadeConfiguration = [pscustomobject]@{ Assign = $c.Assign } } }
+            }
+            return & $wrap $rels
+        }
         if ($u -match "/fieldsecurityprofiles\?.*name eq '([^']+)'") {
             $name = $Matches[1]
             if ($name -eq 'Spaarke BFF-Managed Field Readers') {
-                $defaults = @($w.Teams | Where-Object isdefault | ForEach-Object { [pscustomobject]@{ teamid = $_.teamid; name = $_.name } })
-                return & $wrap @([pscustomobject]@{ fieldsecurityprofileid = $global:MdmIds.Reader; name = $name; teamprofiles_association = $defaults; systemuserprofiles_association = @() })
+                $defaults = @($w.Teams | Where-Object { $_.isdefault -and $w.ReaderMissingTeams -notcontains $_.teamid } | ForEach-Object { [pscustomobject]@{ teamid = $_.teamid; name = $_.name } })
+                $one = [pscustomobject]@{ fieldsecurityprofileid = $global:MdmIds.Reader; name = $name; teamprofiles_association = $defaults; systemuserprofiles_association = @() }
             }
-            return & $wrap @([pscustomobject]@{ fieldsecurityprofileid = $global:MdmIds.Writer; name = $name; teamprofiles_association = @($w.WriterTeams); systemuserprofiles_association = @($w.WriterUsers) })
+            else {
+                $one = [pscustomobject]@{ fieldsecurityprofileid = $global:MdmIds.Writer; name = $name; teamprofiles_association = @($w.WriterTeams); systemuserprofiles_association = @($w.WriterUsers) }
+            }
+            if ($w.DuplicateProfile -eq $name) { return & $wrap @($one, $one) }
+            return & $wrap @($one)
         }
         if ($u -match '/systemusers\?.*applicationid eq ([0-9a-f-]+)') {
             $app = $Matches[1]
@@ -121,13 +165,14 @@ BeforeAll {
         if ($u -match "/fieldpermissions\?.*entityname eq '([^']+)' and attributelogicalname eq '([^']+)'") {
             $col = "$($Matches[1]).$($Matches[2])"
             $rows = @(
-                [pscustomobject]@{ canread = 4; cancreate = 0; canupdate = 0; _fieldsecurityprofileid_value = $global:MdmIds.Reader; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Readers' } }
-                [pscustomobject]@{ canread = 4; cancreate = 4; canupdate = 4; _fieldsecurityprofileid_value = $global:MdmIds.Writer; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Writers' } }
+                [pscustomobject]@{ canread = $w.ReaderCanRead; cancreate = 0; canupdate = 0; _fieldsecurityprofileid_value = $global:MdmIds.Reader; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Readers' } }
+                [pscustomobject]@{ canread = $w.WriterCanRead; cancreate = 4; canupdate = $w.WriterCanUpdate; _fieldsecurityprofileid_value = $global:MdmIds.Writer; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Writers' } }
             )
-            if ($w.OtherWriter -eq $col) { $rows += [pscustomobject]@{ canread = 4; cancreate = 0; canupdate = 4; _fieldsecurityprofileid_value = (MdmId 32); fieldsecurityprofileid = [pscustomobject]@{ name = 'Someone Else' } } }
+            if ($w.OtherWriter -eq $col) { $rows += [pscustomobject]@{ canread = 4; cancreate = 0; canupdate = 4; _fieldsecurityprofileid_value = $w.OtherWriterId; fieldsecurityprofileid = [pscustomobject]@{ name = $w.OtherWriterName } } }
             return & $wrap $rows
         }
         if ($u -match '/sprk_communicationthreads\?') { return & $wrap @($w.Threads | Where-Object { $_.sprk_threadtype -eq 100000001 }) }
+        if ($u -match '/sprk_communicationthreads\(([0-9a-f-]+)\)') { $id = $Matches[1]; return $w.Threads | Where-Object { $_.sprk_communicationthreadid -eq $id } }
         if ($u -match '/sprk_communications\?') {
             $rows = @($w.Messages | Where-Object { $_.sprk_communicationtype -eq 100000004 -and $_._sprk_communicationthread_value })
             if ($u -match '_sprk_directrecipient_value eq null') { $rows = @($rows | Where-Object { -not $_._sprk_directrecipient_value }) }
@@ -154,6 +199,7 @@ BeforeAll {
     function global:Invoke-MdmPatch([string]$u, $Body) {
         $w = $global:MdmWorld
         $b = [Text.Encoding]::UTF8.GetString([byte[]]$Body) | ConvertFrom-Json
+        if ($w.PatchFault -and $u -match $w.PatchFault) { throw "Test: simulated write fault on $u" }
         $w.Writes.Add([pscustomobject]@{ Uri = $u; Body = $b })
         if (-not ($u -match '/(\w+)\(([0-9a-f-]+)\)$')) { throw "Test: unexpected write $u" }
         $set = $Matches[1]; $id = $Matches[2]
@@ -161,7 +207,7 @@ BeforeAll {
         if (-not $row) { throw "Test: write to a missing row $u" }
         if ($b.'sprk_DirectRecipient@odata.bind' -match '/systemusers\(([0-9a-f-]+)\)') { $row._sprk_directrecipient_value = $Matches[1] }
         if ($b.'ownerid@odata.bind' -match '/teams\(([0-9a-f-]+)\)') {
-            if (-not $w.IgnoreAssign) { $row._owningteam_value = $Matches[1]; $row._owninguser_value = $null }
+            if (-not $w.IgnoreAssign) { $row._owningteam_value = $Matches[1] }   # the user-owner column is left as it was (Dataverse returns it beside the team)
             if ($w.DropShareOnAssign) { $w.Poa = @($w.Poa | Where-Object { $_.objectid -ne $id }) }
         }
     }
@@ -172,14 +218,15 @@ BeforeAll {
         $all = @{ EnvironmentUrl = $script:Url; BffApplicationIds = @($global:MdmBffAppId); ReviewPath = $review }
         foreach ($k in $Arguments.Keys) { $all[$k] = $Arguments[$k] }
         $global:LASTEXITCODE = 0
-        $output = & $script:Script @all 6>&1 2>&1 | Out-String
+        $thrown = $null
+        try { $output = & $script:Script @all 6>&1 2>&1 | Out-String } catch { $thrown = $_.Exception.Message; $output = '' }
         $code = $LASTEXITCODE
         $rows = if (Test-Path $review) { @(Get-Content -Raw $review | ConvertFrom-Json) } else { @() }
         Remove-Item $review -ErrorAction SilentlyContinue
-        [pscustomobject]@{ ExitCode = $code; Output = $output; Review = @($rows | Where-Object { $_ }) }
+        [pscustomobject]@{ ExitCode = $code; Output = $output; Review = @($rows | Where-Object { $_ }); Thrown = $thrown }
     }
     function global:Invoke-MdmMove([hashtable]$Extra = @{}) {
-        $a = @{ Phase = 'Move'; DirectMessageBusinessUnitName = 'Direct Messages'; DirectMessageOwnerTeamName = 'Direct Owners' }
+        $a = @{ Phase = 'Move'; DirectMessageBusinessUnitName = 'Direct Messages'; DirectMessageOwnerTeamName = 'Direct Owners'; GateRecordWriterApplicationIds = @($global:MdmGateAppId) }
         foreach ($k in $Extra.Keys) { $a[$k] = $Extra[$k] }
         Invoke-Mdm $a
     }
@@ -254,6 +301,61 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $r.Output | Should -Match "profile 'Someone Else' can also write sprk_communication.sprk_sentby"
         }
 
+        It 'must fire: a profile NAMED System Administrator (not the built-in one) that can update a column refuses' {
+            $global:MdmWorld.OtherWriter = 'sprk_communication.sprk_sentby'
+            $global:MdmWorld.OtherWriterName = 'System Administrator'
+            $r = Invoke-Mdm @{ Phase = 'Stamp' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "profile 'System Administrator' can also write sprk_communication.sprk_sentby"
+        }
+
+        It 'must not fire: the built-in System Administrator profile (its fixed id) may update a column' {
+            $global:MdmWorld.OtherWriter = 'sprk_communication.sprk_sentby'
+            $global:MdmWorld.OtherWriterName = 'System Administrator'
+            $global:MdmWorld.OtherWriterId = '572329c1-a042-4e22-be47-367c6374ea45'
+            $r = Invoke-Mdm @{ Phase = 'Stamp' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Not -Match 'REFUSED'
+        }
+
+        It 'must fire: <Case>' -TestCases @(
+            @{ Case = 'two profiles named like the writer profile'; Setup = { $global:MdmWorld.DuplicateProfile = 'Spaarke BFF-Managed Field Writers' }; Expect = "2 profile\(s\) named 'Spaarke BFF-Managed Field Writers'; exactly one is required" }
+            @{ Case = 'two profiles named like the reader profile'; Setup = { $global:MdmWorld.DuplicateProfile = 'Spaarke BFF-Managed Field Readers' }; Expect = "2 profile\(s\) named 'Spaarke BFF-Managed Field Readers'; exactly one is required" }
+            @{ Case = 'a business unit default team is missing from the reader profile'; Setup = { $global:MdmWorld.ReaderMissingTeams = @($global:MdmIds.SomeTeam) }; Expect = "default team 'Customer One' is NOT on the reader profile" }
+            @{ Case = 'the writer profile cannot read a column'; Setup = { $global:MdmWorld.WriterCanRead = 0 }; Expect = 'writer profile does not read and update sprk_communication' }
+            @{ Case = 'the writer profile cannot update a column'; Setup = { $global:MdmWorld.WriterCanUpdate = 0 }; Expect = 'writer profile does not read and update sprk_communication' }
+            @{ Case = 'the reader profile cannot read a column'; Setup = { $global:MdmWorld.ReaderCanRead = 0 }; Expect = 'reader profile does not read sprk_communication' }
+        ) {
+            param($Case, $Setup, $Expect)
+            & $Setup
+            $r = Invoke-Mdm @{ Phase = 'Stamp' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'REFUSED'
+            $r.Output | Should -Match $Expect
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?|sprk_communicationthreads\?' }).Count | Should -Be 0
+        }
+
+        It 'must fire: a precondition refusal under -Verify exits non-zero and selects nothing (<Phase>)' -TestCases @(
+            @{ Phase = 'Stamp' }
+            @{ Phase = 'Move' }
+        ) {
+            param($Phase)
+            Add-MdmThread $T1 $global:MdmIds.Alice $null @(@{ P = $global:MdmIds.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
+            $global:MdmWorld.Unsecured = @('sprk_communication.sprk_sentby')
+            $r = if ($Phase -eq 'Move') { Invoke-MdmMove @{ Verify = $true } } else { Invoke-Mdm @{ Phase = 'Stamp'; Verify = $true } }
+            $r.ExitCode | Should -Not -Be 0
+            $r.Output | Should -Match 'REFUSED'
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications|sprk_communicationthreads|businessunits' }).Count | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'throws on an empty -BffApplicationIds (a list of separators) before any read' {
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; BffApplicationIds = @(',') }
+            $r.Thrown | Should -Match '-BffApplicationIds names no application id'
+            $global:MdmWorld.Requests.Count | Should -Be 0
+        }
+
         It 'must not fire: with 054b in place the dry run proceeds and exits 0' {
             $r = Invoke-Mdm @{ Phase = 'Stamp' }
             $r.ExitCode | Should -Be 0
@@ -295,6 +397,32 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
             $r = Invoke-Mdm @{ Phase = 'Stamp'; NamePrefix = 'NOPE-' }
             $r.Output | Should -Match 'PLAN: 0 row'
+        }
+
+        It 'a Direct-typed thread with a typed regarding lookup is not Direct: its messages go to review (<Column>)' -TestCases @(
+            @{ Column = 'sprk_regardingmatter' }
+            @{ Column = 'sprk_regardingperson' }
+            @{ Column = 'sprk_regardingorganization' }
+        ) {
+            param($Column)
+            Add-MdmThread $T1 $global:MdmIds.Alice $null @(@{ P = $global:MdmIds.Bob; Mask = 1 }) -Regarding $Column
+            Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            $r.ExitCode | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'thread_has_regarding'
+            $r.Output | Should -Match 'PLAN: 0 row'
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'selects the thread''s own regarding columns, never sprk_regardingreportcard (the thread table has none)' {
+            Add-MdmThread $T1 $global:MdmIds.Alice $null @(@{ P = $global:MdmIds.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
+            $r = Invoke-Mdm @{ Phase = 'Stamp' }
+            $threadReads = @($global:MdmWorld.Requests | Where-Object { $_ -match '/sprk_communicationthreads\?' })
+            $threadReads.Count | Should -Be 1
+            $threadReads[0] | Should -Match '_sprk_regardingmatter_value'
+            $threadReads[0] | Should -Match '_sprk_regardingperson_value'
+            $threadReads[0] | Should -Not -Match 'reportcard'
         }
 
         It 'reads no Direct-team setting and no business unit or named team' {
@@ -343,6 +471,26 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             }
         }
 
+        It 'a team-owned thread whose user-owner column is also set (as Dataverse returns it) has no owner participant: one user share is not a pair' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $i.SomeTeam @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $null
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            $r.ExitCode | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'not_two_participants'
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._sprk_directrecipient_value | Should -BeNullOrEmpty
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'a team-owned thread with a stray user-owner column and two user Read shares: the shares are the pair' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Carol $i.SomeTeam @(@{ P = $i.Alice; Mask = 1 }, @{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $null
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            $r.ExitCode | Should -Be 0
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._sprk_directrecipient_value | Should -Be $i.Bob
+        }
+
         It 'must not fire: a share read fault sends the row to review as read_fault and writes nothing' {
             Add-MdmThread $T1 $global:MdmIds.Alice $null @(@{ P = $global:MdmIds.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
@@ -358,6 +506,22 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
             ReasonOf $r $M1 | Should -Be 'thread_shares_changed_after_create'
             $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+    }
+
+    Context 'Stamp: a write that throws keeps the review list' {
+        It 'writes the review list gathered so far, then rethrows' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage (MdmId 199) $T1 $null $null            # no sentby: review
+            Add-MdmMessage $M1 $T1 $i.Alice $null                  # stamped
+            Add-MdmMessage (MdmId 201) $T1 $i.Alice $null          # its PATCH throws
+            $global:MdmWorld.PatchFault = "sprk_communications\($(MdmId 201)\)"
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            $r.Thrown | Should -Match 'simulated write fault'
+            @($r.Review).Count | Should -Be 1
+            ReasonOf $r (MdmId 199) | Should -Be 'no_sentby'
+            $global:MdmWorld.Writes.Count | Should -Be 1
         }
     }
 
@@ -424,6 +588,181 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
         }
     }
 
+    Context 'Move: the gate-record creator list' {
+        It 'must fire: -Phase Move without -GateRecordWriterApplicationIds throws before any read' {
+            $r = Invoke-Mdm @{ Phase = 'Move'; DirectMessageBusinessUnitName = 'Direct Messages'; DirectMessageOwnerTeamName = 'Direct Owners' }
+            $r.Thrown | Should -Match '-GateRecordWriterApplicationIds'
+            $global:MdmWorld.Requests.Count | Should -Be 0
+        }
+
+        It 'must fire: an empty list (separators only) throws before any read' {
+            $r = Invoke-MdmMove @{ GateRecordWriterApplicationIds = @(',') }
+            $r.Thrown | Should -Match '-GateRecordWriterApplicationIds'
+            $global:MdmWorld.Requests.Count | Should -Be 0
+        }
+
+        It 'must fire: a gate-writer id with no application user refuses; nothing is selected' {
+            $r = Invoke-MdmMove @{ GateRecordWriterApplicationIds = @('dddddddd-0000-4000-8000-000000000009'); Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'REFUSED: the gate record writer is not usable \(gate_record_writer_not_found'
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?|sprk_communicationthreads\?' }).Count | Should -Be 0
+        }
+
+        It 'must not fire: the gate writer is not on the writer profile and need not be (the lists are separate)' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 300) $M1 -CreatedBy $i.GateWriter
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 301) $M1 -CreatedBy $i.Bff
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 300))._owningteam_value | Should -Be $i.DirectTeam
+            ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 301))._owningteam_value | Should -BeNullOrEmpty
+        }
+
+        It 'a Decision Record created by an id in neither list is not moved' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 300) $M1 -CreatedBy $i.Carol
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 300))._owningteam_value | Should -BeNullOrEmpty
+            @($global:MdmWorld.Writes | Where-Object { $_.Uri -match [regex]::Escape((MdmId 300)) }).Count | Should -Be 0
+        }
+    }
+
+    Context 'Move: the Assign cascade refusal' {
+        BeforeEach {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+        }
+
+        It 'must fire: <Case>' -TestCases @(
+            @{ Case = 'sprk_communication cascades Assign to a child'; Table = 'sprk_communication'; Child = 'sprk_communicationattachment' }
+            @{ Case = 'a content table (sprk_document) cascades Assign to a child'; Table = 'sprk_document'; Child = 'sprk_documentchild' }
+            @{ Case = 'the gate Decision Record table cascades Assign'; Table = 'sprk_decisionrecord'; Child = 'sprk_decisionchild' }
+        ) {
+            param($Case, $Table, $Child)
+            $global:MdmWorld.Cascades[$Table] = @(@{ Child = $Child; Attribute = 'sprk_parent'; Assign = 'Cascade' })
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "REFUSED: an Assign cascade is not accepted \($Table->$Child\)"
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?|sprk_communicationthreads\?' }).Count | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'must fire under -Verify too (exit non-zero, nothing selected)' {
+            $global:MdmWorld.Cascades['sprk_communication'] = @(@{ Child = 'sprk_x'; Attribute = 'sprk_parent'; Assign = 'Active' })
+            $r = Invoke-MdmMove @{ Verify = $true }
+            $r.ExitCode | Should -Be 1
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?' }).Count | Should -Be 0
+        }
+
+        It 'must not fire: a cascade to a child the owner accepted proceeds' {
+            $global:MdmWorld.Cascades['sprk_communication'] = @(@{ Child = 'sprk_communicationattachment'; Attribute = 'sprk_communication'; Assign = 'Cascade' })
+            $r = Invoke-MdmMove @{ Apply = $true; AcceptedAssignCascade = @('sprk_communicationattachment') }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'ACCEPTED'
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -Be $global:MdmIds.DirectTeam
+        }
+
+        It 'must not fire: no Assign cascade (only NoCascade relationships) proceeds' {
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'Assign-cascading relationships from the tables this script assigns: 0'
+        }
+    }
+
+    Context 'Move: the thread''s own regarding lookups' {
+        It 'a Direct-typed thread with a typed regarding lookup is not Direct: nothing of its messages moves, and the message is listed' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 }) -Regarding 'sprk_regardingmatter'
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'thread_has_regarding'
+            (Invoke-MdmMove @{ Verify = $true }).ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'Move: the write-time re-read' {
+        BeforeEach {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+        }
+
+        It 'a message that became Secure-owned since selection moves nothing of it' {
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communications\($($global:MdmM1)\)" } {
+                [pscustomobject]@{ sprk_communicationid = $global:MdmM1; sprk_name = 'FMSWP-x'; _sprk_communicationthread_value = $global:MdmT1; _sprk_sentby_value = $global:MdmIds.Alice; _sprk_directrecipient_value = $global:MdmIds.Bob; _owninguser_value = $null; _owningteam_value = $global:MdmIds.SecureTeam }
+            }
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+        }
+
+        It 'a message that gained a typed regarding lookup since selection moves nothing of it' {
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communications\($($global:MdmM1)\)" } {
+                [pscustomobject]@{ sprk_communicationid = $global:MdmM1; sprk_name = 'FMSWP-x'; _sprk_communicationthread_value = $global:MdmT1; _sprk_sentby_value = $global:MdmIds.Alice; _sprk_directrecipient_value = $global:MdmIds.Bob; _owninguser_value = $global:MdmIds.Alice; _owningteam_value = $null; _sprk_regardingmatter_value = (MdmId 999) }
+            }
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+        }
+
+        It 'a thread that gained a typed regarding lookup since selection moves nothing of its message' {
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communicationthreads\($($global:MdmT1)\)" } {
+                [pscustomobject]@{ sprk_communicationthreadid = $global:MdmT1; _sprk_regardingmatter_value = (MdmId 998) }
+            }
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+        }
+
+        It 'must not fire: an unchanged message and thread move as planned' {
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 2
+        }
+    }
+
+    Context 'Move: a write that throws keeps the review list' {
+        It 'writes the review list gathered so far, then rethrows' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            Add-MdmMessage (MdmId 201) $T1 $i.Alice $null          # no valid pair: review
+            $global:MdmWorld.PatchFault = "sprk_documents\($(MdmId 300)\)"
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.Thrown | Should -Match 'simulated write fault'
+            @($r.Review).Count | Should -Be 1
+            ReasonOf $r (MdmId 201) | Should -Be 'no_valid_pair'
+        }
+    }
+
+    Context 'OData literals' {
+        It 'a unit and a team name with &, #, + and spaces are percent-encoded and resolve' {
+            ($global:MdmWorld.Units | Where-Object name -eq 'Direct Messages').name = 'Legal & Co #1+2'
+            ($global:MdmWorld.Teams | Where-Object name -eq 'Direct Owners').name = 'Direct+Owners & Co #2'
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            $r = Invoke-MdmMove @{ Apply = $true; DirectMessageBusinessUnitName = 'Legal & Co #1+2'; DirectMessageOwnerTeamName = 'Direct+Owners & Co #2' }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match "Direct team $($i.DirectTeam)"
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -Be $i.DirectTeam
+            $unitReads = @($global:MdmWorld.Requests | Where-Object { $_ -match '/businessunits\?' -and $_ -match 'Legal' })
+            $unitReads.Count | Should -BeGreaterThan 0
+            $unitReads[0] | Should -Match 'Legal( |%20)%26( |%20)Co( |%20)%231%2B2'
+        }
+    }
+
     Context 'Move: apply, content rows, idempotence, verify' {
         It 'moves the content rows then the message; skips Direct- and Secure-owned rows and a non-gate Decision Record' {
             $i = $global:MdmIds
@@ -433,8 +772,10 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             Add-MdmContent 'sprk_communicationparticipants' (MdmId 301) $M1
             Add-MdmContent 'sprk_emailreviewlogs' (MdmId 302) $M1
             Add-MdmContent 'sprk_documents' (MdmId 303) $M1
-            Add-MdmContent 'sprk_decisionrecords' (MdmId 304) $M1                                   # gate record (BFF-created, unconfirmed)
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 304) $M1 -CreatedBy $i.GateWriter          # gate record (the gate writer's, unconfirmed)
             Add-MdmContent 'sprk_decisionrecords' (MdmId 305) $M1 -CreatedBy $i.Alice               # not a gate record
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 309) $M1 -CreatedBy $i.Bff                 # the BFF's own: not a gate record
+            Add-MdmContent 'sprk_decisionrecords' (MdmId 310) $M1 -CreatedBy $i.Carol               # a creator in neither list
             Add-MdmContent 'sprk_decisionrecords' (MdmId 306) $M1 -ConfirmedBy $i.Alice             # confirmed: not a gate record
             Add-MdmContent 'sprk_documents' (MdmId 307) $M1 -OwnerTeam $i.SecureTeam                # Secure-owned
             Add-MdmContent 'sprk_documents' (MdmId 308) $M1 -OwnerTeam $i.DirectTeam                # already Direct
@@ -451,6 +792,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $moved | Should -Be @((MdmId 300), (MdmId 301), (MdmId 302), (MdmId 303), (MdmId 304), $M1)
             @($global:MdmWorld.Writes | Where-Object { $_.Body.'ownerid@odata.bind' -ne "/teams($($i.DirectTeam))" }).Count | Should -Be 0
             ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 305))._owninguser_value | Should -Be $i.Alice
+            foreach ($n in 309, 310) { ($global:MdmWorld.Content | Where-Object Id -eq (MdmId $n))._owningteam_value | Should -BeNullOrEmpty }
             ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 307))._owningteam_value | Should -Be $i.SecureTeam
             ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq (MdmId 201))._owningteam_value | Should -Be $i.SecureTeam
 
@@ -547,7 +889,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
         }
 
         It '-Phase Move without the two Direct names throws before any read' {
-            { & $script:Script -EnvironmentUrl $script:Url -Phase Move -BffApplicationIds $global:MdmBffAppId -ReviewPath (Join-Path ([IO.Path]::GetTempPath()) 'x.json') } |
+            { & $script:Script -EnvironmentUrl $script:Url -Phase Move -BffApplicationIds $global:MdmBffAppId -GateRecordWriterApplicationIds $global:MdmGateAppId -ReviewPath (Join-Path ([IO.Path]::GetTempPath()) 'x.json') } |
                 Should -Throw '*-DirectMessageBusinessUnitName and -DirectMessageOwnerTeamName*'
             $global:MdmWorld.Requests.Count | Should -Be 0
         }
