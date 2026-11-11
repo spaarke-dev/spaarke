@@ -594,10 +594,11 @@ A Direct message is a Message row (`sprk_communicationtype` = 100000004) whose t
 
 ### Apply, per row
 
-- **Stamp:** re-read, write, read back. A read-back mismatch stops the run (exit 1).
+- **Stamp:** re-read, write, read back. A read-back mismatch stops the run (exit 1). The re-read covers the message (still empty, same sender, same thread, no typed regarding lookup) and its thread (still Direct-typed, `sprk_isdefaultthread` still false, no typed regarding lookup); a row that fails any of them is listed `changed_since_selection` and not written.
+- **Application ids** (`-BffApplicationIds`, `-GateRecordWriterApplicationIds`) are normalised to the plain dashed form before they reach a filter (`Guid.TryParse` also accepts braced, parenthesised, no-dash and `0x` forms).
 - **Move:**
   - `sharetopreviousowneronassign` true refuses `-Apply` before any write. It is re-read before every row.
-  - The message and its thread are re-read. When the pair is no longer valid, the message is now owned by the Secure Record team, or the message or its thread now carries a typed regarding lookup, nothing of that message moves and it is listed.
+  - The message and its thread are re-read. When the pair is no longer valid, the message is now owned by the Secure Record team, the message or its thread now carries a typed regarding lookup, or the thread is no longer Direct-typed or is now the per-user master thread (flag true or unread), nothing of that message moves and it is listed.
   - A request that throws mid-run (a PATCH or a read) writes the review list gathered so far, then rethrows (Stamp and Move).
   - Then each content row, the message last: count the shares (mask > 0), assign `ownerid@odata.bind` → `/teams(<Direct team>)`, read the owner back (stop if it did not land), count again.
   - Stop if the count fell. A rise is reported, not stopped: once the row is Direct-owned, 198's share job may grant the participants.
@@ -613,6 +614,7 @@ A Direct message is a Message row (`sprk_communicationtype` = 100000004) whose t
 - **L11.** The operator runs the script as a System Administrator, whom field security does not restrict. The stamp is written by the operator, not the BFF, under the same rule.
 - **L12.** Stamp computes a thread's pair once per run. A share changed on that thread during the run is not re-read before each row.
 - **L13.** Between a message's assign and 198's next job run, the moved rows are readable by neither participant (the piece-3 contract's stated limit). The script does not call the BFF's per-message grant.
+- **L15.** A table missing from the Assign-cascade metadata read ends the run with the raw request error rather than a named refusal. It fails closed: nothing is selected or written.
 - **L14.** The share-count check races 198's share job. If the job revokes a non-participant share on a just-moved message before the second count, the run stops. Re-running resumes.
 
 ### §11 for the script
@@ -668,4 +670,9 @@ Not verified without a live environment:
   - write-time re-read checks removed: Secure-owned **Failed 1**, message regarding **Failed 2**, thread regarding **Failed 1**;
   - empty `-BffApplicationIds` accepted: **Failed 1**; review list not kept when a write throws: **Failed 2** (Stamp, Move); OData literal not percent-encoded: **Failed 1**;
   - restored: **Passed 86, Failed 0**.
-- **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file): **122 passed, 0 failed.**
+- **Re-check round** (scoped re-check of the fix diff; the file now has 95 tests). Each fix reverted alone:
+  - Move/Stamp thread re-read without the type check: **Failed 2**; without the master-flag check: **Failed 3**;
+  - Stamp without the thread re-read: **Failed 3**; Stamp without the message-regarding re-read: **Failed 1**;
+  - application ids not normalised: **Failed 1**;
+  - restored: **Passed 95, Failed 0**.
+- **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed.** Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.

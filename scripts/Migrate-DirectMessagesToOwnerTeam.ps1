@@ -165,11 +165,15 @@ function Split-List([string[]]$Values) { @($Values | ForEach-Object { $_ -split 
 $BffApplicationIds = Split-List $BffApplicationIds
 if ($BffApplicationIds.Count -eq 0) { throw '-BffApplicationIds names no application id (an empty list would leave the writer profile with no allowed member).' }
 foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
+# Normalise to the plain dashed lower-case form: TryParse also accepts {..}, (..), no-dash and 0x forms, and the id goes
+# unquoted into an OData filter.
+$BffApplicationIds = @(foreach ($id in $BffApplicationIds) { [Guid]::Parse($id).ToString('D') })
 $GateRecordWriterApplicationIds = Split-List $GateRecordWriterApplicationIds
 if ($Phase -eq 'Move' -and $GateRecordWriterApplicationIds.Count -eq 0) {
     throw '-Phase Move needs -GateRecordWriterApplicationIds (the application id of the identity that creates gate Decision Records). It has no default and is not the BFF id list.'
 }
 foreach ($id in $GateRecordWriterApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-GateRecordWriterApplicationIds: '$id' is not a GUID." } }
+$GateRecordWriterApplicationIds = @(foreach ($id in $GateRecordWriterApplicationIds) { [Guid]::Parse($id).ToString('D') })   # foreach, not a pipe: an empty list arrives as $null and a pipe would run once
 $AcceptedAssignCascade = Split-List $AcceptedAssignCascade
 if ($Phase -eq 'Move' -and ([string]::IsNullOrWhiteSpace($DirectMessageBusinessUnitName) -or [string]::IsNullOrWhiteSpace($DirectMessageOwnerTeamName))) {
     throw '-Phase Move needs -DirectMessageBusinessUnitName and -DirectMessageOwnerTeamName (the BFF settings DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName). They have no default.'
@@ -244,6 +248,20 @@ function Lc($g) { if ($null -eq $g -or "$g" -eq '') { $null } else { "$g".ToLowe
 function NonEmpty($g) { $v = Lc $g; if ($v -and $v -ne '00000000-0000-0000-0000-000000000000') { $v } else { $null } }
 # True when any of the named typed regarding lookups (columns) is set on the row.
 function HasRegarding($Row, [string[]]$Columns) { [bool]($Columns | Where-Object { NonEmpty $Row."_$($_)_value" }) }
+# The write-time re-read (Stamp and Move), so a row is written only if what selected it still holds.
+$MessageRecheckSelect = (@('sprk_communicationid', 'sprk_name', '_sprk_communicationthread_value', '_sprk_sentby_value', '_sprk_directrecipient_value',
+        '_owningteam_value', '_owninguser_value') + @($RegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
+$ThreadRecheckSelect = (@('sprk_communicationthreadid', 'sprk_threadtype', 'sprk_isdefaultthread') +
+    @($ThreadRegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
+# The thread is still Direct-typed, still not the per-user master thread, and still carries no typed regarding lookup.
+# Returns why it no longer qualifies, or $null.
+function Get-ThreadChange([string]$ThreadId) {
+    $t = Invoke-DvGet "sprk_communicationthreads($ThreadId)?`$select=$ThreadRecheckSelect"
+    if ($t.sprk_threadtype -ne $ThreadTypeDirect) { return 'its thread is no longer Direct-typed' }
+    if ($t.sprk_isdefaultthread -ne $false) { return 'its thread is the per-user master thread, or the flag is unread' }
+    if (HasRegarding $t $ThreadRegardingColumns) { return 'its thread now carries a typed regarding lookup' }
+    $null
+}
 
 $gaps = New-Object System.Collections.Generic.List[string]
 function Report([string]$State, [string]$What) {
@@ -446,11 +464,15 @@ if ($Phase -eq 'Stamp') {
     $stamped = 0
     try {
         foreach ($p in $plan) {
-            $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
+            $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=$MessageRecheckSelect"
+            $planned = [pscustomobject]@{ sprk_communicationid = $p.MessageId; sprk_name = $p.Name; _sprk_communicationthread_value = $p.ThreadId; _sprk_sentby_value = $p.Sender }
             if ((NonEmpty $now._sprk_directrecipient_value) -or (NonEmpty $now._sprk_sentby_value) -ne $p.Sender -or (Lc $now._sprk_communicationthread_value) -ne $p.ThreadId) {
-                Add-Review ([pscustomobject]@{ sprk_communicationid = $p.MessageId; sprk_name = $p.Name; _sprk_communicationthread_value = $p.ThreadId; _sprk_sentby_value = $p.Sender }) 'changed_since_selection'
+                Add-Review $planned 'changed_since_selection'
                 continue
             }
+            if (HasRegarding $now $RegardingColumns) { Add-Review $planned 'changed_since_selection' 'now carries a typed regarding lookup'; continue }
+            $threadChange = Get-ThreadChange $p.ThreadId
+            if ($threadChange) { Add-Review $planned 'changed_since_selection' $threadChange; continue }
             Invoke-DvPatch "sprk_communications($($p.MessageId))" @{ 'sprk_DirectRecipient@odata.bind' = "/systemusers($($p.Recipient))" }
             $back = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=_sprk_directrecipient_value,_sprk_sentby_value,_sprk_communicationthread_value"
             if ((Lc $back._sprk_directrecipient_value) -ne $p.Recipient) {
@@ -625,21 +647,18 @@ function Move-Row([string]$Set, [string]$Table, [string]$Id) {
     $script:moved++
     Write-Host "   moved $Table ${Id}: owner verified, shares $before -> $after"
 }
-$messageRecheckSelect = (@('sprk_communicationid', 'sprk_name', '_sprk_communicationthread_value', '_sprk_sentby_value', '_sprk_directrecipient_value',
-        '_owningteam_value', '_owninguser_value') + @($RegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
-$threadRecheckSelect = (@('sprk_communicationthreadid') + @($ThreadRegardingColumns | ForEach-Object { "_$($_)_value" })) -join ','
 try {
     foreach ($p in $plan) {
         # The assign invariant, at write time: a message that is no longer a Direct message with a valid stamped pair moves
         # nothing of it, content rows included.
-        $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=$messageRecheckSelect"
+        $now = Invoke-DvGet "sprk_communications($($p.MessageId))?`$select=$MessageRecheckSelect"
         if (-not (ValidPair $now)) { Add-Review $now 'no_valid_pair' 'changed since selection'; continue }
         if ($secureTeamId -and (NonEmpty $now._owningteam_value) -eq $secureTeamId) { Add-Review $now 'changed_since_selection' 'now owned by the Secure Record team'; continue }
         if (HasRegarding $now $RegardingColumns) { Add-Review $now 'changed_since_selection' 'now carries a typed regarding lookup'; continue }
         $threadNowId = NonEmpty $now._sprk_communicationthread_value
         if (-not $threadNowId) { Add-Review $now 'changed_since_selection' 'now has no thread'; continue }
-        $threadNow = Invoke-DvGet "sprk_communicationthreads($threadNowId)?`$select=$threadRecheckSelect"
-        if (HasRegarding $threadNow $ThreadRegardingColumns) { Add-Review $now 'changed_since_selection' 'its thread now carries a typed regarding lookup'; continue }
+        $threadChange = Get-ThreadChange $threadNowId
+        if ($threadChange) { Add-Review $now 'changed_since_selection' $threadChange; continue }
         foreach ($c in $p.Content) { Move-Row $c.Set $c.Table $c.Id }
         if ((NonEmpty $now._owningteam_value) -ne $directTeamId) { Move-Row 'sprk_communications' 'sprk_communication' $p.MessageId }
     }

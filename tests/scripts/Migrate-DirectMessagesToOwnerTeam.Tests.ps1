@@ -555,6 +555,50 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             ReasonOf $r $M1 | Should -Be 'changed_since_selection'
             $global:MdmWorld.Writes.Count | Should -Be 0
         }
+
+        It 'a message that gained a typed regarding lookup since selection is not stamped' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $null
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communications\($($global:MdmM1)\)" } {
+                [pscustomobject]@{ sprk_communicationid = $global:MdmM1; _sprk_directrecipient_value = $null; _sprk_sentby_value = $global:MdmIds.Alice; _sprk_communicationthread_value = $global:MdmT1; _sprk_regardingmatter_value = (MdmId 999) }
+            }
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'a thread that no longer qualifies since selection: its message is not stamped (<Case>)' -ForEach @(
+            @{ Case = 'retyped'; Type = 100000000; IsDefault = $false; Regarding = $null; Expect = 'no longer Direct-typed' }
+            @{ Case = 'now the master thread'; Type = 100000001; IsDefault = $true; Regarding = $null; Expect = 'per-user master thread' }
+            @{ Case = 'gained a regarding lookup'; Type = 100000001; IsDefault = $false; Regarding = '00000000-0000-4000-8000-000000000998'; Expect = 'typed regarding lookup' }
+        ) {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $null
+            $global:MdmRecheck = @{ Type = $Type; IsDefault = $IsDefault; Regarding = $Regarding }
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communicationthreads\($($global:MdmT1)\)" } {
+                [pscustomobject]@{ sprk_communicationthreadid = $global:MdmT1; sprk_threadtype = $global:MdmRecheck.Type; sprk_isdefaultthread = $global:MdmRecheck.IsDefault; _sprk_regardingmatter_value = $global:MdmRecheck.Regarding }
+            }
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+            @($r.Review | Where-Object { $_.MessageId -eq $M1 })[0].Detail | Should -Match $Expect
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+    }
+
+    Context 'Application ids are normalised before they reach a filter' {
+        It 'a braced, upper-case id is sent as the plain dashed form (<Param>)' -ForEach @(
+            @{ Param = 'BffApplicationIds' }
+            @{ Param = 'GateRecordWriterApplicationIds' }
+        ) {
+            $raw = if ($Param -eq 'BffApplicationIds') { $global:MdmBffAppId } else { $global:MdmGateAppId }
+            $r = Invoke-MdmMove @{ $Param = @("{$($raw.ToUpperInvariant())}") }
+            $r.Thrown | Should -BeNullOrEmpty
+            $r.ExitCode | Should -Be 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -match "applicationid eq $raw" }).Count | Should -BeGreaterThan 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'applicationid eq [{(]' }).Count | Should -Be 0
+        }
     }
 
     Context 'Move: the assign invariant' {
@@ -717,11 +761,26 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
 
         It 'a thread that gained a typed regarding lookup since selection moves nothing of its message' {
             Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communicationthreads\($($global:MdmT1)\)" } {
-                [pscustomobject]@{ sprk_communicationthreadid = $global:MdmT1; _sprk_regardingmatter_value = (MdmId 998) }
+                [pscustomobject]@{ sprk_communicationthreadid = $global:MdmT1; sprk_threadtype = 100000001; sprk_isdefaultthread = $false; _sprk_regardingmatter_value = (MdmId 998) }
             }
             $r = Invoke-MdmMove @{ Apply = $true }
             $global:MdmWorld.Writes.Count | Should -Be 0
             ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+        }
+
+        It 'a thread that is no longer Direct-typed since selection moves nothing of its message (<Case>)' -ForEach @(
+            @{ Case = 'retyped'; Type = 100000000; IsDefault = $false; Expect = 'no longer Direct-typed' }
+            @{ Case = 'now the master thread'; Type = 100000001; IsDefault = $true; Expect = 'per-user master thread' }
+            @{ Case = 'flag unread'; Type = 100000001; IsDefault = $null; Expect = 'per-user master thread' }
+        ) {
+            $global:MdmRecheck = @{ Type = $Type; IsDefault = $IsDefault }
+            Mock Invoke-RestMethod -ParameterFilter { $Method -eq 'Get' -and [string]$Uri -match "sprk_communicationthreads\($($global:MdmT1)\)" } {
+                [pscustomobject]@{ sprk_communicationthreadid = $global:MdmT1; sprk_threadtype = $global:MdmRecheck.Type; sprk_isdefaultthread = $global:MdmRecheck.IsDefault }
+            }
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'changed_since_selection'
+            @($r.Review | Where-Object { $_.MessageId -eq $M1 })[0].Detail | Should -Match $Expect
         }
 
         It 'must not fire: an unchanged message and thread move as planned' {
