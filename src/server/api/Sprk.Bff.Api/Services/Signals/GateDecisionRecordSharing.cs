@@ -901,8 +901,10 @@ public sealed class GateDecisionRecordSharing
     /// 198 pass 2 N3: on a record the Direct team owns, with a valid audience, every user share outside that audience (a revoke that failed
     /// earlier) is revoked, the same revoke <see cref="ReownToDirectAsync"/> sends. Only after the owner is read back as exactly the Direct
     /// team (a record a filing or the Secure reconciler re-owned meanwhile is theirs). A share read or owner read that faults revokes nothing.
+    /// <paramref name="everyPrincipal"/> (<see cref="ReownToDirectAsync"/>, F-198-1): a share held by a team, not only a user's, is leftover too.
     /// </summary>
-    private async Task RevokeOutsideAudienceAsync(Guid communicationId, GateRecord record, IReadOnlyList<Guid> audience, Guid directTeam)
+    private async Task RevokeOutsideAudienceAsync(
+        Guid communicationId, GateRecord record, IReadOnlyList<Guid> audience, Guid directTeam, bool everyPrincipal = false)
     {
         IReadOnlyList<DataversePrincipalAccess> shares;
         try
@@ -917,7 +919,7 @@ public sealed class GateDecisionRecordSharing
 
         var keep = audience.ToHashSet();
         var leftovers = shares
-            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && !keep.Contains(s.Principal.Id))
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser ? !keep.Contains(s.Principal.Id) : everyPrincipal)
             .Select(s => s.Principal)
             .Distinct()
             .ToList();
@@ -954,7 +956,8 @@ public sealed class GateDecisionRecordSharing
     /// <summary>
     /// D-215 rules 3 and 5: a gate record of a Direct-team-owned communication follows it to the Direct team, in this order: (a) assigned to
     /// <paramref name="directTeam"/> through the ontology writer's identity, (b) the access caches evicted once per attempt, (c) the owner read
-    /// back, and (d) ONLY when the read-back names the Direct team, the audience recomputed, granted, and every other share revoked. A failed
+    /// back, and (d) ONLY when the read-back names the Direct team, the audience recomputed, granted, and every other share revoked, each write
+    /// re-checking that the owner is still the Direct team (F-198-1: a grant it rejects is undone, a revoke it rejects is not sent). A failed
     /// read-back keeps the owner and the shares (Warning); the communication's next re-file or participant grant retries it. A record the Direct
     /// team already owns skips (a) to (c). A record a team owns that the ONE Secure check names Secure is the Secure reconciler's (nothing here);
     /// an unknown answer changes nothing. An invalid pair, or a fault recomputing the audience, grants and revokes nothing.
@@ -1010,66 +1013,29 @@ public sealed class GateDecisionRecordSharing
         }
 
         (IReadOnlyList<Guid>? Users, string? NoPair) audience;
-        IReadOnlyList<DataversePrincipalAccess> shares;
         try
         {
             audience = await DirectAudienceAsync(communicationId, communication).ConfigureAwait(false);
-            if (audience.Users is null)
-            {
-                _logger.LogInformation(
-                    "Gate Decision Record {RecordId} of Direct message {CommunicationId} is owned by the Direct-message owner team, but {Reason}; " +
-                    "nothing is granted or revoked (D-215).", record.Id, communicationId, audience.NoPair);
-                return;
-            }
-
-            shares = await _shares.GetPrincipalAccessOrThrowAsync(Table, record.Id, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            ShareFailed(ex, "owned by the Direct-message owner team, but its participants or shares could not be read; nothing is granted or " +
+            ShareFailed(ex, "owned by the Direct-message owner team, but its participants could not be read; nothing is granted or " +
                 "revoked (D-215)", record.Id, communicationId);
             return;
         }
 
-        var participants = audience.Users.ToHashSet();
-        var holding = shares
-            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && (s.AccessRightsMask & ReadAccessMask) == ReadAccessMask)
-            .Select(s => s.Principal.Id)
-            .ToHashSet();
-        var granted = 0;
-        foreach (var participant in participants.Where(p => !holding.Contains(p)))
+        if (audience.Users is not { } users)
         {
-            try
-            {
-                await _shares.GrantAccessAsync(EntitySet, record.Id, DataversePrincipalRef.User(participant), ReadAccessRights, CancellationToken.None)
-                    .ConfigureAwait(false);
-                granted++;
-            }
-            catch (Exception ex)
-            {
-                ShareFailed(ex, "a participant Read grant failed (D-215)", record.Id, communicationId);
-            }
+            _logger.LogInformation(
+                "Gate Decision Record {RecordId} of Direct message {CommunicationId} is owned by the Direct-message owner team, but {Reason}; " +
+                "nothing is granted or revoked (D-215).", record.Id, communicationId, audience.NoPair);
+            return;
         }
 
-        var revoked = 0;
-        foreach (var share in shares.Where(s => !(s.Principal.Kind == DataversePrincipalKind.SystemUser && participants.Contains(s.Principal.Id))))
-        {
-            try
-            {
-                await _shares.RevokeAccessAsync(EntitySet, record.Id, share.Principal, DataversePrincipalRef.Team(directTeam), CancellationToken.None)
-                    .ConfigureAwait(false);
-                revoked++;
-            }
-            catch (Exception ex)
-            {
-                ReownFailed(ex, "owned by the Direct-message owner team, but a share that is not a participant's could not be revoked (D-215)",
-                    record.Id, communicationId);
-            }
-        }
-
-        _logger.LogInformation(
-            "Gate Decision Record {RecordId} of Direct message {CommunicationId} is owned by the Direct-message owner team; {Granted} participant " +
-            "Read share(s) granted, {Revoked} other share(s) revoked (D-215).", record.Id, communicationId, granted, revoked);
+        // F-198-1: both writes re-read the owner after this pass's reads. A re-file that moved the record meanwhile (the Secure reconciler, or
+        // a filing) undoes this pass's grants and leaves every other share to the new owner's path: the same two helpers ShareDirectAsync uses.
+        await GrantAndConfirmAsync(communicationId, record, users, acceptedTeam: directTeam).ConfigureAwait(false);
+        await RevokeOutsideAudienceAsync(communicationId, record, users, directTeam, everyPrincipal: true).ConfigureAwait(false);
     }
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
