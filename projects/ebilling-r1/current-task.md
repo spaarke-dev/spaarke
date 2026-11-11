@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Last Updated**: 2026-11-11 (session `ebilling-r1`, Claude Desktop; the only writer to this worktree). The previous long version is `notes/handoff-history/current-task-2026-11-11a.md`; read it for history.
-> Work head: `origin/work/ebilling-r1`. It contains the task-130 batch and F3b (merge `017a965312`) and the default-team exclusion (`a945c34a3d`). It is NOT yet synced with master and not on master or dev.
+> Work head: `origin/work/ebilling-r1` at `64ec7a15b9`. It contains the task-130 batch and F3b (merge `017a965312`), the default-team exclusion (`a945c34a3d`), and the master sync through master `df93d2029c` (sync branch `14e54c9e06`, fast-forwarded; script-guard fix `aa2fe4feab`; comment fix `64ec7a15b9`). It is not on master or dev yet. uac-r2's `--remerge-diff` read was asked 2026-11-11; only `ExternalDataService.cs` was resolved by hand (merge `07ed87e2d4`).
 
 ## Quick recovery
 
@@ -28,17 +28,12 @@
 
 ## Agents running
 
-- **Blocker fixes on `merge/ebilling-master-sync`** (Opus; from `7171d01aa6`):
-  - (1) master's `ModalUnmountedWhileOpenGuardTests` (#2658) fails at 5 of our modal sites (InvoiceReview ×3, CreateInvoiceWizard BlockedSubmissionPanel, EmailWorkspace); fix with the keep-mounted shape;
-  - (2) ontology 176's `ExternalMessageEndpointsTests…InquiryEmail` control check: the test world gets explicit nulls, as Issue963 does, after confirming against the production `$select`. Do not weaken the absent-column rule. Tell ontology-r1 the result.
-- **116 fix round 5** on `task/ebilling-116-r5` (Opus; from `ae0a9cffa3`):
-  - EB-D-216a: `/draft` checks the reject-equivalent rights as the caller, then deactivates app-only;
-  - the re-check findings: F2, the in-flight run race (take the job's lock, answer 409 drafting_in_progress, plan only drafts older than the current file); F1, an unknown transaction outcome answers 503;
-  - Ks: active-only compare, a 1000-request cap answering 422, a queue failure answering 503 `ruleset.redraft_not_queued` plus a retry test, `None` after commit, wider guard coverage, a stale comment.
+- **116 round 5 scoped re-check** (Opus adversarial-reviewer, read-only): diff `ae0a9cffa3..6fa104ffef` on `origin/task/ebilling-116-r5`. Round 5 is done: EB-D-216a reject-equivalent check, F2 job lock with 409 and older-drafts-only, F1 503 on an unknown outcome, the Ks. ArchTests 2206/2206.
+- The master-sync blockers are done (modal keep-mounted shape at 5 sites; ontology's 176 and BudgetInquiry test doubles; uac-r2's boundary test helper was missing `readDocumentChains`). Peers have been told.
 
 ## Next actions, in order
 
-1. **Master sync:**
+1. **Master sync: DONE (work at `64ec7a15b9`); waiting on uac-r2's `--remerge-diff` read.** Then re-check `merge-tree` against the newest master before the PR. The notes below are kept for the record:
    - When the blockers are fixed, MERGE `merge/ebilling-master-sync` into work. Don't fast-forward: work has newer commits.
    - Re-run `merge-tree` against current master. uac-r2 (2026-11-11) warns that master now has #2673 (F-198-1) and #2679 (#2669: `ExternalModuleDataEndpoints.cs` and `ExternalDataService.cs` around the document narrowing), with #2677 (198b) coming. Our batch also edits `ExternalModuleDataEndpoints.cs`, so expect a hand-resolve there and list it for uac-r2.
    - Send uac-r2 the sync SHA and the hand-resolved files. They read `--remerge-diff` for the ExternalAccess files and `FeatureRolePrivilegeGuardTests` before the PR opens. Guards and ratchets: union only.
