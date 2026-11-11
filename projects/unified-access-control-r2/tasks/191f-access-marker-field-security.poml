@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191f" project="unified-access-control-r2">
+  <metadata>
+    <title>T191f (F1): field-lock Access Permission, internal-only and thread privacy so flagged users cannot lower them (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Field security on three security-marker columns across seven tables; a mistake masks or unlocks access decisions.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Interacts with task 189's own-narrowing record and task 188's profiles; read-masking must never change a BFF decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group A with 191b and 191d: the field-security engine script, a new named entry point and its tests only.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, security, access-control, field-security, scripts, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement owner decision Q1 = (a): field security on `sprk_accesspermission`, `sprk_isinternalonly` and `sprk_privacystate`. Every business unit's default team reads them; only the internal business units' default teams and the two BFF application users update them. A flagged user in the External Collaborators unit can then never lower a marker.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Dataverse field security profiles and the repo's task-133 field-security engine.</role>
+  <goal>A new target in `scripts/Set-DocumentPointerFieldSecurity.ps1` and a named entry point `scripts/Set-AccessMarkerFieldSecurity.ps1` (dry run, -Apply, -Verify) exist and are tested. Nothing is applied live in this task.</goal>
+
+  <context>
+    <background>Design §3.6 (F1) and §4.1 Q1. Spike S1 finding F1: a flagged user with Write lowered `sprk_accesspermission`. Task 189 §2.4 kept the document's value unsecured because a secured column the BFF cannot read reads empty; here the BFF application users are explicit readers and writers, so the BFF never reads a masked value. `Set-SecureFlagFieldSecurity.ps1:47` recorded the owner-accepted "stays editable by Write holders"; Q1 narrows that for flagged users only.</background>
+    <relevant-files>
+      <file role="modify">scripts/Set-DocumentPointerFieldSecurity.ps1 (the one engine; add target AccessMarkerColumns)</file>
+      <file role="new">scripts/Set-AccessMarkerFieldSecurity.ps1 (named entry point, copy Set-DocumentNarrowingFieldSecurity.ps1)</file>
+      <file role="canonical-reference">scripts/Set-DocumentNarrowingFieldSecurity.ps1 (preconditions p1-p7, dry run, -Verify)</file>
+      <file role="modify">scripts/Set-SecureFlagFieldSecurity.ps1 (the :47 comment only: point to the new target)</file>
+      <file role="new">tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs (RefuseAppOnlyWrite :1199: app-only writes of these columns stay refused)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191d" status="pending">The External Collaborators BU name (config) so -Verify can assert it holds the reader profile only. Code can proceed; -Verify reads the name from 191d's config.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Columns: sprk_accesspermission on every table that carries it (matter, project, work assignment, document, communication, event, to-do; confirm the live list read-only), sprk_communication.sprk_isinternalonly, sprk_communicationthread.sprk_privacystate. Nothing else.</constraint>
+    <constraint source="project">Profiles: a reader (Read) on every BU default team, External included; a writer (Read, Create, Update) on the internal BU default teams and the two BFF application users. The External BU's default team never holds the writer.</constraint>
+    <constraint source="project">Never secure sprk_isexternal (a masked flag reads blank, and blank is internal).</constraint>
+    <constraint source="project">The script's preconditions refuse to secure a column while any BU default team lacks the reader profile (a masked read on a form would show blank).</constraint>
+    <constraint source="project">No live write in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+      <file>projects/unified-access-control-r2/notes/task-189-own-narrowing.md</file>
+      <file>projects/unified-access-control-r2/notes/task-188-d7-document-narrowing.md</file>
+    </files>
+    <patterns>
+      <pattern name="one field-security engine, named entry points" location="scripts/Set-DocumentPointerFieldSecurity.ps1">Targets share the same preconditions and modes; each named script passes -Target.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read-only: list the live tables carrying sprk_accesspermission and the BU default teams on dev; record counts in the task notes.</step>
+    <step order="2">Add target AccessMarkerColumns to the engine with the reader and writer profiles above; add the named entry point.</step>
+    <step order="3">Check every BFF writer of these columns: app-only writes are refused by RefuseAppOnlyWrite or are made by the BFF application users (writers); caller-identity writes (field mapping, OBO tools, forms) meet the profile. List them in the task notes.</step>
+    <step order="4">Pester tests: dry run writes nothing; -Verify names each gap (column unsecured, team without reader, External team with writer, BFF app user without writer).</step>
+    <step order="5">Run the dry run against dev (read-only) and save the output.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: `Set-AccessMarkerFieldSecurity.ps1 -Apply` secures columns on a live environment. It is step 4 of the design's §3.19 and runs only in 191i after the owner's go.</trigger>
+    <trigger>If any BFF path writes one of these columns app-only on a caller's behalf without RefuseAppOnlyWrite, or any web resource writes them as a user who is not internal, STOP and escalate.</trigger>
+    <trigger>If securing sprk_accesspermission on documents would change task 189's classification for internal editors, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The task-133 engine and its targets (document pointers, document narrowing links, secure flag, regarding pair).</existing>
+    <extension>A new target in the same engine and a named entry point; no new mechanism.</extension>
+    <cost-of-doing-nothing>A flagged user with Write lowers Restricted or reopens a communication (spike S1 F1), and the share job then acts on the lowered value.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">scripts/Set-AccessMarkerFieldSecurity.ps1</output>
+    <output type="code">scripts/Set-DocumentPointerFieldSecurity.ps1</output>
+    <output type="test">tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dry run against dev writes nothing and lists the three columns per table and the profile assignments it would make.</criterion>
+    <criterion testable="true">-Verify reports a named gap for each of: an unsecured column, a BU default team without the reader, the External team holding the writer, a BFF application user without the writer.</criterion>
+    <criterion testable="true">Negative: the engine refuses -Apply while any BU default team lacks the reader profile.</criterion>
+    <criterion testable="true">Negative: sprk_isexternal is never in any target (test).</criterion>
+    <criterion testable="true">The task notes list every writer of the three columns and how each meets the profile.</criterion>
+    <criterion testable="true">Pester tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>The live proof (a flagged user's PATCH refused, an internal user's accepted) is part of 191i's gate (AC-3).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
