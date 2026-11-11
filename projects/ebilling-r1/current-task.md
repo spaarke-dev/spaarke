@@ -48,7 +48,7 @@
    - The PR gets reviews from ontology-r1, uac-r2 and spa-r4.
    - Notify every peer with the SHA.
 3. **After master:**
-   - dev deploy via uac-r2 and mcp-r1. uac-r2 needs the owner's go typed in ITS session and is putting the specific deploy (which build, mcp-r1's spike `755987b385`, timing alongside 198) to the owner itself; nothing more to relay;
+   - dev deploy via uac-r2 and mcp-r1. The owner approved it in uac-r2's session on 2026-11-11 (D-2): a dev BFF deploy from master once our batch lands, with mcp-r1 coordinated. uac-r2 runs it after `/merge-to-master`;
    - the 164 `-Apply`, plus read-backs to uac-r2;
    - one message to provisioning-r1 (master SHA + SpaarkeMaster version for DEF-059, 166 and 089d option R; the 166 field-security grants with `-Verify`; 116's `sprk_procedureversion.sprk_notconvertedlist` reader/writer line; the writer-unit team needs no grant);
    - word-add-in-r1 (session-move notice done 2026-11-11):
