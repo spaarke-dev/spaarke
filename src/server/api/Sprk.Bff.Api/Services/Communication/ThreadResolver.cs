@@ -1183,9 +1183,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// <summary>
     /// <c>true</c> unless the thread's owner is proven NOT to be the Secure Record owner team: a user owner, or a team whose
     /// own row rules it out — the detection <see cref="Access.DirectThreadAccessService"/> uses
-    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync"/>, then
-    /// <see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>). A team owner
-    /// with no configuration, or an ambiguous Secure team, answers <c>true</c> (fail closed). A Dataverse fault propagates.
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.IsSecureOwnerTeamAsync"/>). A team owner with no
+    /// configuration, an ambiguous Secure team, or Secure settings that name a unit or team Dataverse does not find answer
+    /// <c>true</c> (fail closed). A Dataverse fault propagates.
     /// </summary>
     private async Task<bool> ThreadOwnerMayBeSecureAsync(DataverseEntity thread, CancellationToken ct)
     {
@@ -1198,13 +1198,9 @@ public sealed class ThreadResolver : IThreadResolver
         if (_configuration is null)
             return true;
 
-        if (await Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(
-                _entityService, _configuration, team, ct))
-            return false;
-
-        var secure = await Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(
-            _entityService, _configuration, ct);
-        return secure.Refusal is not null || secure.TeamId == team;
+        var (secure, _) = await Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.IsSecureOwnerTeamAsync(
+            _entityService, _configuration, team, ct);
+        return secure is not false;
     }
 
     /// <summary>

@@ -422,7 +422,10 @@ public class RecordOwnerAssignmentCensusTests
             "Called once per communication re-file from SecureChildReconciler.AfterRefileAsync (after UAC's own steps; 042b round 2). "
             + "ReownAfterFilingAsync asks IRecordOwnershipResolver over the communication and the record's core stamps "
             + "(KeepCreatorUnlessTargetIsTeamOwned); a secure answer is left to SecureChildReconciler, Unchanged or a refusal "
-            + "keeps the user owner and its shares. The assign is read back before any share is revoked."),
+            + "keeps the user owner and its shares. The assign is read back before any share is revoked. uac-r2 task 198 Part E "
+            + "(ontology D-215): a gate record of an unfiled Direct-team-owned message is assigned to the Direct-message owner team "
+            + "(ReownToDirectAsync: at write, on a grant of the message, and on a re-file that unfiles it back to Direct), read back "
+            + "before its participants are granted and any other share revoked; filing a Direct record keeps its participants' Read."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -960,6 +963,10 @@ public class RecordOwnerAssignmentCensusTests
         new AssignCaller("GateDecisionRecordSharing.cs", "ReownAsync", 1,
             "Ontology 042b (D-169): the gate Decision Record re-own, only after IRecordOwnershipResolver answered an ordinary team for the "
             + "communication and the record's stamps; the owner is read back before any share is revoked."),
+        new AssignCaller("GateDecisionRecordSharing.cs", "ReownToDirectAsync", 1,
+            "uac-r2 task 198 Part E (ontology D-215): the gate Decision Record of an unfiled message the Direct-message owner team owns "
+            + "(the one Direct check, ids only) is assigned to that team; the caches are evicted and the owner read back before any "
+            + "participant is granted or any other share revoked. A Secure-team-owned record is left to SecureChildReconciler."),
         new AssignCaller("RuleSetEndpoints.cs", "AssignRuleSet", 1,
             "ebilling-r1: RuleSetService.AssignAsync assigns a billing rule set to a scope (ClientDefault or a firm). It writes rule-set "
             + "columns, not an owner, and builds no AssignRequest; listed because the call regex matches any .AssignAsync."),
