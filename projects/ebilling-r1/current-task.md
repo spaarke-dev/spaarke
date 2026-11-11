@@ -94,7 +94,14 @@
    - **Build after 116 and the 130 batch merge.** It needs the owner's dev go for the column (ontology recipe), notices to both peers, and the scoped `Services/Signals/**` review by ontology-r1 before merge.
 3b. **Master PR path (uac-r2 approved the batch merge, "ship the batch without 116"):**
    - The format nit is fixed (`338e3f79ee`).
-   - **RUNNING:** the master-sync agent (Opus, `merge/ebilling-master-sync` from `338e3f79ee`). A dry run found 11 conflicted files: docs, `Set-CustomerOwnerTeams` and its tests, `ExternalModuleDataEndpoints.cs`, `FeatureRolePrivilegeGuardTests.cs`, `RuleSetServiceTests`, `InvoiceComplianceEvaluatorTests`, Issue963, and a UI test.
+   - **Master sync DONE at `7171d01aa6`** (merge of master `c71414c7a0` = `30f8c0c083`).
+     - `2011574c2c` fixes two defects in `Set-CustomerOwnerTeams.ps1` that appeared only after the merge (sent to provisioning-r1 for review); `50c6b9ee76` adds Pester, 68/68; `7171d01aa6` fixes two tests broken by the new `ApplyMappingsToChildRecordsAsync` signature.
+     - Build 0/0; ArchTests 2420 + 1 fail; filtered unit tests 23918 + 2 fail (one a load flake).
+     - **Running now (Opus):** fixing the two blockers.
+       - (1) Master's `ModalUnmountedWhileOpenGuardTests` (#2658) fails on 5 of our modal sites (InvoiceReview ×3, CreateInvoiceWizard, EmailWorkspace). Fix: convert them to the keep-mounted shape.
+       - (2) Ontology 176's `ExternalMessageEndpointsTests…InquiryEmail` control fails under our absent-column rule. Fix: the test world gets explicit nulls, as Issue963 does, after confirming against the production `$select`. Tell ontology-r1 the result.
+     - The sync branch lacks `a945c34a3d` and later, so merge it into work rather than fast-forward.
+     - Original: master-sync agent (Opus, `merge/ebilling-master-sync` from `338e3f79ee`). A dry run found 11 conflicted files: docs, `Set-CustomerOwnerTeams` and its tests, `ExternalModuleDataEndpoints.cs`, `FeatureRolePrivilegeGuardTests.cs`, `RuleSetServiceTests`, `InvoiceComplianceEvaluatorTests`, Issue963, and a UI test.
    - **RUNNING:** the default-team exclusion (Sonnet, `task/ebilling-default-team-exclusion`, all 7 sites now; 116 resolves its `Deploy-EbillingProcedureSchema.ps1` conflict at its merge).
    - **Then:** fast-forward work; send uac-r2 the sync SHA and the list of hand-resolved files (they read `--remerge-diff` for the ExternalAccess files and the guard file before the PR opens; for guards and ratchets, no entry is dropped and no count is raised without a reason); measure the publish size against fresh master, and **ask the owner for the go to open the work→master PR** (the 4th; earlier ones were #1911, #2507, #2526, #2530; review by ontology-r1, uac-r2 and R4).
    - Dev deploy: uac-r2 coordinates with mcp-r1 (dev carries mcp-r1's spike `755987b385`), and the owner gives the go in uac-r2's session. We do not deploy.
