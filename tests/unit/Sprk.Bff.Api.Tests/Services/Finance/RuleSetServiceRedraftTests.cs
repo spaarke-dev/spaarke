@@ -317,7 +317,7 @@ public sealed class RuleSetServiceRedraftTests
         h.Rows["sprk_policy"].Should().BeEmpty("this run's untouched drafts are removed");
     }
 
-    [Fact(DisplayName = "116 fix 1 (A2 race) must-fire: the file replaced between the check and the marker: the marker is taken back (No, then the list), drafts removed, 503")]
+    [Fact(DisplayName = "116 fix 1 (A2 race) / fix 3 must-fire: the file replaced between the check and the marker: the marker is taken back (No, then the cleared list), drafts removed, 503")]
     public async Task AddDrafts_TheFileReplacedAfterTheCheck_TakesTheMarkerBack()
     {
         var h = new Harness();
@@ -336,12 +336,12 @@ public sealed class RuleSetServiceRedraftTests
         outcome.ErrorCode.Should().Be(RuleSetService.CodeSourceChanged);
         outcome.StatusCode.Should().Be(503);
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().NotBe(true);
-        Version(h, d.Version).Contains(RuleSetService.VersionNotConvertedListColumn).Should().BeFalse();
+        StoredList(h, d.Version).Should().Be(RuleSetService.ClearedNotConverted, "fix round 3: the take-back writes the cleared envelope, never an empty list");
         h.Writes.Where(w => w.Entity == ProcedureEntity.VersionEntity).Select(w => (w.Fields.Keys.Single(), w.Fields.Values.Single())).Should().Equal(
             (RuleSetService.VersionNotConvertedListColumn, (object)RuleSetService.StoredNotConvertedOf(d.File, "[]")),
             (RuleSetService.VersionDraftedColumn, true),
             (RuleSetService.VersionDraftedColumn, false),
-            (RuleSetService.VersionNotConvertedListColumn, DBNull.Value));
+            (RuleSetService.VersionNotConvertedListColumn, RuleSetService.ClearedNotConverted));
         h.Rows["sprk_policy"].Should().BeEmpty();
     }
 
@@ -517,5 +517,67 @@ public sealed class RuleSetServiceRedraftTests
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
+    }
+
+    // ── Fix round 3 (item 4): the take-back writes the cleared envelope ──
+
+    private static void Servable(Harness h, Guid servable, Guid removed)
+    {
+        h.Row(StoredFileSchema.Entity, servable)[StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Servable);
+        h.Row(StoredFileSchema.Entity, removed)[StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed);
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 4) must-fire: overlapping runs (one writes its list, the other's take-back writes, then the first writes Yes): the version is not drafted, for its file or a later one")]
+    public async Task OverlappingRuns_ATakeBackBetweenAListAndItsMarker_IsNotDraftedForAnotherFile()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        var earlier = d.File;
+        var current = h.SourceFile(d.Version, StoredFileStatus.Removed, "guidelines-v2.pdf");
+        Servable(h, current, earlier); // run 1 drafts from the current file
+
+        var versionUpdates = 0;
+        RuleSetOutcome<DraftsAdded>? run2 = null;
+        h.FailUpdateFor = e =>
+        {
+            if (e != ProcedureEntity.VersionEntity || ++versionUpdates != 2)
+            {
+                return false;
+            }
+
+            // Run 1 has written its list and is about to write its marker. Run 2 (drafting from the earlier file) runs now: its first check
+            // sees its file, then the current one is back, so after its marker it takes the marker back.
+            h.FailUpdateFor = null;
+            Servable(h, earlier, current);
+            var storedFileReads = 0;
+            h.AfterQuery = q =>
+            {
+                if (q.EntityName == StoredFileSchema.Entity && ++storedFileReads == 1)
+                {
+                    h.AfterQuery = null;
+                    Servable(h, current, earlier);
+                }
+            };
+            run2 = service.AddDraftsAsync(d.Version, earlier, new[] { Cap(10) }, None, CallerOid, CancellationToken.None).GetAwaiter().GetResult();
+            return false; // run 1's marker now lands
+        };
+
+        var run1 = await service.AddDraftsAsync(d.Version, current, new[] { Increment() }, None, CallerOid, CancellationToken.None);
+
+        run2!.ErrorCode.Should().Be(RuleSetService.CodeSourceChanged, "run 2 took its marker back");
+        run1.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue("run 1's marker landed last");
+        var stored = RuleSetService.ParseStoredNotConverted(StoredList(h, d.Version));
+        stored.IsEnvelope.Should().BeTrue("the take-back wrote the cleared envelope, not an empty list");
+        stored.DraftedFromFileId.Should().BeNull();
+        (await service.GetDraftSourceAsync(d.Version, CancellationToken.None)).Value!.AlreadyDrafted.Should().BeFalse("a Yes over a list that names no file is not drafted");
+
+        // A later file whose upload re-check never landed: still not drafted, so it can be drafted.
+        var later = h.SourceFile(d.Version, StoredFileStatus.Servable, "guidelines-v3.pdf");
+        h.Row(StoredFileSchema.Entity, current)[StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed);
+        var found = await service.GetDraftSourceAsync(d.Version, CancellationToken.None);
+        found.Value!.AlreadyDrafted.Should().BeFalse("the version must not read as drafted for a file no run drafted");
+        found.Value.FileId.Should().Be(later);
     }
 }

@@ -781,7 +781,7 @@ public class RuleSetService
 
     /// <summary>
     /// Fix round 1: the source file was replaced while a run drafted from the earlier one. A marker the run already wrote is taken back (No
-    /// first, then the list), the run's untouched drafts are removed, and the run refuses 503 <c>ruleset.source_changed</c> (retried). Runs on
+    /// first, then the list, written as <see cref="ClearedNotConverted"/> since fix round 3), the run's untouched drafts are removed, and the run refuses 503 <c>ruleset.source_changed</c> (retried). Runs on
     /// <see cref="CancellationToken.None"/>; a fault in the clean-up is logged and the refusal stands (the retry compensates again).
     /// </summary>
     private async Task<RuleSetOutcome<DraftsAdded>> SourceChangedAsync(Guid ruleSetId, Guid procedureVersionId, bool markerWritten)
@@ -793,8 +793,10 @@ public class RuleSetService
             {
                 await _entities.UpdateAsync(
                     ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionDraftedColumn] = false }, CancellationToken.None);
+                // Fix round 3: the cleared envelope, not an empty column, so an overlapping run whose marker lands after this write leaves a
+                // Yes that reads as not drafted (IsDraftedAsync) rather than a Yes with no file id, which would read as drafted for any file.
                 await _entities.UpdateAsync(
-                    ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = DBNull.Value }, CancellationToken.None);
+                    ProcedureEntity.VersionEntity, procedureVersionId, new Dictionary<string, object> { [VersionNotConvertedListColumn] = ClearedNotConverted }, CancellationToken.None);
             }
 
             var removed = await RemoveDraftsAsync(ruleSetId, procedureVersionId, supersededBefore: null, CancellationToken.None);
