@@ -575,15 +575,18 @@ A message's thread lookup can no longer be moved by a generic update (plain PATC
 ### Owner decision (option A, 2026-11-11) and the rule-2 type guard
 
 - **Option A:** `AnchorThreadForFilingAsync` is sanctioned as the one update writer of `sprk_threadtype` (it writes Record-Anchored when a filed email conversation follows its record whole).
-- **Rule-2 type guard (A1): HELD, escalated.** The guard as briefed ("a Direct thread (100000001) skips the whole-thread anchor") conflicts with the threads it would hit:
-  - `CreateThreadAsync` types every thread it creates without a regarding anchor as Direct (`ThreadResolver.cs:227`), and that includes an inbound email conversation's thread (`EmailThreadKeyStrategy` → `CreateNew`). The type alone cannot tell a resolver email thread from a Direct 1:1 pair thread.
-  - Rule 2 exists to anchor exactly those email threads (owner clarification 2026-10-11). `ThreadResolverTests.ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly` (the dev repro) pins it. The guard would turn every such filing into an email-only move.
-  - F1-c already keeps a thread holding any non-email message (a chat thread) from being anchored. What is left at risk is a strict Direct pair thread that holds only emails, which 054a piece 2b creates for an outbound Direct email send.
-  - **Options:**
-    - (a) skip the anchor when the thread is Direct **and** is a strict pair, or **and** any of its messages carries `sprk_directrecipient` (stamped only on a Direct pair's messages). This keeps rule 2 for resolver email threads (recommended);
-    - (b) give resolver email threads their own type, or leave them untyped (a schema / data decision);
-    - (c) accept the reversal: type-only guard, the dev-repro test flips, and filed inbound email threads stop following their record.
-  - Until decided, rule 2 is unchanged. The A2 ArchTest still holds the update writer to the one sanctioned member.
+- **Rule-2 strict-pair guard (A1), owner decision 2026-11-11 (option (a)).** Filing never anchors a strict Direct pair thread to a record:
+  - Rule 2 does not anchor a thread typed Direct (100000001) when either:
+    - `DirectMessageRecipient.ReadStrictPairShapeAsync` answers `IsStrictPair` for it; or
+    - any message in the thread carries a non-empty `sprk_directrecipient`.
+  - It fails closed: a fault reading the pair shape (`participant_read_fault`), a fault reading the thread's messages, or no share read wired, also means do not anchor.
+  - When the guard applies, rule 2 takes its declining path: only the email moves, to the record's default thread (rule 3). Nothing throws and the filing stands.
+  - Event: EventId **5413** `thread_filing.direct_pair_not_anchored`, structured `Reason` from a bounded set: `strict_pair`, `stamped_message`, `participant_read_fault`, `message_read_fault`, `share_read_unavailable`. Information for a decision, Warning (with the exception) for a fault.
+  - Unchanged:
+    - a Direct-typed thread that is neither a strict pair nor holds a stamped message still anchors. That is an inbound email conversation's thread (owner clarification 2026-10-11); `ThreadResolverTests.ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly` passes with its body unchanged;
+    - a thread not typed Direct (Record-Anchored) is not asked: no shape read, no message read.
+  - Implemented in `ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, asked after `FiledToOnlyAsync` and before `AnchorThreadForFilingAsync`.
+- The A2 ArchTest holds the update writer to the one sanctioned member.
 
 ### Binding rule (agreed with UAC-r2, 2026-11-11)
 
@@ -597,6 +600,21 @@ A message's thread lookup can no longer be moved by a generic update (plain PATC
 4. 054c Stamp.
 5. Piece 3.
 6. 054c Move.
+
+Standing rule: on an environment where 054b is applied, run `Set-ThreadFlagFieldSecurity.ps1 -Verify` after **every** SpaarkeMaster import. A non-zero exit is a gap: `-Apply`, then `-Verify` again. The rule and the binding rule are also in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (after the SpaarkeMaster upgrade check) and in the script's help.
+
+### Solution source
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml` (`sprk_sentby`, `sprk_communicationthread`) and `sprk_CommunicationThread/Entity.xml` (`sprk_threadtype`, `sprk_isdefaultthread`) carry `<IsSecured>1</IsSecured>`, the same shape as `sprk_CreatedByPerson`.
+- The form controls are left as they are: a secured field renders locked for a user without Update.
+- `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` reads both files and keeps the four at `IsSecured=1` (must-fire control: `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`).
+
+### Known limits
+
+- **`sprk_directrecipient` is live-only.** It exists only where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the solution source has no definition of it (none is hand-authored). An import therefore does not secure it; `Set-ThreadFlagFieldSecurity.ps1` does, and `-Verify` after every import catches a gap. The solution-source test accepts its absence and requires `IsSecured=1` once it is exported.
+- **A1 on an environment without `sprk_directrecipient`.** The stamped-message read selects that column. Where it does not exist the read faults, so the guard fails closed: no Direct-typed thread is anchored there (only the email moves), and event 5413 logs `message_read_fault`. The live order runs the schema script before Direct setup.
+- **A1 and a missing share read.** A host with no `IDataverseRecordShareService` cannot tell a pair, so no Direct-typed thread is anchored there (`share_read_unavailable`). The BFF host always registers it.
+- The ArchTest's limits are in its remarks: a key in a local variable, a caller-supplied payload (refused at run time) and writes outside `src/server` are not seen.
 
 ### Scan (writers of the five columns in `src/server`)
 
@@ -618,8 +636,8 @@ A message's thread lookup can no longer be moved by a generic update (plain PATC
 | `DataverseUpdateRecordHandler` (chat update) | any (model payload) | run as user | update | **refused** (:228 and via `RefileAsync`) |
 | `UpdateRecordActionCore` (node, action seam, ConfirmedProposal impersonated) | any | app-only or impersonated | update | **refused** (one update-side check) |
 | `DataverseUpdateHandler`, `WorkProductRecordPersister`, field-mapping push | any (configuration) | app-only / caller | update | **refused** (push: rule skipped) |
-| `DataverseCreateRecordHandler` run-as-user POST | any (model payload) | run as user | create | **refused** (explicit check) |
-| `RecordCreationService` step 2 | any (caller payload) | caller | create | **refused** (except the server-set "for" person) |
+| `DataverseCreateRecordHandler` run-as-user POST | any (model payload) | run as user | create | **refused** before the confirm dialog (`BlockedColumnBeforeSuspend`) and again before the POST |
+| `RecordCreationService` step 2 | any (caller payload) | caller or system principal | create | **refused** (except the server-set "for" person) |
 
 No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonated caller.
 
@@ -634,7 +652,9 @@ No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonate
     It is table-keyed because the names collide across tables (`sprk_communicationthread` is both a table and a column).
   - **Cost of doing nothing:** a user-, model- or configuration-built payload could set a message's participants or thread, or a thread's type, through the BFF's generic writers. Those writers run as the BFF application user, past field security, and UAC-r2's share reconcile decides grants from these columns.
 - **`CallerBlockedColumnRefusal(..., serverSet)`** (an optional parameter on an existing method). Cost of doing nothing: the server's own "for" person stamp would be refused.
-- **`DataverseCreateRecordHandler`**: a refusal on an existing path; no new surface.
+- **`DataverseCreateRecordHandler`**: a refusal on an existing path, asked before the confirm dialog too; no new surface.
+- **`RecordCreationService` system-principal step 2**: the existing refusal asked on the existing path; no new surface.
+- **`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`** (a private step, EventId 5413). Existing: `DirectMessageRecipient.ReadStrictPairShapeAsync` (reused, not forked). Extension: it is the existing shape rule plus one bounded read, asked inside rule 2. Cost of doing nothing: filing a message of a strict Direct pair would anchor the pair thread to a record and grant the record's members every message in it.
 - **`scripts/Set-ThreadFlagFieldSecurity.ps1`**:
   - **Existing:** `Set-SecureFlagFieldSecurity.ps1` and `Set-DocumentPointerFieldSecurity.ps1` use the same two profiles.
   - **Extension:** each of those carries column-specific preconditions (null repair, a client-deploy flag) that do not apply here. Generalising them would change scripts already verified live, so this script copies their shape instead.
@@ -667,3 +687,20 @@ No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonate
   - **9924 passed, 1 failed, 4 skipped.** The one failure was `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`, a 1-minute timeout while the ArchTests ran in parallel. Re-run alone: 55 of 55 pass.
 - **ArchTests:** **2148 passed, 0 failed.**
 - **`dotnet format --verify-no-changes`** on the changed files: clean, except a pre-existing IMPORTS ordering finding at line 1 of `DataverseCreateRecordHandler.cs` (its usings are untouched).
+
+### Adversarial pass 1 fixes and A1 (2026-11-11)
+
+- **A1 strict-pair guard** (`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, EventId 5413). Tests in `ThreadResolverTests`:
+  - must fire: `ReconcileThreadForFiling_A1_StrictDirectPairThread_IsNotAnchored_OnlyTheEmailMoves_AndTheEventIsLogged`, `..._A1_DirectThreadNotAStrictPair_ButHoldingAStampedMessage_IsNotAnchored`, `..._A1_WhenThePairShapeReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WhenTheMessageReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WithNoShareReadWired_TheDirectThreadIsNotAnchored`;
+  - must not fire: `..._A1_UserOwnedDirectEmailThread_WithNoSharesAndNoStampedMessage_IsStillAnchored`, `..._A1_RecordAnchoredThread_IsUnaffected_EvenWithAStampedMessage`, and the unchanged dev-repro test `ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly`.
+  - The filing test compositions (`CreateFilingSut`, `CreateFilingSutWithScopes`, the `RefileThreadCaller` resolver) pass the share read the host always injects. `ReconcileThreadForFiling_TheMessageScan_IsTheThreadsActiveMessages_Bounded` ignores the separate Direct-recipient read.
+- **Solution source (F3):** `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` and its control `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`. No Pester or ArchTest compared solution XML with the script, and the script has no Pester file, so the test sits next to the script pin.
+- **Chat create before the confirm dialog (F3):** `DataverseCreateRecordHandler.BlockedColumnBeforeSuspend` asks the BFF-owned refusal before its per-user / keeps-its-creator exit, in the post-confirm refusal's words. `ChatPreSuspendServiceRefusalTests.ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_054b` (six cases) and the must-not-fire `ValidateChat_AProposalWithoutTheFiveColumns_StillPassesToItsConfirmation_054b_MustNotFire`. An invalid validation never suspends (`SideEffectGatePreSuspendValidationTests`).
+- **ArchTest (F4):** `ThreadFlagUpdateWriterGuardTests` resolves derived constants to a fixed point, flags `[JsonPropertyName(...)]` on a flag column (no existing hit in `src/server`), and treats an entity initializer that sets `Id` as an update. Controls in `Detector_MustFireAndMustNotFire`; must-not-fire `AliasFixedPoint_MustNotFire_OnAnUnrelatedDerivedConstant`.
+- **Typed writer test (F4):** `CommunicationBffOwnedColumnRefusalTests.TheTypedThreadWriters_StillCreateTheThreadsTypeAndFileTheMessage_ThroughTheResolver_AppOnly` drives `ThreadResolver.ResolveAndAssignThreadAsync` (a Direct thread create, then the filing write) and asserts the same payloads are refused by `RefuseAppOnlyWrite`.
+- **System-principal create (K1):** `RecordCreationService` step 2 for `ForSystem` asks `RefuseBffOwnedCommunicationColumn`, except a server-set lookup. `RecordCreationServiceMappingSeamTests.CreateAsync_ASystemCommunicationNamingItsThreadLookup_IsRefused_BeforeAnythingIsAsked_054b`; must-not-fire `CreateAsync_ASystemCommunicationWhoseSenderTheServerSet_PassesStep2_054b`. `WriterBuilderOwnershipParityTests.ACommunicationCreatedInASecureRecordThread_...` (042b Q3) now marks the thread lookup server-set; its ownership assertions are unchanged.
+- **Fail-then-pass.** Each fix was removed in place (guard call short-circuited, pre-suspend check disabled, system-principal check disabled, both Entity.xml files from HEAD): **14 failed, 61 passed** of the new and neighbouring tests; every must-fire failed and every must-not-fire passed. With `WriteThreadFilingAsync` made to ask `RefuseAppOnlyWrite` first, the typed-writer test failed ("collection is empty"). Each ArchTest shape, removed singly, failed `Detector_MustFireAndMustNotFire`. All restored: pass.
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors.
+- **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, RecordCreationService, AccessTableAppOnlyWriter, RefileWriterBindShape, Communication, ChildRecord, OwnedChildWrite, ParentLineage, DataMutation, RecordCreation, UpdateRecord, FieldMapping, GateDecisionRecord, SecureChildReconciler; excluding `Api.Office.`): **10047 passed, 0 failed, 4 skipped.**
+- **ArchTests:** **2149 passed, 0 failed.**
+- **`dotnet format --verify-no-changes`** on the three changed BFF files: no finding in the changed lines (the pre-existing `DataverseCreateRecordHandler.cs` IMPORTS / line-ending findings remain).
