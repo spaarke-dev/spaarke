@@ -542,6 +542,10 @@ public class ExternalDataService
                 readable.Count - visible.Count, readable.Count, parentKind, parentId, narrowing.HiddenSummary(candidates));
         }
 
+        // #2669 (NFR-03): a row hidden because its parent chain cannot be known within the walk's bound is a cap, not a
+        // decision: it stays hidden, warns once, and the list says truncated.
+        var pastBound = ExternalDocumentNarrowing.ReportHiddenPastBound(narrowing, candidates, caller, _logger);
+
         // F3b: a child document is decided by EVERY invoice link up its parent chain; a chain that cannot be read drops its rows.
         var (documents, chainDropped) = await MapDocumentsWithAncestorLinksAsync(visible, ct).ConfigureAwait(false);
 
@@ -551,6 +555,7 @@ public class ExternalDataService
             Truncated = read.Truncated
                         || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
                         || (narrowing.Faulted && visible.Count < readable.Count)
+                        || pastBound
                         || chainDropped,
         };
     }

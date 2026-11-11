@@ -42,7 +42,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <para><b>Fail closed.</b> <see cref="DecideAsync"/> THROWS on a failed read (the assistant's tools fail the call with no
 /// data); <see cref="DecideOrFailClosedAsync"/> turns a failed read into "nothing visible" and says so
 /// (<see cref="DocumentNarrowingResult.Faulted"/>: a list then reports <c>Truncated</c>). A document id the decision was
-/// not asked about is not visible.</para>
+/// not asked about is not visible. #2669 (NFR-03): a list that hides a row because its chain cannot be known within
+/// <see cref="MaxHops"/> (a fourth hop, or a cycle) also reports <c>Truncated</c> and warns once per row
+/// (<see cref="ReportHiddenPastBound"/>); the row stays hidden.</para>
 /// <para><b>Cost</b> (task 188 notes, "Query cost"). No read for a row that decides on its own columns (own Restricted, or
 /// no link and no parent). Otherwise one batched read per hop level over the DISTINCT parents still undecided (OR-filter
 /// chunks of <see cref="ChunkSize"/> ids, the URL bound, up to <see cref="CommunicationOpenThreadGate.MaxChunksInFlight"/>
@@ -278,6 +280,8 @@ internal static class ExternalDocumentNarrowing
         // id is still decided, and two copies of one row decide alike.
         var decided = new Dictionary<DocumentNarrowingRow, DocumentNarrowingReason>();
         var communicationOf = new Dictionary<DocumentNarrowingRow, Guid>();
+        // #2669: the last hop each subject's walk reached, so a row hidden past the bound can say how far its walk went.
+        var hopOf = new Dictionary<DocumentNarrowingRow, int>();
 
         var input = rows.Distinct().ToList();
         var hopLevels = await WalkChainsAsync(
@@ -297,12 +301,16 @@ internal static class ExternalDocumentNarrowing
             }
         }
 
-        return new DocumentNarrowingResult(decided, faulted: false, counter.Cost(input.Count, hopLevels));
+        var pastBoundHops = decided
+            .Where(kv => DocumentNarrowingResult.IsPastBound(kv.Value) && hopOf.ContainsKey(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => hopOf[kv.Key]);
+        return new DocumentNarrowingResult(decided, faulted: false, counter.Cost(input.Count, hopLevels), pastBoundHops);
 
         // One node of a subject's chain: the subject itself (hop 0) or the ancestor reached at `hop`. The own leg (hop 0) and
         // the ancestor leg check EVERY node to the top of the chain; the communication leg takes the FIRST link found.
         bool Visit(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop)
         {
+            hopOf[subject] = hop;
             if (node.Own != DocumentPermission.NotNarrowed && !SkipsOwnLeg(node, hop))
             {
                 decided[subject] = (hop, node.Own) switch
@@ -528,6 +536,39 @@ internal static class ExternalDocumentNarrowing
     }
 
     /// <summary>
+    /// #2669 (NFR-03: caps are visible), for an external LIST only: logs one Warning per row among <paramref name="rows"/> that
+    /// <paramref name="narrowing"/> hid because its parent chain cannot be known within <see cref="MaxHops"/>
+    /// (<see cref="DocumentNarrowingReason.ChainTooLong"/>, <see cref="DocumentNarrowingReason.Cycle"/>), and answers whether
+    /// there was any, so the list says <c>Truncated</c>. The row stays hidden. Every other reason (own or ancestor Restricted,
+    /// a hidden communication, ...) is a decision, not a cap: no warning, <c>false</c>. The warning carries the table, the row
+    /// id, the hops walked, the caller's plane and the reason code only (ADR-015: never a name or a title). Single-record
+    /// reads do not call it: they refuse as before.
+    /// </summary>
+    internal static bool ReportHiddenPastBound(
+        DocumentNarrowingResult narrowing, IEnumerable<DocumentNarrowingRow> rows, CallerPrincipal caller, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(narrowing);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(logger);
+        var plane = caller.SystemUserId is null ? "contact" : "systemuser";
+        var any = false;
+        foreach (var row in rows)
+        {
+            var reason = narrowing.ReasonFor(row);
+            if (!DocumentNarrowingResult.IsPastBound(reason))
+                continue;
+            any = true;
+            logger.LogWarning(
+                "[EXT-DOCUMENT-CHAIN-PAST-BOUND] table={Table} id={DocumentId} hops={Hops} plane={Plane} reason={Reason}: "
+                + "withheld because its parent chain cannot be known within the bound; the list is flagged truncated (NFR-03).",
+                DocumentTable, row.DocumentId, narrowing.HopsFor(row), plane, DocumentNarrowingResult.CodeOf(reason));
+        }
+
+        return any;
+    }
+
+    /// <summary>
     /// For the assistant's <c>dataverse.*</c> tools (through <see cref="AppOnlyDocumentNarrowing"/>): reads the documents by
     /// id (batched, <see cref="SelectColumns"/>), then decides them, never on the columns the user's own read returned. A
     /// document that does not come back is not visible. A failed read THROWS.
@@ -739,13 +780,16 @@ public sealed class DocumentNarrowingResult
 {
     private readonly IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> _byRow;
     private readonly Dictionary<Guid, DocumentNarrowingReason> _byId = new();
+    private readonly IReadOnlyDictionary<DocumentNarrowingRow, int> _pastBoundHops;
 
     internal DocumentNarrowingResult(
-        IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> decided, bool faulted, DocumentNarrowingCost cost = default)
+        IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> decided, bool faulted, DocumentNarrowingCost cost = default,
+        IReadOnlyDictionary<DocumentNarrowingRow, int>? pastBoundHops = null)
     {
         _byRow = decided;
         Faulted = faulted;
         Cost = cost;
+        _pastBoundHops = pastBoundHops ?? new Dictionary<DocumentNarrowingRow, int>();
         // By id: an id is visible only when every row read for it is (two different reads of one document cannot open it).
         foreach (var (row, reason) in decided)
         {
@@ -789,6 +833,18 @@ public sealed class DocumentNarrowingResult
     /// failed or the document was not decided.</summary>
     internal DocumentNarrowingReason ReasonFor(Guid documentId) =>
         documentId != Guid.Empty && _byId.TryGetValue(documentId, out var reason) ? reason : DocumentNarrowingReason.ReadFailed;
+
+    /// <summary>
+    /// #2669: <paramref name="reason"/> hides a row only because its parent chain cannot be known within
+    /// <see cref="ExternalDocumentNarrowing.MaxHops"/> (a fourth hop, or a cycle): a cap, which a list must report as
+    /// <c>Truncated</c>, not a decision.
+    /// </summary>
+    internal static bool IsPastBound(DocumentNarrowingReason reason) =>
+        reason is DocumentNarrowingReason.ChainTooLong or DocumentNarrowingReason.Cycle;
+
+    /// <summary>#2669: the parent hops the walk took before it stopped, for a row hidden past the bound
+    /// (<see cref="IsPastBound"/>); <see langword="null"/> for any other row.</summary>
+    internal int? HopsFor(DocumentNarrowingRow row) => _pastBoundHops.TryGetValue(row, out var hops) ? hops : null;
 
     /// <summary>The log reason code of <paramref name="reason"/> (ADR-015: codes and counts only).</summary>
     internal static string CodeOf(DocumentNarrowingReason reason) => reason switch

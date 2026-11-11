@@ -405,7 +405,7 @@ public static class ExternalModuleDataEndpoints
             var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags, liveParents);
             // Task 188 (D7, #2126): THE document narrowing, after the root rule (own or ancestor Restricted, or an
             // internal-only / non-Open communication on the bounded parent walk). A failed read hides every row and the
-            // response says truncated.
+            // response says truncated; so does a row hidden past the walk's bound (#2669, NFR-03).
             var narrowingTruncated = false;
             if (module.NarrowsDocuments && scoped.Count > 0)
             {
@@ -418,7 +418,8 @@ public static class ExternalModuleDataEndpoints
                         "[EXT-MODULE] Fetch module={Module}: {Hidden} of {Total} document(s) hidden by the document narrowing ({Reasons}).",
                         module.Name, scoped.Count - narrowed.Count, scoped.Count,
                         narrowing.HiddenSummary(candidates));
-                    narrowingTruncated = narrowing.Faulted;
+                    var pastBound = ExternalDocumentNarrowing.ReportHiddenPastBound(narrowing, candidates, principal, logger);
+                    narrowingTruncated = narrowing.Faulted || pastBound;
                 }
 
                 scoped = narrowed;
