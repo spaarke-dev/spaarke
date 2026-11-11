@@ -146,7 +146,14 @@
 
 ## 116 fix round 2 DONE `61d133463d` (2026-11-10)
 
-All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133463d (notes). Build 0/0, ArchTests 2200/2200, filtered 9452/0. Items 8 and 11 are Ks. **Running:** a scoped Opus re-check of `ebc4f178d5..61d133463d`. **OPEN, owner plus uac-r2:** item 2 (Delete on the policy tables for `/draft`) has a user-visible consequence for who can draft (detail in chat and messages only, never in files). Options: (a) grant it; (b) require it only when superseded drafts exist; (c) deactivate superseded drafts and require Write instead (recommended). Asked uac-r2. Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
+All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133463d (notes). Build 0/0, ArchTests 2200/2200, filtered 9452/0. Items 8 and 11 are Ks. **Running:** a scoped Opus re-check of `ebc4f178d5..61d133463d`. **OPEN, owner plus uac-r2:** item 2 (Delete on the policy tables for `/draft`) has a user-visible consequence for who can draft (detail in chat and messages only, never in files). Options: (a) grant it; (b) require it only when superseded drafts exist; (c) deactivate superseded drafts and require Write instead (recommended). **uac-r2: (c) satisfies R1 and is preferred** ((a) rejected: a Delete in the UI reaches published versions; (b) rejected: that exposure returns at the first redraft). Its conditions for (c):
+1. Write is checked per row, as the user, on each draft being deactivated (plus Create), before any write; any failure refuses the whole redraft with no partial state.
+2. Only rows still Draft at write time are touched (re-read or concurrency check); one published in between is left alone and the redraft answers a conflict. A published version is never deactivated.
+3. Every reader excludes inactive drafts: the draft readers, the rule-review lists, publish (which refuses an inactive draft, 409 or 422, pinned by a test), the DEF-060 replay and mapper source, and any assistant or tool draft read. A guard checks that every draft query names `statecode`, with must-fire and must-not-fire controls.
+4. A citation of a deactivated draft still resolves; say so in the notes.
+5. The role-privilege guard is unchanged; confirm the Write depth fits team-owned drafts and report what you find.
+
+**Waiting on the owner's choice.** Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
 
 ## Queued: default-team exclusion in our scripts (from provisioning-r1, 2026-11-10)
 
