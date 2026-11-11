@@ -41,8 +41,10 @@ share or securing a column cannot hide a row that depth reaches.
 5. **A scheduled BFF job moves a newly flagged user** into the unit within about 2 minutes. It is one-way, acts only on a
    flag read as definitely true, and alerts only on a failed move.
 
-**Still open:** seven owner questions (§4), two of them carried from 2026-10-22 (F1, S4). **Build:** 9 tasks, L/XL,
-about 11–15 agent-days including two security review passes (§3.18). **Live steps:** 8, each needing an owner go (§3.19).
+**Owner decisions:** all seven questions answered on 2026-11-11 (§4.1). Q2 chose an item-level edit permission (not
+the recommendation), which needs a live test with the BFF identity first. **Build:** 9 tasks (T191b–T191j, POMLs in
+`tasks/`), L/XL, about 12–16 agent-days including two security review passes (§3.18). **Live steps:** 9, each needing an
+owner go (§3.19).
 
 ---
 
@@ -112,7 +114,7 @@ regardless of business unit; matrix BUs are on. Every mechanism below is declara
 | **Team ownership of internal-only rows** (park them where external depth cannot reach) | Exclusion by construction | A re-own engine over every lineage table on every transition | Fights I-6; flip-flop ownership; a same-BU user still reads everything else | Rejected (v1) |
 | **Share to one External team, withdraw when internal-only** | Exactly the owner's visibility target, row by row, from the SPA's predicate | ≈ one POA row per visible row (dev: about 1,100). S3: 12.7 grants/s, revoke similar. | Fails open for the job window on out-of-band transitions; new rows are invisible to external users until shared | **Chosen** (round 115) |
 | **Per-user child mirror** (v1) | Same rule, per user | POA = users × rows | Needs the "would lose" migration list; superseded | Replaced by the team share |
-| **Per-firm access teams** | Firm-level row visibility (invoices) | One team per firm, membership from the linked contact | More moving parts | Only if Q6 = (b) |
+| **Per-firm access teams** | Firm-level row visibility (invoices) | One team per firm, membership from the linked contact | More moving parts | Not used (Q6 = a) |
 | **Field-level security** | Protects columns from writers; masks readers | A profile per BU default team, re-run when a BU is added | Cannot hide a row ("column-level security doesn't grant access to a record"); a masked column reads blank | Used only for writer protection (§3.6, F1) |
 | **Hierarchy security** | Widens only | — | Leak vector if on | Census: off, or no flagged manager. Off on dev. |
 | **Filtered record ownership** | Row filters per privilege | — | Public preview (Oct 2026), union-only, cannot say "shared AND not internal-only" | Watch item |
@@ -154,8 +156,9 @@ SPA/Teams (036 read set asks Dataverse) and AI tools: same Dataverse answer + th
   - `prvReadUser` at Local (not Basic-capable), no `prvWriteUser`, `prvRead/WriteUserSettings` at Basic;
   - **no privilege at all** on: `sprk_procedure`, `sprk_procedureversion`, `sprk_procedureassignment`, `sprk_storedfile`,
     `sprk_ruleset`, `sprk_policy`, `sprk_policyversion` (ebilling 088, D-185, round 131), the communication-content tables
-    (`sprk_emailartifact`, `sprk_attachmentartifact`, `sprk_emailreviewlog`, `sprk_affinity`), and the invoice family if
-    Q6 = (a);
+    (`sprk_emailartifact`, `sprk_attachmentartifact`, `sprk_emailreviewlog`, `sprk_affinity`), and the invoice family
+    (Q6 = a: `sprk_invoice`, `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`,
+    `sprk_externalidentifier`, `sprk_billingevent`);
   - no Share, no Assign, no Delete beyond Basic, no Global or Deep on any lineage table;
   - the Console and Office add-in entry privileges those surfaces need (S1 lists them; the move strips the old roles).
 - **The user's other roles are removed** by the move. The census flags any role later assigned from another BU.
@@ -195,7 +198,7 @@ SPA/Teams (036 read set asks Dataverse) and AI tools: same Dataverse answer + th
   `SecureChildShareReconciliationJob` (2 min) and the recent-changes pass of `SecureChildReconciliationJob`. No new job,
   no new DI surface beyond the predicate.
 - **Scope.** Rows of the three roots and every registry table that are **not** owned by the Secure Record team.
-- **Grant** the External team's share when the predicate says visible. Mask: **Read + AppendTo** (Q3 recommendation),
+- **Grant** the External team's share when the predicate says visible. Mask: **Read + AppendTo** (Q3 = a, decided),
   so partners see the row and can file their own new to-dos, documents and events under it. Write comes only from a
   per-user share (Manage Access level, Assigned-To) on a root.
 - **Revoke** when the predicate hides the row, or the row turns secure (the secure path takes over). It only ever touches
@@ -219,7 +222,7 @@ gives them only the children the predicate allows, and revokes the rest. A Restr
 | Write, unlink or re-parent a **hidden** row | No share → no access. Dataverse refuses (S1). |
 | Re-parent a visible row under a hidden or Restricted target | No AppendTo on the target → refused (S1) |
 | Unlink a document from its communication, clear its parent document | Task 188 field security (S1), unchanged |
-| **Lower `sprk_accesspermission`, clear `sprk_isinternalonly`, open a Private thread** on a row the user can still Write (a Write-shared root; or the ≤ 2-min window after a row turned internal-only out of product) | **F1, open (Q1).** Recommended: field security on those three columns. Read profile for every BU default team including External; **Update only for the internal BU default teams and the two BFF app users**. Internal users keep editing; flagged users cannot lower. BFF app-only writes of these columns are already refused (`ParentLineage.RefuseAppOnlyWrite`); caller-identity writes then hit field security. |
+| **Lower `sprk_accesspermission`, clear `sprk_isinternalonly`, open a Private thread** on a row the user can still Write (a Write-shared root; or the ≤ 2-min window after a row turned internal-only out of product) | **F1, decided (Q1 = a, 2026-11-11):** field security on those three columns. Read profile for every BU default team including External; **Update only for the internal BU default teams and the two BFF app users**. Internal users keep editing; flagged users cannot lower. BFF app-only writes of these columns are already refused (`ParentLineage.RefuseAppOnlyWrite`); caller-identity writes then hit field security. |
 
 Why this is safe for task 189 (§2.4 there): the BFF app users are explicit readers and writers, so the BFF never reads a
 masked value; internal editors are unchanged, so 189's own-narrowing classification still sees their edits. It revisits
@@ -276,14 +279,33 @@ is hidden on both planes. Their own `sprk_accesspermission` copy is never truste
 - **Procedure files**: the role holds no privilege on the procedure tables or `sprk_storedfile`; a legacy Procedure
   Library document has marker Never; the ebilling file route keeps refusing (F1-e). Extracts in rules or decision
   records keep their own rules.
-- **Invoices and exports**: Q6. Recommended (a): no privilege on the invoice family in the external role, so a flagged
+- **Invoices and exports** (Q6 = a, decided): no privilege on the invoice family in the external role, so a flagged
   user's invoices are SPA-only, through the firm route that already applies 187, (a′) and the firm rule (round 116
   F1-4). This matches ebilling 088's "no Stored File privilege", so invoice files were already SPA-only.
 
 ### 3.12 SharePoint Embedded (#2201, spike S4)
 
-Office edit-open must grant no container role to a flagged caller (Q2). Recommended: view and download through the
-BFF broker only. `SpeContainerMembershipSync` removes any existing just-in-time grant held by a flagged user.
+**Decided (Q2 = b, 2026-11-11): an item-level edit permission on the one file, after a live test with the BFF
+identity.**
+
+- **Never a container role for a flagged caller.** `OfficeEditAccessService.PrepareAsync` never calls
+  `GrantMarkedWriterAsync` for a caller whose stored `sprk_isexternal` is true (or unreadable: fail closed).
+  `SpeContainerMembershipSync` removes any container role a flagged user already holds on a secure container.
+- **Item-level grant, just in time.** When a flagged caller opens a document in Office and (1) the caller has Write on the
+  secure record, asked as the caller (`CallerRecordAccessProbe`, unchanged), (2) the record is not Restricted, effective
+  through filing (unchanged), and (3) `ExternalVisibility` says the document is visible, the BFF grants the caller a
+  **write permission on that one drive item** (Graph `driveItem` invite or permission create, app-only, no invitation
+  mail), reads it back, and records a marker for it beside the round-70 JIT writer markers.
+- **Same lifecycle as round 70's JIT writer grants.** The existing `SpeContainerMembershipSyncJob` pass
+  (`RemoveRevokedJitGrantsAsync`) also reads the item markers and removes the item permission when Dataverse positively
+  answers that the holder no longer has Write on the record, when the holder is disabled, or when `ExternalVisibility`
+  hides the document. An unknown answer keeps the grant for one run and reports it, as the container pass does today.
+- **Fail closed.** If the item grant cannot be made, read back or recorded, the answer is 503 `edit_access_unavailable`
+  (today's code) and no URL that cannot work is returned. View and download through the broker stay available.
+- **Live test first (owner go).** Spike S4 was blocked: the az CLI Graph token cannot reach the container. The test runs
+  with the BFF's managed identity on dev: app-only item permission on a secure container under the restrictive sharing
+  model; Office web edit by the flagged test user through that permission; no access to a sibling file; removal takes
+  access away. If any part fails, the task stops and the owner chooses again (view-only is the fallback on record).
 
 ### 3.13 The placement job (owner Q5, round 115)
 
@@ -303,12 +325,12 @@ BFF broker only. `SpeContainerMembershipSync` removes any existing just-in-time 
 3. Team-share **dry run**: rows it would share and rows it would refuse because they are internal-only, per table.
 4. Turn team-share writes on (harmless while depth still covers the rows). Count POA with mask > 0 only (S3 F2: a revoke
    leaves the row at mask 0).
-5. Field security for F1 (if Q1 = a): dry run, apply, verify.
+5. Field security for F1 (Q1 = a): dry run, apply, verify.
 6. Turn the placement job on; verify each user's BU, role and default team.
 7. Re-own lineage rows owned by flagged users; reassign a Restricted root with a flagged owner (reverses task 114
    decision 5 for this case only).
 8. First sweep revokes internal-only per-user shares left by the secure mirror and Direct messages.
-9. Live gate (AC-1 to AC-9).
+9. Live gate (AC-1 to AC-10).
 10. Every other environment: read hierarchy, matrix and role holdings before step 2.
 
 ### 3.15 Enforced by
@@ -355,43 +377,47 @@ identity-model change; the BFF app user's existing rights. Round 77's rejection 
 | AC-5 | A row that stops being internal-only gets the team share back within the same window | regranted | — |
 | AC-6 | An undecidable row gets no share and is carried | no grant | — |
 | AC-7 | A newly flagged user is moved and gets only the external role within 2 min + run; an unflagged, blank-flag, disabled, application or administrator user is never moved | moved | not moved |
-| AC-8 | Office edit-open by a flagged caller on a secure record grants no container role | refused / view-only | internal caller still gets the JIT writer |
+| AC-8 | Office edit-open by a flagged caller with Write on a secure, non-Restricted record grants **no container role** and a write permission on **that one file** only, recorded with a marker; the sync removes it when Write goes, the holder is disabled or the document becomes hidden | no container role; no item grant without Write, on a Restricted record, on a hidden document, or on an unreadable flag; a sibling file stays unreachable | an internal caller still gets the container JIT writer; a flagged caller with Write gets Office edit on the one file |
 | AC-9 | Census raises CRITICAL for each drift kind in §3.8 | each | clean environment: zero findings |
 | AC-10 | `grid_overview`, `read_query` and Dataverse search as the flagged user show only visible rows (#2125, #2369 part 1); semantic search over an invoice's documents applies (a′) (#2369 part 2) | hidden | visible rows shown |
 | AC-11 | BFF build 0 errors; targeted and full ArchTests green; publish-size delta measured against a fresh master build; deployed to dev via R3 with a server-side live gate | — | — |
 | AC-12 | I-14, I-16, `.claude/constraints/auth.md` (:97 known limit removed, Enforced by named) and the deployment guide updated; #1864, #2125, #2179, #2201, #2369 closed or re-scoped; #2189 answered | — | — |
 
-### 3.18 Build size
+### 3.18 Build size and order
 
-| Id | Scope | Size |
-|---|---|---|
-| T191b | `ExternalMarker` on the registry; `ExternalVisibility` (taint closure, (a′)); fold the two guard lists; unit tests must-fire/must-not-fire; ArchTests | M |
-| T191c | External-team mode of the synchronizer: grant/revoke, L1 hooks (remover, `AfterRefileAsync`, 189's two writers, `LowerWhenSafeAsync`, Make Secure/Unsecure), recent-changes reverse walk, sweep; predicate in the secure mirror, Direct-message and gate-record writers; re-own of flagged-owned rows; resolver change | L |
-| T191d | Role XML + role ArchTest + BU script (`-Apply/-Verify`) + reader-profile re-run | M |
-| T191e | Placement job (setting-gated, one-way, read-back, alert) + census extension | M |
-| T191f | F1 field-security target (if Q1 = a): engine target, script `-Verify`, tests | S |
-| T191g | `OfficeEditAccessService`: no container role for flagged callers; membership-sync cleanup | S |
-| T191h | SPA to-do/event/memo lists, AI derived-table filter and `RetrievalAccessTrim` call the predicate (Q3 parity, #2189, #2369) | M |
-| T191i | Dev migration (§3.14) and live gate | M |
-| T191j | Docs and issues (I-14, I-16, auth.md, deployment guide; close or re-scope issues) | S |
+Task files: `tasks/191b-*.poml` to `tasks/191j-*.poml`. Each is FULL rigor on the opus tier.
 
-Overall **L/XL: about 11–15 agent-days** including two adversarial passes (security, tenant isolation). T191b, c, e, g
-and h touch the BFF and carry the §10 publish-size delta.
+| Id | Scope | Deps | Parallel | Size |
+|---|---|---|---|---|
+| T191b | `ExternalMarker` on the registry; `ExternalVisibility` (taint closure, (a′)); fold the two guard lists; unit tests and ArchTests | none | group A | M |
+| T191d | External Collaborator role (config JSON), BU and role script (`-Apply/-Verify`), role ArchTest, reader-profile step for the new BU | none | group A | M |
+| T191f | F1: field-security target for the three marker columns (engine target, named script, `-Verify`, tests) | none | group A | S |
+| T191c | External-team mode of the share synchronizer: grant/revoke, L1 hooks, recent-changes reverse walk, sweep; predicate in the per-user writers; re-own of flagged-owned rows; resolver change | 191b, 191d | group B | L |
+| T191e | Placement job (setting-gated, one-way, read-back, alert) and census extension | 191d | group B | M |
+| T191g | Office edit: no container role for flagged callers; item-level JIT permission and its removal pass; live test with the BFF identity first | 191b | group B | M |
+| T191h | SPA to-do/event/memo lists, AI derived-table filter and `RetrievalAccessTrim` call the predicate (#2189, #2369) | 191b | group B | M |
+| T191i | Dev migration (§3.14) and the live gate | 191c, 191e, 191f, 191g, 191h | serial | M |
+| T191j | Docs and issues (I-14, I-16, auth.md, deployment guide; close or re-scope issues) | 191i | serial | S |
+
+Overall **L/XL: about 12–16 agent-days** including two adversarial passes (security, tenant isolation). Q2 = (b)
+raised T191g from S to M. T191b, c, e, g and h touch the BFF and carry the §10 publish-size delta.
 
 ### 3.19 Live and owner-go steps
 
-1. Create the External Collaborators BU on dev (data write).
-2. Import the role (solution import).
-3. Reader column profiles on the new BU's default team (`-Apply` re-runs); never the Stored File profile.
-4. F1 field security apply (if Q1 = a).
+Each needs its own owner go in the uac-r2 session when it is due.
+
+1. **T191g live test**: the item-level edit permission with the BFF's managed identity on dev (§3.12), undone afterwards.
+2. Create the External Collaborators BU and its role on dev (`-Apply`).
+3. Reader column profiles on the new BU's default team (the existing `-Apply` re-runs); never the Stored File profile.
+4. F1 field security `-Apply` on dev.
 5. BFF deploy via R3 with every new write switch off; dry-run reports.
 6. Turn the team-share writes on.
-7. Turn the placement job on (moves users, strips and re-assigns roles); re-own flagged-owned rows.
-8. Live gate with a test flagged user (writes as that user, undone afterwards); then the same for each customer stamp.
+7. Turn the placement job on (moves users, strips and re-assigns roles); turn on the re-own of flagged-owned rows.
+8. Turn on the Office item-level grant path (deployed with T191g, setting off until the go).
+9. Live gate with a test flagged user (writes as that user, undone afterwards); then the same for each customer stamp.
 
 ---
-
-## 4. Owner questions
+## 4. Owner questions (as asked; answered 2026-11-11, see §4.1)
 
 1. **F1: may a flagged user change Access Permission, internal-only or thread privacy on a row they can write?**
    (a) Field security on the three columns: everyone reads, only internal BU teams and the BFF write. **Recommended**:
@@ -427,6 +453,20 @@ and h touch the BFF and carry the §10 publish-size delta.
    re-owned, and a Restricted root with a flagged owner is reassigned (§3.14 step 7); a hand-made share on a row that
    became internal-only is not restored when it becomes visible again (§3.4); the placement job never moves application
    users, administrators or disabled users (§3.13).
+
+### 4.1 Owner decisions 2026-11-11
+
+Given in the uac-r2 session on 2026-11-11 and relayed by the coordinator. They are binding for T191b–T191j.
+
+| # | Answer | Effect on this design |
+|---|---|---|
+| Q1 (F1) | **(a)** "field-lock the 3 columns", as recommended | §3.6: field security on `sprk_accesspermission`, `sprk_isinternalonly`, `sprk_privacystate`; every BU default team reads, only internal BU default teams and the two BFF app users write. Task T191f. |
+| Q2 (S4 / #2201) | **(b)** "an item-level edit permission on the one file, after a live test with the BFF identity". Not the recommendation. The live test is a live action and needs a separate owner go in uac-r2 when it is due. | §3.12 and AC-8: no container role for a flagged caller; a JIT write permission on the one file for a flagged caller with Write on the secure record, removed when Write goes, in round 70's lifecycle. Task T191g, live test first. |
+| Q3 | **(a)** Read + AppendTo, as recommended | §3.4: the team share mask is Read + AppendTo; Write only through per-user shares on roots. |
+| Q4 | **(a) Restricted stays fully closed; I-14 unchanged.** The owner confirmed the model, verbatim: "restricted is internal only; if the record is otherwise restricted but needs to be shared external then it is setup as a 'secure' record (which can be explicitly shared with external users)". The coordinator confirmed this is the current setup: Restricted is internal only (rounds 2 and 67), secure records may be shared with flagged users (round 78), and Restricted wins when both are set. | No Restricted share or access-list entry for a flagged user, ever. Round 114's "(unless for restricted they are added to the access list)" is read as "use Secure for that case". |
+| Q5 | **(a)** the whole environment | §3.4: one External team share over every visible lineage row in the environment. |
+| Q6 | **(a)** no invoice-family privilege; SPA only | §3.2 and §3.11: the external role holds no privilege on the invoice family; invoices reach flagged users only through the SPA firm route. |
+| Q7 | **(a)** accept all four | §3.2 (unfiled create owned by the customer BU's team), §3.14 step 7 (re-own; reassign a Restricted root with a flagged owner), §3.4 (a hand-made share is not restored), §3.13 (the placement job never moves application users, administrators or disabled users). |
 
 ---
 
