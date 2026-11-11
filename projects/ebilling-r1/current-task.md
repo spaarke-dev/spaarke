@@ -183,7 +183,12 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
   - (3) a realistic test where row Write is refused yet the redraft succeeds, plus the three negatives, each with nothing written;
   - (4) the other conditions stand, plus the 503 `ruleset.redraft_not_queued` and the retry test;
   - (5) record why in the notes and the PR.
-- **Round 5 starts when the round-4 Opus re-check returns,** and bundles its findings.
+- **The round-4 re-check returned NOT APPROVED.**
+  - F2: a redraft outside the job's lock can deactivate an in-flight run's drafts.
+  - F1: when the transaction's outcome is unknown, the answer says "nothing changed".
+  - Ks: the inactive-version compare sticks; the 1000-request transaction cap; the queue-failure wording; a disconnect after the commit; guard coverage; a stale comment.
+- **Round 5 RUNNING** (Opus, `task/ebilling-116-r5` from `ae0a9cffa3`): EB-D-216a, plus all of the above.
+- **Then:** a scoped Opus re-check; the round 2–5 diff to uac-r2; merge 116 into work; close out 116.
 - Tell the owner it's a refinement with no role change.
 - Tell the owner (no role change; consistent with EB-D-216).
 - The DEF-060 note line is added on work (`152257b9f1`).
