@@ -504,7 +504,8 @@ jobs:
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
-  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 (unified-access-control-r2
+  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 and (task 191d)
+  # scripts/Set-ExternalCollaboratorRole.ps1 (unified-access-control-r2
   # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
   # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
@@ -529,7 +530,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
