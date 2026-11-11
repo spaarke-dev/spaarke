@@ -195,3 +195,39 @@ Fail-before was proved by putting the previous code back in place (or reverting 
 - The route ledger's prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs`) still lists DraftRules() only; it was not changed (the ledger follows moved code only). The main session decides whether to add the two Delete checks there.
 
 **Verification (fix round 2, `f4c3b538cc`).** BFF build: 0 errors, 0 warnings. Full ArchTests: 2200/2200 (no ledger change). Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling, SecureChildLineage, RecordOwnership): 9452 passed, 4 skipped, 0 failed, first run. RuleReview not touched (the rule set read still returns the bare list), so no Jest run.
+
+## Fix round 3 (2026-11-10, after the scoped re-check of fix round 2)
+
+Not deployed; no Dataverse call of any kind. Out of scope and unchanged: how a redraft treats the drafts it supersedes (the removal, `IsSupersededDraft`, the Delete checks on `/draft`); that is an open owner decision.
+
+**What "drafted" means now (replaces the fix round 2 table).** Unchanged rule: Yes AND the envelope's file is the version's one Servable source file; a list with no file id under Yes is drafted. Changed writers: the first reset of PUT `/file` writes No only for a list with no file id (item 2), and the drafting run's take-back writes the cleared envelope instead of an empty column (item 4), so no write since round 2 produces a list with no file id under Yes.
+
+| State | `sprk_notconverted` | `sprk_notconvertedlist` | Drafted? |
+|---|---|---|---|
+| Never drafted | No / empty | empty | no |
+| Run died after the list | No / empty | envelope (file F) | no; the retry compensates and overwrites |
+| Drafted from F, F still the one Servable file | Yes | envelope (file F) | yes: `/draft` 409, the job is a no-op |
+| Drafted from F, first reset ran, upload never landed (published meanwhile, refused, store fault) | Yes | envelope (file F) | yes, list shown: the first reset writes nothing for an envelope |
+| Drafted from F, F replaced (re-check never landed) | Yes | envelope (file F) | no: redraftable; the rule set read hides the list |
+| Replace confirmed (re-check) | No | cleared envelope (no file) | no |
+| Run's take-back after its file changed | No | cleared envelope (no file) | no |
+| Take-back, then an overlapping run's marker lands | Yes | cleared envelope (no file) | no: redraftable (one extra run, compensated) |
+| Earlier shape | Yes | bare list | yes, as before |
+| Earlier shape, first reset ran | No | bare list | no (list hidden); the first reset still writes No for a list with no file id |
+
+| Item | Fix | Tests (fail-before) |
+|---|---|---|
+| 1 F4 citation removed too early | `("sprk_ruleset", "sprk_sourcedocument")` is back in `RecordOwnershipResolver.CitationLookups`, with a comment: the entry is removed in the same change as `Remove-EbillingSourceDocumentColumns.ps1 -Delete`, not before (the column exists and rows can hold it until then). The `SecureChildLineage` comment and the legacy-set test cases round 2 removed are restored; round 2's "no rule set citation" reflection pin is dropped (inverted it would repeat the restored `IsCitation` assertion). **Removing this entry is part of the column's `-Delete` change.** | The legacy set with only `sprk_sourcedocument` has no parent; with a matter it is filed under the matter only. 1 failed before (round 2's resolver: the set was filed under the document). |
+| 2 F1 first reset hides "drafted" | `ResetDraftedStateIfDraftAsync` (the first reset) writes No only when the stored list names no file (bare list or no list); for an envelope it writes nothing. The re-check once the new file is Servable is unchanged. `StoredFileService.PrecheckUploadAsync` asks `CanStageAsync` (configured and the environment confirmed), so a store that cannot stage is refused 503 before the reset; a fault of that check is 500 and nothing changes. | Scenario A (drafted from F, reset, G Servable, publish, re-check refuses, G withdrawn): drafted, list shown. Scenario B (upload refused after the reset): drafted, list shown. `Recheck_AVersionPublishedAfterTheFirstReset_KeepsItsList` now seeds an envelope and asserts `GetAsync` shows the list. The first reset of an envelope writes nothing. Route: a store whose environment check fails is 503 before the reset; a faulted check is 500 before the reset; must-not-fire: a confirmed environment stores the file. 6 failed before; the must-not-fire passed both ways. |
+| 3 F4 `/draft` timing | The no-Read 404 from the rights probe (which answers no rights for an unknown id too) is returned before `GetDraftSourceAsync`. Read without Write (403) and a probe fault still wait for the version read, so a version under another Procedure answers 404 as before. | The handler over the real rule set service and file store: an unknown id and an unreadable existing version give the same status and body and the same reads in number and order (rights questions, Dataverse reads, file-store calls). Must-not-fire: Read without Write on another Procedure's version still reads the version and answers 404. 1 failed before (1 read against 4). |
+| 4 K2 take-back writes an empty list | `SourceChangedAsync` writes `ClearedNotConverted` instead of `DBNull`. | Overlapping runs (run 1 writes its list, run 2's take-back writes, then run 1's marker lands): the list is the cleared envelope, not drafted, and not drafted for a later file either. The existing take-back test now expects the cleared envelope. 2 failed before. |
+
+Fail-before was proved per item by putting that item's previous behaviour back in place (item 1: the round-2 resolver; item 2: the unconditional marker write and the `IsConfigured`-only precheck; item 3: no early return; item 4: the round-2 `RuleSetService`), running the item's tests, then restoring.
+
+**Known limits (fix round 3).**
+- Item 3: an existing version whose Procedure row is missing, asked by a caller with no Read, now answers the version 404 (`procedure.version_not_found`) instead of the Procedure 404 the version read gave. Both are 404; the new body is the unknown-id body, which is the point of the item.
+- Item 2: an earlier-shape version (bare list, no file id) still has its marker written No by the first reset, so an upload that never lands leaves it undrafted with its list hidden (safe; drafting again works). New runs always write an envelope.
+- Item 4: a Yes over the cleared envelope after overlapping runs reads as not drafted although a run did draft the current file; `/draft` then runs once more and its compensation removes the earlier run's untouched drafts.
+- Round 2's "Item 3 residual" now covers only faults the precheck cannot see (a Dataverse fault after the reset); for an envelope version the reset writes nothing, so it is unaffected.
+
+**Verification (fix round 3, `0854ddff14`).** BFF build: 0 errors, 0 warnings. Full ArchTests: 2200/2200 (no ledger change). Filtered unit tests (Finance, Procedure, Jobs, StoredFile, RuleSet, RateCard, BillingRuleDraft, Ebilling, SecureChildLineage, RecordOwnership): 9461 passed, 4 skipped, 0 failed, first run (9452 + 9 new). RuleReview not touched (the rule set read still returns the bare list), so no Jest run.
