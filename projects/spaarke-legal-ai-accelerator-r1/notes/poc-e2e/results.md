@@ -553,3 +553,35 @@ Steps: new chat (no agent), open `Brightwater Mutual NDA.docx`, add **Spaarke ND
   not reported.
 
 Synopsis of Word desktop vs Cowork across all acts: `synopsis-word-and-cowork.md`.
+
+## Tier tests round 1: Word (owner, Word desktop, 2026-11-11; script `tier-test-script.md`)
+
+Evidence: `projects/spaarke-legal-ai-accelerator-r1/test-results/` (screenshots, plus the two W-1 output documents).
+Package v0.1 with playbooks under `Documents/Cowork/Playbooks/`, extracted about 11:38; tests from about 12:30.
+
+**Setup (section 0).** OneDrive restarted; the Spaarke NDA (MVP) plugin deleted; both zips extracted into `Documents`
+(package into `Cowork/`, test documents into `Spaarke Test Documents/`); custom instruction pasted and saved.
+Owner notes: `Cowork/` already holds `Profile/` (ours, from the earlier setup; emptied by the archive move),
+`Projects/`, `Tasks/` and `AGENTS.md` (Cowork's), and the Read me should say which is which. The custom instruction
+box is shared with anything else the user wants there, so ours must be one block that sits beside their own. Test
+copies should be renamed before the first run, so the original stays clean.
+
+| Test | Setup | Result |
+|---|---|---|
+| W-1 test 1 | Brightwater copy, Allow editing, attach `Spaarke NDA – Mutual v1.2.docx`, "Review this NDA against the attached playbook" | Card **Spaarke NDA – Mutual v1.2** after about 1 minute, review after about 4. **24 topics.** *Apply edits with comments*: **16 insertions, 16 deletions, 15 comments**, all by the user. Edits are tracked although the Track Changes button is off; default markup is balloons. **Pass** |
+| W-1 test 2 | Word's suggested prompt *Review contract with a playbook* → picker (v1.2 Nov 11, "NDA - Mutual (Spaarke baseline)" Nov 1, v1.1 Nov 7) → v1.2 | About 3 minutes, no attachment. 24 topics. **11 insertions, 16 deletions, 12 comments.** One rating differs from test 1 (derived data: warning vs red). The stale saved v1.1 and baseline are still listed (gap #32). **Pass** |
+| G-1 ×3 | Decoy in `Documents/`; draft A copy; agent mode, Chat only; attach the legal hold playbook `.docx`; "Review this notice against the attached playbook" | Three complete reviews in Copilot's own layout (Critical/High/Medium, Pass/Acceptable fallback, replacement text). Content matches the key each time (6 escalations, 2 fallbacks, the rest pass). But **no protocol line, no verification code, no colour ratings**, and Sources lists **only the playbook**: neither the real method file nor the decoy was read. **Fail: the custom instruction did not bring in the method** (gap #36) |
+| G-2 as run | The owner edited the *decoy* file's "Review protocol" line to a link (screenshot) rather than the custom instruction | Not the designed test. Test 1 repeated G-1 (no method read). **Test 2: playbook and method both attached** → header with *Spaarke Review Method, version 1.0* and **SRM-1110-A** (the real file), 🟢🟡🔴 ratings, 13 rows, totals **Meets 5 / Acceptable fallback 2 / Escalate 6** = the key. The text said "12 topics" while listing 13 rows |
+| NDA + method (owner's extra) | Brightwater; attach playbook **and** method | Chat only is not offered with a contract open (the pane moves to Allow editing). **"I can only use one attached file as a playbook when reviewing a contract."** Gap #37 |
+| NDA follow-up (owner's extra) | After the review, attach only the method: "follow the Spaarke Review Method to produce a … chart" | Topic-by-topic table with SRM-1110-A and colours, as a separate step. Header says **"Playbook applied: Spaarke NDA – Mutual v1.3"**; no v1.3 exists (v1.2 was used). Gap #38 |
+| G-3, G-4, H-1, P-1, Cowork, advanced | — | Not run |
+
+**Findings.**
+1. **The Word contract route works from the package as built.** Attach or pick, 24 topics, tracked changes with
+   comments in the open document. Run-to-run counts vary (16/16/15 vs 11/16/12).
+2. **Naming the method in the custom instruction is not enough** (0 of 3, no file read at all). In Act 7 the same
+   idea worked with the owner's protocol file, which had been in OneDrive for days; here the file was about an hour
+   old. Whether Word applied the custom instruction at all is open: P-1 settles it.
+3. **Attaching the method next to the playbook works for non-contracts** (code, colours, complete, key totals).
+   For contracts Word's Review contract route takes exactly one file, so the method can only be a second step.
+4. **A second-step chart can misstate the playbook version** (v1.3). Provenance from the model is not reliable.

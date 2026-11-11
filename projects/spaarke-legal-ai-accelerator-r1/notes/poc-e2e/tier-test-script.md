@@ -105,6 +105,50 @@ place after a rated review?
 
 ---
 
+## Word round 2 (after round 1 on 2026-11-11)
+
+Round 1 showed: W-1 passes; G-1 failed 3 of 3 (the method file was never read); attaching the playbook **and**
+the method works for a non-contract; a contract review takes only one attached file. Results: `results.md`, gaps
+#36–#38. Run in this order. G-4 (`.md` playbook) is dropped: attaching the `.docx` works.
+
+**Before you start.** The decoy was edited in round 1 (its "Review protocol" line became a link). Replace both
+decoy copies (`Spaarke Test Documents/Decoy/` and `Documents/`) with a fresh one from the test zip. Rename each
+test copy before the first prompt, for example `… - R2 G-1b.docx`.
+
+### P-1 first (5 minutes)
+As above, but in **four** places: Word agent mode with Chat only, Word agent mode with Allow editing, Cowork, the
+Copilot app. **Tells us** whether Word loads the custom instruction at all. If P1-CHECK never appears in Word,
+skip G-1b and G-2: the custom-instruction route is out for Word.
+
+### G-1b. Same as G-1, a day after install (indexing)
+Two new chats, as G-1 steps 2–3. Chat 1: the same prompt. Chat 2: *Review this notice against the attached
+playbook, following my review method.* **Record:** code or none, and Sources (expanded) for each.
+
+### G-2 (as designed). A link in the custom instruction
+Change the **custom instruction**, not the method file: Copilot app › Settings › Personalization › Custom
+instructions. In the first bullet, replace `"Spaarke Review Method.docx", in Documents/Cowork/Playbooks/Review
+method/` with the file's link (OneDrive › right-click the real method file › Copy link). Save. Then one chat as
+G-1. **Record:** code or none. Put the custom instruction back afterwards.
+
+### H-1. Non-contract, in-place redline after the rated review
+After any complete rated review of draft A (G-1b, G-2, G-5, or round 1's "attach both" route), same chat:
+switch to **Allow editing** and run H-1 as written above. **This is still the main open Word question.**
+
+### G-5. One file for non-contracts: the method inside the playbook (needs a rebuild; I'll send the file)
+Attach only `Spaarke Legal Hold Notice – Employee Custodians v1.0.docx` from the rebuilt package, whose first
+section is the review method. Chat only, *Review this notice against the attached playbook.* **Record:** code,
+colours, row count. **Pass:** SRM-1110-A, 🟢🟡🔴, 13 rows, without attaching the method.
+
+### W-2. Contract: the method chart as a second step (after the rebuild)
+After a W-1 review, same chat, attach only the method file: *Follow the attached review method to produce the
+topic-by-topic chart for the review you just ran.* **Record:** the "Playbook applied" line (expected v1.2, gap #38),
+the row count (24), and whether each rating matches the review card's icon.
+
+### G-3 (optional). `/`-reference instead of the paperclip
+As written above. Useful only if typing `/` is easier for users than attaching.
+
+---
+
 ## C-1. Cowork: fresh install from the zip
 
 1. New Cowork chat. Type `/` and screenshot the list.
@@ -173,13 +217,17 @@ what the agent does about the redline (expected: says it can't create files and 
 
 | Test | Date | Result (pass / fail / partial) | Code seen | Notes | Screens |
 |---|---|---|---|---|---|
-| W-1 | | | — | | |
-| G-1 (3 chats) | | | | | |
-| G-2 (3 chats) | | | | | |
-| G-3 | | | | | |
-| G-4 | | | | | |
+| W-1 | 2026-11-11 | pass | — | 24 topics; 16/16/15 (attach) and 11/16/12 (picker) | test-results/ |
+| G-1 (3 chats) | 2026-11-11 | fail | none ×3 | method never read; Sources = playbook only | test-results/ |
+| G-2 (3 chats) | 2026-11-11 | not run as designed | SRM-1110-A when attached | decoy file edited instead; "attach both" works | test-results/ |
+| P-1 (round 2, first) | | | — | | |
+| G-1b (2 chats) | | | | | |
+| G-2 (round 2) | | | | | |
 | H-1 | | | | | |
-| P-1 | | | — | | |
+| G-5 | | | | | |
+| W-2 | | | | | |
+| G-3 (optional) | | | | | |
+| G-4 | — | dropped | — | attaching the .docx works | — |
 | C-1 | | | — | | |
 | C-2 | | | — | | |
 | C-3 | | | — | | |
