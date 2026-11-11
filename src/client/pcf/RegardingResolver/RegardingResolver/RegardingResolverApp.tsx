@@ -1483,6 +1483,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         // key (its TEXT_FIELDS array explicitly enumerates the 3 legacy
         // fields; unrecognized keys are simply not consumed).
         if (!writeCtx.hostRecordId) {
+          // 045c: the auto-detect path stages the detected parent's number straight onto the form attribute, and only
+          // when it has one. A pick of a target with no number must clear what is staged, or the previous parent's
+          // number is saved beside the new parent.
+          if (typeof result.recordNumber !== 'string' || result.recordNumber.length === 0) {
+            setFormTextValue('sprk_regardingrecordnumber', null);
+          }
           (
             window as unknown as {
               __sprk_regarding_pending__?: Record<string, unknown>;

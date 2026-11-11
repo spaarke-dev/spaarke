@@ -235,7 +235,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             _h.Store.Assign(root, id, Attorney1, attorney);
             _h.Store.Assign(root, id, "sprk_assignedtoexternal", external);
             _h.Store.Assign(root, id, "sprk_assignedlawfirm1", firm);
-        });
+        }
+        );
     }
 
     [Fact]
@@ -699,6 +700,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var dataverse = new Mock<IFieldMappingDataverseService>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             dataverse.Object,
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },
@@ -730,6 +732,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var dataverse = new Mock<IFieldMappingDataverseService>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             dataverse.Object,
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },

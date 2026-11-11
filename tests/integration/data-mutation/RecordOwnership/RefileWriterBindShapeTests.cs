@@ -344,6 +344,53 @@ public sealed class RefileWriterBindShapeTests
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
+    // ── task 022 fix round 4 (UAC-r2 (a)): a push from a secure source never changes a child's filing ──────────────────
+
+    [Fact(DisplayName = "022 r4: a push from a secure matter binding an isolated child's matter elsewhere skips the child whole, with the re-file code")]
+    public async Task FieldMappingPush_FromASecureSource_ThatWouldRefileTheChild_SkipsItWhole_WithTheRefileCode()
+    {
+        ASecureCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({OrdinaryMatter})", Scopes(), sourceGate: SourceGateFrom(SecureMatter));
+
+        (updated, failed).Should().Be((0, 1));
+        var error = errors.Should().ContainSingle().Which;
+        error.RecordId.Should().Be(Communication);
+        error.ReasonCode.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedReasonCode);
+        error.Error.Should().Be(FieldMappingPushSourceGate.RefileNotAllowedMessage);
+        AssertNothingMoved();
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingmatter")!.Id.Should().Be(SecureMatter);
+        _world.OwnerWrites.Should().BeEmpty("no re-file step ran");
+    }
+
+    [Fact(DisplayName = "022 r4: a push from a secure matter binding the matter an isolated child already holds writes it")]
+    public async Task FieldMappingPush_FromASecureSource_ThatBindsTheFilingTheChildHolds_IsWritten()
+    {
+        ASecureCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({SecureMatter})", Scopes(), sourceGate: SourceGateFrom(SecureMatter));
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        _writes.Should().ContainSingle();
+        _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
+    }
+
+    [Fact(DisplayName = "022 r4: a push from an ordinary matter re-filing a child into a secure matter re-owns it as before")]
+    public async Task FieldMappingPush_FromAnOrdinarySource_ThatRefilesTheChild_IsUnchanged()
+    {
+        AnOrdinaryCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(
+            MatterBind, $"/sprk_matters({SecureMatter})", Scopes(), sourceGate: SourceGateFrom(OrdinaryMatter));
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        AssertMovedIntoSecure();
+    }
+
     [Fact(DisplayName = "#2091 r4: a 500-child no-op push from a secure matter costs a few Dataverse calls per child, never a descendant pass")]
     public async Task FieldMappingPush_A500ChildNoOpPush_CostsAFewCallsPerChild()
     {
@@ -372,7 +419,12 @@ public sealed class RefileWriterBindShapeTests
         _world.OwnerWrites.Should().BeEmpty();
         _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         _world.QueriedTables.Should().NotContain("sprk_todo", "no descendant pass ran over what is filed under any child");
-        ((double)total / count).Should().BeLessThanOrEqualTo(5, "a no-op child costs its isolation read, its reparent's row read and its write — not a pass");
+        // Task 045b (owner ruling Q4 (b): the pair follows a moved agreement lookup on every pair table, the push included): the
+        // update planner reads the row's pair once per child whose payload writes an agreement lookup — one more O(1) read, still
+        // no pass over anything filed under it (asserted above).
+        _world.RowReads.Should().Be(count, "the planner's one row read per child, nothing more");
+        ((double)total / count).Should().BeLessThanOrEqualTo(6,
+            "a no-op child costs its isolation read, its reparent's row read, the pair planner's row read and its write — not a pass");
     }
 
     [Fact(DisplayName = "#2091 r4: a field-mapping push rule whose planned bind writes a different filing lookup than the rule names is refused, and nothing is written")]
@@ -469,8 +521,11 @@ public sealed class RefileWriterBindShapeTests
         AnOrdinaryCommunication();
         var first = new FieldMappingRuleDto
         {
-            SourceField = "sprk_lookupsource", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_lookupsource",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         var second = first with { };
         var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
@@ -480,10 +535,11 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [first, second],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
-            Scopes(), rootFiling: null, lookupBinds: plans);
+            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader(), callerQuery: CallerQuery().Object);
 
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
@@ -530,7 +586,8 @@ public sealed class RefileWriterBindShapeTests
                 "sprk_communication", Communication, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?>
                 {
-                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadB})",
+                    [MatterBind] = $"/sprk_matters({SecureMatter})",
+                    [ThreadBind] = $"/sprk_communicationthreads({ThreadB})",
                 },
                 Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
             CancellationToken.None);
@@ -548,7 +605,8 @@ public sealed class RefileWriterBindShapeTests
                 "sprk_communication", Communication, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?>
                 {
-                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadA})",
+                    [MatterBind] = $"/sprk_matters({SecureMatter})",
+                    [ThreadBind] = $"/sprk_communicationthreads({ThreadA})",
                 },
                 Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
             CancellationToken.None);
@@ -582,13 +640,19 @@ public sealed class RefileWriterBindShapeTests
         ASecureCommunication(inThread: ThreadA);
         var matterRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_mattersource", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_mattersource",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         var threadRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_threadsource", TargetField = "sprk_communicationthread",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+            SourceField = "sprk_threadsource",
+            TargetField = "sprk_communicationthread",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 2,
         };
         var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
         {
@@ -597,10 +661,11 @@ public sealed class RefileWriterBindShapeTests
         };
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, Restamper(), [matterRule, threadRule],
             new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid(), ["sprk_threadsource"] = Guid.NewGuid() },
             "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
-            Scopes(), rootFiling: null, lookupBinds: plans);
+            Scopes(), rootFiling: null, lookupBinds: plans, appOnlyEntities: AppOnlyReader(), callerQuery: CallerQuery().Object);
 
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
@@ -659,6 +724,177 @@ public sealed class RefileWriterBindShapeTests
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
         _stamps.PatchesTo("sprk_todo", TodoUnderCommunication).Should().NotBeEmpty(
             "the core-ancestor re-stamp after a filing write is not the step, and still ran");
+    }
+
+    // ── Task 045b: the regarding pair planner on each app-only update path (AC3, asserted per path; owner rulings Q4, Q7) ──
+
+    private static readonly Guid MatterType = Guid.Parse("045b0000-0000-4000-8000-0000000000a1");
+
+    /// <summary>The ordinary communication, its ADR-024 pair repeating its matter lookup (id = the matter, type = the matter's
+    /// catalog row), and the secure matter's name, which a pair moved onto it shows.</summary>
+    private void AnOrdinaryCommunicationWhosePairRepeatsItsMatter()
+    {
+        AnOrdinaryCommunication();
+        _world.Add("sprk_recordtype_ref", MatterType, (OwnedChildWrite.RecordTypeLogicalNameColumn, "sprk_matter"));
+        _world.Set("sprk_communication", Communication, SecureRootInheritance.PairIdColumn, OrdinaryMatter.ToString("D"));
+        _world.Set("sprk_communication", Communication, SecureRootInheritance.PairTypeColumn,
+            new EntityReference("sprk_recordtype_ref", MatterType));
+        _world.Set("sprk_matter", SecureMatter, RegardingRecordType.GetPrimaryNameField("sprk_matter")!, "Secure v. Matter");
+    }
+
+    [Theory(DisplayName = "045b: each app-only update path moving the matter lookup the pair repeated moves the pair with it and re-derives its display")]
+    [InlineData("node")]
+    [InlineData("output-mapping")]
+    [InlineData("push")]
+    public async Task AppOnlyPath_MovingTheLookupThePairRepeated_MovesThePairWithIt(string path)
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var reader = AppOnlyReader();
+
+        switch (path)
+        {
+            case "node":
+                await Core(reader).UpdateAsync(
+                    new UpdateRecordActionInput(
+                        "sprk_communication", Communication, FieldMappings: null,
+                        LegacyFields: new Dictionary<string, string?> { [MatterBind] = $"/sprk_matters({SecureMatter})" }, Lookups: null,
+                        ImpersonateSystemUserId: ConfirmingUser),
+                    CancellationToken.None);
+                break;
+            case "output-mapping":
+                _writesAs = null;
+                await Handler(reader).UpdateAsync(
+                    "sprk_communication", Communication,
+                    new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})" },
+                    ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+                break;
+            default:
+                var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes());
+                errors.Should().BeEmpty();
+                (updated, failed).Should().Be((1, 0));
+                break;
+        }
+
+        var written = _writes.Should().ContainSingle().Subject;
+        written[SecureRootInheritance.PairIdColumn].Should().Be(SecureMatter.ToString("D"), "the pair follows the lookup it repeated");
+        written.Keys.Should().NotContain(k => k.EndsWith("@odata.bind", StringComparison.Ordinal)
+                                               && SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn,
+            "the type is unchanged, so it is not written again");
+        written["sprk_regardingrecordname"].Should().Be("Secure v. Matter", "the display is re-derived for the record the pair now names");
+        written["sprk_regardingrecordurl"].Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", SecureMatter.ToString("D")));
+        _world.ValueOf<string>("sprk_communication", Communication, SecureRootInheritance.PairIdColumn)
+            .Should().Be(SecureMatter.ToString("D"));
+    }
+
+    [Fact(DisplayName = "045b: the push derives display values as the caller — a record the caller cannot read has its display cleared, never read app-only")]
+    public async Task Push_ARecordTheCallerCannotRead_HasItsDisplayCleared_AndIsNeverReadAppOnly()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var appOnly = AppOnlyReaderMock();
+        var caller = CallerQuery(denied: true);
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            appOnly: appOnly.Object, callerQuery: caller.Object);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        var written = _writes.Should().ContainSingle().Subject;
+        written[SecureRootInheritance.PairIdColumn].Should().Be(SecureMatter.ToString("D"), "the pair still follows the lookup it repeated");
+        foreach (var display in OwnedChildWrite.PairDisplayColumns)
+            written.Should().ContainKey(display).WhoseValue.Should().BeNull();
+        caller.Verify(q => q.QueryAsync("sprk_matters", It.IsAny<string?>(), ConfirmingUser, It.IsAny<CancellationToken>()), Times.Once);
+        appOnly.Verify(e => e.RetrieveAsync("sprk_matter", SecureMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the push reads the named record's display values as the caller only");
+    }
+
+    [Fact(DisplayName = "045b: the push derives display values as the caller — a record the caller can read gives its values")]
+    public async Task Push_ARecordTheCallerCanRead_GivesItsDisplayValues()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var appOnly = AppOnlyReaderMock();
+        var caller = CallerQuery();
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            appOnly: appOnly.Object, callerQuery: caller.Object);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        var written = _writes.Should().ContainSingle().Subject;
+        written["sprk_regardingrecordname"].Should().Be("Secure v. Matter");
+        written["sprk_regardingrecordurl"].Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", SecureMatter.ToString("D")));
+        appOnly.Verify(e => e.RetrieveAsync("sprk_matter", SecureMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "045b: the push's display read as the caller faulting refuses that child, nothing written")]
+    public async Task Push_TheCallersDisplayReadFaults_RefusesThatChild()
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", Scopes(),
+            callerQuery: CallerQuery(fault: new TimeoutException("socket")).Object);
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.Error.Should().Contain(RecordOwnerRefusal.ParentUndetermined);
+        _writes.Should().BeEmpty();
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(General, "nothing moved");
+    }
+
+    [Theory(DisplayName = "045b: each app-only update path whose pair-planner row read faults writes nothing")]
+    [InlineData("node")]
+    [InlineData("output-mapping")]
+    [InlineData("push")]
+    public async Task AppOnlyPath_ThePlannersRowReadFaults_WritesNothing(string path)
+    {
+        AnOrdinaryCommunicationWhosePairRepeatsItsMatter();
+        var faulting = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        faulting.Setup(e => e.RetrieveAsync("sprk_communication", Communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("socket"));
+
+        switch (path)
+        {
+            case "node":
+                var node = () => Core(faulting.Object).UpdateAsync(
+                    new UpdateRecordActionInput(
+                        "sprk_communication", Communication, FieldMappings: null,
+                        LegacyFields: new Dictionary<string, string?> { [MatterBind] = $"/sprk_matters({SecureMatter})" }, Lookups: null,
+                        ImpersonateSystemUserId: ConfirmingUser),
+                    CancellationToken.None);
+                (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                    .Should().Be(RecordOwnerRefusal.ParentUndetermined);
+                break;
+            case "output-mapping":
+                _writesAs = null;
+                var handler = () => Handler(faulting.Object).UpdateAsync(
+                    "sprk_communication", Communication,
+                    new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})" },
+                    ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+                (await handler.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                    .Should().Be(RecordOwnerRefusal.ParentUndetermined);
+                break;
+            default:
+                var rule = new FieldMappingRuleDto
+                {
+                    SourceField = "sprk_lookupsource",
+                    TargetField = "sprk_regardingmatter",
+                    SourceFieldType = "Lookup",
+                    TargetFieldType = "Lookup",
+                    Priority = 1,
+                };
+                var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
+                    _write.Object, Restamper(), [rule],
+                    new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
+                    "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
+                    Scopes(), rootFiling: null,
+                    lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan> { [rule] = new(MatterBind, $"/sprk_matters({SecureMatter})", null) },
+                    appOnlyEntities: faulting.Object);
+                (updated, failed).Should().Be((0, 1));
+                errors.Should().ContainSingle().Which.Error.Should().Contain(RecordOwnerRefusal.ParentUndetermined);
+                break;
+        }
+
+        _writes.Should().BeEmpty("a pair the planner could not read is never written half-planned");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(General, "nothing moved");
     }
 
     // ── worlds ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -721,11 +957,18 @@ public sealed class RefileWriterBindShapeTests
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
-    /// <summary>Dataverse applying a PATCH's binds: the lookup moves (or clears). Nothing else is modelled.</summary>
+    /// <summary>Dataverse applying a PATCH's binds: the lookup moves (or clears); and the ADR-024 pair's id text (task 045b: the
+    /// planner writes it with the pair's type bind). Nothing else is modelled.</summary>
     private void ApplyBinds(string table, Guid id, Dictionary<string, object?> fields)
     {
         foreach (var (key, value) in fields)
         {
+            if (string.Equals(key, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                _world.Set(table, id, SecureRootInheritance.PairIdColumn, value);
+                continue;
+            }
+
             if (!key.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase))
                 continue;
 
@@ -742,6 +985,7 @@ public sealed class RefileWriterBindShapeTests
                 "sprk_matters" => "sprk_matter",
                 "sprk_projects" => "sprk_project",
                 "sprk_communicationthreads" => "sprk_communicationthread",
+                "sprk_recordtype_refs" => "sprk_recordtype_ref",
                 _ => null,
             };
             if (target is not null)
@@ -786,38 +1030,106 @@ public sealed class RefileWriterBindShapeTests
         return rights.Object;
     }
 
-    private IServiceScopeFactory Scopes(IDataverseRecordShareService? rights = null) =>
+    private IServiceScopeFactory Scopes(IDataverseRecordShareService? rights = null, IGenericEntityService? entities = null) =>
         new ServiceCollection()
             .AddSingleton(Restamper())
             .AddSingleton<IRecordOwnershipResolver>(Resolver())
             .AddSingleton(_threads.Object)
             .AddSingleton(rights ?? FullAccessRights())
-            .AddSingleton(EntitySetNameFixtures.Service())
+            .AddSingleton(entities ?? EntitySetNameFixtures.Service())
             .AddScoped(_ => Reconciler())
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
             .GetRequiredService<IServiceScopeFactory>();
 
-    private UpdateRecordActionCore Core() => new(_write.Object, Scopes(), NullLogger.Instance);
+    private UpdateRecordActionCore Core(IGenericEntityService? entities = null) =>
+        new(_write.Object, Scopes(entities: entities), NullLogger.Instance);
 
-    private DataverseUpdateHandler Handler() =>
+    private DataverseUpdateHandler Handler(IGenericEntityService? entities = null) =>
         new(
-            _write.Object, new Mock<IGenericEntityService>().Object, Restamper(), Resolver(),
+            _write.Object, entities ?? new Mock<IGenericEntityService>().Object, Restamper(), Resolver(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance, Reconciler());
 
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string bindKey, string bindValue, IServiceScopeFactory? scopes, string? targetField = null, Guid[]? children = null,
-        CoreAncestorRestamper? restamper = null)
+        CoreAncestorRestamper? restamper = null, IGenericEntityService? appOnly = null, IImpersonatedCommunicationQuery? callerQuery = null,
+        FieldMappingPushSourceGate? sourceGate = null)
     {
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_lookupsource", TargetField = targetField ?? SecureRootInheritance.NormalizeColumn(bindKey),
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_lookupsource",
+            TargetField = targetField ?? SecureRootInheritance.NormalizeColumn(bindKey),
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            sourceGate ?? Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _write.Object, restamper ?? Restamper(), [rule],
             new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
             "sprk_communication", children ?? [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
             scopes, rootFiling: null,
-            lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan> { [rule] = new(bindKey, bindValue, null) });
+            lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan> { [rule] = new(bindKey, bindValue, null) },
+            appOnlyEntities: appOnly ?? AppOnlyReader(), callerQuery: callerQuery ?? CallerQuery().Object);
+    }
+
+    /// <summary>
+    /// The push's mapping-source gate (task 022 fix round 4) for a push from <paramref name="sourceMatter"/>, reading the world
+    /// app-only. The world keeps owners as <c>owningteam</c>/<c>owninguser</c>; a read of <c>ownerid</c> answers the owner, as
+    /// Dataverse does.
+    /// </summary>
+    private FieldMappingPushSourceGate SourceGateFrom(Guid sourceMatter)
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                var row = _world.Retrieve(table, id, columns);
+                if (columns.Contains("ownerid") && _world.OwnerOf(table, id) is { } owner)
+                {
+                    row["ownerid"] = new EntityReference(
+                        owner.Kind == DataversePrincipalKind.Team ? "team" : "systemuser", owner.Id);
+                }
+
+                return Task.FromResult(row);
+            });
+        return new FieldMappingPushSourceGate(
+            entities.Object, "sprk_matter", sourceMatter,
+            _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((SecureChildShareWorld.SecureTeam, null)));
+    }
+
+    /// <summary>The push's app-only reader over the world, as the endpoint passes its <c>IGenericEntityService</c> (task 045b:
+    /// the update planner reads the row's pair and agreement lookups with it before the write).</summary>
+    private IGenericEntityService AppOnlyReader() => AppOnlyReaderMock().Object;
+
+    private Mock<IGenericEntityService> AppOnlyReaderMock()
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => $"{table}s");
+        return entities;
+    }
+
+    /// <summary>The push's caller query (as the endpoint passes its <c>IImpersonatedCommunicationQuery</c>): the push derives
+    /// display values as the caller. Over the world's rows, as the confirming user; <paramref name="denied"/> answers what
+    /// Dataverse answers a caller who may not read the row (no row), <paramref name="fault"/> throws.</summary>
+    private Mock<IImpersonatedCommunicationQuery> CallerQuery(bool denied = false, Exception? fault = null)
+    {
+        var query = new Mock<IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), ConfirmingUser, It.IsAny<CancellationToken>()))
+            .Returns((string set, string? odata, Guid _, CancellationToken _) =>
+            {
+                if (fault is not null)
+                    throw fault;
+                var table = set.TrimEnd('s');
+                var query = odata ?? "";
+                var id = Guid.Parse(query[(query.LastIndexOf(" eq ", StringComparison.Ordinal) + 4)..]);
+                if (denied)
+                    return Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>([]);
+                var select = query["$select=".Length..query.IndexOf('&')].Split(',');
+                var row = select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(_world.ValueOf<string>(table, id, c)));
+                return Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>([row]);
+            });
+        return query;
     }
 }

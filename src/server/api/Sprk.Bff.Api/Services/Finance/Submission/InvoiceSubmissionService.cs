@@ -941,12 +941,12 @@ public class InvoiceSubmissionService
         }
 
         if (Services.Office.ReconciledEmailFiling.FilingColumns.Any(column => communication.Attributes.TryGetValue(column, out var value) && value switch
-            {
-                null => false,
-                string text => !string.IsNullOrWhiteSpace(text),
-                EntityReference reference => reference.Id != Guid.Empty,
-                _ => true,
-            })
+        {
+            null => false,
+            string text => !string.IsNullOrWhiteSpace(text),
+            EntityReference reference => reference.Id != Guid.Empty,
+            _ => true,
+        })
             || CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity).Count > 0)
         {
             return true;

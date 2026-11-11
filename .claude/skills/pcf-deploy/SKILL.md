@@ -318,14 +318,10 @@ Controls/sprk_Spaarke.Controls.{ControlName}/css/*.css  (if applicable)
 ### Step 5: Import to Dataverse
 
 ```bash
-# Disable CPM if needed
-mv /c/code_files/{worktree}/Directory.Packages.props{,.disabled}
-
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
-
-# Restore CPM
-mv /c/code_files/{worktree}/Directory.Packages.props{.disabled,}
 ```
+
+(No "disable CPM" step any more: `Directory.Packages.props` was removed on 2026-11-10. A worktree branched before that may still have it; if `pac` reports NU1008 there, rename it aside for the command.)
 
 ### Step 6: Verify
 

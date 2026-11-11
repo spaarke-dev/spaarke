@@ -1569,7 +1569,11 @@ public class SubmissionOverrideServiceTests
 
     private static JsonObject ValueRead(string name, string? value, int? line, string? field = null) => new()
     {
-        ["name"] = name, ["value"] = value, ["line"] = line, ["field"] = field, ["confidence"] = field is null ? null : 0.97,
+        ["name"] = name,
+        ["value"] = value,
+        ["line"] = line,
+        ["field"] = field,
+        ["confidence"] = field is null ? null : 0.97,
         ["belowReliabilityThreshold"] = false,
     };
 
@@ -1581,9 +1585,18 @@ public class SubmissionOverrideServiceTests
     {
         var finding = new JsonObject
         {
-            ["ruleType"] = ruleType, ["policyCode"] = policy, ["policyVersionId"] = Guid.NewGuid().ToString("D"), ["clause"] = "Guideline 9",
-            ["clauseLocation"] = null, ["subject"] = line is null ? "Invoice" : "Line", ["line"] = line, ["reasonCode"] = reason,
-            ["detailWithheld"] = withheld, ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["ruleType"] = ruleType,
+            ["policyCode"] = policy,
+            ["policyVersionId"] = Guid.NewGuid().ToString("D"),
+            ["clause"] = "Guideline 9",
+            ["clauseLocation"] = null,
+            ["subject"] = line is null ? "Invoice" : "Line",
+            ["line"] = line,
+            ["reasonCode"] = reason,
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         if (withheld)
         {

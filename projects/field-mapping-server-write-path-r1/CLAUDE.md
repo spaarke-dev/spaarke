@@ -87,6 +87,21 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - **No backfill**: forward-only.
 - Rollout: per-wizard cutover, Matter first. Rollback is redeploying the previous bundle; no runtime flag.
 - Matter number: platform autonumber (owner 2026-10-02, task 076). The wizard stops generating `{typeCode}-{random6}`.
+- 2026-11-08/09 owner decisions:
+  - 032 option B;
+  - O1 inline; O2 gate move;
+  - invoice Assigned To targets people for the Daily Briefing and notifications WITHOUT conferring access (032b-1b);
+  - Repair pass: only contacts get an owner rule (the `ExternalAccess:CustomerBusinessUnitId` default team, fail closed), also for the chat contact create;
+  - inbound mapping is a gap (DI-022);
+  - the NFR-02 verdict moves to UAT;
+  - Direct 1:1 messages are owned by the Direct team (task 054);
+  - participants keep their shares when a Direct message is filed, except on secure or Restricted targets;
+  - a Direct message records its own two participants (`sprk_sentby` + `sprk_directrecipient`, option A; threads do not move);
+  - private messages in a record's context are deferred to `messages-enhancements-r1`.
+- Mapping-source rule (022): values copied from a secure source are written only into a row owned by that source's isolation owner, on create, push and Repair, through one predicate (`MappingSourceCopyGate.DecideAsync`). For a secure source, a push that would change a child's filing skips the child whole.
+- Public repo: access defects go to UAC-r2 by message only; repo text (commits, notes, comments, issues) states rules, never holes.
+- Live Dataverse writes need the owner's explicit go in this project's own session; a peer cannot grant it. No deploys from this session.
+- Every Agent call names a model; at most 4 agents at once. Never run Sprk.Bff.Api.Tests unfiltered: use `scripts/verify-suites.sh <repo> <logdir>`. Publish delta: `scripts/publish-delta.ps1` (main session only).
 - OOB relationship mappings (EntityMaps) are form prefill only and never an invariant owner. Remove the
   `businessunit → sprk_matter` map. Recommend a quick view when a child only needs to *show* a parent value.
 
@@ -142,6 +157,9 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - 2026-10-20 — POMLs written at planning name new test files under `tests/unit/Sprk.Bff.Api.Tests/...`, which
   `.claude/constraints/testing.md:132` forbids. Use `tests/unit/domain/**` (globbed into Sprk.Bff.Api.Tests) or the
   matching KEEP path.
+- 2026-11-09 — Shell calls time out under agent load: prefer Grep/Read, use timeouts ≥ 300 s and background runs; `timeout 400 git commit`. lint-staged backs up into the shared stash and drops it itself: never pop or drop a stash. Use `gh --jq`, not `jq`. Never print a token.
+- 2026-11-09 — In Git Bash, `git sparse-checkout set --no-cone /path/` gets its leading `/` rewritten to `C:/Program Files/Git/...`; prefix with `MSYS_NO_PATHCONV=1`. A sparse worktree also needs `scripts/quality/`, the archive-prefix baseline in `tests/Spaarke.ArchTests/`, `package.json` and `.lintstagedrc.mjs` for the pre-commit hook to pass.
+- 2026-11-09 — Web API `@odata.bind` keys use the navigation property name. The regarding pair's type lookup is `sprk_RegardingRecordType` on every pair table except `sprk_invoice` (lower case): use `OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(table)`, guarded by `PairTypeBindSpellingGuardTests`.
 - 2026-10-19 — A user-owned row stays readable by Deep (Parent:Child) readers in the owner's BU and its ancestors. The
   harm of OOB Assign is the BU move and User-depth tables (e.g. `sprk_communication`), not "only the owner sees it".
 

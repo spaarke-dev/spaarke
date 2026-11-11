@@ -44,6 +44,15 @@ public static class H10Rejections
     /// <summary>InterStepState.miObjectId missing — H2a (uami.bicep) has not completed yet.</summary>
     public const string MissingUamiObjectId = "h10-missing-uami-object-id";
 
+    /// <summary>Task 266: InterStepState.ontologyWriterClientId / ontologyWriterObjectId missing — H2a has not deployed the writer UAMI.</summary>
+    public const string MissingOntologyWriterIdentity = "h10-missing-ontology-writer-identity";
+
+    /// <summary>Task 266: the ontology writer's client id equals the stamp UAMI's — the writer would be System Administrator (FR-21).</summary>
+    public const string OntologyWriterIsStampIdentity = "h10-ontology-writer-is-stamp-identity";
+
+    /// <summary>Task 266: the ontology writer UAMI's App User could not be found or created.</summary>
+    public const string OntologyWriterAppUserCreationFailed = "h10-ontology-writer-app-user-creation-failed";
+
     /// <summary>InterStepState.dataverseEnvUrl missing — H5/H6 has not completed yet.</summary>
     public const string MissingDataverseEnvUrl = "h10-missing-dataverse-env-url";
 
@@ -158,6 +167,13 @@ public static class H10Rejections
     /// its users would reach that unit's records by depth; re-parenting a unit is an owner decision (QuarantineRequired).
     /// </summary>
     public const string CustomerBusinessUnitWrongParent = "h10-customer-bu-wrong-parent";
+
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name is the Secure Record unit (same business-unit id): Dataverse
+    /// matches names without case or accents, so a name that differs only that way lands on it. H10 never places the BFF's
+    /// users there; the run needs a different customer name (QuarantineRequired — nothing was written).
+    /// </summary>
+    public const string CustomerBusinessUnitIsReserved = "h10-customer-bu-is-reserved";
 
     /// <summary>Reading or creating the customer's business unit failed (Resumable — find-then-create is idempotent).</summary>
     public const string CustomerBusinessUnitFailed = "h10-customer-bu-failed";

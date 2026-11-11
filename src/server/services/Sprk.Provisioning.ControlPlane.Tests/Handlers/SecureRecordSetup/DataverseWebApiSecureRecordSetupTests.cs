@@ -212,6 +212,49 @@ public sealed class DataverseWebApiSecureRecordSetupTests
     }
 
     [Fact]
+    public async Task W11_OntologyServiceRole_ReadsEveryCopy_ItsUsersWithApplicationId_AndTheUsersRoles()
+    {
+        var user = Guid.NewGuid();
+        var appId = Guid.NewGuid();
+        var http = new Recorder().Respond(request =>
+        {
+            var uri = Uri.UnescapeDataString(request.RequestUri!.ToString());
+            return uri.Contains("systemuserroles_association", StringComparison.Ordinal) && uri.Contains("roles(", StringComparison.Ordinal)
+                    && uri.Contains("/systemuserroles_association?$select=systemuserid", StringComparison.Ordinal)
+                ? Json(new { value = new object[] { new { systemuserid = user, applicationid = appId }, new { systemuserid = Guid.NewGuid(), applicationid = (Guid?)null } } })
+                : Json(new { value = new object[] { new { roleid = Role, name = "Spaarke Ontology Service", _businessunitid_value = Unit, _parentrootroleid_value = Role } } });
+        });
+        var api = Api(http);
+
+        var copies = await api.FindRoleCopiesAsync("Spaarke Ontology Service", CancellationToken.None);
+        var holders = await api.ListRoleUsersAsync(Role, CancellationToken.None);
+        var userRoles = await api.ListUserRolesAsync(user, CancellationToken.None);
+
+        copies.Should().ContainSingle().Which.Id.Should().Be(Role);
+        Uri.UnescapeDataString(http.Requests[0].Uri).Should().Contain("roles?$filter=name eq 'Spaarke Ontology Service'")
+            .And.NotContain("_businessunitid_value eq", "every copy, in every unit");
+        holders.Select(h => h.ApplicationId).Should().Equal(appId, null);
+        Uri.UnescapeDataString(http.Requests[1].Uri).Should().Contain($"roles({Role})/systemuserroles_association?$select=systemuserid,applicationid");
+        Uri.UnescapeDataString(http.Requests[2].Uri).Should().Contain($"systemusers({user})/systemuserroles_association");
+        userRoles.Should().ContainSingle().Which.Id.Should().Be(Role);
+    }
+
+    [Fact]
+    public async Task W12_AssociateUserRole_PostsTheRoleReferenceToTheUsersRoleAssociation()
+    {
+        var user = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        await Api(http).AssociateUserRoleAsync(user, Role, CancellationToken.None);
+
+        var request = http.Requests.Single();
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.Should().EndWith($"/api/data/v9.2/systemusers({user})/systemuserroles_association/$ref");
+        JsonDocument.Parse(request.Body!).RootElement.GetProperty("@odata.id").GetString()
+            .Should().EndWith($"/api/data/v9.2/roles({Role})");
+    }
+
+    [Fact]
     public async Task W8_ReadPrivileges_AbsentTableIsEmpty_AndOnlyReadIsReturned()
     {
         var absent = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -272,7 +315,9 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         var parent = Guid.NewGuid();
         var http = new Recorder().Respond(_ => Json(new Dictionary<string, object>
         {
-            ["businessunitid"] = Unit.ToString(), ["name"] = "Acme Corporation", ["_parentbusinessunitid_value"] = parent.ToString(),
+            ["businessunitid"] = Unit.ToString(),
+            ["name"] = "Acme Corporation",
+            ["_parentbusinessunitid_value"] = parent.ToString(),
         }));
 
         var unit = await Api(http).GetBusinessUnitAsync(Unit, CancellationToken.None);

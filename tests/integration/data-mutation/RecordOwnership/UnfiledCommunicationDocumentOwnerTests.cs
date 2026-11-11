@@ -124,9 +124,9 @@ public class UnfiledCommunicationDocumentOwnerTests
     {
         var thread = Guid.NewGuid();
         var resolver = WithCommunication(World(), RootBu, RootTeam, new()
-            {
-                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
-            })
+        {
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+        })
             .WithRecord("sprk_communicationthread", thread, RootBu, owningTeam: RootTeam, extra: new()
             {
                 ["sprk_threadtype"] = new OptionSetValue(RecordThreadFiling.DirectThreadType),
@@ -231,9 +231,9 @@ public class UnfiledCommunicationDocumentOwnerTests
         // is missing": it propagates (fail closed, as every resolver read does), and no owner is looked up.
         var thread = Guid.NewGuid();
         var directory = WithCommunication(World(), RootBu, RootTeam, new()
-            {
-                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
-            })
+        {
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+        })
             .WithRecord("sprk_communicationthread", thread, RootBu, owningTeam: RootTeam);
         var queried = new List<string>();
         var resolver = StrictResolverOver(directory, query =>
@@ -277,9 +277,9 @@ public class UnfiledCommunicationDocumentOwnerTests
     {
         var thread = Guid.NewGuid();
         var directory = WithCommunication(World(), RootBu, RootTeam, new()
-            {
-                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
-            })
+        {
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+        })
             .WithRecord("sprk_communicationthread", thread, RootBu, owningTeam: RootTeam, extra: new()
             {
                 ["sprk_threadtype"] = new OptionSetValue(RecordThreadFiling.DirectThreadType),
@@ -348,9 +348,9 @@ public class UnfiledCommunicationDocumentOwnerTests
         if (threadType is { } type)
             threadColumns["sprk_threadtype"] = new OptionSetValue(type);
         var resolver = WithCommunication(World(), OtherBu, OtherTeam, new()
-            {
-                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
-            })
+        {
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+        })
             .WithRecord("sprk_communicationthread", thread, OtherBu, owningTeam: OtherTeam, extra: threadColumns)
             .Resolver();
 

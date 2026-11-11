@@ -61,14 +61,18 @@ internal static class FieldMappingPushFamily
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> LookupBinds,
         int SkippedRuleCount,
         Func<string, string, bool> IsAssignedToColumn,
+        FieldMappingPushSourceGate SourceGate,
         IReadOnlyList<Guid>? RefusedChildIds = null);
 
     /// <summary>One value a rule would write: the same for every child, so computed once.</summary>
-    private sealed record PlannedChange(FieldMappingRuleDto Rule, object? Wire, string To, Guid? LookupId, bool IsAssignedTo);
+    private sealed record PlannedChange(FieldMappingRuleDto Rule, string Key, object? Wire, string To, Guid? LookupId, bool IsAssignedTo);
 
     /// <summary>
     /// The preview: per child the caller may write, the columns that would change. Writes nothing. A fault propagates (the
-    /// route's 500); nothing is read app-only.
+    /// route's 500). The children, their rights and their current values are read AS THE CALLER. The source gate
+    /// (<see cref="FieldMappingPushSourceGate"/>, task 022 fix round 4) reads APP-ONLY, as on the apply: the source's gate
+    /// columns (its owner, and the secure flag on a root) once, and, for a secure source only, each asked child's owner and
+    /// the filing columns the payload writes. Nothing it reads is returned; a child it refuses comes back with its code only.
     /// </summary>
     internal static async Task<PushFieldMappingsResponse> PreviewAsync(
         PreviewInput input,
@@ -82,7 +86,15 @@ internal static class FieldMappingPushFamily
         Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         var planned = Plan(input, logger);
+
+        // What the apply would write to a child (the same rules, in the same order: a later rule's key wins), so the source
+        // rule is asked of the preview with the payload the apply asks it with.
+        var pushPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var change in planned)
+            pushPayload[change.Key] = change.Wire;
+
         var changes = new List<PushPreviewChange>();
+        var notWritten = new List<PushFieldMappingsError>();
         var skippedNoWrite = 0;
 
         if (input.Children.Count > 0)
@@ -112,6 +124,7 @@ internal static class FieldMappingPushFamily
                 foreach (var child in writable)
                 {
                     rows.TryGetValue(child.Id, out var row);
+                    var childChanges = new List<PushPreviewChange>();
                     foreach (var change in planned)
                     {
                         var column = change.Rule.TargetField;
@@ -122,7 +135,7 @@ internal static class FieldMappingPushFamily
                         if (same)
                             continue;
 
-                        changes.Add(new PushPreviewChange
+                        childChanges.Add(new PushPreviewChange
                         {
                             RecordId = child.Id,
                             Name = child.Name,
@@ -132,6 +145,22 @@ internal static class FieldMappingPushFamily
                             Flags = change.IsAssignedTo ? FlagNames(flags.GetValueOrDefault(child.Id, Unreadable)) : [],
                         });
                     }
+
+                    // Task 022 fix round 4 (the mapping-source rule): the same question the apply asks before it writes. A child
+                    // the apply would not write is not listed with values; it is returned with its code instead.
+                    if (childChanges.Count > 0
+                        && await input.SourceGate.RefusalForChildAsync(input.TargetEntity, child.Id, pushPayload, ct).ConfigureAwait(false) is { } refusal)
+                    {
+                        notWritten.Add(new PushFieldMappingsError
+                        {
+                            RecordId = child.Id,
+                            Error = FieldMappingPushSourceGate.MessageFor(refusal),
+                            ReasonCode = refusal,
+                        });
+                        continue;
+                    }
+
+                    changes.AddRange(childChanges);
                 }
             }
         }
@@ -146,6 +175,7 @@ internal static class FieldMappingPushFamily
             SkippedCount = 0,
             Preview = true,
             Changes = changes.ToArray(),
+            Errors = notWritten.ToArray(),
             SkippedNoWriteCount = skippedNoWrite,
             Truncated = input.Truncated,
             SkippedRuleCount = input.SkippedRuleCount,
@@ -185,6 +215,10 @@ internal static class FieldMappingPushFamily
     /// <summary>The values the rules would write, decided once: the source value is the same for every child.</summary>
     private static List<PlannedChange> Plan(PreviewInput input, Microsoft.Extensions.Logging.ILogger? logger)
     {
+        // Task 022 fix round 5 (F1): the binds the apply writes. On a reparentable child a lookup rule whose planned bind is
+        // another lookup is refused per rule (#2091 r4) by the helper the apply calls, so the payload the source gate is
+        // asked with below is the apply's, and a child the apply would write is never hidden by a bind it would not write.
+        var lookupBinds = FieldMappingPushLookups.ConfineToNamedColumn(input.TargetEntity, input.LookupBinds);
         var result = new List<PlannedChange>();
         foreach (var rule in input.Rules.OrderBy(r => r.Priority))
         {
@@ -192,7 +226,7 @@ internal static class FieldMappingPushFamily
                 continue;
 
             var scratch = new Dictionary<string, object?>();
-            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, input.LookupBinds, logger).Status != FieldMappingStatus.Mapped
+            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, lookupBinds, logger).Status != FieldMappingStatus.Mapped
                 || scratch.Count != 1)
             {
                 continue;
@@ -204,12 +238,12 @@ internal static class FieldMappingPushFamily
             {
                 input.SourceValues.TryGetValue(rule.SourceField, out var source);
                 var id = LookupIdOf(wire as string);
-                result.Add(new PlannedChange(rule, wire, (source as SourceLookupValue)?.DisplayName ?? id?.ToString("D") ?? string.Empty, id, assignedTo));
+                result.Add(new PlannedChange(rule, key, wire, (source as SourceLookupValue)?.DisplayName ?? id?.ToString("D") ?? string.Empty, id, assignedTo));
                 continue;
             }
 
             input.SourceValues.TryGetValue(rule.SourceField, out var value);
-            result.Add(new PlannedChange(rule, wire, value is SourceChoiceValue choice ? choice.Label ?? choice.Value.ToString(CultureInfo.InvariantCulture) : TextOf(wire), null, assignedTo));
+            result.Add(new PlannedChange(rule, key, wire, value is SourceChoiceValue choice ? choice.Label ?? choice.Value.ToString(CultureInfo.InvariantCulture) : TextOf(wire), null, assignedTo));
         }
 
         return result;

@@ -2521,15 +2521,15 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <summary>The request's optional references: (column, target table, chosen id). Their columns are the registry's.</summary>
     private static IEnumerable<(string Column, string Target, Guid? Id)> QuickCreateReferences(
         QuickCreateEntityType entityType, QuickCreateRequest request) => entityType switch
-    {
-        QuickCreateEntityType.Matter =>
-        [
-            (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
+        {
+            QuickCreateEntityType.Matter =>
+            [
+                (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
             ("sprk_practicearea", "sprk_practicearea_ref", request.PracticeAreaId),
         ],
-        QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
-        _ => [],
-    };
+            QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
+            _ => [],
+        };
 
     /// <summary>A lookup in the service's Web API payload: the target table and the record (no entity set to guess).</summary>
     private static Dictionary<string, object?> LookupValue(string relatedTable, Guid recordId) => new(StringComparer.Ordinal)
@@ -2760,6 +2760,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
                 => new(refusal.Code, Forbidden, refusal.Detail),
 
+            // ── Invalid: a value copied from a secure source files the row, which would not be secure (task 022 fix round 3).
+            // The same request is refused every time: passed through with the service's words, never the generic 500. ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.MappingSourceSecureFilingCode)
+                => new(refusal.Code, StatusCodes.Status400BadRequest, refusal.Detail),
+
             // ── OwnerUnresolved (stays 403) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
@@ -2929,6 +2935,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 payload["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
             }
 
+            // The relative record URL beside the id and name (045c, gap G5): the writer holds the table and the id, and
+            // RegardingRecordType owns the format every other writer of the pair uses. The reference number needs a read of
+            // the record, which this adapter does not make, so it is left unset (never guessed).
+            payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(reg.LogicalName, regardingId.ToString("D"));
+
             // Best-effort record-type ref (the denormalized ADR-024 resolver lookup): the typed lookup above is the
             // load-bearing relationship; a missing type only affects cross-entity display.
             var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
@@ -3068,34 +3079,34 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <param name="targetTable">What the To Do is filed against (the record, else a carrier), or <see langword="null"/>.</param>
     internal static SdapProblemException? MapTodoRefusal(
         Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string? targetTable) => refusal.Kind switch
-    {
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
-            or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
-            when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
-                is StatusCodes.Status429TooManyRequests
-                or StatusCodes.Status503ServiceUnavailable
-                or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
-            OfficeErrorCodes.RecordOwnerUnresolved,
-            OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
-            targetTable is not null
-                ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
-                  + "Check that the item still exists and that you can open it."
-                : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
-                  + "administrator to check your user record's business unit.",
-            OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved)),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied => new SdapProblemException(
-            OfficeErrorCodes.AccessDenied,
-            "Forbidden",
-            Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail,
-            StatusCodes.Status403Forbidden,
-            new Dictionary<string, object>
-            {
-                [AssigneeReasonCodeExtension] = Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode,
-            }),
-        _ => null,
-    };
+        {
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
+                when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
+                    is StatusCodes.Status429TooManyRequests
+                    or StatusCodes.Status503ServiceUnavailable
+                    or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
+                OfficeErrorCodes.RecordOwnerUnresolved,
+                OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
+                targetTable is not null
+                    ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
+                      + "Check that the item still exists and that you can open it."
+                    : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
+                      + "administrator to check your user record's business unit.",
+                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved)),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied => new SdapProblemException(
+                OfficeErrorCodes.AccessDenied,
+                "Forbidden",
+                Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail,
+                StatusCodes.Status403Forbidden,
+                new Dictionary<string, object>
+                {
+                    [AssigneeReasonCodeExtension] = Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode,
+                }),
+            _ => null,
+        };
 
     /// <summary>
     /// What the add-in pane shows for a To Do create that failed for a reason a retry can clear (<see cref="MapTodoRefusal"/>).

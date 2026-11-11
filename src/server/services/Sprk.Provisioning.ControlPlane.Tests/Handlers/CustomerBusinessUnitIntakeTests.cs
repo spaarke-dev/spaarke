@@ -40,6 +40,20 @@ public sealed class CustomerBusinessUnitIntakeTests
     public void AnOrdinaryName_IsAccepted_Verbatim(string name)
         => Validate(name).Should().Be(new CustomerBusinessUnitIntakeOutcome.Valid(name));
 
+    [Theory]
+    [InlineData("Sécure Record")]
+    [InlineData("SECURE RÉCORD")]
+    [InlineData("Secure Récord")]   // combining acute accent
+    public void TheSecureRecordName_WithAccents_IsRefusedAtIntake_AsAFirstFilter(string name)
+        => Validate(name).Should().BeOfType<CustomerBusinessUnitIntakeOutcome.Invalid>()
+            .Which.RejectionCode.Should().Be(H10Rejections.CustomerDisplayNameInvalid);
+
+    [Theory]
+    [InlineData("Société Générale")]   // accents elsewhere are fine
+    [InlineData("Secure Récords")]
+    public void AnAccentedName_ThatIsNotTheSecureRecordName_IsAccepted_Verbatim(string name)
+        => Validate(name).Should().Be(new CustomerBusinessUnitIntakeOutcome.Valid(name));
+
     [Fact]
     public void ARefusal_NeverEchoesAControlCharacter()
     {

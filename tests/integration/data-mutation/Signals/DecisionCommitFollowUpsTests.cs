@@ -140,13 +140,13 @@ public sealed class DecisionCommitFollowUpsTests
             // Secure Record owner team and the partition (SignalSuppressionService.PartitionsAsync) is ordinary; only Signal reads return the grain.
             .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName != "sprk_signal" ? new EntityCollection()
                 : new EntityCollection(Enumerable.Range(0, 3).Select(_ => new Entity("sprk_signal", Guid.NewGuid())
-            {
-                ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved),
-                ["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed),
-                ["sprk_resolvedon"] = now.AddDays(-1),
-                ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid()),
-                ["owningteam"] = new EntityReference("team", Guid.NewGuid()),
-            }).ToList()));
+                {
+                    ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved),
+                    ["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed),
+                    ["sprk_resolvedon"] = now.AddDays(-1),
+                    ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid()),
+                    ["owningteam"] = new EntityReference("team", Guid.NewGuid()),
+                }).ToList()));
         var walled = await FollowUps().AfterRecordedAsync(Matter, [], [Row(TypeMatter, Matter, null, Policy)], CancellationToken.None);
 
         _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))

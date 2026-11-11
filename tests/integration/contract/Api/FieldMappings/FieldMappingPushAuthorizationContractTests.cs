@@ -510,11 +510,53 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     [Fact]
-    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind_MatterToInvoice()
+    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind()
     {
         await using var host = await PushHost.StartAsync();
-        // Task 040 fix round 1: sprk_invoice.sprk_assignedtoattorney1 is an Assigned-To column of the registry, so the attorney
-        // rule is pushed only on a request that opts in, which needs Write on the source.
+        // Task 032b-1: this ran Matter to Invoice until the invoice's attorney columns became display copies, which a push never
+        // writes (Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice). The lookup-bind proof is unchanged on the event target,
+        // where sprk_assignedtoattorney1 is plain data; the host gives every target the same schema-cased navigation property.
+        // The request still opts in (with Write on the source), as before.
+        host.Probe.Rights = AccessRights.Read | AccessRights.Write;
+        host.ArrangeHappyPathData(
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: AttorneyColumns(AttorneyId));
+
+        var response = await host.SendAsync(Authenticated(
+            new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo = true }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a lookup rule's push 500ed here (first seen on the live Matter to Invoice profile)");
+        host.SourceReads.Should().ContainSingle().Which.Should().Be(
+            ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+             CallerSystemUserId),
+            "still read AS THE CALLER (field-level security), now with the lookup's Web API property");
+        host.MetadataQueries.Should().Contain(
+            ("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships",
+             (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
+            "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
+        host.Writes.Should().HaveCount(2);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_event" && w.ImpersonatedAs == CallerSystemUserId,
+            "a child is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
+            ["sprk_clientreference"] = "REF-166",
+        }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+    }
+
+    /// <summary>
+    /// Task 032b-1 (U3 (c)): the invoice's attorney and paralegal columns are display copies. A push never writes one — not at
+    /// Manual Refresh, not when the request opts in to the Assigned-To rules — and the response counts it as a skipped rule. The
+    /// plain rule of the same profile is still written.
+    /// </summary>
+    [Fact]
+    public async Task Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice()
+    {
+        await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read | AccessRights.Write;
         host.ArrangeHappyPathData(
             targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
@@ -528,23 +570,12 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(
             new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_invoice", includeAssignedTo = true }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "the live Matter to Invoice (Attorney Matrix) push 500ed here");
-        host.SourceReads.Should().ContainSingle().Which.Should().Be(
-            ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
-             CallerSystemUserId),
-            "still read AS THE CALLER (field-level security), now with the lookup's Web API property");
-        host.MetadataQueries.Should().Contain(
-            ("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships",
-             (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
-            "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
-        host.Writes.Should().HaveCount(2);
-        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId,
-            "an invoice is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
-        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
-        {
-            ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
-            ["sprk_clientreference"] = "REF-166",
-        }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId);
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" },
+            "the display copy is written by the create only; a push never re-maps it"));
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
     }
 
     [Fact]
@@ -765,6 +796,7 @@ public class FieldMappingPushAuthorizationContractTests
             // one, so the children the caller's query found exist here too (no core lookups stored).
             Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+            ArrangeSourceGateRead("sprk_matter");
             FieldMappings
                 .Setup(f => f.UpdateExistingRecordFieldsAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -862,6 +894,28 @@ public class FieldMappingPushAuthorizationContractTests
                 });
         }
 
+        /// <summary>
+        /// Task 022 fix round 4 (the mapping-source rule): the source's gate columns as the app-only read returns them — its
+        /// owner, and the secure flag on a root. By default an ordinary source: owned by a user, flag explicitly off.
+        /// </summary>
+        public void ArrangeSourceGateRead(string sourceTable, Microsoft.Xrm.Sdk.EntityReference? owner = null, bool? secureFlag = false)
+        {
+            Entities.Setup(e => e.RetrieveAsync(sourceTable, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                {
+                    var row = new Microsoft.Xrm.Sdk.Entity(table, id)
+                    {
+                        ["ownerid"] = owner ?? new Microsoft.Xrm.Sdk.EntityReference("systemuser", SourceOwnerUserId),
+                    };
+                    if (secureFlag is { } flag)
+                        row["sprk_issecure"] = flag;
+                    return row;
+                });
+        }
+
+        /// <summary>The user who owns the source in <see cref="ArrangeSourceGateRead"/> by default.</summary>
+        public static readonly Guid SourceOwnerUserId = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
+
         /// <summary>Every child PATCH, with a copy of its payload.</summary>
         public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();
 
@@ -870,19 +924,26 @@ public class FieldMappingPushAuthorizationContractTests
 
         internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
         {
-            Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
-            TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = $"{sourceField}->{targetField}",
+            SourceField = sourceField,
+            SourceFieldType = sourceType,
+            TargetField = targetField,
+            TargetFieldType = targetType,
+            MappingType = 0,
+            ExecutionOrder = 1,
+            IsActive = true,
             // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh; a rule left at One Time is not pushed.
             SyncMode = Spaarke.Dataverse.SyncMode.ManualRefresh,
         };
 
         private static Dictionary<string, JsonElement> Relationship(
             string referencingAttribute, string referencedEntity, string? navigationProperty = null) => new()
-        {
-            ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
-            ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
-            ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
-        };
+            {
+                ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
+                ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
+                ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
+            };
 
         private static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true) => new()
         {

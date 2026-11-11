@@ -326,19 +326,23 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         {
             "user" => new RecordAccessGateEndpoint.OwnerRow
             {
-                _owninguser_value = Guid.NewGuid(), _owningbusinessunit_value = Guid.NewGuid()
+                _owninguser_value = Guid.NewGuid(),
+                _owningbusinessunit_value = Guid.NewGuid()
             },
             "secure-team" => new RecordAccessGateEndpoint.OwnerRow
             {
-                _owningteam_value = SecureOwnerTeam, _owningbusinessunit_value = SecureBusinessUnit
+                _owningteam_value = SecureOwnerTeam,
+                _owningbusinessunit_value = SecureBusinessUnit
             },
             "other-team-inside" => new RecordAccessGateEndpoint.OwnerRow
             {
-                _owningteam_value = otherTeam, _owningbusinessunit_value = SecureBusinessUnit
+                _owningteam_value = otherTeam,
+                _owningbusinessunit_value = SecureBusinessUnit
             },
             _ => new RecordAccessGateEndpoint.OwnerRow
             {
-                _owningteam_value = otherTeam, _owningbusinessunit_value = Guid.NewGuid()
+                _owningteam_value = otherTeam,
+                _owningbusinessunit_value = Guid.NewGuid()
             },
         });
 

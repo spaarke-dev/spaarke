@@ -241,7 +241,8 @@ public class MappingSourceReadProbeTests
             {
                 _events.Add($"narrowing {id}");
                 throw new HttpRequestException("narrowing read failed: upstream-secret");
-            },
+            }
+            ,
             _ => (Func<Guid, CancellationToken, Task<bool>>?)null,
         };
 

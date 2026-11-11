@@ -313,8 +313,11 @@ public sealed class H14IntegrationWiringHandlerTests
         {
             run.CompletedPhases.Add(new CompletedPhase
             {
-                Phase = phase, IdempotencyKey = key, JobId = "prior-run",
-                StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5), CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+                Phase = phase,
+                IdempotencyKey = key,
+                JobId = "prior-run",
+                StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+                CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
             });
         }
         var repo = new FakeRepository(run, etag: "etag-12");

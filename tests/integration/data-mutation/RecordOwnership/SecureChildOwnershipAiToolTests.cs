@@ -662,7 +662,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             tablename = table,
             item = item.ToDictionary(i => i.Column, i => i.Value),
-        })) with { UserId = Guid.NewGuid().ToString() };
+        })) with
+        { UserId = Guid.NewGuid().ToString() };
 
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
@@ -675,7 +676,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     tablename = table,
                     recordId = id,
                     item = item.ToDictionary(i => i.Column, i => i.Value),
-                })) with { UserId = Guid.NewGuid().ToString() },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(DataverseUpdateRecordHandler)), CancellationToken.None);
 
     private static (string Column, JsonElement Value) Lookup(string column, string table, Guid id) =>
@@ -708,21 +710,36 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         private static readonly Dictionary<string, string> EntitySets = new()
         {
-            ["sprk_todo"] = "sprk_todos", ["sprk_matter"] = "sprk_matters", ["sprk_project"] = "sprk_projects",
-            ["sprk_document"] = "sprk_documents", ["sprk_communication"] = "sprk_communications",
-            ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
-            ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
-            ["sprk_mattertype_ref"] = "sprk_mattertype_refs", ["sprk_practicearea_ref"] = "sprk_practicearea_refs",
+            ["sprk_todo"] = "sprk_todos",
+            ["sprk_matter"] = "sprk_matters",
+            ["sprk_project"] = "sprk_projects",
+            ["sprk_document"] = "sprk_documents",
+            ["sprk_communication"] = "sprk_communications",
+            ["task"] = "tasks",
+            ["systemuser"] = "systemusers",
+            ["contact"] = "contacts",
+            ["sprk_workassignment"] = "sprk_workassignments",
+            ["sprk_workspacelayout"] = "sprk_workspacelayouts",
+            ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            ["sprk_practicearea_ref"] = "sprk_practicearea_refs",
             // Task 147 r1: the browser child-record routes' tables.
-            ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
-            ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
-            ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
+            ["sprk_memo"] = "sprk_memos",
+            ["sprk_event"] = "sprk_events",
+            ["sprk_budget"] = "sprk_budgets",
+            ["sprk_invoice"] = "sprk_invoices",
+            ["sprk_reportcard"] = "sprk_reportcards",
+            ["sprk_analysis"] = "sprk_analysises",
+            ["sprk_kpiassessment"] = "sprk_kpiassessments",
+            ["sprk_billingevent"] = "sprk_billingevents",
             // Task 158 r1: the pair's type, and an org-typed lookup (a create's own No Access list).
-            ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
+            ["sprk_recordtype_ref"] = "sprk_recordtype_refs",
+            ["sprk_organization"] = "sprk_organizations",
             // Ontology task 126: the business-owned lookup targets.
-            ["team"] = "teams", ["businessunit"] = "businessunits",
+            ["team"] = "teams",
+            ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
-            ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            ["sprk_signal"] = "sprk_signals",
+            ["sprk_policy"] = "sprk_policies",
             // Task 042c fix round 4: a Create Budget decision binds the budget's currency.
             ["transactioncurrency"] = "transactioncurrencies",
             // The core record pair is fixed after create on BFF update paths: a Decision Record is driven through the chat update.
@@ -807,6 +824,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
                 ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
                 ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
+                // A matter's standalone regarding type (sprk_RecordType_Ref.xml; no sprk_regardingrecordid on the matter).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_project"] = new[]
             {
@@ -845,6 +864,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
                 ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
+                // Field mapping task 045b: the communication's ADR-024 pair type (live: SpaarkeMaster sprk_Communication
+                // Entity.xml, sprk_RegardingRecordType), which the communication filing route binds on a pair move.
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_document"] = new[]
             {
@@ -884,6 +906,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
                 ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
                 ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
+                // Field mapping task 045a: the analysis's own document filing (RecordContainerResolver.ChildAncestorLinks), the
+                // second link to sprk_document beside the anchor, and its ADR-024 pair type (the analysis is polymorphic), for
+                // the type-only pair's two-candidate case.
+                ("sprk_regardingdocument", "sprk_document", "sprk_RegardingDocument"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is

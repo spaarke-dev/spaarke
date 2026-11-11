@@ -914,7 +914,7 @@ internal static class AssignedAccessTestDoubles
 
             if (!root.Success)
             {
-                var person =Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+                var person = Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
                 if (!person.Success)
                     throw new InvalidOperationException($"Unexpected grant filter: {filter}");
                 var personId = Guid.Parse(person.Groups[1].Value);

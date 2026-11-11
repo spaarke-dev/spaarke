@@ -135,13 +135,17 @@ public sealed class ChatAgentRouteProofTests : IClassFixture<ChatAgentRouteProof
         _fixture.Runs.Setup(o => o.GetRunStatusAsync(foreignRun, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlaybookRunStatus
             {
-                RunId = foreignRun, State = PlaybookRunState.Completed, StartedAt = DateTimeOffset.UtcNow,
+                RunId = foreignRun,
+                State = PlaybookRunState.Completed,
+                StartedAt = DateTimeOffset.UtcNow,
                 StartedByOid = "ffffffff-0000-4000-8000-0000000000aa",
             });
         _fixture.Runs.Setup(o => o.GetRunStatusAsync(ownRun, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlaybookRunStatus
             {
-                RunId = ownRun, State = PlaybookRunState.Completed, StartedAt = DateTimeOffset.UtcNow,
+                RunId = ownRun,
+                State = PlaybookRunState.Completed,
+                StartedAt = DateTimeOffset.UtcNow,
                 StartedByOid = RouteSweepAuthorizationFixture.CallerObjectId,
             });
         using var client = _fixture.CreateCallerClient();

@@ -303,8 +303,21 @@ export const App: React.FC = () => {
   const [documents, setDocuments] = React.useState<IDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  /** Document whose version history is open (null = modal closed). Task 051. */
-  const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<IDocument | null>(null);
+  /**
+   * The document whose version history was last shown (task 051). It stays set after the modal closes: the modal is
+   * closed with `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658). `seq` keys
+   * each opening, so every opening starts fresh.
+   */
+  const [versionHistory, setVersionHistory] = React.useState<{ doc: IDocument; open: boolean; seq: number } | null>(
+    null
+  );
+  const showVersionHistory = React.useCallback((doc: IDocument) => {
+    setVersionHistory(prev => (prev?.open ? { ...prev, doc } : { doc, open: true, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
+  const closeVersionHistory = React.useCallback(() => {
+    setVersionHistory(prev => (prev ? { ...prev, open: false } : prev));
+  }, []);
+  const versionHistoryDoc = versionHistory?.doc;
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -365,7 +378,7 @@ export const App: React.FC = () => {
               <DocumentRow
                 key={doc.sprk_documentid}
                 doc={doc}
-                onShowVersionHistory={setVersionHistoryDoc}
+                onShowVersionHistory={showVersionHistory}
               />
             ))}
           </div>
@@ -377,10 +390,11 @@ export const App: React.FC = () => {
             The SPE-pointer guard is kept purely as UX — it avoids offering version history for a
             document with no file attached, which the server would answer 409. The server still
             fails closed on its own; this guard is not the control. */}
-        {versionHistoryDoc && versionHistoryDoc.sprk_graphdriveid && versionHistoryDoc.sprk_graphitemid && (
+        {versionHistory && versionHistoryDoc && versionHistoryDoc.sprk_graphdriveid && versionHistoryDoc.sprk_graphitemid && (
           <VersionHistoryModal
-            open={true}
-            onClose={() => setVersionHistoryDoc(null)}
+            key={versionHistory.seq}
+            open={versionHistory.open}
+            onClose={closeVersionHistory}
             documentName={versionHistoryDoc.sprk_documentname}
             fileType={versionHistoryDoc.sprk_filetype}
             documentId={versionHistoryDoc.sprk_documentid}

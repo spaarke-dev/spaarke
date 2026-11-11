@@ -671,17 +671,17 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             case PersonalToDoAssignee.Outcome.ToDoNotFound:
                 return new ToDoClass(ToDoKind.Gone);
             case PersonalToDoAssignee.Outcome.Filed:
-            {
-                // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
-                var core = await coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
-                if (!core.Succeeded && core.IsPermanent)
-                    return new ToDoClass(ToDoKind.CoreRefused, Detail: core.Error);
-                if (!core.Succeeded)
-                    throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
-                return core.Stamps.Count > 0
-                    ? new ToDoClass(ToDoKind.Cored)
-                    : new ToDoClass(ToDoKind.Fallback, FallbackReason.FiledNonCore);
-            }
+                {
+                    // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
+                    var core = await coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+                    if (!core.Succeeded && core.IsPermanent)
+                        return new ToDoClass(ToDoKind.CoreRefused, Detail: core.Error);
+                    if (!core.Succeeded)
+                        throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
+                    return core.Stamps.Count > 0
+                        ? new ToDoClass(ToDoKind.Cored)
+                        : new ToDoClass(ToDoKind.Fallback, FallbackReason.FiledNonCore);
+                }
 
             case PersonalToDoAssignee.Outcome.NoAssignedTo or PersonalToDoAssignee.Outcome.NoLinkedUser:
                 return new ToDoClass(ToDoKind.Fallback, FallbackReason.NoAssignee);

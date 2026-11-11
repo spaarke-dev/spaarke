@@ -108,6 +108,7 @@ public class RefilePathRestampTests
         var fieldMapping = new Mock<IFieldMappingDataverseService>().Object;
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             fieldMapping,
             world.Restamper,
             [
@@ -141,6 +142,7 @@ public class RefilePathRestampTests
             .FailWrite("sprk_todo", TodoUnderEvent);
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             new Mock<IFieldMappingDataverseService>().Object,
             world.Restamper,
             [
