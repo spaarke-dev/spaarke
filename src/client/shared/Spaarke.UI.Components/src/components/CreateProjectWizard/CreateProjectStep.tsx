@@ -90,6 +90,11 @@ export interface ICreateProjectStepProps {
    * Falls back to inline LookupField when absent (e.g., BFF SPA context).
    */
   navigationService?: INavigationService;
+  /**
+   * True when the Matter chosen in "Associate To" is secure. A project under a secure matter is secure too, so the
+   * Secure toggle is turned on and locked (preview only; the server decides the create).
+   */
+  parentSecure?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +212,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   authenticatedFetch: authFetch,
   bffBaseUrl,
   navigationService,
+  parentSecure = false,
 }) => {
   const styles = useStyles();
 
@@ -360,6 +366,11 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     setFormState(prev => ({ ...prev, isSecure: value }));
   }, []);
 
+  // A secure parent matter: the project is secure too, so the form value follows (the toggle is locked on).
+  React.useEffect(() => {
+    if (parentSecure) setFormState(prev => (prev.isSecure ? prev : { ...prev, isSecure: true }));
+  }, [parentSecure]);
+
   // ── Derived ───────────────────────────────────────────────────────────
   const isLoading = aiState.status === 'loading';
   const hasAnyPrefill = aiState.prefilledFields.size > 0;
@@ -399,7 +410,13 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
       </div>
 
       {/* ── Secure Project toggle ── */}
-      {!isLoading && <SecureProjectSection isSecure={formState.isSecure} onSecureChange={handleSecureChange} />}
+      {!isLoading && (
+        <SecureProjectSection
+          isSecure={formState.isSecure}
+          onSecureChange={handleSecureChange}
+          lockedOn={parentSecure}
+        />
+      )}
 
       {/* 2-column form grid */}
       {isLoading ? (

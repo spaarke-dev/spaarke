@@ -17,6 +17,8 @@
 //       azureactivedirectoryobjectid, auth-v4 §10.4) — never the root;
 //     - the role is the copy IN the customer unit (filter by its id), associated once; a held role writes nothing;
 //     - an existing App User in another unit → InForeignBusinessUnit, nothing written (never moved);
+//     - T266: an existing App User whose azureactivedirectoryobjectid is not the requested principal id (empty, or the
+//       client id) is a Failure, nothing written (never rewritten); a matching one is adopted;
 //     - a role missing from the unit, or ambiguous, is a Failure (no name-only fallback that could pick another unit's copy).
 // -----------------------------------------------------------------------------
 
@@ -42,6 +44,9 @@ public sealed class DataverseWebApiAppUserCreatorTests
     private const string UamiObjectId = "50000000-0000-0000-0000-000000000005";
     private const string SystemUser = "60000000-0000-0000-0000-000000000006";
     private const string RoleCopy = "70000000-0000-0000-0000-000000000007";
+    private const string SecureBu = "80000000-0000-0000-0000-000000000008";
+    private const string SecureName = "Secure Record";
+    private static readonly string[] Reserved = [SecureName];
 
     // ---------------- EnsureCustomerBusinessUnitAsync ----------------
 
@@ -54,7 +59,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
                 ? Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""")
                 : Json("""{"value":[]}"""));
 
-        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", CancellationToken.None);
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
 
         outcome.Should().Be(new CustomerBusinessUnitOutcome.Success(Guid.Parse(CustomerBu), Created: true));
         http.Requests[1].Uri.Should().Contain("name%20eq%20").And.Contain("Acme%20Corporation").And.Contain("$top=2");
@@ -69,7 +74,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
     {
         var http = UnitFake($$"""[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":"{{RootBu}}"}]""");
 
-        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", CancellationToken.None);
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
 
         outcome.Should().Be(new CustomerBusinessUnitOutcome.Success(Guid.Parse(CustomerBu), Created: false));
         http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
@@ -83,7 +88,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
         var parentJson = parent is null ? "null" : $"\"{parent}\"";
         var http = UnitFake($$"""[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":{{parentJson}}}]""");
 
-        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", CancellationToken.None);
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
 
         outcome.Should().Be(new CustomerBusinessUnitOutcome.WrongParent(
             Guid.Parse(CustomerBu), parent is null ? null : Guid.Parse(parent), Guid.Parse(RootBu)));
@@ -95,7 +100,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
     {
         var http = UnitFake($$"""[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":"{{RootBu}}"},{"businessunitid":"{{OtherBu}}","_parentbusinessunitid_value":"{{RootBu}}"}]""");
 
-        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", CancellationToken.None);
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
 
         outcome.Should().Be(new CustomerBusinessUnitOutcome.Ambiguous(2));
         http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
@@ -106,7 +111,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
     {
         var http = new FakeHttp(_ => Json("""{"value":[]}"""));
 
-        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", CancellationToken.None);
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
 
         outcome.Should().BeOfType<CustomerBusinessUnitOutcome.Failure>().Which.Diagnostic.Should().Contain("0 root business units");
         http.Requests.Should().ContainSingle();
@@ -117,9 +122,139 @@ public sealed class DataverseWebApiAppUserCreatorTests
     {
         var http = UnitFake($$"""[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":"{{RootBu}}"}]""");
 
-        await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "O'Brien & Co", CancellationToken.None);
+        await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "O'Brien & Co", Reserved, CancellationToken.None);
 
         http.Requests[1].Uri.Should().Contain("O%27%27Brien%20%26%20Co");
+    }
+
+    // ---- the customer's unit is never a reserved unit (compared by ID, as Dataverse resolves both names) ----
+
+    [Theory]
+    [InlineData("Secure Record")]   // exact
+    [InlineData("SECURE RECORD")]   // casing
+    [InlineData("Sécure Record")]   // accent — OrdinalIgnoreCase in code does not see this one
+    [InlineData("Secure Récord")]
+    public async Task CustomerName_DataverseResolvesToTheSecureUnit_IsReservedUnit_NothingWritten(string customerName)
+    {
+        // Must fire: the Secure Record unit exists; Dataverse finds it for the customer's name.
+        var http = UnitsFake([(SecureBu, SecureName)]);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, customerName, Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.IsReservedUnit(Guid.Parse(SecureBu), SecureName));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get, "refused before any write: no create, no adopt");
+    }
+
+    [Theory]
+    [InlineData("Sécure Record")]
+    [InlineData("SECURE RECORD")]
+    public async Task FreshStamp_CustomerNameCollidingWithAReservedName_IsRefusedRightAfterTheCreate_NoUserPlaced(string customerName)
+    {
+        // Must fire on the NORMAL path: no Secure Record unit exists yet (H7b creates it after H10). H10 creates the
+        // customer's unit, then the reserved-name lookup resolves to that very unit → refused; only an empty unit was written.
+        var units = new List<(string Id, string Name)>();
+        var http = UnitsFake(units, onCreate: name => units.Add((CustomerBu, name)));
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, customerName, Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.IsReservedUnit(Guid.Parse(CustomerBu), SecureName, CreatedByThisCall: true));
+        http.Requests.Where(r => r.Method != HttpMethod.Get).Should().ContainSingle("only the unit itself was created")
+            .Which.Uri.Should().EndWith("/api/data/v9.2/businessunits");
+    }
+
+    [Fact]
+    public async Task TwoUnitsForTheCustomersName_OneTheSecureUnit_IsReservedUnit_NotAmbiguous()
+    {
+        var http = UnitsFake([(SecureBu, SecureName), (CustomerBu, "Sécure Record")]);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Sécure Record", Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.IsReservedUnit(Guid.Parse(SecureBu), SecureName));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task ThreeUnitsAnswerTheSecureName_TheCustomersLast_IsStillFound()
+    {
+        // Must fire: a $top=2 read of the reserved name would miss the customer's unit in third place. (Scripted per query:
+        // the customer-name lookup answers one unit, the reserved-name lookup answers three with the customer's last.)
+        var http = new FakeHttp(req =>
+        {
+            var uri = Uri.UnescapeDataString(req.RequestUri!.AbsoluteUri);
+            if (uri.Contains("parentbusinessunitid eq null"))
+            {
+                return Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""");
+            }
+            if (uri.Contains($"name eq '{SecureName}'"))
+            {
+                var take = int.Parse(System.Text.RegularExpressions.Regex.Match(uri, @"\$top=(\d+)").Groups[1].Value);
+                var rows = new[] { "90000000-0000-0000-0000-000000000009", SecureBu, CustomerBu }
+                    .Take(take).Select(id => $$"""{"businessunitid":"{{id}}"}""");
+                return Json($$"""{"value":[{{string.Join(",", rows)}}]}""");
+            }
+            return Json($$"""{"value":[{"businessunitid":"{{CustomerBu}}","_parentbusinessunitid_value":"{{RootBu}}"}]}""");
+        });
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Sécure Record", Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.IsReservedUnit(Guid.Parse(CustomerBu), SecureName));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task ReservedNameAnsweredByTheCapOrMore_IsAFailure_NeverAPass()
+    {
+        var units = Enumerable.Range(1, DataverseWebApiAppUserCreator.ReservedLookupCap)
+            .Select(i => ($"a0000000-0000-0000-0000-{i:D12}", SecureName))
+            .Append((CustomerBu, "Acme Corporation"));
+        var http = UnitsFake(units);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
+
+        outcome.Should().BeOfType<CustomerBusinessUnitOutcome.Failure>().Which.Diagnostic.Should().Contain("cannot tell");
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task CustomerName_Distinct_WithTheSecureUnitPresent_ReusesTheCustomersUnit()
+    {
+        // Must not fire: distinct names proceed.
+        var http = UnitsFake([(SecureBu, SecureName), (CustomerBu, "Acme Corporation")]);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.Success(Guid.Parse(CustomerBu), Created: false));
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task CustomerName_Distinct_Absent_IsCreated_EvenWithTheSecureUnitPresent()
+    {
+        var http = UnitsFake([(SecureBu, SecureName)]);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
+
+        outcome.Should().Be(new CustomerBusinessUnitOutcome.Success(Guid.Parse(CustomerBu), Created: true));
+    }
+
+    [Fact]
+    public async Task ReservedUnitLookup_Fault_IsAFailure_NothingWritten()
+    {
+        // A fault resolving the reserved unit is never "not found, so adopt".
+        var http = UnitsFake([(CustomerBu, "Acme Corporation")], faultOnName: SecureName);
+
+        var outcome = await Creator(http).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", Reserved, CancellationToken.None);
+
+        outcome.Should().BeOfType<CustomerBusinessUnitOutcome.Failure>().Which.Diagnostic.Should().Contain("503");
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task ReservedUnitNames_Empty_IsACallerBug()
+    {
+        var act = () => Creator(UnitsFake([])).EnsureCustomerBusinessUnitAsync(EnvUrl, TenantId, "Acme Corporation", [], CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
     }
 
     // ---------------- EnsureAppUserAsync ----------------
@@ -142,6 +277,33 @@ public sealed class DataverseWebApiAppUserCreatorTests
         var associate = http.Requests.Single(r => r.Uri.EndsWith("/systemuserroles_association/$ref"));
         associate.Uri.Should().Contain($"/systemusers({SystemUser})/");
         associate.Body.Should().Contain($"https://spaarke-acme.crm.dynamics.com/api/data/v9.2/roles({RoleCopy})");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(CustomerBu)]
+    public async Task AppUser_NoRoleRequested_CreatesOrAdoptsTheUserOnly_AndTouchesNoRole(string? existingUnit)
+    {
+        // T266 (#2605): the ontology writer's App User — H10 associates no role; H7b S24 owns its one role.
+        var http = AppUserFake(existingUnit: existingUnit, roleRows: 1, roleHeld: false);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId) with { SecurityRoleName = null }, CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests.Should().NotContain(r => r.Uri.Contains("/roles?"), "no role is looked up");
+        http.Requests.Should().NotContain(r => r.Uri.Contains("systemuserroles_association"), "no role is read or associated");
+        http.Requests.Count(r => r.Method == HttpMethod.Post).Should().Be(existingUnit is null ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task AppUser_ABlankRoleName_IsACallerBug_NotNoRole()
+    {
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: false);
+
+        var act = () => Creator(http).EnsureAppUserAsync(Request() with { SecurityRoleName = " " }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -169,6 +331,32 @@ public sealed class DataverseWebApiAppUserCreatorTests
         http.Requests.Should().ContainSingle("nothing after the read: no role, no PATCH");
     }
 
+    [Fact]
+    public async Task AppUser_ExistingWithTheRequestedObjectId_IsAdopted()
+    {
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: true, existingObjectId: UamiObjectId.ToUpperInvariant());
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests[0].Uri.Should().Contain("azureactivedirectoryobjectid");
+    }
+
+    [Theory]
+    [InlineData(AppId)]   // the trap: the client id where the principal id belongs
+    [InlineData(null)]    // never set
+    public async Task AppUser_ExistingWithAnotherObjectId_IsAFailure_NothingWritten(string? heldObjectId)
+    {
+        // auth-v4 §10.4 on adoption (T266 review): such a row passes every existence check yet fails every app-only call.
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: false, existingObjectId: heldObjectId);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId) with { SecurityRoleName = null }, CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseAppUserCreationOutcome.Failure>().Which.Diagnostic
+            .Should().Contain(UamiObjectId).And.Contain(heldObjectId ?? "(empty)");
+        http.Requests.Should().ContainSingle("nothing after the read: no PATCH, no role");
+    }
+
     [Theory]
     [InlineData(0, "not found in business unit")]
     [InlineData(2, "More than one role")]
@@ -188,12 +376,54 @@ public sealed class DataverseWebApiAppUserCreatorTests
     private static DataverseAppUserCreationRequest Request(string? objectId = null)
         => new(EnvUrl, TenantId, AppId, "System Administrator", Guid.Parse(CustomerBu), objectId);
 
+    /// <summary>The customer-name lookup answers <paramref name="namedRows"/>; the reserved-name (Secure Record) lookup finds nothing.</summary>
     private static FakeHttp UnitFake(string namedRows)
         => new(req => req.RequestUri!.AbsoluteUri.Contains("parentbusinessunitid%20eq%20null")
             ? Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""")
-            : Json($$"""{"value":{{namedRows}}}"""));
+            : req.RequestUri!.AbsoluteUri.Contains("Secure%20Record")
+                ? Json("""{"value":[]}""")
+                : Json($$"""{"value":{{namedRows}}}"""));
 
-    private static FakeHttp AppUserFake(string? existingUnit, int roleRows, bool roleHeld)
+    /// <summary>
+    /// A small environment of business units (all under the root) that answers <c>name eq</c> the way Dataverse does —
+    /// ignoring case AND accents — and creates a unit on POST. <paramref name="faultOnName"/>: that name's lookup → 503.
+    /// </summary>
+    private static FakeHttp UnitsFake(
+        IEnumerable<(string Id, string Name)> units, string? faultOnName = null, Action<string>? onCreate = null)
+    {
+        var all = units as List<(string Id, string Name)> ?? units.ToList();
+        return new FakeHttp(req =>
+        {
+            var uri = Uri.UnescapeDataString(req.RequestUri!.AbsoluteUri);
+            if (req.Method == HttpMethod.Post)
+            {
+                var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                var created = System.Text.RegularExpressions.Regex.Match(body, "\"name\":\"([^\"]*)\"").Groups[1].Value;
+                onCreate?.Invoke(System.Text.RegularExpressions.Regex.Unescape(created));
+                return Created($"{EnvUrl}api/data/v9.2/businessunits({CustomerBu})");
+            }
+            if (uri.Contains("parentbusinessunitid eq null"))
+            {
+                return Json($$"""{"value":[{"businessunitid":"{{RootBu}}"}]}""");
+            }
+            var match = System.Text.RegularExpressions.Regex.Match(uri, @"name eq '((?:[^']|'')*)'");
+            var name = match.Groups[1].Value.Replace("''", "'", StringComparison.Ordinal);
+            if (faultOnName is not null && Fold(name) == Fold(faultOnName))
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("busy") };
+            }
+            var rows = all.Where(u => Fold(u.Name) == Fold(name))
+                .Select(u => $$"""{"businessunitid":"{{u.Id}}","_parentbusinessunitid_value":"{{RootBu}}"}""");
+            return Json($$"""{"value":[{{string.Join(",", rows)}}]}""");
+        });
+
+        static string Fold(string value)
+            => new string(value.Normalize(NormalizationForm.FormD)
+                .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+                .ToArray()).ToUpperInvariant();
+    }
+
+    private static FakeHttp AppUserFake(string? existingUnit, int roleRows, bool roleHeld, string? existingObjectId = UamiObjectId)
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
@@ -207,7 +437,7 @@ public sealed class DataverseWebApiAppUserCreatorTests
             {
                 return Json(existingUnit is null
                     ? """{"value":[]}"""
-                    : $$"""{"value":[{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{existingUnit}}"}]}""");
+                    : $$"""{"value":[{"systemuserid":"{{SystemUser}}","_businessunitid_value":"{{existingUnit}}","azureactivedirectoryobjectid":{{(existingObjectId is null ? "null" : $"\"{existingObjectId}\"")}}}]}""");
             }
             if (uri.Contains("/roles?"))
             {

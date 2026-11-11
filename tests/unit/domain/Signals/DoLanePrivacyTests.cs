@@ -227,8 +227,11 @@ public sealed class DoLanePrivacyTests
     private static World AlicesTodo(Guid rowId, string? notes, int? inquiryState = 0, bool inquiryReadFaults = false) =>
         new("sprk_todo", hasCore: true)
         {
-            SubjectRowId = rowId, Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
-            InquiryState = inquiryState, InquiryReadFaults = inquiryReadFaults,
+            SubjectRowId = rowId,
+            Notes = notes,
+            Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            InquiryState = inquiryState,
+            InquiryReadFaults = inquiryReadFaults,
         };
 
     private static string Hint(Guid inquiry) => $"{InquiryReplyTodoCreator.NotesKey}{inquiry:D}";
@@ -356,8 +359,11 @@ public sealed class DoLanePrivacyTests
         // with 409 inquiry.disposition_required.
         var world = new World("sprk_todo", hasCore: true)
         {
-            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry), Notes = notes, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
-            TodoMatter = MatterId, MatterInquiries = [OtherInquiry, Inquiry],
+            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry),
+            Notes = notes,
+            Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId,
+            MatterInquiries = [OtherInquiry, Inquiry],
         };
 
         var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
@@ -376,8 +382,11 @@ public sealed class DoLanePrivacyTests
         // The matter has an open inquiry, but its derived To Do id is not this To Do's. The cost: one list per plan read.
         var world = new World("sprk_todo", hasCore: true)
         {
-            SubjectRowId = SubjectId, Notes = "Call the client back", Subject = { [PersonColumn("sprk_todo")] = AliceContact },
-            TodoMatter = MatterId, MatterInquiries = [Inquiry],
+            SubjectRowId = SubjectId,
+            Notes = "Call the client back",
+            Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId,
+            MatterInquiries = [Inquiry],
         };
 
         var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
@@ -395,8 +404,12 @@ public sealed class DoLanePrivacyTests
     {
         var world = new World("sprk_todo", hasCore: true)
         {
-            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry), Notes = null, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
-            TodoMatter = MatterId, MatterInquiries = [Inquiry], InquiryListFails = fault,
+            SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry),
+            Notes = null,
+            Subject = { [PersonColumn("sprk_todo")] = AliceContact },
+            TodoMatter = MatterId,
+            MatterInquiries = [Inquiry],
+            InquiryListFails = fault,
         };
 
         var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
@@ -532,7 +545,7 @@ public sealed class DoLanePrivacyTests
                     return Task.FromResult(Answer(path));
                 });
 
-            var entities = new Mock<IGenericEntityService>();
+            var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
             entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
             entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

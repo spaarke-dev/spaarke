@@ -472,8 +472,12 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         GrantWriteAndParent();
         ArrangeRow(new DocumentEntity
         {
-            Id = WritableDocument.ToString(), Name = "contract.docx", GraphDriveId = Drive, GraphItemId = Item,
-            MatterId = ParentMatter.ToString(), MatterName = "Row Matter Name",
+            Id = WritableDocument.ToString(),
+            Name = "contract.docx",
+            GraphDriveId = Drive,
+            GraphItemId = Item,
+            MatterId = ParentMatter.ToString(),
+            MatterName = "Row Matter Name",
         });
 
         var response = await PostIndexFileAsync(IndexFile(
@@ -535,8 +539,12 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         GrantWriteAndParent();
         ArrangeRow(new DocumentEntity
         {
-            Id = WritableDocument.ToString(), Name = "contract.docx", GraphDriveId = Drive, GraphItemId = Item,
-            MatterId = ParentMatter.ToString(), MatterName = "Acme v. Zenith",
+            Id = WritableDocument.ToString(),
+            Name = "contract.docx",
+            GraphDriveId = Drive,
+            GraphItemId = Item,
+            MatterId = ParentMatter.ToString(),
+            MatterName = "Acme v. Zenith",
         });
 
         // uploadOrchestrator.ts triggerRagIndexing: driveId, itemId, fileName, tenantId, documentId,
@@ -567,8 +575,12 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         GrantWriteAndParent();
         ArrangeRow(new DocumentEntity
         {
-            Id = WritableDocument.ToString(), Name = "invoice.ledes", GraphDriveId = Drive, GraphItemId = Item,
-            MatterId = ParentMatter.ToString(), MatterName = "Acme v. Zenith",
+            Id = WritableDocument.ToString(),
+            Name = "invoice.ledes",
+            GraphDriveId = Drive,
+            GraphItemId = Item,
+            MatterId = ParentMatter.ToString(),
+            MatterName = "Acme v. Zenith",
         });
         _fixture.FileIndexing
             .Setup(f => f.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))

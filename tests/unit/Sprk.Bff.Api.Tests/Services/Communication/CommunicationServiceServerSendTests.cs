@@ -158,7 +158,11 @@ public class CommunicationServiceServerSendTests
         await rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
         await rig.Service.SendAsync(new SendCommunicationRequest
         {
-            To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+            To = ["someone@example.com"],
+            Subject = "s",
+            Body = "b",
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User,
         }, RecordingUserEmailRig.UserContext());
 
         rig.Channel.Sent.Should().HaveCount(2);
@@ -186,7 +190,11 @@ public class CommunicationServiceServerSendTests
 
         var normal = new SendCommunicationRequest
         {
-            To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+            To = ["someone@example.com"],
+            Subject = "s",
+            Body = "b",
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User,
         };
         await rig.Service.SendAsync(normal, RecordingUserEmailRig.UserContext());
         rig.Enrichment.Verify(
@@ -319,7 +327,11 @@ public class CommunicationServiceServerSendTests
 
     private static SendCommunicationRequest NormalRequest() => new()
     {
-        To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+        To = ["someone@example.com"],
+        Subject = "s",
+        Body = "b",
+        CommunicationType = CommunicationType.Email,
+        SendMode = SendMode.User,
     };
 
     /// <summary>
@@ -531,7 +543,11 @@ public class CommunicationServiceServerSendTests
         var rig = Rig();
         var request = new SendCommunicationRequest
         {
-            To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+            To = ["someone@example.com"],
+            Subject = "s",
+            Body = "b",
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User,
         };
         request.ServerSend.Should().BeNull();
 

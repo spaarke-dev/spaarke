@@ -71,16 +71,26 @@ export interface IBffMappingSource {
 export interface IBffCreateOptions {
   /** The explicit mapping source; omit it to let the server infer the source from what the row is filed under. */
   mappingSource?: IBffMappingSource;
+  /**
+   * Task 049 fix round 2: the record is created secure from creation (`secure=true`; a project or a work assignment
+   * only — the server answers 400 for any other table). The server first asks the caller's own Write and Share rights,
+   * as provisioning does.
+   */
+  secure?: boolean;
 }
 
-/** The create route's query string: the mapping source when the caller named one, else nothing. */
+/** The create route's query string: the mapping source when the caller named one, and the secure intent; else nothing. */
 function createQuery(options?: IBffCreateOptions): string {
+  const parts: string[] = [];
   const source = options?.mappingSource;
-  if (!source) return '';
-  return (
-    `?mappingSourceEntity=${encodeURIComponent(source.entity.trim().toLowerCase())}` +
-    `&mappingSourceId=${encodeURIComponent(cleanId(source.id))}`
-  );
+  if (source) {
+    parts.push(
+      `mappingSourceEntity=${encodeURIComponent(source.entity.trim().toLowerCase())}`,
+      `mappingSourceId=${encodeURIComponent(cleanId(source.id))}`
+    );
+  }
+  if (options?.secure === true) parts.push('secure=true');
+  return parts.length === 0 ? '' : `?${parts.join('&')}`;
 }
 
 /** The BFF re-file route for each table a browser writer re-files (one route per table). */

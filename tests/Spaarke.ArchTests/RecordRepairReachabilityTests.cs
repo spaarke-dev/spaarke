@@ -20,7 +20,8 @@ namespace Spaarke.ArchTests;
 public sealed class RecordRepairReachabilityTests
 {
     /// <summary>
-    /// Members allowed to reference Repair, each with its reason. Empty until task 052 (which is hard-blocked on task 033).
+    /// Members allowed to reference Repair, each with its reason. Empty until task 052b, the scheduled repair pass, adds the
+    /// first production caller (the app-only metadata wiring it needed landed in 052a).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> AllowedReferences =
         new Dictionary<string, string>(StringComparer.Ordinal);

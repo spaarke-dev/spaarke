@@ -101,18 +101,18 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// optionally, an arbitrary primary-name declaration (default: the live <c>sprk_documentname</c>).</summary>
     private static ExternalModuleDescriptor DocumentsModuleWithColumns(
         IReadOnlySet<string>? columns, string primaryName = "sprk_documentname") => new()
-    {
-        Name = "documents",
-        RecordEntity = DocumentEntity,
-        PrimaryNameAttribute = primaryName,
-        ScopeDimensions = new[]
+        {
+            Name = "documents",
+            RecordEntity = DocumentEntity,
+            PrimaryNameAttribute = primaryName,
+            ScopeDimensions = new[]
         {
             new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
             new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
         },
-        ReadableColumns = columns!,
-    };
+            ReadableColumns = columns!,
+        };
 
     private static ExternalModuleDescriptor ProjectsModule() => new()
     {

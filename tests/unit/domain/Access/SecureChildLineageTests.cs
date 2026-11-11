@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -484,18 +485,139 @@ public class SecureChildLineageTests
     [InlineData(1 | 32, 1)]               // Create means nothing on a share
     [InlineData(262167 | 524288, 262167)] // Collaborate + Assign → Assign dropped, Share kept
     public void ChildMirrorMask_KeepsTheRootsRights_ExceptAssignAndCreate(int rootMask, int childMask)
-        => RecordShareLevels.ChildMirrorMask(rootMask).Should().Be(childMask);
+    {
+        // Must-not-fire (GitHub #2560): an ordinary child table keeps the full mirror, Share included where the root holds it.
+        RecordShareLevels.ChildMirrorMask("sprk_document", rootMask).Should().Be(childMask);
+        RecordShareLevels.ChildMirrorMask("sprk_event", rootMask).Should().Be(childMask);
+    }
+
+    // GitHub #2560: a mirrored share on a hard-deny row carries Read only — whatever the root share carries.
+    public static TheoryData<string, int, int> HardDenyMirrors()
+    {
+        var data = new TheoryData<string, int, int>();
+        foreach (var table in new[] { "sprk_storedfile", "sprk_procedureassignment", "sprk_ruleset", "sprk_policy", "sprk_policyversion" })
+        {
+            data.Add(table, 327703, 1);           // Full Access → Read
+            data.Add(table, 262167, 1);           // Collaborate → Read
+            data.Add(table, 1, 1);                // View Only → Read
+            data.Add(table, 2, 0);                // Write only: no Read on the root, nothing on the child
+            data.Add(table, 2 | 65536 | 262144, 0); // Write, Delete, Share without Read → nothing
+            data.Add(table, 1 | 524288, 1);       // Read + Assign → Read
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(HardDenyMirrors))]
+    public void ChildMirrorMask_OnAHardDenyTable_IsReadOnly(string table, int rootMask, int childMask)
+    {
+        RecordShareLevels.ChildMirrorMask(table, rootMask).Should().Be(childMask);
+        RecordShareLevels.ChildMirrorMask(" " + table.ToUpperInvariant() + " ", rootMask).Should().Be(childMask,
+            "the hard-deny rule is by table name, as RecordOwnershipResolver.IsRestrictedContentTable reads it");
+    }
+
+    /// <summary>GitHub #2560: every hard-deny table, from the ONE list — so a table added to it later is covered too.</summary>
+    [Fact]
+    public void ChildMirrorMask_OnEveryHardDenyTable_CarriesReadOnly()
+    {
+        RecordOwnershipResolver.RestrictedContentTables.Should().NotBeEmpty();
+        foreach (var table in RecordOwnershipResolver.RestrictedContentTables)
+            RecordShareLevels.ChildMirrorMask(table, 327703 | 524288 | 32).Should().Be(1, $"{table} is a hard-deny table");
+
+        // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same).
+        SecureChildLineage.Children.Keys.Where(RecordOwnershipResolver.IsRestrictedContentTable)
+            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion");
+    }
+
+    [Fact]
+    public void ChildMirrorMask_RefusesABlankTable()
+    {
+        var blank = () => RecordShareLevels.ChildMirrorMask(" ", 1);
+        blank.Should().Throw<ArgumentException>("every child mirror names the child's table");
+    }
+
+    // Must-not-fire (GitHub #2560): a secure ROOT inheriting its parent's sharees (task 158) keeps the full mirror.
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(262167, 262167)]
+    [InlineData(327703, 327703)]
+    [InlineData(23, 23)]
+    [InlineData(1 | 524288, 1)]
+    [InlineData(1 | 32, 1)]
+    [InlineData(262167 | 524288, 262167)]
+    public void InheritedRootMirrorMask_KeepsTheParentsRights_ExceptAssignAndCreate(int parentMask, int rootMask)
+        => RecordShareLevels.InheritedRootMirrorMask(parentMask).Should().Be(rootMask);
+
+    // ── GitHub #2560: the reconcile's drift finding ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void HardDenySharesWiderThanRead_FiresForAHardDenyRowWithAWiderShare_ByPrincipalKind()
+    {
+        var user = DataversePrincipalRef.User(Guid.Parse("00000000-0000-4000-8000-000000000001"));
+        var team = DataversePrincipalRef.Team(Guid.Parse("00000000-0000-4000-8000-000000000002"));
+        var reader = DataversePrincipalRef.User(Guid.Parse("00000000-0000-4000-8000-000000000003"));
+        var shares = new Dictionary<DataversePrincipalRef, int> { [user] = 1 | 2 | 65536 | 262144, [team] = 2, [reader] = 1 };
+
+        SecureChildShareSynchronizer.HardDenySharesWiderThanRead("sprk_policy", shares)
+            .Should().Equal(DataversePrincipalKind.SystemUser, DataversePrincipalKind.Team);
+    }
+
+    [Fact]
+    public void HardDenySharesWiderThanRead_DoesNotFire_ForReadOnlySharesOrAnOrdinaryTable()
+    {
+        var user = DataversePrincipalRef.User(Guid.NewGuid());
+        SecureChildShareSynchronizer.HardDenySharesWiderThanRead(
+                "sprk_policyversion", new Dictionary<DataversePrincipalRef, int> { [user] = 1 })
+            .Should().BeEmpty("a Read-only share on a hard-deny row is the mirror");
+        SecureChildShareSynchronizer.HardDenySharesWiderThanRead(
+                "sprk_document", new Dictionary<DataversePrincipalRef, int> { [user] = 327703 })
+            .Should().BeEmpty("an ordinary child table carries the full mirror");
+    }
 
     [Fact]
     public void ChildMirrorRights_WritesTheCanonicalLiteral_AndRefusesAssign()
     {
-        RecordShareLevels.ChildMirrorRights(65559).AccessRightsCsv
+        RecordShareLevels.ChildMirrorRights("sprk_document", 65559).AccessRightsCsv
             .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess");
-        RecordShareLevels.ChildMirrorRights(262167).AccessRightsCsv
+        RecordShareLevels.ChildMirrorRights("sprk_document", 262167).AccessRightsCsv
             .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess");
-        RecordShareLevels.ChildMirrorRights(1).AccessRightsCsv.Should().Be("ReadAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_document", 1).AccessRightsCsv.Should().Be("ReadAccess");
 
-        var withAssign = () => RecordShareLevels.ChildMirrorRights(1 | 524288);
+        var withAssign = () => RecordShareLevels.ChildMirrorRights("sprk_document", 1 | 524288);
         withAssign.Should().Throw<ArgumentOutOfRangeException>("a child mirror never carries Assign");
+    }
+
+    // GitHub #2560, defence in depth: the last check before a mirrored share is written refuses anything but Read on a
+    // hard-deny table, whatever the caller computed.
+    [Theory]
+    [InlineData("sprk_policy", 1 | 2)]
+    [InlineData("sprk_policy", 2)]
+    [InlineData("sprk_policyversion", 262167)]
+    [InlineData("sprk_storedfile", 1 | 65536)]
+    [InlineData("SPRK_POLICY", 1 | 262144)]
+    public void ChildMirrorRights_OnAHardDenyTable_RefusesEveryBitButRead(string table, int mask)
+    {
+        var write = () => RecordShareLevels.ChildMirrorRights(table, mask);
+        write.Should().Throw<ArgumentOutOfRangeException>("a mirrored share on a hard-deny row carries only Read")
+            .WithMessage("*hard-deny*");
+    }
+
+    [Fact]
+    public void ChildMirrorRights_OnAHardDenyTable_AllowsRead_AndAnOrdinaryTableAllowsWrite()
+    {
+        RecordShareLevels.ChildMirrorRights("sprk_policy", 1).AccessRightsCsv.Should().Be("ReadAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_policyversion", 1).AccessRightsCsv.Should().Be("ReadAccess");
+
+        // Must-not-fire: an ordinary child table takes Write (and the rest of the mirrorable set) as before.
+        RecordShareLevels.ChildMirrorRights("sprk_document", 1 | 2).AccessRightsCsv.Should().Be("ReadAccess,WriteAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_event", 2).AccessRightsCsv.Should().Be("WriteAccess");
+    }
+
+    [Fact]
+    public void ChildMirrorRights_RefusesABlankTable()
+    {
+        var blank = () => RecordShareLevels.ChildMirrorRights(" ", 1);
+        blank.Should().Throw<ArgumentException>();
     }
 }

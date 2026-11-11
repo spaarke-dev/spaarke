@@ -1163,7 +1163,7 @@ public class ExternalNotificationFeedTests
             case "throws": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagReadThrows = true; break;
             case "fault": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagFault = System.Net.HttpStatusCode.ServiceUnavailable; break;
             case "flag-null": _roots.AddRoot(ExternalGrantRootType.Matter, matter, isSecure: null); break;
-            // "missing": no matter record; "malformed": the stamp is not a GUID.
+                // "missing": no matter record; "malformed": the stamp is not a GUID.
         }
 
         var caller = Ciam(Guid.NewGuid(), project: project);

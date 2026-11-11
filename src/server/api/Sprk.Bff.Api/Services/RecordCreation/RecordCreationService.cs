@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -188,6 +189,7 @@ internal sealed partial class RecordCreationService
 
         ValidateReferenceLookupColumns(table, rule, request);
         ValidateRouteAuthorizedLookups(table, request, principal);
+        ValidateSecureFromCreation(table, request, principal);
         var defaults = PostMappingDefaultValues(table, rule, request);
 
         Decision decision;
@@ -280,7 +282,8 @@ internal sealed partial class RecordCreationService
         // The mapping step's warnings first (step 3 ran before the create), then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
             [.. decision.MappingWarnings.Select(w => w.Detail), .. warnings], decision.MappingWarnings,
-            writtenColumns) with { IsolatedCompletion = isolatedCompletion };
+            writtenColumns) with
+        { IsolatedCompletion = isolatedCompletion };
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -294,7 +297,14 @@ internal sealed partial class RecordCreationService
         /// <summary>The person an isolated root was created for (the plan's creator), when the plan isolated it.</summary>
         public Guid? IsolatedFor { get; init; }
 
+        /// <summary>Task 049 fix round 2: the caller asked for the record to be secure (the words of step 12's outcomes).</summary>
+        public bool SecureFromCreation { get; init; }
+
         public string? GrantorOid { get; init; }
+
+        /// <summary>The maker's <c>systemuserid</c> (the caller's, or the system create's requester), when known. Step 12 asks
+        /// whether the root's "for" person is this person's linked contact (task 049 fix round 1).</summary>
+        public Guid? MakerSystemUserId { get; init; }
 
         /// <summary>Step 3's and step 5's warnings about the mapped values (task 014): what was not mapped, and why.</summary>
         public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
@@ -320,36 +330,36 @@ internal sealed partial class RecordCreationService
         switch (principal)
         {
             case RecordCreationPrincipal.CallerPrincipal caller:
-            {
-                user = caller.Client;
-                var who = await CallerWriteAuthorization.WhoAmIAsync(caller.Client, ct).ConfigureAwait(false);
-                if (who.Failure is { } whoFailure)
                 {
-                    if (Sprk.Bff.Api.Api.ChildRecordEndpoints.IsUnresolvedCaller(whoFailure))
+                    user = caller.Client;
+                    var who = await CallerWriteAuthorization.WhoAmIAsync(caller.Client, ct).ConfigureAwait(false);
+                    if (who.Failure is { } whoFailure)
                     {
-                        _logger.LogWarning(
-                            "[RECORD-CREATE] create of {Table} refused: the caller has no Dataverse identity ({ErrorCode})",
-                            table, whoFailure.ErrorCode);
-                        return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
-                            Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
-                            $"You could not be identified in Dataverse, so the {noun} was not created.")
+                        if (Sprk.Bff.Api.Api.ChildRecordEndpoints.IsUnresolvedCaller(whoFailure))
                         {
-                            // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
-                            ClientFailure = whoFailure,
-                        });
+                            _logger.LogWarning(
+                                "[RECORD-CREATE] create of {Table} refused: the caller has no Dataverse identity ({ErrorCode})",
+                                table, whoFailure.ErrorCode);
+                            return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
+                                Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
+                                $"You could not be identified in Dataverse, so the {noun} was not created.")
+                            {
+                                // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
+                                ClientFailure = whoFailure,
+                            });
+                        }
+
+                        return Decision.Refuse(Upstream(whoFailure, noun));
                     }
 
-                    return Decision.Refuse(Upstream(whoFailure, noun));
+                    callerSystemUserId = who.SystemUserId;
+                    ownerContextObjectId = caller.ObjectId;
+                    // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them.
+                    requestedBy = RecordRequester.Of(who.SystemUserId);
+                    grantorOid = caller.ObjectId?.ToString("D");
+                    trace.Record(RecordCreationStep.Principal, RecordCreationStepState.Ran, "caller (WhoAmI under their own token)");
+                    break;
                 }
-
-                callerSystemUserId = who.SystemUserId;
-                ownerContextObjectId = caller.ObjectId;
-                // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them.
-                requestedBy = RecordRequester.Of(who.SystemUserId);
-                grantorOid = caller.ObjectId?.ToString("D");
-                trace.Record(RecordCreationStep.Principal, RecordCreationStepState.Ran, "caller (WhoAmI under their own token)");
-                break;
-            }
 
             case RecordCreationPrincipal.SystemPrincipal system:
                 requestedBy = system.RequestedBy;
@@ -368,6 +378,21 @@ internal sealed partial class RecordCreationService
         // sprk_grantedby user) - what the chat create did before the service, and what every other AI-tool write still does.
         if (request.Grantor == AssignedAccessGrantor.None)
             grantorOid = null;
+
+        // Task 049c (NFR-02, option a): steps 2 and 3 read the same table metadata as the caller — step 3's merge re-reads the
+        // table's relationships and the entity sets step 2 just read. Within these two steps each such read is asked once
+        // (CallerMetadataReadMemo: schema only; access answers, record reads and failures are never kept). Step 3½, step 5
+        // (its own memo), the pre-write rules and steps 6 to 10 keep the caller's own client, so their reads are asked as before.
+        var mappingClient = user is null ? null : new CallerMetadataReadMemo(user);
+
+        // Task 049c (NFR-02, option b): step 3's reads for a source the caller NAMED depend on nothing steps 2 and 3 decide, so
+        // they start now, beside step 2, and are taken at step 3 (MappingReadsPrefetch). Refused before step 3: cancelled and
+        // awaited when this method returns, their answers dropped.
+        var callerMapping = request.Mapping;
+        await using var earlyMappingReads = NamedMappingSource(rule, request, principal) is { } namedSource
+            ? MappingReadsPrefetch.Start(namedSource,
+                token => ReadMappingInputsAsync(table, callerMapping!, mappingClient!, namedSource, token), ct)
+            : null;
 
         // ── Step 2: the table's rules — refuse a server-owned column in the CALLER's payload ────────────────────────────
         trace.Begin(RecordCreationStep.TableRules);
@@ -421,7 +446,7 @@ internal sealed partial class RecordCreationService
                 var webApiBody = rule.SearchIndexed
                     ? RecordTableRules.WithoutSearchIndex(webApi.Body, RecordTableRules.SearchIndexOriginCaller, indexDrops)
                     : webApi.Body;
-                var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, table, webApiBody, ct).ConfigureAwait(false);
+                var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(mappingClient!, table, webApiBody, ct).ConfigureAwait(false);
                 if (mapped.ValidationError is { } invalid)
                 {
                     return Decision.Refuse(new RecordCreationRefusal(
@@ -453,7 +478,8 @@ internal sealed partial class RecordCreationService
             if (request.ReferenceLookupColumns is { Count: > 0 } references)
             {
                 var checkedReferences = await DropUnusableReferencesAsync(
-                        table, user, callerSystemUserId!.Value, item, references, request.ServerSetLookupColumns, noun, referenceWarnings, ct)
+                        table, mappingClient!, callerSystemUserId!.Value, item, references, request.ServerSetLookupColumns, noun,
+                        referenceWarnings, ct)
                     .ConfigureAwait(false);
                 if (checkedReferences.Refusal is { } referenceRefusal)
                     return Decision.Refuse(referenceRefusal);
@@ -482,6 +508,18 @@ internal sealed partial class RecordCreationService
         var mappingWarnings = new List<RecordCreationWarning>();
         var callerItem = item;
         IReadOnlyDictionary<string, JsonElement> mappedValues = NoMappedValues;
+
+        // Task 022 fix round 2: the mapping source's gate read (when a value was mapped), checked again after step 7; and the
+        // Secure Record owner team, asked at most once per create, so step 3 and that check read the same answer (a fault too).
+        MappedSourceGate? mappingGate = null;
+        Task<(Guid? TeamId, string? Refusal)>? secureOwnerTeamAnswer = null;
+        Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamOnce(CancellationToken token) =>
+            secureOwnerTeamAnswer ??= _shares.SecureOwnerTeamAsync(token);
+        var copiedDefaults = new List<(string Column, string Source)>();
+
+        // Task 022 fix round 3: the columns step 3 mapped, as step 3 left them. A copied default whose source is one of these
+        // is a value from the mapping source, whatever step 5 later keeps of its source.
+        IReadOnlySet<string> stepThreeMappedColumns = NoDefaultColumns;
         if (rule.MappingExclusion is { } exclusion)
         {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
@@ -496,7 +534,9 @@ internal sealed partial class RecordCreationService
             MappingStep mapped;
             try
             {
-                mapped = await MapFieldsAsync(table, rule, request, mapping, user, callerItem, mappingWarnings, ct)
+                mapped = await MapFieldsAsync(
+                        table, rule, request, mapping, mappingClient!, callerItem, mappingWarnings, earlyMappingReads,
+                        SecureOwnerTeamOnce, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -516,6 +556,9 @@ internal sealed partial class RecordCreationService
             // ebilling-r1's review of 013, item 1: the SAME local — the pre-write rules (5½) and the create (11) read this item.
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
+            stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped.
+            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(table, null) : null;
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
                 $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
         }
@@ -530,6 +573,7 @@ internal sealed partial class RecordCreationService
         if (user is not null)
         {
             (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
+            copiedDefaults.AddRange(copied.Select(c => (c.Column, c.Source)));
             var serverSetCopies = copied
                 .Where(c => request.ServerSetLookupColumns?.Contains(c.Source) == true)
                 .Select(c => c.Column)
@@ -636,14 +680,41 @@ internal sealed partial class RecordCreationService
         trace.Begin(RecordCreationStep.CallerChecks);
         if (user is null)
         {
+            // Step 4½ for the system principal (task 045a fix round 1, K2): there is no caller to read the catalog as, so a
+            // type-only pair is never filled — it is cleared, with the same warning, and never written half.
+            if (IsTypeOnlyRegardingPair(table, item))
+            {
+                item = WithoutRegardingPair(item);
+                mappingWarnings.Add(new RecordCreationWarning(
+                    RecordCreationWarning.RegardingTypeClearedCode, SecureRootInheritance.PairTypeColumn, RegardingTypeCleared(noun)));
+                _logger.LogInformation(
+                    "[RECORD-CREATE] step 4½: a {Table}'s regarding pair named a type only (system principal); type cleared", table);
+            }
+
             trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped, "system principal (FR-07)");
         }
         else
         {
+            // ── Step 4½ (task 045a): a regarding pair sent with its type and no id is filled or cleared HERE, so every check
+            // below (step 5's AppendTo on the pair, 5½, 6, 6½, 7) sees the pair exactly as it is written. Both items: step 5
+            // checks the caller's own values (callerItem) as well as the merged row, and may rebuild the row from them. ───────
+            var typeOnly = await CompleteTypeOnlyRegardingPairAsync(
+                table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, noun, mappingWarnings, ct).ConfigureAwait(false);
+            if (typeOnly.Refusal is { } typeOnlyRefusal)
+                return Decision.Refuse(typeOnlyRefusal);
+            callerItem = typeOnly.CallerItem!;
+            item = typeOnly.Item!;
+
+            // Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row (and on a
+            // failure each value, then the row as written): every pass re-read the same table metadata. Within this step each
+            // such read is asked once; access answers are never kept (CallerMetadataReadMemo). Scoped to step 5 only: the
+            // other steps' reads, and the pre-write rules, keep the caller's own client.
+            var checking = new CallerMetadataReadMemo(user);
+
             // The K-2 guard (a server-set FILING lookup) ran before step 3. Task 031 fix round 1 (F1): a route-authorised
             // lookup is asked Read as the caller here, and only its AppendTo is skipped below (appendToSkip).
             var routeAuthorized = await CheckRouteAuthorizedLookupsAsync(
-                user, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
+                checking, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
             if (routeAuthorized.Refusal is { } routeRefusal)
                 return Decision.Refuse(CallerCheckRefused(routeRefusal, noun));
             var appendToSkip = routeAuthorized.SkipAppendTo;
@@ -651,7 +722,7 @@ internal sealed partial class RecordCreationService
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
-                    user, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
+                    checking, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
                 if (!check.Succeeded)
                     return Decision.Refuse(CallerCheckRefused(check, noun));
 
@@ -661,7 +732,7 @@ internal sealed partial class RecordCreationService
             else
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
-                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
+                    table, checking, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
                     mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
@@ -690,6 +761,7 @@ internal sealed partial class RecordCreationService
         trace.Begin(RecordCreationStep.SecureRootPlan);
         var creatorPerson = callerSystemUserId ?? Guid.Empty;
         Guid? isolatedTeam = null;
+        (RecordCreationRefusal? Refusal, Dictionary<string, object>? Plan)? earlyStampPlan = null;
         if (SecureRootInheritance.Inherits(table))
         {
             // A work assignment or project filed under a record may be filed under a SECURE one: then it is created into
@@ -732,8 +804,21 @@ internal sealed partial class RecordCreationService
             if (SecureRootServerColumnRefusal(table, item) is { } serverColumn)
                 return Decision.Refuse(PlanRefused(serverColumn, noun));
 
+            // Task 049 fix round 2 (UAC-r2 D1): a create the caller asks to be secure first passes the delegation rule
+            // provision-project asks (Write and the table's Share privilege), on the record as an ordinary create would make it.
+            if (request.SecureFromCreation)
+            {
+                var gate = await SecureFromCreationGateAsync(table, rule, item, user!, creatorPerson, ownerContextObjectId,
+                    requestedBy, noun, trace.CorrelationId, ct).ConfigureAwait(false);
+                if (gate.Refusal is { } gateRefusal)
+                    return Decision.Refuse(gateRefusal);
+                earlyStampPlan = gate.Planned;
+            }
+
             var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
-                user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
+                    user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns),
+                    secureRequested: request.SecureFromCreation)
+                .ConfigureAwait(false);
             if (plan.Refusal is { } planRefusal)
                 return Decision.Refuse(PlanRefused(planRefusal, noun));
 
@@ -741,7 +826,9 @@ internal sealed partial class RecordCreationService
                 isolatedTeam = secureTeam;
 
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran,
-                isolatedTeam is null ? "ordinary" : "into isolation (the named Secure Record Owners team)");
+                isolatedTeam is null ? "ordinary"
+                : request.SecureFromCreation ? "into isolation (the named Secure Record Owners team), as the caller asked"
+                : "into isolation (the named Secure Record Owners team)");
         }
         else
         {
@@ -759,7 +846,7 @@ internal sealed partial class RecordCreationService
         // Its trace step is step 10's (StampAndInheritance), begun here: a refusal is recorded under it, with the same codes and
         // words as before; a derivation that succeeds is recorded once, at step 10, which binds it.
         trace.Begin(RecordCreationStep.StampAndInheritance);
-        var planned = await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
+        var planned = earlyStampPlan ?? await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
         if (planned.Refusal is { } stampPlanRefusal)
             return Decision.Refuse(stampPlanRefusal);
 
@@ -794,6 +881,21 @@ internal sealed partial class RecordCreationService
         trace.Record(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp,
             "the index follows the content type (#2502); nothing written");
 
+        // Task 022 fix round 2 (the mapping-source rule, the invariant): values mapped from a secure source are written only into
+        // a row owned by that source's secure owner. Asked here, with the owner decided and before anything is built from the
+        // item, on every path that mapped a value; step 3's early answer only narrows it. Never changes the owner or the filing.
+        if (mappingGate is { } sourceGate && mappedValues.Count > 0 && user is not null)
+        {
+            var enforced = await EnforceMappingSourceOwnerAsync(
+                    table, rule, user, sourceGate, owningTeam, callerItem, item, mappedValues, defaultColumns, copiedDefaults,
+                    stepThreeMappedColumns, SecureOwnerTeamOnce, mappingWarnings, noun, ct)
+                .ConfigureAwait(false);
+            if (enforced.Refusal is { } ownerCheckRefusal)
+                return Decision.Refuse(ownerCheckRefusal);
+            item = enforced.Item;
+            mappedValues = enforced.Values;
+        }
+
         // ── Step 9: the creator person ("for" person and table defaults: the adapters', owner-review item 3) ─────────────
         var fields = owner is not null
             ? OwnedCreateFields(owner, table, item)
@@ -817,7 +919,9 @@ internal sealed partial class RecordCreationService
             Item = item,
             OwningTeamId = owningTeam,
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
+            SecureFromCreation = request.SecureFromCreation,
             GrantorOid = grantorOid,
+            MakerSystemUserId = callerSystemUserId,
             MappingWarnings = referenceWarnings.Count == 0 ? mappingWarnings : [.. referenceWarnings, .. mappingWarnings],
             SearchIndexDrops = indexDrops,
         };
@@ -1155,7 +1259,8 @@ internal sealed partial class RecordCreationService
             var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
                 $"what it is filed under could not be told ({undetermined})");
             return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                refused.Reason!) { OwnerDecision = refused });
+                refused.Reason!)
+            { OwnerDecision = refused });
         }
 
         // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
@@ -1167,7 +1272,8 @@ internal sealed partial class RecordCreationService
             var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
                 $"what it is filed under could not be told ({unread})");
             return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                refused.Reason!) { OwnerDecision = refused });
+                refused.Reason!)
+            { OwnerDecision = refused });
         }
 
         var owner = await _ownership.ResolveOwnerAsync(
@@ -1587,13 +1693,224 @@ internal sealed partial class RecordCreationService
         };
     }
 
+    /// <summary>What step 4½ leaves for step 5: both items (unchanged, filled or cleared), or the caller's own failure.</summary>
+    private readonly record struct TypeOnlyPairStep(
+        DataverseWriteItemMapper.MappedItem? CallerItem, DataverseWriteItemMapper.MappedItem? Item, RecordCreationRefusal? Refusal);
+
+    /// <summary>The words of <see cref="RecordCreationWarning.RegardingTypeClearedCode"/>: no record id and no access state.</summary>
+    internal static string RegardingTypeCleared(string noun) =>
+        $"The regarding record type was not saved: the {noun} names no single record of that type, so it was created " +
+        "without a regarding record.";
+
+    /// <summary>The pair's display columns, which describe the record the pair names: cleared with the type.</summary>
+    private static readonly string[] RegardingPairDisplayColumns =
+        ["sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl"];
+
+    /// <summary>
+    /// Step 4½ (task 045a; owner decision 4 of 2026-11-04; the owner's 045 rulings Q2 (a) and Q3 (a) of 2026-11-07): a regarding
+    /// pair sent with its TYPE and no id (absent, null, empty or whitespace) is never written half. The caller's own catalog
+    /// read (<see cref="CallerWriteAuthorization.PairTypeTableAsync"/>) says which table the type names; then:
+    /// <list type="bullet">
+    /// <item>exactly one record of that table named by the item's agreement lookups
+    /// (<see cref="RegardingPairFillRecords"/>) → the id is FILLED with it (lower-case "D"), silently;</item>
+    /// <item>none, or more than one, or a type naming no table → the type is CLEARED (with the id and the display columns
+    /// the item sent), with one <see cref="RecordCreationWarning.RegardingTypeClearedCode"/> warning — but first AppendTo is
+    /// asked on the type's catalog row, as step 5 would have, and a refusal is step 5's own (fix round 1, F4);</item>
+    /// <item>a catalog read answered 404 → the items are left as sent: step 5 then asks AppendTo on the type's own catalog
+    /// row and answers exactly as before (NFR-07). A 403 is a type naming no table (fix round 2): AppendTo asked, then
+    /// cleared. Any other failed answer is the caller's upstream refusal (fix round 1, F2); a thrown fault propagates (fail
+    /// closed).</item>
+    /// </list>
+    /// A whole pair, an empty pair and an id with no type are untouched (nothing is read). The step runs before step 5, so the
+    /// caller's AppendTo is asked on the pair as it is written. The system principal has no caller to read the catalog as: its
+    /// type-only pair is cleared without a read (<see cref="WithoutRegardingPair"/>, fix round 1, K2).
+    /// </summary>
+    private async Task<TypeOnlyPairStep> CompleteTypeOnlyRegardingPairAsync(
+        string table, IDataverseUserClient user, Guid callerSystemUserId, DataverseWriteItemMapper.MappedItem callerItem,
+        DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, JsonElement> mappedValues, string noun,
+        List<RecordCreationWarning> warnings, CancellationToken ct)
+    {
+        var pair = OwnedChildWrite.PairOf(item);
+        if (!IsTypeOnlyRegardingPair(table, item) || pair.TypeId is not { } type
+            || mappedValues.Keys.Contains(SecureRootInheritance.PairTypeColumn, StringComparer.OrdinalIgnoreCase))
+        {
+            return new TypeOnlyPairStep(callerItem, item, null);
+        }
+
+        var (typeRow, pairTable) = await CallerWriteAuthorization.PairTypeTableAsync(user, type, pair.TypeEntitySet, ct)
+            .ConfigureAwait(false);
+        if (!typeRow.IsSuccess)
+        {
+            _logger.LogInformation(
+                "[RECORD-CREATE] step 4½: a {Table}'s regarding pair names a type only, and its record type could not be read as " +
+                "the caller (status {Status})", table, typeRow.StatusCode);
+
+            // 404: left as sent — step 5 asks AppendTo on the type's own catalog row, whose existence read gives its uniform
+            // 404. 403 (fix round 2): the caller may not read which table the type names, though they may still be able to
+            // append to the row — so it is a type naming no table: AppendTo asked below, then cleared, never stored type-only.
+            // Any other status (a 429, a 503, no answer) is the caller's own failure, as in PairTargetAsync: refused, so a
+            // type-only pair is never written past a read that did not answer.
+            if (typeRow.StatusCode == 404)
+                return new TypeOnlyPairStep(callerItem, item, null);
+            if (typeRow.StatusCode != 403)
+                return new TypeOnlyPairStep(null, null, Upstream(typeRow, noun));
+            // 403: pairTable is null (a failed read names no table), so there is no candidate and the type is cleared below.
+        }
+
+        var records = pairTable is null ? [] : RegardingPairFillRecords(table, item, pairTable, mappedValues);
+        Guid? fill = records.Count == 1 ? records[0] : null;
+
+        // A clear removes the type before step 5, so step 5 would no longer ask AppendTo on its catalog row: asked here, with
+        // step 5's own question and answer (NFR-07: a caller who may not append to the type, or whose type row is missing,
+        // still gets the uniform 404, never a create with a warning).
+        if (fill is null)
+        {
+            var typeLookups = item.Lookups
+                .Where(l => string.Equals(l.Column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase));
+            var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, callerSystemUserId, typeLookups, ct)
+                .ConfigureAwait(false);
+            if (!appendTo.Succeeded)
+                return new TypeOnlyPairStep(null, null, CallerCheckRefused(appendTo, noun));
+        }
+
+        // One memo for both rewrites: the table's relationships and the related entity sets are read once (schema only).
+        var memo = new CallerMetadataReadMemo(user);
+        var rewritten = await RewriteRegardingPairAsync(memo, table, item, fill, noun, ct).ConfigureAwait(false);
+        if (rewritten.Refusal is not null)
+            return new TypeOnlyPairStep(null, null, rewritten.Refusal);
+        var rewrittenCaller = ReferenceEquals(callerItem, item)
+            ? rewritten
+            : await RewriteRegardingPairAsync(memo, table, callerItem, fill, noun, ct).ConfigureAwait(false);
+        if (rewrittenCaller.Refusal is not null)
+            return new TypeOnlyPairStep(null, null, rewrittenCaller.Refusal);
+
+        if (fill is null)
+        {
+            warnings.Add(new RecordCreationWarning(
+                RecordCreationWarning.RegardingTypeClearedCode, SecureRootInheritance.PairTypeColumn, RegardingTypeCleared(noun)));
+        }
+
+        // The table and the outcome only: never the record the pair names (042c coordinator condition 2).
+        _logger.LogInformation("[RECORD-CREATE] step 4½: a {Table}'s regarding pair named a type only; {Outcome}",
+            table, fill is null ? "type cleared" : "id filled");
+        return new TypeOnlyPairStep(rewrittenCaller.Item, rewritten.Item, null);
+    }
+
+    /// <summary>
+    /// Step 4½'s candidates (pure): the distinct records of <paramref name="pairTable"/> named by the item's lookups in the
+    /// table's agreement columns (<see cref="OwnedChildWrite.PairAgreementColumns"/>, the columns the pair's readers match its
+    /// id against), the caller's own or server-set ones only. Left out:
+    /// <list type="bullet">
+    /// <item>a MAPPED lookup (in <paramref name="mappedValues"/>): step 5 may drop it, and the pair never names a lookup that
+    /// is not written;</item>
+    /// <item>an I-1 stamp column (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>) whenever the item binds an
+    /// intermediate source (<see cref="CoreAncestorResolver.StampSourceColumns"/>): a pair naming the stamp would make it a
+    /// direct root link (<see cref="CoreAncestorResolver.ClassifyStampSource"/>), and restamps would stop following the
+    /// intermediate.</item>
+    /// </list>
+    /// </summary>
+    private static IReadOnlyList<Guid> RegardingPairFillRecords(
+        string table, DataverseWriteItemMapper.MappedItem item, string pairTable, IReadOnlyDictionary<string, JsonElement> mappedValues)
+    {
+        var agreement = OwnedChildWrite.PairAgreementColumns(table);
+        var bindsAnIntermediate = CoreAncestorResolver.StampSourceColumns.TryGetValue(table, out var sources)
+            && item.Lookups.Any(l => sources.Any(s => string.Equals(s.Column, l.Column, StringComparison.OrdinalIgnoreCase)));
+        return item.Lookups
+            .Where(l => agreement.ContainsKey(l.Column)
+                        && string.Equals(l.RelatedTable, pairTable, StringComparison.OrdinalIgnoreCase)
+                        && !mappedValues.Keys.Contains(l.Column, StringComparer.OrdinalIgnoreCase)
+                        && !(bindsAnIntermediate && CoreAncestorResolver.CoreAncestorLookups.Any(
+                            s => string.Equals(s.LookupAttribute, l.Column, StringComparison.OrdinalIgnoreCase))))
+            .Select(l => l.RecordId)
+            .Distinct()
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Step 4½'s rewrite of one item, through the mapper as the caller (<see cref="MergedItem"/> then
+    /// <see cref="DataverseWriteItemMapper.MapAsync"/>), so every bind keeps the table's own navigation property:
+    /// <paramref name="fill"/> given → the pair's id is that record's; none → the type, the id and the display columns are left
+    /// out. A mapping failure is the caller's own (the existing upstream refusal); nothing is written.
+    /// </summary>
+    private static async Task<(DataverseWriteItemMapper.MappedItem? Item, RecordCreationRefusal? Refusal)> RewriteRegardingPairAsync(
+        IDataverseUserClient memo, string table, DataverseWriteItemMapper.MappedItem item, Guid? fill, string noun,
+        CancellationToken ct)
+    {
+        string[] leftOut = fill is null
+            ? [SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn, .. RegardingPairDisplayColumns]
+            : [SecureRootInheritance.PairIdColumn];
+        KeyValuePair<string, JsonElement>[] filled = fill is { } id
+            ? [KeyValuePair.Create(SecureRootInheritance.PairIdColumn, JsonSerializer.SerializeToElement(id.ToString("D")))]
+            : [];
+        var logical = MergedItem(item, leftOut, filled);
+        if (logical.EnumerateObject().Any() is false)
+            return (new DataverseWriteItemMapper.MappedItem("{}", Array.Empty<string>()), null);
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(memo, table, logical, ct).ConfigureAwait(false);
+        return mapped switch
+        {
+            { Item: { } rewritten } => (rewritten, null),
+            { ClientFailure: { } failure } => (null, Upstream(failure, noun)),
+            _ => (null, new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode,
+                mapped.ValidationError ?? $"The {noun} could not be mapped.")),
+        };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="item"/>'s regarding pair names a type and no id (absent, null, empty or whitespace). Only a table
+    /// that holds the whole pair (<see cref="OwnedChildWrite.RegardingPairTables"/>, as the update planner) has a pair to keep
+    /// whole: a table whose regarding type stands alone, with no id column (a matter), keeps its type and number as sent.
+    /// </summary>
+    private static bool IsTypeOnlyRegardingPair(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        if (!OwnedChildWrite.RegardingPairTables.Contains(table.Trim()))
+            return false;
+        var pair = OwnedChildWrite.PairOf(item);
+        return pair.TypeId is not null && !pair.InvalidId && string.IsNullOrWhiteSpace(pair.IdText);
+    }
+
+    /// <summary>The pair's columns, in a body key's form (a column or <c>{nav}@odata.bind</c>), any case.</summary>
+    private static bool IsRegardingPairKey(string key)
+    {
+        var name = key.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase) ? key[..^"@odata.bind".Length] : key;
+        return string.Equals(name, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase)
+               || RegardingPairDisplayColumns.Contains(name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The system principal's clear (no metadata read): <paramref name="item"/> without the pair's type, id and display
+    /// columns — its body keys, columns, lookups and clears, as <see cref="RecordTableRules.WithoutSearchIndex(DataverseWriteItemMapper.MappedItem, string, ICollection{RecordTableRules.DroppedSearchIndexValue})"/> removes a column.
+    /// </summary>
+    private static DataverseWriteItemMapper.MappedItem WithoutRegardingPair(DataverseWriteItemMapper.MappedItem item)
+    {
+        using var body = JsonDocument.Parse(item.JsonBody);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in body.RootElement.EnumerateObject().Where(p => !IsRegardingPairKey(p.Name)))
+                property.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return item with
+        {
+            JsonBody = System.Text.Encoding.UTF8.GetString(stream.ToArray()),
+            Columns = item.Columns.Where(c => !IsRegardingPairKey(c)).ToList(),
+            Lookups = item.Lookups.Where(l => !IsRegardingPairKey(l.Column)).ToList(),
+            ClearedColumns = item.ClearedColumns.Where(c => !IsRegardingPairKey(c)).ToList(),
+        };
+    }
+
     /// <summary>Step 5's answer in this service's contract, in the child-record route's order.</summary>
     private static RecordCreationRefusal CallerCheckRefused(OwnedChildWrite.Outcome check, string noun) => check switch
     {
         { ClientFailure: { } failure } => Upstream(failure, noun),
         { Invalid: { } invalid } => new(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, invalid),
         { ParentUnavailable: true } => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            check.Denied ?? NotAvailableToFileUnder) { RefusedColumn = check.RefusedColumn },
+            check.Denied ?? NotAvailableToFileUnder)
+        { RefusedColumn = check.RefusedColumn },
         { Denied: { } denied } => new(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.DeniedCode, denied),
         _ => new(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created."),
     };
@@ -1644,16 +1961,20 @@ internal sealed partial class RecordCreationService
     private static RecordCreationRefusal PlanRefused(RecordOwnerResolution plan, string noun) => plan.RefusalCode switch
     {
         DataverseUserClientErrorCodes.AccessDenied => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            plan.Reason ?? NotAvailableToFileUnder) { OwnerDecision = plan },
+            plan.Reason ?? NotAvailableToFileUnder)
+        { OwnerDecision = plan },
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
             or AccessFollowsParent.SecureFlagReasonCode
             or AccessInheritance.ServerOnlyReasonCode => new(RecordCreationRefusalKind.Forbidden, plan.RefusalCode!,
-            $"The {noun} was not created: {plan.Reason ?? "it may not be filed there"}.") { OwnerDecision = plan },
+            $"The {noun} was not created: {plan.Reason ?? "it may not be filed there"}.")
+            { OwnerDecision = plan },
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable
             or RecordOwnerRefusal.SecureOwnerTeamUnresolved => new(RecordCreationRefusalKind.Undecided, plan.RefusalCode!,
-            $"The {noun} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}.") { OwnerDecision = plan },
+            $"The {noun} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}.")
+            { OwnerDecision = plan },
         _ => new(RecordCreationRefusalKind.OwnerUnresolved, plan.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource,
-            plan.Reason ?? "no owner could be resolved") { OwnerDecision = plan },
+            plan.Reason ?? "no owner could be resolved")
+        { OwnerDecision = plan },
     };
 
     /// <summary>
@@ -1684,7 +2005,8 @@ internal sealed partial class RecordCreationService
             return refusal switch
             {
                 { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
-                    RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder) { PreWrite = refusal },
+                    RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder)
+                { PreWrite = refusal },
                 { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
                 // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
                 // uniform not-found, which only NotFound() reaches (the arm above).
@@ -1769,10 +2091,22 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// Step 12, in the existing paths' order: the number read-back (autonumber tables), the isolated root's completion, the
-    /// "Assigned *" grants of a root, the I-1 re-stamp and I-16 (step 10), the secure child's sharee mirror, the membership
-    /// event. Never throws; returns a refusal only when an isolated root had to be removed again.
+    /// The refusal text of a secure-from-creation create whose row had to be removed again (fix round 3): one neutral
+    /// sentence; the reason code travels in the refusal's code, not in the words.
     /// </summary>
+    internal static string SecureFromCreationNotSecuredDetail(string noun) =>
+        $"The {noun} could not be secured, so it was not kept. Please try again or ask an administrator.";
+
+    /// <summary>
+    /// Step 12, in the existing paths' order: the number read-back (autonumber tables), the isolated root's completion, the
+    /// "Assigned *" grants of a root (<see cref="GrantAssignedAccessAsync"/>), the I-1 re-stamp and I-16 (step 10), the secure
+    /// child's sharee mirror, the membership event. Never throws; returns a refusal only when an isolated root had to be
+    /// removed again.
+    /// </summary>
+    /// <remarks>Task 049 fix round 1 (UAC-r2 ruling, item 4): for an isolated root, the create-time pass waits for secure
+    /// provisioning, so eligibility is decided on the final record. It runs only once <c>CompleteIsolatedCreateAsync</c>
+    /// reports the securing complete; otherwise nothing is granted at create, and the assigned-access reconciliation job
+    /// grants it later.</remarks>
     private async Task<RecordCreationRefusal?> AfterCreateAsync(
         string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings,
         Action<SecureRootInheritResult> isolatedCompleted)
@@ -1782,7 +2116,8 @@ internal sealed partial class RecordCreationService
 
         if (decision.IsolatedFor is { } isolatedFor)
         {
-            var secured = await _rootFiling.CompleteIsolatedCreateAsync(table, id, isolatedFor, correlationId).ConfigureAwait(false);
+            var secured = await _rootFiling.CompleteIsolatedCreateAsync(
+                table, id, isolatedFor, correlationId, decision.SecureFromCreation).ConfigureAwait(false);
             isolatedCompleted(secured);
             if (secured.RowRemoved)
             {
@@ -1790,20 +2125,24 @@ internal sealed partial class RecordCreationService
                     table, id, secured.ReasonCode);
                 return new RecordCreationRefusal(RecordCreationRefusalKind.Undecided,
                     secured.ReasonCode ?? SecureRootInheritance.ReasonUnexpectedResult,
-                    $"The {noun} is filed under a secure record, so it is created secure and shared to you, and that share " +
-                    $"could not be made, so the new {noun} was removed again. Nothing was created. " +
-                    (secured.CompletesAutomatically
-                        ? "Try again in a few minutes."
-                        : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
-                          "administrator needs to review your access to the secure record it would be filed under."));
+                    decision.SecureFromCreation
+                        ? SecureFromCreationNotSecuredDetail(noun)
+                        : $"The {noun} is filed under a secure record, so it is created secure and shared to you, and that share " +
+                          $"could not be made, so the new {noun} was removed again. Nothing was created. " +
+                          (secured.CompletesAutomatically
+                              ? "Try again in a few minutes."
+                              : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
+                                "administrator needs to review your access to the secure record it would be filed under."));
             }
 
             if (secured.RowStranded)
             {
+                // A secure-from-creation project is not visited by the secure-root inheritance job unless it is filed under a
+                // secure parent, so no retry is promised for it: an administrator must act.
                 warnings.Add(
                     $"The {noun} was created as a secure record, but it could not be shared to you and could not be removed " +
                     $"again ({secured.ReasonCode}); " +
-                    (secured.CompletesAutomatically
+                    (secured.CompletesAutomatically && !decision.SecureFromCreation
                         ? "it is shared to you automatically once that step succeeds (it is retried every few minutes)."
                         : "it will not be shared to you automatically — only an administrator can open it, and an administrator " +
                           "needs to review and remove it."));
@@ -1812,15 +2151,30 @@ internal sealed partial class RecordCreationService
             {
                 warnings.Add(
                     $"The {noun} was created as a secure record shared to you, but securing it could not be finished yet " +
-                    $"({secured.ReasonCode}); it is completed automatically within a few minutes.");
+                    $"({secured.ReasonCode}); " +
+                    (decision.SecureFromCreation
+                        ? $"it is not finished automatically; an administrator can finish securing the {noun}."
+                        : "it is completed automatically within a few minutes."));
+            }
+
+            if (rule.Kind == RecordTableKind.Root)
+            {
+                if (secured.IsComplete && !secured.RowStranded)
+                {
+                    await GrantAssignedAccessAsync(table, id, rule, decision, correlationId).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "[ASSIGNED-ACCESS] The create-time pass of {Table} {Id} waits for secure provisioning, so eligibility is " +
+                        "decided on the final record; the assigned-access reconciliation job runs it (correlationId={CorrelationId}).",
+                        table, id, correlationId);
+                }
             }
         }
-
-        if (rule.Kind == RecordTableKind.Root)
+        else if (rule.Kind == RecordTableKind.Root)
         {
-            // I-12 L1: the "Assigned *" contacts' grant or share now. Never throws; a fault is the job's.
-            await AssignedAccessMaterializer.RunAfterWriteAsync(
-                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+            await GrantAssignedAccessAsync(table, id, rule, decision, correlationId).ConfigureAwait(false);
         }
 
         await AfterCreateStepAsync("core-ancestor stamp (I-1)", table, id, async () =>
@@ -1859,6 +2213,136 @@ internal sealed partial class RecordCreationService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The I-12 L1 "Assigned *" pass of a created root. When the root's "for" person is its maker's own linked contact, the
+    /// maker's own subject is granted inline (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays
+    /// immediate), and then the full pass is queued (task 049b, UAC-r2 ruling: every other subject, external grants included,
+    /// takes the queued path; the full pass finds the maker's access already in place and writes nothing for it). Otherwise
+    /// the full pass is queued (<see cref="QueueAssignedAccessGrantAsync"/>). Either way, when nothing could be queued the
+    /// FULL pass runs inline, once, with the create's grantor (<see cref="RunFullPassNotQueuedAsync"/>). Never throws; a
+    /// fault is the reconciliation job's.
+    /// </summary>
+    /// <remarks>Task 049b fix round 2 (UAC-r2 ruling b): in the maker case a failed enqueue no longer leaves the other
+    /// subjects to the reconciliation job; it runs the same inline full pass as the other case, so an external subject is
+    /// granted and invited in the request. A send that is merely slow and then succeeds is not a failure and runs nothing
+    /// inline.</remarks>
+    private async Task GrantAssignedAccessAsync(string table, Guid id, RecordTableRule rule, Decision decision, string correlationId)
+    {
+        if (await MakersForPersonContactAsync(table, id, rule, decision).ConfigureAwait(false) is { } makersContact)
+        {
+            await AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None,
+                onlySubject: new AssignedSubject(AssignedSubjectKind.Contact, makersContact)).ConfigureAwait(false);
+        }
+
+        var queued = await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false);
+        if (!queued.Queued)
+            await RunFullPassNotQueuedAsync(table, id, decision.GrantorOid, correlationId, queued.SendFailure).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Nothing was queued, so the full "Assigned *" pass runs inline, once, as the create's grantor (the grantor the queued
+    /// job would carry, so an external subject's invite has its actor). When the send itself failed
+    /// (<paramref name="sendFailure"/>), one <c>[ASSIGNED-ACCESS] QueueDownInlinePass</c> line records the root and how many
+    /// assigned subjects the pass evaluated, so creates made while the queue is down can be counted; it names no contact,
+    /// name or email. (The BFF logs with message tags, not event ids.)
+    /// </summary>
+    private async Task RunFullPassNotQueuedAsync(
+        string table, Guid id, string? grantorOid, string correlationId, string? sendFailure)
+    {
+        var outcome = await AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopes, table, id, writtenColumns: null, grantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+
+        if (sendFailure is not null)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] QueueDownInlinePass {Table} {Id}: the create-time grant could not be queued ({ExceptionType}); " +
+                "the full pass ran inline for {Subjects} assigned subject(s) (correlationId={CorrelationId}).",
+                table, id, sendFailure, outcome?.Entries.Count ?? 0, correlationId);
+        }
+    }
+
+    /// <summary>
+    /// Task 049 fix round 1 (UAC-r2 ruling): the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
+    /// Assigned To) when it is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/>
+    /// answers it: the resolver the chat and Office adapters fill that column from (cached); otherwise <c>null</c>. Only a
+    /// root that sets the column asks. Fails closed: no maker, no resolver in this host, or a lookup that faults, outlasts
+    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>null</c>, so the pass is
+    /// queued and never granted inline on a guess.
+    /// </summary>
+    private async Task<Guid?> MakersForPersonContactAsync(string table, Guid id, RecordTableRule rule, Decision decision)
+    {
+        if (rule.ForPerson is not { } forPerson
+            || !string.Equals(forPerson.RelatedTable, "contact", StringComparison.OrdinalIgnoreCase)
+            || decision.MakerSystemUserId is not { } maker || maker == Guid.Empty)
+        {
+            return null;
+        }
+
+        var assignee = decision.Item?.Lookups
+            .FirstOrDefault(l => string.Equals(l.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))?.RecordId;
+        if (assignee is not { } forPersonId || forPersonId == Guid.Empty)
+            return null;
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<IIdentityNormalizationService>() is not { } identity)
+                return null;
+
+            using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
+            var person = await identity.ResolveAsync(maker, timeout.Token).ConfigureAwait(false);
+            return person.ContactId is { } contact && contact == forPersonId ? forPersonId : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] The maker of {Table} {Id} could not be matched to its Assigned To ({ExceptionType}); the " +
+                "create-time pass is queued.", table, id, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Task 049 Part B (NFR-02; UAC-r2's conditions, notes/task-049-notes.md): queues the I-12 L1 "Assigned *" pass of a
+    /// created project, matter or work assignment (<see cref="AssignedAccessCreateGrantJobHandler"/>), so the create returns
+    /// without it. Create only: every update path keeps its inline pass. The message names the root, the grantor and the
+    /// cache tenants, never the assignees. <c>Queued</c> is <c>false</c> when nothing was queued (another table, no queue in
+    /// this host, a failed send, or a send that outlasts the enqueue timeout); the caller then runs the full pass inline
+    /// (<see cref="RunFullPassNotQueuedAsync"/>), in the maker case too (task 049b fix round 2). <c>SendFailure</c> is the
+    /// exception type when the send itself failed or timed out; the caller logs it.
+    /// </summary>
+    private async Task<(bool Queued, string? SendFailure)> QueueAssignedAccessGrantAsync(
+        string table, Guid id, string? grantorOid, string correlationId)
+    {
+        if (!AssignedAccessMaterializer.TryParseRootLogicalName(table, out var rootType))
+            return (false, null);
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>() is not { } jobs)
+                return (false, null);
+
+            var tenant = scope.ServiceProvider.GetService<IConfiguration>() is { } configuration
+                ? ImpersonatedRootSetSource.DeploymentCacheTenant(configuration)
+                : null;
+            var job = AssignedAccessCreateGrantJobHandler.NewJob(
+                new AssignedAccessCreateGrantPayload(rootType, id, grantorOid, tenant is null ? [] : [tenant]), correlationId);
+
+            using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
+            await jobs.SubmitJobAsync(job, timeout.Token).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Queued the create-time grant of {Table} {Id} (job {JobId}, correlationId={CorrelationId}).",
+                table, id, job.JobId, correlationId);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.GetType().Name);
+        }
     }
 
     /// <summary>One post-create step: a failure is logged and the create stands (step 12 never throws).</summary>
@@ -1903,10 +2387,19 @@ internal sealed partial class RecordCreationService
             "record numbering.");
     }
 
-    /// <summary>The step record, with one log line per step (NFR-04).</summary>
+    /// <summary>
+    /// The step record, with one log line per step (NFR-04). Task 049c (NFR-02): each line also carries the step's time, the
+    /// milliseconds since the previous step was recorded (the first: since the pipeline began), and the total so far — the
+    /// split task 021 read from the gaps between these lines, now on the line itself.
+    /// </summary>
     private sealed class StepTrace(string table, string correlationId, ILogger logger)
     {
         private readonly List<RecordCreationStepRecord> _steps = [];
+        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+        private TimeSpan _lastRecorded = TimeSpan.Zero;
+
+        /// <summary>The request's correlation id (for the logs of a step's own helpers).</summary>
+        public string CorrelationId => correlationId;
 
         /// <summary>The step running now (for the fault log).</summary>
         public RecordCreationStep? Current { get; private set; }
@@ -1920,9 +2413,12 @@ internal sealed partial class RecordCreationService
         {
             Current = record.Step;
             _steps.Add(record);
+            var now = _clock.Elapsed;
+            var stepMs = (long)(now - _lastRecorded).TotalMilliseconds;
+            _lastRecorded = now;
             logger.Log(record.State is RecordCreationStepState.Refused or RecordCreationStepState.Failed ? LogLevel.Warning : LogLevel.Debug,
-                "[RECORD-CREATE] {Table} step {Step}: {State} {Note} (correlationId={CorrelationId})",
-                table, record.Step, record.State, record.Note, correlationId);
+                "[RECORD-CREATE] {Table} step {Step}: {State} {Note} (correlationId={CorrelationId}, stepMs={StepMs}, totalMs={TotalMs})",
+                table, record.Step, record.State, record.Note, correlationId, stepMs, (long)now.TotalMilliseconds);
         }
 
         public RecordCreationOutcome Refused(RecordCreationRefusal refusal)
@@ -1945,16 +2441,16 @@ internal sealed partial class RecordCreationService
         public RecordCreationOutcome Created(
             Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings,
             IReadOnlyList<RecordCreationWarning> mappingWarnings, IReadOnlyCollection<string> writtenColumns) => new()
-        {
-            CreatedId = id,
-            WrittenColumns = writtenColumns,
-            OwningTeamId = owningTeamId,
-            Isolated = isolated,
-            Warnings = warnings,
-            MappingWarnings = mappingWarnings,
-            Steps = _steps.ToArray(),
-            CorrelationId = correlationId,
-        };
+            {
+                CreatedId = id,
+                WrittenColumns = writtenColumns,
+                OwningTeamId = owningTeamId,
+                Isolated = isolated,
+                Warnings = warnings,
+                MappingWarnings = mappingWarnings,
+                Steps = _steps.ToArray(),
+                CorrelationId = correlationId,
+            };
     }
 }
 
@@ -2048,6 +2544,17 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     public AssignedAccessGrantor Grantor { get; init; } = AssignedAccessGrantor.Caller;
 
     /// <summary>
+    /// Task 049 fix round 2 (owner ruling 2026-11-05; UAC-r2's rulings D1 and D2): the caller asks for the record to be secure
+    /// (the Create Project wizard's Secure choice, <c>?secure=true</c> on the child-record route). A project the wizard creates
+    /// as secure is secure from creation: after the caller holds the rights the delegation rule asks on
+    /// <c>provision-project</c> (Write and the table's Share privilege on the record as an ordinary create would make it), it
+    /// is created INTO isolation like a row filed under a secure record, and completed the same way (step 12). Only a table
+    /// whose create can be isolated (<see cref="SecureRootInheritance.Inherits"/>: a project or a work assignment), and only a
+    /// caller's create; anything else is an argument error. <c>false</c> (the default): the create is exactly what it was.
+    /// </summary>
+    public bool SecureFromCreation { get; init; }
+
+    /// <summary>
     /// Task 019 review: search-index values (FR-38) the caller's adapter already removed from the payload BEFORE it mapped it
     /// (the chat create drops them first so a malformed index lookup cannot fail the mapping, review R7). They are logged at
     /// step 12 with the other drops (record id, applied index, origin <c>caller</c>, only when they differ from what was
@@ -2133,6 +2640,16 @@ internal sealed record RecordCreationWarning(string Code, string? Column, string
     /// <summary>Task 018a (K-7): a post-mapping default (<see cref="RecordCreationRequest.PostMappingDefaults"/>) was not written:
     /// the caller may not set it, it could not be checked, or the column cannot take it.</summary>
     internal const string DefaultValueDroppedCode = "record_creation.default_value_dropped";
+
+    /// <summary>Task 045a (owner decision 4 of 2026-11-04; the owner's 045 ruling Q3 (a), 2026-11-07): the regarding pair was sent
+    /// with its record type (<see cref="Column"/>: <c>sprk_regardingrecordtype</c>) and no record id, and no single record of that
+    /// type could be told from the row's own lookups, so the type (with any display columns sent) was not written: the row
+    /// holds neither half of the pair. Filling the id from the one record that agrees is silent.</summary>
+    internal const string RegardingTypeClearedCode = "record_creation.regarding_type_cleared";
+
+    /// <summary>Task 022 fix round 2 (the mapping-source rule): the source is secure, or whether it is secure could not be told,
+    /// and the row is not created in that source's isolation, so nothing mapped from it is written. The row is still created.</summary>
+    internal const string MappingSourceSecureCode = "record_creation.mapping_source_secure";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>

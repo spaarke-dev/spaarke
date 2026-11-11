@@ -727,7 +727,10 @@ public sealed class StoredFileServiceTests
         var rig = new StoredFileRig();
         var spec = Spec() with
         {
-            SourceDocumentId = Guid.NewGuid(), SourceCommunicationId = Guid.NewGuid(), SourceAttachmentIdentity = "eml-part-0", SourceVersion = 7,
+            SourceDocumentId = Guid.NewGuid(),
+            SourceCommunicationId = Guid.NewGuid(),
+            SourceAttachmentIdentity = "eml-part-0",
+            SourceVersion = 7,
         };
         var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
         (await rig.Service.StageAsync(spec with { SourceVersion = 8 }, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused
@@ -785,7 +788,11 @@ public sealed class StoredFileServiceTests
         var person = Guid.NewGuid();
         var spec = Spec() with
         {
-            SourceDocumentId = doc, SourceCommunicationId = comm, SourceAttachmentIdentity = "part-2", SourceVersion = 77, SourceSha256 = Sha(Pdf),
+            SourceDocumentId = doc,
+            SourceCommunicationId = comm,
+            SourceAttachmentIdentity = "part-2",
+            SourceVersion = 77,
+            SourceSha256 = Sha(Pdf),
         };
         var path = StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, spec.FileId);
 

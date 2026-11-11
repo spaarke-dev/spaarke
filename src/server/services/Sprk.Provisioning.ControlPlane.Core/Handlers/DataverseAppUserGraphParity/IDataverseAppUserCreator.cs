@@ -63,6 +63,16 @@ public abstract record CustomerBusinessUnitOutcome
     /// </summary>
     public sealed record WrongParent(Guid BusinessUnitId, Guid? ParentId, Guid RootBusinessUnitId) : CustomerBusinessUnitOutcome;
 
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name IS a reserved unit (the Secure Record unit): its id equals the id
+    /// Dataverse resolves for <paramref name="ReservedUnitName"/>. Dataverse matches names without case or accents, so a
+    /// name that differs from the reserved one only that way lands on it. No user was placed in it by this call;
+    /// <paramref name="CreatedByThisCall"/>: this call created it (fresh stamp — the name collides with a reserved name, and
+    /// the unit is empty).
+    /// </summary>
+    public sealed record IsReservedUnit(Guid BusinessUnitId, string ReservedUnitName, bool CreatedByThisCall = false)
+        : CustomerBusinessUnitOutcome;
+
     /// <summary>A read or the create failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
     public sealed record Failure(string Diagnostic) : CustomerBusinessUnitOutcome;
 }
@@ -73,7 +83,8 @@ public abstract record CustomerBusinessUnitOutcome
 /// <param name="ApplicationId">The Entra application (client) ID to register as the App User's <c>applicationid</c>.</param>
 /// <param name="SecurityRoleName">
 /// Security role name to ensure is associated (e.g. "System Administrator") — the copy of that role IN
-/// <paramref name="BusinessUnitId"/> (Dataverse assigns a user only roles of the user's own unit).
+/// <paramref name="BusinessUnitId"/> (Dataverse assigns a user only roles of the user's own unit). <c>null</c> = ensure the
+/// application user only and associate NO role (task 266: the ontology writer, whose one role H7b S24 assigns).
 /// </param>
 /// <param name="BusinessUnitId">
 /// T259: the customer's business unit (<see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/>). A new App
@@ -100,7 +111,7 @@ public sealed record DataverseAppUserCreationRequest(
     string EnvironmentUrl,
     string TenantId,
     string ApplicationId,
-    string SecurityRoleName,
+    string? SecurityRoleName,
     Guid BusinessUnitId,
     string? SystemUserAzureActiveDirectoryObjectId = null);
 
@@ -127,10 +138,14 @@ public interface IDataverseAppUserCreator
     /// <summary>
     /// T259 (ISS-010, INCOMING-145 §6 T1): finds the business unit named <paramref name="name"/> directly under the root,
     /// or creates it there. Read-then-write: an ambiguous name or a unit of that name under another parent writes nothing.
+    /// The found unit's ID is compared with the units Dataverse resolves for <paramref name="reservedUnitNames"/> — never the
+    /// names in code (Dataverse matches names without case or accents) — on the found, ambiguous AND just-created unit; a
+    /// match is <see cref="CustomerBusinessUnitOutcome.IsReservedUnit"/> and places no user. Any read fault is a Failure.
     /// </summary>
     Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
         string environmentUrl,
         string tenantId,
         string name,
+        IReadOnlyCollection<string> reservedUnitNames,
         CancellationToken cancellationToken);
 }

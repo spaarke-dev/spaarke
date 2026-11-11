@@ -1699,7 +1699,10 @@ internal sealed class DocumentGrantControlDirect(Spaarke.Core.Auth.Authorization
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 
@@ -1709,7 +1712,10 @@ internal sealed class DocumentGrantControlDirectThroughTheInterface(Spaarke.Core
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 
@@ -1734,7 +1740,10 @@ internal sealed class DocumentGrantControlListed(Spaarke.Core.Auth.IAuthorizatio
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 

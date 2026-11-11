@@ -1,31 +1,34 @@
 /**
- * projectService BU-cascade unit tests (Task 022 — FR-WIZ-02 + G2 latent-gap fix).
+ * projectService BU-cascade unit tests — converted by field-mapping-server-write-path-r1 task 022 (FR-16, FR-38/FR-40).
  *
- * Scope: ProjectService.createProject's BU cascade behavior for `sprk_searchindexname`. The
- * cascade itself lives in `EntityCreationService.applyUserBuDefaults` (already covered by
- * `EntityCreationService.cascade.test.ts`). These tests verify that:
+ * Before task 022 these tests asserted that `ProjectService.createProject` cascaded `sprk_searchindexname` from the
+ * user's business unit onto the create payload (FR-WIZ-02 / G2). Both index columns are now the SERVER's on a project
+ * (`RecordTableRule.SearchIndexed`; the index follows the content type, FR-40), and the create goes through the BFF
+ * child-records route, so the same scenarios now prove the cascade NEVER reaches the body (as task 021 did for the
+ * matter, and task 076 for the container):
  *
- *   - ProjectService wires the helper correctly (the index-name field appears on the payload)
- *   - `sprk_containerid` NEVER appears on the create payload (task 076, 2026-09-03). This is the
- *     security-critical case: `ICreateProjectFormState.isSecure` set `sprk_issecure` and then
- *     cascaded the SHARED business-unit container onto the same row regardless. The container
- *     half of the cascade is deleted; the server stamps it for a secure project.
- *   - INV-5 is preserved for `sprk_searchindexname` when the payload already has a value
- *     (defensive: ProjectService's current payload doesn't pre-set it, so we mutate
- *      the payload via a side-channel — see "INV-5 wiring proof" tests)
+ *   - `sprk_searchindexname`, the `sprk_ai_search_index` bind and `sprk_containerid` never appear, whatever the BU has;
+ *   - `sprk_issecure` never appears (task 150: field-secured; a secure project is asked for in the query string);
+ *   - `ProjectService` no longer calls `EntityCreationService.applyUserBuDefaults`;
+ *   - the error path is unchanged by the cascade: a refused create is a failed create.
  *
- * NOTE: We mock `_dataService.createRecord` and inspect the payload argument it
- * receives. The fetch-based nav-prop discovery is also mocked.
+ * The payload is read from the POST body to the route.
  */
 
 import { ProjectService } from '../projectService';
 import { EntityCreationService, type IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
 import type { ICreateProjectFormState } from '../projectFormTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
+import { _resetNavPropCacheForTests } from '../../../services/PolymorphicResolverService';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
 // ---------------------------------------------------------------------------
+
+const BFF = 'https://bff.example.test';
+const ROUTE = `${BFF}/api/v1/child-records/sprk_project`;
+const NEW_ID = '00000000-0000-0000-0000-000000000001';
 
 const EMPTY_FORM: ICreateProjectFormState = {
   projectTypeId: '',
@@ -44,7 +47,7 @@ const EMPTY_FORM: ICreateProjectFormState = {
 };
 
 function makeDataService(): { service: IDataService; createSpy: jest.Mock } {
-  const createSpy = jest.fn().mockResolvedValue('00000000-0000-0000-0000-000000000001');
+  const createSpy = jest.fn().mockResolvedValue(NEW_ID);
   const service: IDataService = {
     createRecord: createSpy,
     retrieveRecord: jest.fn().mockResolvedValue({}),
@@ -55,164 +58,150 @@ function makeDataService(): { service: IDataService; createSpy: jest.Mock } {
   return { service, createSpy };
 }
 
-// Mock the EntityDefinitions metadata fetch (nav-prop discovery). The minimum
-// viable response is an empty `value` array — ProjectService falls back to
-// skipping lookups it can't resolve.
+/** The host's authenticated fetch: the create route answers 201 with the new id. */
+function makeBff(): jest.Mock {
+  return jest.fn(async () => ({ ok: true, status: 201, json: async () => ({ id: NEW_ID }) }) as unknown as Response);
+}
+
+/** The body of the one create the route received. */
+function sentBody(bff: jest.Mock): Record<string, unknown> {
+  const calls = bff.mock.calls.filter(([url]) => String(url).startsWith(ROUTE));
+  expect(calls).toHaveLength(1);
+  return JSON.parse((calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+}
+
+const CASCADE_KEYS = /searchindex|search_index|containerid/i;
+
+// Mock the EntityDefinitions metadata fetch (nav-prop discovery). Offering the sprk_ai_search_index lookup proves that
+// the old `sprk_AI_Search_Index` bind is not written even when its navigation property exists.
 beforeEach(() => {
+  _resetNavPropCacheForTests();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (global as any).fetch = jest.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({ value: [] }),
+    json: async () => ({
+      value: [
+        {
+          ReferencingAttribute: 'sprk_ai_search_index',
+          ReferencingEntityNavigationPropertyName: 'sprk_AI_Search_Index',
+          ReferencedEntity: 'sprk_aisearchindex',
+        },
+      ],
+    }),
   });
+  jest.spyOn(console, 'info').mockImplementation(() => undefined);
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  _resetNavPropCacheForTests();
 });
 
 // ---------------------------------------------------------------------------
-// Cascade application — both fields when both BU values are set
+// The BU cascade never reaches the body
 // ---------------------------------------------------------------------------
 
-describe('ProjectService.createProject — FR-WIZ-02 BU cascade (G2 fix)', () => {
-  // Converted by task 076: was "sets BOTH sprk_containerid AND sprk_searchindexname".
-  it('sets sprk_searchindexname and NEVER sprk_containerid on the create payload when BU has both', async () => {
+describe("ProjectService.createProject — the BU cascade is the server's (task 022, FR-38/FR-40)", () => {
+  it('writes neither sprk_searchindexname, the AI search index bind nor sprk_containerid when the BU has all three', async () => {
     const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
+    const bff = makeBff();
 
     const defaults: IUserBuCascadeDefaults = {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
       searchIndexName: 'spaarke-knowledge-index-v2',
+      searchIndexId: 'bu-index-guid',
     };
 
-    const result = await projectService.createProject(EMPTY_FORM, defaults);
+    const result = await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, defaults);
     expect(result.success).toBe(true);
+    expect(createSpy).not.toHaveBeenCalled();
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
-    const [entityName, payload] = createSpy.mock.calls[0];
-    expect(entityName).toBe('sprk_project');
-    expect(payload).not.toHaveProperty('sprk_containerid');
-    expect(payload['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    const payload = sentBody(bff);
+    expect(Object.keys(payload).filter(k => CASCADE_KEYS.test(k))).toEqual([]);
+    expect(JSON.stringify(payload)).not.toMatch(/spaarke-knowledge-index-v2|bu-index-guid|bu-container-abc/);
   });
 
-  // Converted by task 076: was "sets only sprk_containerid when BU has containerId but no
-  // searchIndexName". Same fixture, now asserting neither field is written.
   it('writes neither field when BU has containerId but no searchIndexName (Spaarke Dev 1 / Test 1 scenario)', async () => {
-    const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
+    const { service } = makeDataService();
+    const bff = makeBff();
 
-    const defaults: IUserBuCascadeDefaults = {
+    await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
       searchIndexName: undefined,
-    };
+    });
 
-    await projectService.createProject(EMPTY_FORM, defaults);
-    const payload = createSpy.mock.calls[0][1];
-
-    expect(payload).not.toHaveProperty('sprk_containerid');
-    expect('sprk_searchindexname' in payload).toBe(false);
+    expect(Object.keys(sentBody(bff)).filter(k => CASCADE_KEYS.test(k))).toEqual([]);
   });
 
-  // Added by task 076 — the case W1 actually endangered: a project the user marked SECURE must not
-  // be born pointing at the shared business-unit container.
+  // Task 076 — the case W1 endangered: a project the user marked SECURE must not be born pointing at the shared
+  // business-unit container.
   it('writes no sprk_containerid on a SECURE project even when the BU supplies one', async () => {
-    const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
+    const { service } = makeDataService();
+    const bff = makeBff();
 
-    const defaults: IUserBuCascadeDefaults = {
-      businessUnitId: 'bu-guid-1',
-      containerId: 'shared-bu-container-abc',
-      searchIndexName: 'spaarke-knowledge-index-v2',
-    };
-
-    const result = await projectService.createProject({ ...EMPTY_FORM, isSecure: true }, defaults);
+    const result = await new ProjectService(service, bff, BFF).createProject(
+      { ...EMPTY_FORM, isSecure: true },
+      {
+        businessUnitId: 'bu-guid-1',
+        containerId: 'shared-bu-container-abc',
+        searchIndexName: 'spaarke-knowledge-index-v2',
+      }
+    );
     expect(result.success).toBe(true);
 
-    const payload = createSpy.mock.calls[0][1];
+    const payload = sentBody(bff);
     expect(payload).not.toHaveProperty('sprk_containerid');
+    expect(JSON.stringify(payload)).not.toContain('shared-bu-container-abc');
   });
 
-  // Task 150: sprk_issecure is field-secured — only the BFF (provisioning) may write it. A create payload that still
-  // names it is refused for every user, and a client that could write it could mark a record secure without
-  // provisioning it. Secure is REQUESTED by calling provisioning, never by this payload.
+  // Task 150: sprk_issecure is field-secured — only the BFF may write it. Secure is asked for in the route's query
+  // string (`secure=true`, task 049 fix round 2), never in this payload.
   it.each([true, false])('never writes sprk_issecure on the create payload (secure requested: %s)', async isSecure => {
-    const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
+    const { service } = makeDataService();
+    const bff = makeBff();
 
-    const result = await projectService.createProject({ ...EMPTY_FORM, isSecure });
+    const result = await new ProjectService(service, bff, BFF).createProject({ ...EMPTY_FORM, isSecure });
     expect(result.success).toBe(true);
 
-    const payload = createSpy.mock.calls[0][1];
-    expect(Object.keys(payload).map(k => k.toLowerCase())).not.toContain('sprk_issecure');
+    expect(Object.keys(sentBody(bff)).map(k => k.toLowerCase())).not.toContain('sprk_issecure');
   });
 
-  it('leaves both fields unset when cascadeDefaults is omitted (legacy behavior — backwards-compat)', async () => {
-    const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
+  it.each([
+    ['omitted', undefined],
+    ['with both fields undefined (BU exists but unset)', { businessUnitId: 'bu-guid-1' } as IUserBuCascadeDefaults],
+  ])("the body is the user's values only when cascadeDefaults is %s", async (_label, defaults) => {
+    const { service } = makeDataService();
+    const bff = makeBff();
 
-    await projectService.createProject(EMPTY_FORM);
-    const payload = createSpy.mock.calls[0][1];
+    await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, defaults);
 
-    expect('sprk_containerid' in payload).toBe(false);
-    expect('sprk_searchindexname' in payload).toBe(false);
-  });
-
-  it('leaves both fields unset when cascadeDefaults has both fields undefined (BU exists but unset)', async () => {
-    const { service, createSpy } = makeDataService();
-    const projectService = new ProjectService(service);
-
-    const defaults: IUserBuCascadeDefaults = {
-      businessUnitId: 'bu-guid-1',
-      containerId: undefined,
-      searchIndexName: undefined,
-    };
-
-    await projectService.createProject(EMPTY_FORM, defaults);
-    const payload = createSpy.mock.calls[0][1];
-
-    expect('sprk_containerid' in payload).toBe(false);
-    expect('sprk_searchindexname' in payload).toBe(false);
+    expect(sentBody(bff)).toEqual({ sprk_projectname: 'Test Project' });
   });
 });
 
 // ---------------------------------------------------------------------------
-// INV-5 wiring proof — verify the helper is called and honored.
-//
-// The ProjectService form (ICreateProjectFormState) does NOT currently expose
-// `sprk_containerid` or `sprk_searchindexname` as form fields, so an in-form
-// override is not possible from the wizard UI today. We verify the INV-5
-// contract is honored by directly testing the helper-application boundary
-// (i.e. that ProjectService delegates to `applyUserBuDefaults` rather than
-// reimplementing — which IS where INV-5 lives).
+// INV-5: the helper is no longer called by ProjectService (nothing of the cascade is written)
 // ---------------------------------------------------------------------------
 
-describe('ProjectService.createProject — INV-5 wiring (FR-WIZ-08)', () => {
-  it('delegates BU cascade to EntityCreationService.applyUserBuDefaults (INV-5 guard centralized)', async () => {
+describe('ProjectService.createProject — no client BU cascade (was INV-5 wiring, FR-WIZ-08)', () => {
+  it('does not call EntityCreationService.applyUserBuDefaults', async () => {
     const applySpy = jest.spyOn(EntityCreationService, 'applyUserBuDefaults');
-
     const { service } = makeDataService();
-    const projectService = new ProjectService(service);
 
-    const defaults: IUserBuCascadeDefaults = {
+    await new ProjectService(service, makeBff(), BFF).createProject(EMPTY_FORM, {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
       searchIndexName: 'spaarke-knowledge-index-v2',
-    };
+    });
 
-    await projectService.createProject(EMPTY_FORM, defaults);
-
-    expect(applySpy).toHaveBeenCalledTimes(1);
-    // The payload arg is the first positional arg; defaults the second.
-    const [payloadArg, defaultsArg] = applySpy.mock.calls[0];
-    expect(payloadArg).toEqual(expect.objectContaining({ sprk_projectname: 'Test Project' }));
-    expect(defaultsArg).toBe(defaults);
-
-    applySpy.mockRestore();
+    expect(applySpy).not.toHaveBeenCalled();
   });
 
-  // Defense-in-depth: even though the wizard UI doesn't expose override inputs today,
-  // verify the static helper IS INV-5-safe in the projectService caller path by
-  // wiring a payload pre-populated with explicit values via the helper directly.
-  // This is the canonical INV-5 test from EntityCreationService.cascade.test.ts,
-  // re-asserted here at the ProjectService caller boundary.
+  // The static helper itself is unchanged and still INV-5-safe for its other callers (EntityCreationService.cascade.test.ts
+  // is canonical); re-asserted here because this file used to own the project caller boundary.
   it('static applyUserBuDefaults preserves explicit values on the payload (INV-5)', () => {
     const entity: Record<string, unknown> = {
       sprk_projectname: 'Protected Project',
@@ -228,36 +217,29 @@ describe('ProjectService.createProject — INV-5 wiring (FR-WIZ-08)', () => {
     const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
 
     expect(applied).toEqual({ searchIndexNameSet: false });
-    // A pre-seeded `sprk_containerid` is untouched simply because nothing writes the column any
-    // more (task 076) — the INV-5 guard that used to protect it has no field left to guard.
     expect(entity['sprk_containerid']).toBe('explicit-override-container');
     expect(entity['sprk_searchindexname']).toBe('spaarke-file-index');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error path — cascade does not affect failure handling
+// Error path — the cascade does not affect failure handling
 // ---------------------------------------------------------------------------
 
 describe('ProjectService.createProject — error handling unchanged by cascade', () => {
-  it('returns success=false when createRecord throws (cascade does not mask the error)', async () => {
-    const createSpy = jest.fn().mockRejectedValue(new Error('Dataverse boom'));
-    const service: IDataService = {
-      createRecord: createSpy,
-      retrieveRecord: jest.fn().mockResolvedValue({}),
-      retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
-      updateRecord: jest.fn().mockResolvedValue(undefined),
-      deleteRecord: jest.fn().mockResolvedValue(undefined),
-    };
-    const projectService = new ProjectService(service);
+  it('returns success=false when the create is refused (cascade does not mask the error)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { service } = makeDataService();
+    const bff = jest.fn(async (): Promise<Response> => {
+      throw apiErrorFor(500, { title: 'Record not saved', status: 500, detail: 'Dataverse boom' });
+    });
 
-    const defaults: IUserBuCascadeDefaults = {
+    const result = await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
       searchIndexName: 'spaarke-knowledge-index-v2',
-    };
+    });
 
-    const result = await projectService.createProject(EMPTY_FORM, defaults);
     expect(result.success).toBe(false);
     expect(result.errorMessage).toContain('Dataverse boom');
   });

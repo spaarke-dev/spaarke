@@ -94,9 +94,11 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
     // The grid's loaded rows, in grid order. A ref, not state: the grid re-fires `onRecordsLoaded` whenever its
     // handler identity changes, and nothing renders from the rows until a row is opened.
     const rowsRef = React.useRef<ReadonlyArray<Record<string, unknown>>>([]);
-    const [detail, setDetail] = React.useState<DetailTarget | null>(null);
-    // Remounts the grid so it re-reads after the user deleted a record in the detail modal (that modal unmounts on close
-    // and forgets what it deleted, so the stale row would otherwise stay in the grid and reopen as "no access").
+    // The last record shown, kept after the modal closes: the modal is closed with `open={false}`, never unmounted while
+    // open, which would leave the page aria-hidden (#2658). `seq` keys each opening and changes only while closed.
+    const [detail, setDetail] = React.useState<(DetailTarget & { open: boolean; seq: number }) | null>(null);
+    // Remounts the grid so it re-reads after the user deleted a record in the detail modal (each opening is a fresh modal
+    // that forgets what was deleted before, so the stale row would otherwise stay in the grid and reopen as "no access").
     const [gridKey, setGridKey] = React.useState(0);
     const deletedRef = React.useRef(false);
 
@@ -111,9 +113,9 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
       const ids = rowsRef.current.map(r => String(r[cfg.idAttribute] ?? '')).filter(id => id.length > 0);
       const at = ids.findIndex(id => id.toLowerCase() === wanted);
       // The opened row is always in the set; if the grid has not reported it, browse just that one record.
-      setDetail(
-        at >= 0 ? { entityName: cfg.entity, ids, index: at } : { entityName: cfg.entity, ids: [recordId], index: 0 }
-      );
+      const target: DetailTarget =
+        at >= 0 ? { entityName: cfg.entity, ids, index: at } : { entityName: cfg.entity, ids: [recordId], index: 0 };
+      setDetail(prev => (prev?.open ? { ...prev, ...target } : { ...target, open: true, seq: (prev?.seq ?? 0) + 1 }));
     }, []);
 
     const handleIndexChange = React.useCallback((index: number) => setDetail(d => (d ? { ...d, index } : d)), []);
@@ -121,7 +123,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
       deletedRef.current = true;
     }, []);
     const handleClose = React.useCallback(() => {
-      setDetail(null);
+      setDetail(d => (d ? { ...d, open: false } : d));
       if (deletedRef.current) {
         deletedRef.current = false;
         rowsRef.current = [];
@@ -141,7 +143,8 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
         />
         {detail && (
           <RecordDetailModal
-            open
+            key={detail.seq}
+            open={detail.open}
             onClose={handleClose}
             entityName={detail.entityName}
             recordIds={detail.ids}

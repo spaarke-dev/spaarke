@@ -58,6 +58,7 @@ import {
   COMMUNICATION_ENTITY,
   mapRowToEmailCardItem,
   deriveEmailWorkspaceVisibleState,
+  replyParentAssociations,
 } from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
@@ -219,10 +220,11 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   }, [selectedId]);
 
   // Parent-email "Related to" inheritance: the selected record's typed regarding
-  // lookups are the parent's associations for Reply/Reply All/Forward.
+  // lookups are the parent's associations for Reply/Reply All/Forward — its denormalized
+  // primary FIRST, since the send signs the tracking footer from associations[0] (task 176 R3-2).
   const parentAssociations = React.useMemo<ICommunicationAssociation[]>(
     () =>
-      (record.recordState?.filedAssociations ?? []).map(a => ({
+      replyParentAssociations(record.recordState).map(a => ({
         entityType: a.entityType,
         entityId: a.recordId,
         entityName: a.recordName,

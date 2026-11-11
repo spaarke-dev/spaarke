@@ -141,7 +141,7 @@ A test that passes all three is maintain-class: name it `{Method}_{Scenario}_{Ex
 
 - **Naming:** `{MethodOrEndpoint}_{Scenario}_{ExpectedResult}` — e.g. `GetDocument_WhenNotFound_ReturnsNotFound`.
 - **Class names:** `{ClassUnderTest}Tests.cs` (domain unit tests), `{Endpoint}ContractTests.cs` (contract), `Issue{N}_{Description}Tests.cs` (regression).
-- **Frameworks:** xUnit, Moq (not NSubstitute), FluentAssertions (prefer it over `Assert.Equal` / `Assert.NotNull`). Versions: the test `.csproj` files (`Directory.Packages.props` is not authoritative — central package management is off).
+- **Frameworks:** xUnit, Moq (not NSubstitute), FluentAssertions (prefer it over `Assert.Equal` / `Assert.NotNull`). Versions: the test `.csproj` files (there is no central package management).
 - **Time:** `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`). Banned in tests: `Stopwatch`, `DateTime.UtcNow`, `Task.Delay` — they flake on shared CI runners. Pattern: construct the SUT with a `FakeTimeProvider`, then `time.Advance(...)`.
 - **Moq** for module-boundary mocks only, never for `HttpClient` / `HttpMessageHandler`.
 - **Test data builders** for complex objects, next to the test class or under `tests/integration/Shared/` for cross-class reuse.

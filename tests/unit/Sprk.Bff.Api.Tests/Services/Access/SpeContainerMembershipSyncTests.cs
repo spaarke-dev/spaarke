@@ -61,7 +61,8 @@ public class SpeContainerMembershipSyncTests
                 "systemuser" => _users,
                 "sprk_project" => _secureProjects,
                 _ => [],
-            }) { MoreRecords = false });
+            })
+            { MoreRecords = false });
         _dataverse.Setup(d => d.GetEntitySetNameAsync("sprk_project", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_projects");
         _registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HashSet<string> { "sprk_project" });

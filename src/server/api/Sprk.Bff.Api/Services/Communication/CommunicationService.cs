@@ -47,6 +47,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -112,8 +114,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
-        TrackingFooterGate? trackingFooterGate = null)
+        TrackingFooterGate? trackingFooterGate = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null)
     {
+        _recordShares = recordShares;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -188,7 +192,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
                 ? regarding.EntityName!
-                : $"{regarding.EntityType} {regarding.EntityId}";
+                : "a Spaarke record"; // never the logical name or the id
 
             var footerText = settings.MessageTemplate
                 .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
@@ -852,6 +856,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = CommunicationDirection.Outgoing,
                     Message = envelope,
                     AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                    // Ontology task 176 (D-216): the budget inquiry's new thread is created Private.
+                    CreatePrivate = request.CreateThreadPrivate,
                 },
                 ct);
         }
@@ -1281,7 +1287,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
 
-        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record.
+        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
+        // from its source describes the source's record: it goes unless the thread names that same record.
+        DropDisplayValuesUnlessSameRecord(communication, regarding.Id);
         if (!string.IsNullOrWhiteSpace(thread.RegardingName))
             communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
         communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
@@ -1567,21 +1575,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
             // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned). #2091: then
             // the step after a re-file (its mirror, what is filed under it, its gate Decision Records), never thrown.
+            // Task 054: a message joining a Direct thread gets its two participants in this same update.
             var assignment = await ThreadResolver.JoinThreadAsync(
                 _genericEntityService,
                 _ownership,
                 _scopeFactory,
                 _logger,
+                _recordShares,
                 communicationId,
                 threadId,
-                token => _genericEntityService.UpdateAsync(
-                    "sprk_communication",
-                    communicationId,
-                    new Dictionary<string, object>
-                    {
-                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-                    },
-                    token),
+                (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
+                    _genericEntityService, _logger, communicationId, threadId, alongside, token),
                 ct);
 
             _logger.LogInformation(
@@ -2892,6 +2896,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
 
+            // Ontology task 176 (D-216): a server-set secondary association the caller files the row under too (the budget
+            // inquiry's matter). Written BEFORE the stamp, so the inherited Access Permission and the owner question see it.
+            foreach (var also in associations.Skip(1).Where(a => a.AlsoRegarding && a.EntityId != Guid.Empty))
+            {
+                if (RegardingLookupMap.TryGetValue(also.EntityType, out var alsoMapping))
+                    communication[alsoMapping.LookupField] = new EntityReference(also.EntityType, also.EntityId);
+            }
+
             // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
             // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
             // inherited one. Four of the twelve mapped targets are child-class (analysis, invoice, event
@@ -2906,6 +2918,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Unknown entity type for association lookup mapping: {EntityType}. Regarding lookup will not be set.",
                 primary.EntityType);
         }
+
+        // A reply's copied display values describe the SOURCE's record (CopyRegardingFromSourceAsync): unless the explicit
+        // association names that same record they leave with the id they described, so the row never holds one record's id
+        // beside another's values. The association's own name and url are written below when it gives them; otherwise they
+        // stay unset.
+        DropDisplayValuesUnlessSameRecord(communication, primary.EntityId);
 
         // Set denormalized regarding fields
         if (primary.EntityName is not null)
@@ -2973,7 +2991,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var columns = new List<string>
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
-                "sprk_regardingrecordurl", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -2996,9 +3014,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Denormalized regarding pointer — copy only populated values (additive).
             CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            // The display values (name, url, number) and the pair's TYPE describe the record the id names, so they are copied
+            // only beside that id: the row must now hold the source's id, and it must parse as an id. A source with display
+            // values but no usable id copies none, so the row never holds values with nothing to say which record they are of.
+            // The type is a lookup to sprk_recordtype_ref, copied as a reference (045c, owner Q6 (c); the string read this
+            // replaces always came back empty, so a reply never carried the type).
+            if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"),
+                    source.GetAttributeValue<string>("sprk_regardingrecordid")))
+            {
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
+
+                if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
+                    && !communication.Attributes.ContainsKey("sprk_regardingrecordtype"))
+                {
+                    communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+                }
+            }
 
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
@@ -3020,6 +3054,30 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Fail closed (task 065 fix round 1): the parent's flag is unknown, so the reply is not shareable.
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whether two stored record ids name the same record: both parse as ids (braces, hyphens and letter case do not matter)
+    /// and are equal. A value that does not parse, or is absent, names no record, so it is different from every other value.
+    /// </summary>
+    private static bool SameRecord(string? left, string? right) =>
+        Guid.TryParse(left, out var a) && Guid.TryParse(right, out var b) && a == b;
+
+    /// <summary>
+    /// The display values of the regarding pointer (type, number, name, url) describe the record the row's
+    /// <c>sprk_regardingrecordid</c> names. Before that id is written for <paramref name="newRecordId"/>, they are removed
+    /// unless the row's current id already names that same record (<see cref="SameRecord"/>); an absent id counts as a
+    /// different record. The caller then writes whatever display values it has for the new record.
+    /// </summary>
+    private static void DropDisplayValuesUnlessSameRecord(DataverseEntity communication, Guid newRecordId)
+    {
+        if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"), newRecordId.ToString()))
+            return;
+
+        communication.Attributes.Remove("sprk_regardingrecordtype");
+        communication.Attributes.Remove("sprk_regardingrecordnumber");
+        communication.Attributes.Remove("sprk_regardingrecordname");
+        communication.Attributes.Remove("sprk_regardingrecordurl");
     }
 
     /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>
@@ -3069,8 +3127,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Graph's path-keyed simple PUT, which accepts NO @microsoft.graph.conflictBehavior and is a
         // silent, unconditional REPLACE. Flattening to a bare {fileName} would therefore have been silent
         // DATA LOSS. Folding the id into the filename keeps the write flat AND keeps it unique — the same
-        // filename-carries-the-uniqueness approach EmailAttachmentProcessor.GenerateUniqueFileName already
-        // uses (Services/Email/EmailAttachmentProcessor.cs).
+        // filename-carries-the-uniqueness approach IncomingCommunicationProcessor's attachment upload uses
+        // (`$"{communicationId:N}_{SpeUploadPath.SanitizeFileName(fileName)}"`).
         //
         // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),

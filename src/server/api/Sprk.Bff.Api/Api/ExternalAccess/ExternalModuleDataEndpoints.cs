@@ -1238,57 +1238,57 @@ public static class ExternalModuleDataEndpoints
                     break;
 
                 case "attribute":
-                {
-                    var name = (string?)element.Attribute("name");
-                    if (element.Attribute("alias") is not null)
                     {
-                        return $"aliased attribute '{name}'";
+                        var name = (string?)element.Attribute("name");
+                        if (element.Attribute("alias") is not null)
+                        {
+                            return $"aliased attribute '{name}'";
+                        }
+                        var marker = AggregateMarkers.FirstOrDefault(m => element.Attribute(m) is not null);
+                        if (marker is not null)
+                        {
+                            return $"aggregate attribute '{name}' ({marker}=)";
+                        }
+                        if (!IsReadable(name, readableColumns))
+                        {
+                            return $"attribute '{name}'";
+                        }
+                        break;
                     }
-                    var marker = AggregateMarkers.FirstOrDefault(m => element.Attribute(m) is not null);
-                    if (marker is not null)
-                    {
-                        return $"aggregate attribute '{name}' ({marker}=)";
-                    }
-                    if (!IsReadable(name, readableColumns))
-                    {
-                        return $"attribute '{name}'";
-                    }
-                    break;
-                }
 
                 case "condition":
-                {
-                    if (element.Attribute("entityname") is not null)
                     {
-                        // Names a link-entity alias — there are none on this surface, so it is not modelled.
-                        return "condition with entityname=";
+                        if (element.Attribute("entityname") is not null)
+                        {
+                            // Names a link-entity alias — there are none on this surface, so it is not modelled.
+                            return "condition with entityname=";
+                        }
+                        var name = (string?)element.Attribute("attribute");
+                        if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
+                        {
+                            return $"condition on '{name}'";
+                        }
+                        var valueOf = element.Attribute("valueof");
+                        if (valueOf is not null && (!IsReadable(valueOf.Value, readableColumns) || IsUnfilterable(valueOf.Value, unfilterableColumns)))
+                        {
+                            return $"condition valueof '{valueOf.Value}'";
+                        }
+                        break;
                     }
-                    var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
-                    {
-                        return $"condition on '{name}'";
-                    }
-                    var valueOf = element.Attribute("valueof");
-                    if (valueOf is not null && (!IsReadable(valueOf.Value, readableColumns) || IsUnfilterable(valueOf.Value, unfilterableColumns)))
-                    {
-                        return $"condition valueof '{valueOf.Value}'";
-                    }
-                    break;
-                }
 
                 case "order":
-                {
-                    if (element.Attribute("alias") is not null || element.Attribute("entityname") is not null)
                     {
-                        return "order by alias or entityname";
+                        if (element.Attribute("alias") is not null || element.Attribute("entityname") is not null)
+                        {
+                            return "order by alias or entityname";
+                        }
+                        var name = (string?)element.Attribute("attribute");
+                        if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
+                        {
+                            return $"order by '{name}'";
+                        }
+                        break;
                     }
-                    var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
-                    {
-                        return $"order by '{name}'";
-                    }
-                    break;
-                }
 
                 case "all-attributes":
                     return "all-attributes";

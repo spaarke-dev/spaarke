@@ -58,7 +58,8 @@ public class AdminAttentionTextTests
     {
         [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(Enumerable.Range(0, count).Select(i => (JsonNode)new JsonObject
         {
-            ["policyCode"] = $"BILL-{i}", ["code"] = "core_record_changed",
+            ["policyCode"] = $"BILL-{i}",
+            ["code"] = "core_record_changed",
             ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = Guid.NewGuid().ToString("D") },
         }).ToArray()),
     };
@@ -110,7 +111,8 @@ public class AdminAttentionTextTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
         };
@@ -199,12 +201,14 @@ public class AdminAttentionTextTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
             [InvoiceSubmissionPersister.SignalPlanRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-P", ["code"] = "sentence_too_long",
+                ["policyCode"] = "BILL-P",
+                ["code"] = "sentence_too_long",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_invoice", ["id"] = "bbbbbbbb-0000-0000-0000-000000000000" },
             }),
         };

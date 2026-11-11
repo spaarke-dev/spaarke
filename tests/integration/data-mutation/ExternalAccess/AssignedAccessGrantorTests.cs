@@ -146,7 +146,8 @@ public sealed class AssignedAccessGrantorTests : TypedToolHandlerTestFixture
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"{{{table}}}","item":{"{{{nameColumn}}}":"New"}}""")
-                with { UserId = _callerOid.ToString("D") },
+                with
+            { UserId = _callerOid.ToString("D") },
             BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record"),
             CancellationToken.None);
 

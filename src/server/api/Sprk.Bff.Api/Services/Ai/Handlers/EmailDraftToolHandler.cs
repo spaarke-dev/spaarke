@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
@@ -1320,18 +1320,26 @@ internal sealed class EmailDraftToolHandler : IToolHandler
             // gave the result the failure's own ErrorCode, null included), never as a code of this tool's own.
             { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream, ClientFailure: { } upstream } =>
                 upstream.ErrorCode,
-            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved
-                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream } =>
+            {
+                Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
+            } =>
                 refusal.ClientFailure?.ErrorCode ?? ToolErrorCodes.InternalError,
-            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied
-                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.BlockedColumn } =>
+            {
+                Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.BlockedColumn
+            } =>
                 DataverseUserClientErrorCodes.AccessDenied,
-            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden,
-                Code: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.DeniedCode } =>
+            {
+                Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden,
+                Code: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.DeniedCode
+            } =>
                 DataverseUserClientErrorCodes.AccessDenied,
             { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid } => ToolErrorCodes.ValidationFailed,
-            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved
-                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden } => refusal.Code,
+            {
+                Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden
+            } => refusal.Code,
             _ => ToolErrorCodes.InternalError,
         };
         return (code, text);

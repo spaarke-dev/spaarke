@@ -355,7 +355,7 @@ public static class ExecutorSideEffects
         [ExecutorType.Wait] = "control flow (no executor registered)",
         [ExecutorType.Start] = "StartNodeExecutor binds the run payload into scope",
         [ExecutorType.DeliverOutput] = "DeliverOutputNodeExecutor renders the run's output for the caller",
-        [ExecutorType.DeliverComposite] ="DeliverCompositeNodeExecutor composes upstream outputs into one section map",
+        [ExecutorType.DeliverComposite] = "DeliverCompositeNodeExecutor composes upstream outputs into one section map",
         [ExecutorType.QueryDataverse] = "QueryDataverseNodeExecutor runs a read query",
         [ExecutorType.LookupUserMembership] = "LookupUserMembershipNodeExecutor reads the caller's memberships",
         [ExecutorType.GroundingVerify] = "GroundingVerifyNode compares citations with source chunks",

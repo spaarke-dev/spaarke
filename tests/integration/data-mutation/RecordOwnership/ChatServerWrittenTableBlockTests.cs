@@ -288,7 +288,8 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
         {
             tablename = table,
             item = item.ToDictionary(i => i.Column, i => i.Value),
-        })) with { UserId = CallerOid.ToString() };
+        })) with
+        { UserId = CallerOid.ToString() };
 
     private static (string Column, JsonElement Value) Lookup(string column, string table, Guid id) =>
         (column, JsonSerializer.SerializeToElement(new { relatedTable = table, recordId = id }));

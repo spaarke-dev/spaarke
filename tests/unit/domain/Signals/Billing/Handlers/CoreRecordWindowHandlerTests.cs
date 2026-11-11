@@ -275,7 +275,8 @@ public class CoreRecordWindowHandlerTests
         var facts = Facts(
             Fee(0) with { Date = Open.AddDays(-30), Hours = -1m, Amount = -575m },
             Fee(1) with { Date = null, Amount = -575m },
-            Expense(2) with { Date = Open.AddDays(-30), Amount = -40m }) with { CoreRecord = core };
+            Expense(2) with { Date = Open.AddDays(-30), Amount = -40m }) with
+        { CoreRecord = core };
 
         Run(Window(), facts).Should().BeEmpty("a credit is never judged as a charge, whatever the billing status");
     }

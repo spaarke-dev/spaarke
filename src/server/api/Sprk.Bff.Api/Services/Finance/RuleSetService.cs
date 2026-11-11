@@ -1422,7 +1422,11 @@ public class RuleSetService
 
             var newWorking = merged with
             {
-                Id = newId, Number = number, State = (int)ProposalState.Proposed, InForceFrom = null, InForceTo = null,
+                Id = newId,
+                Number = number,
+                State = (int)ProposalState.Proposed,
+                InForceFrom = null,
+                InForceTo = null,
             };
             var versions = rule.Versions.Append(newWorking).ToList();
             _logger.LogInformation("Rule {PolicyId} of rule set {RuleSetId}: new draft version {Number} {VersionId} (predecessor {Predecessor} untouched)",

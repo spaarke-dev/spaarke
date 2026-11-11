@@ -752,11 +752,11 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed()
+    public async Task ATeamOwnedSource_WhenTheSecureTeamIsSetUpButMissing_CopiesNothing_FailClosed()
     {
-        // Review pass 3: with no Secure Record owner team to compare against, the source's team owner cannot be told
-        // not to be it.
-        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        // Review pass 3, task 022 fix round 6: the Secure Record business unit exists but holds no named owner team, so the
+        // source's team owner cannot be told not to be it.
+        _world.ShareWorld = () => SecureChildShareWorld.Standard().Remove("team", SecureChildShareWorld.SecureTeam);
         var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
         var id = EventOwnedByThePersonUnder(source);
 
@@ -764,6 +764,34 @@ public sealed class RecordRepairModeTests
 
         NothingSecretWasWritten();
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task ATeamOwnedUnflaggedSource_WithNoSecureRecordSetUp_IsCopied()
+    {
+        // Task 022 fix round 6: an environment with no Secure Record business unit has no team that can own a secure record,
+        // so an unflagged team-owned source is ordinary.
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Ordinary Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Values).OfType<string>().Should().Contain("Ordinary Client");
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task AFlaggedSource_WithNoSecureRecordSetUp_IsStillNotCopied()
+    {
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: true, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
     }
 
     [Fact]
@@ -1048,6 +1076,34 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Mapping, "sprk_assignedlawfirm1").ReasonCode.Should().Be(RecordRepairReason.MappedValueAssignsAccess);
     }
 
+    /// <summary>
+    /// Task 032b-1 (review): an invoice's display copies (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>) left the
+    /// access registry, so Repair's never-map list names them itself, with their own reason: Repair never re-fills a display
+    /// copy (the create alone sets it). Asked directly: an invoice row is refused before the mapping step today (#1911), which
+    /// would mask the list.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_assignedtoattorney1")]
+    [InlineData("sprk_assignedtoattorney2")]
+    [InlineData("sprk_assignedtoparalegal1")]
+    [InlineData("sprk_assignedtoparalegal2")]
+    public void AnInvoiceDisplayCopy_IsNeverMappedByRepair_WithItsOwnReason(string column)
+    {
+        _world.ColumnsRepairNeverMaps("sprk_invoice").Should().Contain(column, RecordRepairReason.MappedValueIsDisplayCopy);
+    }
+
+    [Fact]
+    public void ADisplayCopyName_OnAnotherTable_OrAPlainInvoiceColumn_IsNotADisplayCopy_MustNotFire()
+    {
+        var invoice = _world.ColumnsRepairNeverMaps("sprk_invoice");
+        invoice.Should().NotContainKeys("sprk_clientreference", "sprk_assignedto1", "sprk_assignedto2");
+
+        var eventColumns = _world.ColumnsRepairNeverMaps("sprk_event");
+        eventColumns.Should().NotContainKey("sprk_assignedtoattorney1");
+        eventColumns.Should().Contain("sprk_assignedattorney1", RecordRepairReason.MappedValueAssignsAccess,
+            "the registry's columns keep their own reason");
+    }
+
     [Fact]
     public async Task AnOrdinaryColumn_IsStillFilledFromTheProject_F1_1MustNotFire()
     {
@@ -1276,8 +1332,14 @@ internal sealed class RepairWorld
             Copy("sprk_practicearea", "sprk_practicearea", 2),
             new FieldMappingRuleEntity
             {
-                Id = Guid.NewGuid(), Name = "priority", SourceField = string.Empty, TargetField = "sprk_priorityname", TargetFieldType = 0,
-                MappingType = CreateTimeFieldMapping.MappingTypeDefault, DefaultValue = DefaultPriority, ExecutionOrder = 3,
+                Id = Guid.NewGuid(),
+                Name = "priority",
+                SourceField = string.Empty,
+                TargetField = "sprk_priorityname",
+                TargetFieldType = 0,
+                MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+                DefaultValue = DefaultPriority,
+                ExecutionOrder = 3,
                 IsActive = true,
             });
     }
@@ -1326,11 +1388,30 @@ internal sealed class RepairWorld
     /// <summary>Every update call the service made (applied or not).</summary>
     public int UpdateCalls => Writes.Count;
 
+    /// <summary>
+    /// Task 052a: the column metadata the service reads app-only, per (table, column), over the default — every column any
+    /// profile's rules name, on every table: text, valid for update, not field-secured, no length limit. A <c>null</c> value
+    /// takes the column out of its table.
+    /// </summary>
+    public Dictionary<(string Table, string Column), ColumnMetadata?> ColumnOverrides { get; } = [];
+
+    /// <summary>Task 052a: per table, the fault reading its column metadata throws.</summary>
+    public Dictionary<string, Exception> ColumnMetadataFaults { get; } = [];
+
+    /// <summary>Task 052a: every table whose column metadata the service read, in order.</summary>
+    public List<string> ColumnMetadataReads { get; } = [];
+
+    /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
+    public List<(string Table, string[] Columns)> SourceReads { get; } = [];
+
     public static readonly Guid MatterType = Guid.Parse("a0160000-0000-4000-8000-0000000000c1");
     public static readonly Guid SecureCommunication = Guid.Parse("a0160000-0000-4000-8000-000000000008");
     public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
 
     public Task<RecordRepairOutcome> RepairAsync(string table, Guid id) => Service().RepairAsync(table, id, CancellationToken.None);
+
+    /// <summary>Task 032b-1 seam: Repair's never-map list for a table, asked directly (no row, no profile).</summary>
+    public IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table) => Service().ColumnsRepairNeverMaps(table);
 
     // ── Rows ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1560,25 +1641,43 @@ internal sealed class RepairWorld
     /// <summary>A Concat or Template rule into a text column.</summary>
     public static FieldMappingRuleEntity Expression(int mappingType, string expression, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"expr -> {target}", SourceField = string.Empty, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = mappingType, Expression = expression,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"expr -> {target}",
+        SourceField = string.Empty,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = mappingType,
+        Expression = expression,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>A Copy rule of a lookup.</summary>
     public static FieldMappingRuleEntity CopyLookup(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source, SourceFieldType = 1, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = 1,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>A Default rule of a literal into a text column.</summary>
     public static FieldMappingRuleEntity DefaultText(string target, string value, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"default -> {target}", SourceField = string.Empty, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
-        DefaultValue = value, ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"default -> {target}",
+        SourceField = string.Empty,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+        DefaultValue = value,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     public static readonly Guid OrdinaryProject = Guid.Parse("a0160000-0000-4000-8000-00000000000a");
@@ -1607,10 +1706,15 @@ internal sealed class RepairWorld
     /// <summary>A Copy rule of a two-option (boolean) column.</summary>
     public static FieldMappingRuleEntity CopyBoolean(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source,
-        SourceFieldType = CreateTimeFieldMapping.FieldTypeBoolean, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeBoolean, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = CreateTimeFieldMapping.FieldTypeBoolean,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeBoolean,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>The matter holds lookups to a document and the communication (sources of the D7-link rules).</summary>
@@ -1709,69 +1813,177 @@ internal sealed class RepairWorld
                 BeforeWrite = null;
                 var current = Directory.Version(table, id).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var applied = current == version;
-                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null));
+                // Task 052a review F3: Dataverse refuses the whole update when one value is not the CLR type its column takes.
+                var mistyped = MistypedColumns(table, fields);
+                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null && mistyped.Count == 0));
                 if (WriteFault is { } fault)
                     throw fault;
+                if (mistyped.Count > 0)
+                    throw new InvalidOperationException($"Test: {table} {id}: the SDK refuses {string.Join("; ", mistyped)}.");
                 if (!applied)
                     throw new DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
                 return Task.CompletedTask;
             });
+        entities
+            .Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, CancellationToken _) => ColumnMetadataOf(table));
         return entities.Object;
     }
+
+    /// <summary>Task 052a: <paramref name="table"/>'s column metadata — the default, with <see cref="ColumnOverrides"/> applied.</summary>
+    private Task<IReadOnlyDictionary<string, ColumnMetadata>> ColumnMetadataOf(string table)
+    {
+        ColumnMetadataReads.Add(table);
+        if (ColumnMetadataFaults.TryGetValue(table, out var fault))
+            return Task.FromException<IReadOnlyDictionary<string, ColumnMetadata>>(fault);
+
+        return Task.FromResult<IReadOnlyDictionary<string, ColumnMetadata>>(ColumnsOf(table));
+    }
+
+    /// <summary>Task 052a review F3: each patch column the world has metadata for whose value is not the CLR type its type takes.</summary>
+    private List<string> MistypedColumns(string table, Dictionary<string, object> fields)
+    {
+        var columns = ColumnsOf(table);
+        return fields
+            .Where(f => columns.TryGetValue(f.Key, out var metadata) && !ClrTypeFits(metadata.AttributeType, f.Value))
+            .Select(f => $"{f.Key} ({columns[f.Key].AttributeType}) = {f.Value?.GetType().Name ?? "null"}")
+            .ToList();
+    }
+
+    /// <summary>The SDK's CLR type for a column of <paramref name="type"/> (a null clears any column; an unknown type is not judged).</summary>
+    public static bool ClrTypeFits(string? type, object? value) => value is null || type switch
+    {
+        "String" or "Memo" => value is string,
+        "Integer" => value is int,
+        "BigInt" => value is long,
+        "Decimal" => value is decimal,
+        "Double" => value is double,
+        "Money" => value is Money,
+        "Boolean" => value is bool,
+        "Picklist" or "State" or "Status" => value is OptionSetValue,
+        "Virtual" => value is OptionSetValueCollection,
+        "DateTime" => value is DateTime,
+        "Lookup" or "Customer" or "Owner" => value is EntityReference,
+        _ => true,
+    };
+
+    /// <summary>The tables this world's lookups point at (a lookup column's default targets).</summary>
+    public static readonly string[] KnownTables =
+    [
+        "sprk_matter", "sprk_project", "sprk_organization", "sprk_document", "sprk_communication", "sprk_invoice", "sprk_event",
+        "sprk_todo", "sprk_aisearchindex", "account", "contact", "systemuser", "team", "businessunit",
+    ];
+
+    /// <summary>
+    /// Task 052a: a column of <paramref name="type"/> as real metadata states one — valid for update, not secured, a number or
+    /// Money column with its platform range, a lookup with <see cref="KnownTables"/> as targets (a choice column states no
+    /// option values: a test that maps one gives them).
+    /// </summary>
+    public static ColumnMetadata Typed(string column, string type, int? maxLength = null)
+    {
+        (decimal? Min, decimal? Max) range = type switch
+        {
+            "Integer" => (int.MinValue, int.MaxValue),
+            "BigInt" => (long.MinValue, long.MaxValue),
+            "Decimal" or "Double" => (-100_000_000_000m, 100_000_000_000m),
+            "Money" => (-922_337_203_685_477m, 922_337_203_685_477m),
+            _ => (null, null),
+        };
+        return new ColumnMetadata(column.ToLowerInvariant(), type, IsValidForUpdate: true, IsSecured: false, maxLength,
+            range.Min, range.Max, type is "Lookup" or "Customer" ? KnownTables : null);
+    }
+
+    /// <summary>Task 052a: <paramref name="table"/>'s column metadata — the default, with <see cref="ColumnOverrides"/> applied.</summary>
+    private Dictionary<string, ColumnMetadata> ColumnsOf(string table)
+    {
+        var rules = _profiles.Values.SelectMany(p => p.Rules ?? []).ToArray();
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in CreateTimeFieldMapping.CollectSourceColumns(rules).Where(c => c.Length > 0))
+            columns[column] = Typed(column, "String");
+
+        // A rule's target column is typed as the rule says it is (Copy keeps the source's value, so the types agree).
+        foreach (var rule in rules.Where(r => !string.IsNullOrWhiteSpace(r.TargetField)))
+            columns[rule.TargetField.Trim()] = Typed(rule.TargetField.Trim(), AttributeTypeOf(rule.TargetFieldType));
+
+        foreach (var ((overridden, column), metadata) in ColumnOverrides)
+        {
+            if (!string.Equals(overridden, table, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (metadata is null)
+                columns.Remove(column);
+            else
+                columns[column] = metadata;
+        }
+
+        return columns;
+    }
+
+    /// <summary>Task 052a: the column type a rule's <c>TargetFieldType</c> names (Number: a decimal column).</summary>
+    public static string AttributeTypeOf(int targetFieldType) => targetFieldType switch
+    {
+        CreateTimeFieldMapping.FieldTypeLookup => "Lookup",
+        CreateTimeFieldMapping.FieldTypeOptionSet => "Picklist",
+        CreateTimeFieldMapping.FieldTypeNumber => "Decimal",
+        CreateTimeFieldMapping.FieldTypeDateTime => "DateTime",
+        CreateTimeFieldMapping.FieldTypeBoolean => "Boolean",
+        CreateTimeFieldMapping.FieldTypeMemo => "Memo",
+        _ => "String",
+    };
 
     private Entity Read(string table, Guid id, string[] columns)
     {
         switch (table)
         {
             case "team":
-            {
-                var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid") };
-                query.Criteria.AddCondition("teamid", ConditionOperator.Equal, id);
-                return Directory.Answer(query).Entities.Single();
-            }
+                {
+                    var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid") };
+                    query.Criteria.AddCondition("teamid", ConditionOperator.Equal, id);
+                    return Directory.Answer(query).Entities.Single();
+                }
 
             case "systemuser":
-            {
-                if (SystemUserReadFault is { } userFault)
-                    throw userFault;
-                if (MissingSystemUsers.Contains(id))
-                    return null!; // no such row: the application-user check cannot tell
-                var user = new Entity("systemuser", id);
-                if (id == AppUser)
-                    user[ApplicationUserCheck.ApplicationIdAttribute] = Guid.Parse("a0160000-0000-4000-8000-0000000000ff");
-                return user;
-            }
+                {
+                    if (SystemUserReadFault is { } userFault)
+                        throw userFault;
+                    if (MissingSystemUsers.Contains(id))
+                        return null!; // no such row: the application-user check cannot tell
+                    var user = new Entity("systemuser", id);
+                    if (id == AppUser)
+                        user[ApplicationUserCheck.ApplicationIdAttribute] = Guid.Parse("a0160000-0000-4000-8000-0000000000ff");
+                    return user;
+                }
 
             case "businessunit":
-            {
-                var unit = new Entity("businessunit", id);
-                if (SearchIndexDefaults.TryGetValue(id, out var defaults))
                 {
-                    if (defaults.Name is { } name)
-                        unit["sprk_searchindexname"] = name;
-                    if (defaults.Index is { } index)
-                        unit["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", index);
-                }
+                    var unit = new Entity("businessunit", id);
+                    if (SearchIndexDefaults.TryGetValue(id, out var defaults))
+                    {
+                        if (defaults.Name is { } name)
+                            unit["sprk_searchindexname"] = name;
+                        if (defaults.Index is { } index)
+                            unit["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", index);
+                    }
 
-                return unit;
-            }
+                    return unit;
+                }
 
             default:
-            {
-                // A mapping source's columns (the system principal's app-only read).
-                if (SourceReadFault is { } readFault)
-                    throw readFault;
-                var row = Directory.Row(table, id);
-                var copy = new Entity(table, id);
-                foreach (var column in columns)
                 {
-                    if (row.Attributes.TryGetValue(column, out var value))
-                        copy[column] = value;
-                }
+                    // A mapping source's columns (the system principal's app-only read).
+                    if (SourceReadFault is { } readFault)
+                        throw readFault;
+                    SourceReads.Add((table, columns));
+                    var row = Directory.Row(table, id);
+                    var copy = new Entity(table, id);
+                    foreach (var column in columns)
+                    {
+                        if (row.Attributes.TryGetValue(column, out var value))
+                            copy[column] = value;
+                    }
 
-                return copy;
-            }
+                    return copy;
+                }
         }
     }
 
@@ -1787,9 +1999,15 @@ internal sealed class RepairWorld
 
     private static FieldMappingRuleEntity Copy(string source, string target, int order) => new()
     {
-        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source, SourceFieldType = 0, TargetField = target,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = order, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = $"{source} -> {target}",
+        SourceField = source,
+        SourceFieldType = 0,
+        TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order,
+        IsActive = true,
     };
 
     /// <summary>The REAL resolver, recording every owner decision asked of it; throwing the fault given, when one is.</summary>

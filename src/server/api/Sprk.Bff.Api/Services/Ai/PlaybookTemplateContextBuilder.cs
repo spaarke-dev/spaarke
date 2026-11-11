@@ -125,54 +125,54 @@ public static class PlaybookTemplateContextBuilder
         switch (value)
         {
             case IDictionary<string, object?> dictionary:
-            {
-                var comparer = (dictionary as Dictionary<string, object?>)?.Comparer ?? StringComparer.Ordinal;
-                var copy = new Dictionary<string, object?>(comparer);
-                copies[value] = copy;
-                foreach (var (key, item) in dictionary.ToList())
                 {
-                    copy[key] = EscapeValue(item, language, copies);
-                }
-
-                return copy;
-            }
-            case System.Collections.IDictionary nonGeneric:
-            {
-                var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
-                copies[value] = copy;
-                foreach (System.Collections.DictionaryEntry entry in nonGeneric)
-                {
-                    copy[entry.Key.ToString() ?? string.Empty] = EscapeValue(entry.Value, language, copies);
-                }
-
-                return copy;
-            }
-            case System.Collections.IEnumerable sequence:
-            {
-                var copy = new List<object?>();
-                copies[value] = copy;
-                foreach (var item in sequence)
-                {
-                    copy.Add(EscapeValue(item, language, copies));
-                }
-
-                return copy;
-            }
-            default:
-            {
-                // Anonymous objects (the run and document bags) and any other CLR object: its public properties.
-                var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
-                copies[value] = copy;
-                foreach (var property in value.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                {
-                    if (property.GetIndexParameters().Length == 0)
+                    var comparer = (dictionary as Dictionary<string, object?>)?.Comparer ?? StringComparer.Ordinal;
+                    var copy = new Dictionary<string, object?>(comparer);
+                    copies[value] = copy;
+                    foreach (var (key, item) in dictionary.ToList())
                     {
-                        copy[property.Name] = EscapeValue(property.GetValue(value), language, copies);
+                        copy[key] = EscapeValue(item, language, copies);
                     }
-                }
 
-                return copy;
-            }
+                    return copy;
+                }
+            case System.Collections.IDictionary nonGeneric:
+                {
+                    var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    copies[value] = copy;
+                    foreach (System.Collections.DictionaryEntry entry in nonGeneric)
+                    {
+                        copy[entry.Key.ToString() ?? string.Empty] = EscapeValue(entry.Value, language, copies);
+                    }
+
+                    return copy;
+                }
+            case System.Collections.IEnumerable sequence:
+                {
+                    var copy = new List<object?>();
+                    copies[value] = copy;
+                    foreach (var item in sequence)
+                    {
+                        copy.Add(EscapeValue(item, language, copies));
+                    }
+
+                    return copy;
+                }
+            default:
+                {
+                    // Anonymous objects (the run and document bags) and any other CLR object: its public properties.
+                    var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    copies[value] = copy;
+                    foreach (var property in value.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                    {
+                        if (property.GetIndexParameters().Length == 0)
+                        {
+                            copy[property.Name] = EscapeValue(property.GetValue(value), language, copies);
+                        }
+                    }
+
+                    return copy;
+                }
         }
     }
 

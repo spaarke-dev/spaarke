@@ -148,15 +148,15 @@ internal static class BillingHandlerKit
     internal static BillingPriorSubmission Prior(
         string trackingNumber, string? firmInvoiceNumber, int sequence, BillingPriorStatus status = BillingPriorStatus.Active,
         params BillingPriorLine[] lines) => new()
-    {
-        SubmissionId = Guid.NewGuid(),
-        SecureRoots = Ordinary,
-        TrackingNumber = trackingNumber,
-        FirmInvoiceNumber = firmInvoiceNumber,
-        Sequence = sequence,
-        Status = status,
-        Lines = lines,
-    };
+        {
+            SubmissionId = Guid.NewGuid(),
+            SecureRoots = Ordinary,
+            TrackingNumber = trackingNumber,
+            FirmInvoiceNumber = firmInvoiceNumber,
+            Sequence = sequence,
+            Status = status,
+            Lines = lines,
+        };
 
     // ── Running a handler ────────────────────────────────────────────────────────────────────────────────────────
 

@@ -963,8 +963,11 @@ public class FromEmailSubmissionServiceTests
         var world = new W();
         world.Save.Answer = new SubmissionEmailSaveOutcome
         {
-            Response = new SaveResponse { Success = true }, EmlDocumentId = Guid.NewGuid(), CommunicationId = W.CommunicationId,
-            ContentDuplicate = true, EmlParts = Array.Empty<EmlPart>(),
+            Response = new SaveResponse { Success = true },
+            EmlDocumentId = Guid.NewGuid(),
+            CommunicationId = W.CommunicationId,
+            ContentDuplicate = true,
+            EmlParts = Array.Empty<EmlPart>(),
         };
 
         (await Run(world)).Extensions.Should().Contain("reason", "eml_ambiguous");
@@ -977,7 +980,9 @@ public class FromEmailSubmissionServiceTests
         var world = new W();
         world.Save.Answer = new SubmissionEmailSaveOutcome
         {
-            Response = new SaveResponse { Success = true }, EmlDocumentId = W.EmlId, CommunicationId = W.CommunicationId,
+            Response = new SaveResponse { Success = true },
+            EmlDocumentId = W.EmlId,
+            CommunicationId = W.CommunicationId,
             EmlParts = new[] { new EmlPart(0, "Invoice 1001.pdf", EmlMimeParts.Sha256Hex(W.PdfBytes)) },
         };
 

@@ -469,9 +469,14 @@ public partial class BillingFactLoaderTests
     {
         var rule = new BillingRuleCandidate
         {
-            PolicyId = Guid.NewGuid(), PolicyCode = "D", PolicyVersionId = Guid.NewGuid(), RuleSetId = Guid.NewGuid(),
-            Scope = RuleSetScope.ClientDefault, RuleType = ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture),
-            RuleBody = body, IsCurrent = true,
+            PolicyId = Guid.NewGuid(),
+            PolicyCode = "D",
+            PolicyVersionId = Guid.NewGuid(),
+            RuleSetId = Guid.NewGuid(),
+            Scope = RuleSetScope.ClientDefault,
+            RuleType = ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RuleBody = body,
+            IsCurrent = true,
         };
 
         BillingFactLoader.ComparesLines([rule]).Should().Be(expected);

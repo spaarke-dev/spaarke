@@ -330,7 +330,8 @@ internal sealed class FromEmailSubmissionService
             case FromEmailSubmitOutcome.Refused when result.ErrorCode is not null:
                 // The operation put the sentence in the detail of a refusal after its step A; the route adds filingKept.
                 return FromEmailSubmissionOutcome.Refused(result.Status, result.ErrorCode, result.Detail ?? "The invoice was not submitted.")
-                    with { FilingKept = result.Filed };
+                    with
+                { FilingKept = result.Filed };
 
             default:
                 return NotQueued();
@@ -573,7 +574,8 @@ internal sealed class FromEmailSubmissionService
             _logger.LogInformation("From-email submission refused: communication {CommunicationId} is filed under another core record", communicationId);
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
                 "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.")
-                with { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
+                with
+            { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
         }
 
         return null;

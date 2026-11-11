@@ -748,7 +748,9 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var target = Guid.NewGuid();
         var input = Input() with
         {
-            Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target,
+            Mode = FromEmailModes.Correction,
+            InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target),
+            ResubmissionOf = target,
         };
 
         var result = await Build().SubmitAsync(input, CancellationToken.None);

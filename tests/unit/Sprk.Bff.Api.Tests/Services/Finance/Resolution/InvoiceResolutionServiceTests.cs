@@ -197,14 +197,14 @@ public sealed class InvoiceResolutionServiceTests
 
     private static InvoiceResolutionLine Fee(
         string? name, DateOnly? date, decimal? hours, decimal? rate, decimal? amount, decimal analyzer = 0.95m, decimal? self = null) => new()
-    {
-        LineType = InvoiceLineType.Fee,
-        Date = new ResolutionField<DateOnly?>(date, analyzer),
-        TimekeeperAsBilled = new ResolutionField<string?>(name, analyzer, self),
-        Hours = new ResolutionField<decimal?>(hours, analyzer, self),
-        Rate = new ResolutionField<decimal?>(rate, analyzer, self),
-        Amount = new ResolutionField<decimal?>(amount, analyzer, self),
-    };
+        {
+            LineType = InvoiceLineType.Fee,
+            Date = new ResolutionField<DateOnly?>(date, analyzer),
+            TimekeeperAsBilled = new ResolutionField<string?>(name, analyzer, self),
+            Hours = new ResolutionField<decimal?>(hours, analyzer, self),
+            Rate = new ResolutionField<decimal?>(rate, analyzer, self),
+            Amount = new ResolutionField<decimal?>(amount, analyzer, self),
+        };
 
     private static InvoiceResolutionLine Expense(decimal? quantity, decimal? unitCost, decimal? amount, decimal analyzer = 0.95m) => new()
     {
@@ -225,19 +225,19 @@ public sealed class InvoiceResolutionServiceTests
         InvoiceResolutionHeader? header = null,
         decimal analyzer = 0.95m,
         decimal? adjustments = null) => new()
-    {
-        FirmId = Firm,
-        CoreRecord = core,
-        Lines = lines,
-        TimekeeperSummaryNames = summary ?? [],
-        Header = header ?? new InvoiceResolutionHeader
         {
-            FeesTotal = new ResolutionField<decimal?>(fees, analyzer),
-            ExpensesTotal = new ResolutionField<decimal?>(expenses, analyzer),
-            AdjustmentsTotal = new ResolutionField<decimal?>(adjustments, analyzer),
-            TotalDue = new ResolutionField<decimal?>(totalDue, analyzer),
-        },
-    };
+            FirmId = Firm,
+            CoreRecord = core,
+            Lines = lines,
+            TimekeeperSummaryNames = summary ?? [],
+            Header = header ?? new InvoiceResolutionHeader
+            {
+                FeesTotal = new ResolutionField<decimal?>(fees, analyzer),
+                ExpensesTotal = new ResolutionField<decimal?>(expenses, analyzer),
+                AdjustmentsTotal = new ResolutionField<decimal?>(adjustments, analyzer),
+                TotalDue = new ResolutionField<decimal?>(totalDue, analyzer),
+            },
+        };
 
     /// <summary>A clean one-line invoice: Jane Doe, 2 h at 500, 1000 due, every header total extracted.</summary>
     private InvoiceResolutionInput CleanInvoice(CoreRecordReference? core = null)

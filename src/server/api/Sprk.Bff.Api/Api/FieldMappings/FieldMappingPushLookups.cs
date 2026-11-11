@@ -72,6 +72,13 @@ internal static class FieldMappingPushLookups
     private static readonly HashSet<string> LookupAttributeTypes =
         new(StringComparer.OrdinalIgnoreCase) { "Lookup", "Customer", "Owner" };
 
+    private static readonly HashSet<string> ChoiceAttributeTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "Picklist", "State", "Status" };
+
+    /// <summary>A single-choice attribute (an option set, a state or a status reason).</summary>
+    internal static bool IsChoiceType(string? attributeType)
+        => attributeType is not null && ChoiceAttributeTypes.Contains(attributeType);
+
     /// <summary>A lookup-family attribute (its Web API property is <c>_{name}_value</c>).</summary>
     internal static bool IsLookupType(string? attributeType)
         => attributeType is not null && LookupAttributeTypes.Contains(attributeType);
@@ -169,7 +176,12 @@ internal static class FieldMappingPushLookups
 
             if (!IsLookupType(type))
             {
-                result[field] = row.TryGetValue(field, out var value) ? toClr(value) : null;
+                var clr = row.TryGetValue(field, out var value) ? toClr(value) : null;
+                // Task 040: a choice carries the label Dataverse returned, which a Copy into a Text target writes (the create-time
+                // convention). The number alone is what every other consumer of the map has always seen.
+                result[field] = IsChoiceType(type) && clr is long whole && whole is >= int.MinValue and <= int.MaxValue
+                    ? new SourceChoiceValue((int)whole, TryGetString(row, field + FormattedValueAnnotation, out var label) ? label : null)
+                    : clr;
                 continue;
             }
 
@@ -208,6 +220,39 @@ internal static class FieldMappingPushLookups
         }
 
         return plans;
+    }
+
+    /// <summary>
+    /// #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by the
+    /// referenced table's navigation property, which can be another lookup to the same table — a filing move the rule never
+    /// asked for. Such a plan is refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
+    /// (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
+    /// </summary>
+    /// <remarks>Task 022 fix round 5 (review F1): the ONE place this is decided. The push's preview
+    /// (<see cref="FieldMappingPushFamily.PreviewAsync"/>) and its apply
+    /// (<see cref="FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync"/>) both call it before a rule is applied, so the
+    /// payload the mapping-source gate is asked with is the same on both, and a preview never hides a child the apply would
+    /// write. Idempotent: a refused plan has no bind key, so a second call keeps it as it is. Any other table's plans are
+    /// returned unchanged (the same instance).</remarks>
+    internal static IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> ConfineToNamedColumn(
+        string targetEntity, IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> lookupBinds)
+    {
+        if (!Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
+            return lookupBinds;
+
+        var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
+        foreach (var (rule, plan) in lookupBinds)
+        {
+            checkedBinds[rule] = plan.BindKey is { } bindKey
+                                 && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                                     rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+                ? LookupBindPlan.Refused(
+                    $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                    + "the lookup was not copied.")
+                : plan;
+        }
+
+        return checkedBinds;
     }
 
     private static async Task<LookupBindPlan> PlanAsync(

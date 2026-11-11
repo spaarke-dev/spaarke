@@ -422,7 +422,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     TenancyModel: run.TenancyModel ?? string.Empty,
                     // T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit (task 265, #2265).
                     // Blank here is not an H13 rejection: T7 reports it as Failed (the run carries no H10 customer business unit).
-                    CustomerBusinessUnitId: run.InterStepState.CustomerBusinessUnitId?.Trim() ?? string.Empty),
+                    CustomerBusinessUnitId: run.InterStepState.CustomerBusinessUnitId?.Trim() ?? string.Empty,
+                    // T7 checks both slots carry Ontology__Writer__ManagedIdentityClientId == H2a's writer identity, and T3 that
+                    // the writer holds no Graph app role (task 266, #2605). Blank is not an H13 rejection: T7 / T3 report it Failed.
+                    OntologyWriterClientId: run.InterStepState.OntologyWriterClientId?.Trim() ?? string.Empty,
+                    OntologyWriterObjectId: run.InterStepState.OntologyWriterObjectId?.Trim() ?? string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

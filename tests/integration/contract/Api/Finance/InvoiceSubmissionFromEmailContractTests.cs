@@ -123,15 +123,15 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
     private static FromEmailSubmissionRequest Request(
         EmailMetadata? email = null, List<FromEmailMark>? marks = null, Guid? firm = null, string? number = "1001",
         string mode = "New", Guid? invoiceId = null) => new()
-    {
-        TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
-        Email = email ?? W.Email(),
-        Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
-        FirmId = firm ?? W.FirmId,
-        FirmInvoiceNumber = number,
-        Mode = mode,
-        InvoiceId = invoiceId,
-    };
+        {
+            TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
+            Email = email ?? W.Email(),
+            Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
+            FirmId = firm ?? W.FirmId,
+            FirmInvoiceNumber = number,
+            Mode = mode,
+            InvoiceId = invoiceId,
+        };
 
     private static string K(FromEmailSubmissionRequest? request = null) =>
         FromEmailSubmissionKey.Of(InvoiceSubmissionFromEmailHttp.ToInput(request ?? Request()));
@@ -1319,7 +1319,11 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
             return Task.FromResult(new RateLimitResult
             {
-                IsAllowed = Allowed, Limit = 10, Remaining = Allowed ? 9 : 0, ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30), RetryAfterSeconds = 30,
+                IsAllowed = Allowed,
+                Limit = 10,
+                Remaining = Allowed ? 9 : 0,
+                ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30),
+                RetryAfterSeconds = 30,
             });
         }
     }

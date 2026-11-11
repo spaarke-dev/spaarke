@@ -495,16 +495,16 @@ public sealed class InvoiceSubmissionServiceTests
 
     internal static InvoiceSubmissionRequest Spa(
         string? number = "INV-1", byte[]? bytes = null, string? contentType = "application/pdf", string? po = null) => new()
-    {
-        FirmId = FirmId,
-        CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
-        Channel = InvoiceSubmissionChannel.Spa,
-        FirmInvoiceNumber = number,
-        PoNumber = po,
-        File = new InvoiceSubmissionFile("May invoice.pdf", contentType, bytes ?? Pdf()),
-        ExternalCaller = Contact(),
-        CorrelationId = "corr-1",
-    };
+        {
+            FirmId = FirmId,
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
+            Channel = InvoiceSubmissionChannel.Spa,
+            FirmInvoiceNumber = number,
+            PoNumber = po,
+            File = new InvoiceSubmissionFile("May invoice.pdf", contentType, bytes ?? Pdf()),
+            ExternalCaller = Contact(),
+            CorrelationId = "corr-1",
+        };
 
     private static InvoiceSubmissionRequest Internal() => Spa() with
     {

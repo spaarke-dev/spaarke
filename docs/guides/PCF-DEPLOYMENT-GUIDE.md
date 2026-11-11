@@ -74,7 +74,6 @@ This name MUST appear identically in ALL of:
 - **MUST** update version in ALL version locations (see Version Locations below)
 - **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
 - **MUST** use `pack.ps1` script (creates forward slashes in ZIP)
-- **MUST** disable/restore CPM around PAC commands
 - **MUST** verify build output path matches your control type (see table above)
 
 ### NEVER:
@@ -310,18 +309,13 @@ powershell -ExecutionPolicy Bypass -File pack.ps1
 
 This creates: `bin/{SolutionName}_v{X.Y.Z}.zip`
 
-### Step 7: Disable CPM and Import
+### Step 7: Import
 
 ```bash
-# Disable CPM (if applicable - only needed if Directory.Packages.props exists in parent)
-mv /path/to/Directory.Packages.props{,.disabled}
-
-# Import
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName <name>
-
-# Restore CPM
-mv /path/to/Directory.Packages.props{.disabled,}
 ```
+
+(The old "disable CPM" step is gone: the repository-root `Directory.Packages.props` was removed on 2026-11-10.)
 
 ### Step 8: Verify Import
 
@@ -694,7 +688,7 @@ And enable in featureconfig.json:
 | `unexpected error` | 1) Missing `.js`/`.css` in `[Content_Types].xml`, 2) Wrong `customizations.xml` format, 3) Backslashes in ZIP | Check `[Content_Types].xml` has `.js`/`.css`, verify `customizations.xml` uses `<Name>` child element (not attribute), use `pack.ps1` |
 | `Root component missing for custom control` | `solution.xml` has empty `<RootComponents />` | Add `<RootComponent type="66" schemaName="sprk_Spaarke.Controls.{ControlName}" behavior="0" />` |
 | `component sprk_xyz.js of type 61 is not declared as root component` | Web resource added to `customizations.xml` but not in `<RootComponents>`, or GUID doesn't match Dataverse | **Remove web resources from PCF solution entirely.** PCF solutions should contain ONLY the PCF control (type 66). Deploy web resources separately via Dataverse UI. |
-| `NU1008` CPM error | CPM not disabled | Disable `Directory.Packages.props` before PAC commands |
+| `NU1008` CPM error | A worktree branched before 2026-11-10 still has `Directory.Packages.props` | Rename it aside for the PAC command, or merge master |
 | Bundle is 8MB (field-based) | Dev build (`npm run build`) or missing platform libraries | Ensure platform libraries declared; build with `npm run build:prod` via `scripts/Invoke-PcfBuildProd.ps1` |
 | Build "succeeded" but the deployed control is unchanged or old | `pcf-scripts` exited 0 on a FAILED webpack build, and the stale `out/` bundle was packed | Build via `scripts/Invoke-PcfBuildProd.ps1`, which exits 1 on `[build] Failed` / `[pcf-1033]`; delete `out/` before building |
 | `Source File does not exist` | Missing file in Controls folder | Copy ALL files from build output |

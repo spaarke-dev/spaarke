@@ -640,9 +640,11 @@ internal sealed class SecureChildShareWorld
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
-    /// <summary>The REAL synchronizer over this world and the given share table.</summary>
-    public SecureChildShareSynchronizer Synchronizer(FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null)
-        => SynchronizerOver(() => this, shares, noAccessGuard);
+    /// <summary>The REAL synchronizer over this world and the given share table (and, when given, a logger to read).</summary>
+    public SecureChildShareSynchronizer Synchronizer(
+        FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
+        => SynchronizerOver(() => this, shares, noAccessGuard, logger);
 
     /// <summary>
     /// The REAL synchronizer over whichever world <paramref name="current"/> answers at query time — for a shared host
@@ -650,9 +652,10 @@ internal sealed class SecureChildShareWorld
     /// by default one that walls nobody (<see cref="NobodyWalled"/>).
     /// </summary>
     public static SecureChildShareSynchronizer SynchronizerOver(
-        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null)
+        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
         => new(EntitiesOver(current).Object, shares, noAccessGuard ?? NobodyWalled(), Configuration(),
-            NullLogger<SecureChildShareSynchronizer>.Instance);
+            logger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
 
     /// <summary>
     /// Task 143's REAL guard over flags that call every record NOT secure — so it answers
@@ -720,7 +723,8 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -734,7 +738,9 @@ internal sealed class SecureChildShareWorld
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges, relocator,
             coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
-            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()); // 194b F1-c: the To Do job's predicate (nobody linked)
+            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore(), // 194b F1-c: the To Do job's predicate (nobody linked)
+            recordShares: shares, // uac-r2 task 198 Part D: the Restricted filing bar's share seam, as the host composes it
+            directMessageOwnerTeam: directMessageOwnerTeam); // task 198 Part C: the Direct participants' re-grant after a re-file
     }
 
     /// <summary>
@@ -874,6 +880,10 @@ internal sealed class SecureChildShareWorld
             .OrderBy(r => r.Id)
             .ToList();
 
+        // uac-r2 task 198 fix round 1 (R4): a query's own order is honoured, as Dataverse does (the id order above is the tie-break).
+        if (query.Orders.Count > 0)
+            matched = matched.OrderBy(r => r, new OrderComparer(query.EntityName, query.Orders)).ToList();
+
         if (query.TopCount is { } top)
             matched = matched.Take(top).ToList();
 
@@ -897,6 +907,38 @@ internal sealed class SecureChildShareWorld
         }
 
         return answer;
+    }
+
+    /// <summary>Orders rows by a query's <see cref="OrderExpression"/>s (a missing value sorts first, as a null does in Dataverse).</summary>
+    private sealed class OrderComparer(string table, IEnumerable<OrderExpression> orders) : IComparer<Entity>
+    {
+        private readonly List<OrderExpression> _orders = orders.ToList();
+
+        public int Compare(Entity? x, Entity? y)
+        {
+            foreach (var order in _orders)
+            {
+                var result = CompareValues(Value(x!, order.AttributeName), Value(y!, order.AttributeName));
+                if (result != 0)
+                    return order.OrderType == OrderType.Descending ? -result : result;
+            }
+
+            return 0;
+        }
+
+        private object? Value(Entity row, string attribute) =>
+            attribute == table + "id" ? row.Id : row.Attributes.TryGetValue(attribute, out var value) ? value : null;
+
+        private static int CompareValues(object? a, object? b) => (a, b) switch
+        {
+            (null, null) => 0,
+            (null, _) => -1,
+            (_, null) => 1,
+            (OptionSetValue o, OptionSetValue p) => o.Value.CompareTo(p.Value),
+            (EntityReference r, EntityReference s) => r.Id.CompareTo(s.Id),
+            (IComparable c, _) => c.CompareTo(b),
+            _ => 0,
+        };
     }
 
     private Entity Project(Entity row, ColumnSet columns)

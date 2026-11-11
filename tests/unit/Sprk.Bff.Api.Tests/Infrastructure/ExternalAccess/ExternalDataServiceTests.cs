@@ -106,28 +106,38 @@ public class ExternalDataServiceTests
     {
         PrincipalKind.SystemUser => new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.Workforce, SystemUserId = SystemUserA, ContactId = Guid.Empty,
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = SystemUserA,
+            ContactId = Guid.Empty,
             ProjectAccess = Array.Empty<CallerProjectAccess>(),
         },
         PrincipalKind.SystemUserWithLinkedContact => new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.Workforce, SystemUserId = SystemUserA, ContactId = ContactA,
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = SystemUserA,
+            ContactId = ContactA,
             ProjectAccess = Array.Empty<CallerProjectAccess>(),
         },
         PrincipalKind.WorkforceContact => new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.Workforce, ContactId = ContactA, ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = ContactA,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
         },
         PrincipalKind.CiamContact => new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.CiamContact, ContactId = ContactA, ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = ContactA,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
         },
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
     private static CallerPrincipal NeitherKind() => new()
     {
-        Plane = CallerPrincipalPlane.Workforce, ContactId = Guid.Empty, ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Guid.Empty,
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
     };
 
     private static bool ExpectsPerson(PrincipalKind kind) =>
@@ -223,7 +233,9 @@ public class ExternalDataServiceTests
         ExternalDataService.CanStampCreator(NeitherKind()).Should().BeFalse();
         ExternalDataService.CanStampCreator(new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.Workforce, SystemUserId = Guid.Empty, ContactId = ContactA,
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = Guid.Empty,
+            ContactId = ContactA,
             ProjectAccess = Array.Empty<CallerProjectAccess>(),
         }).Should().BeFalse("an empty systemuser id is not a person");
     }
@@ -233,7 +245,9 @@ public class ExternalDataServiceTests
     {
         var emptyUser = new CallerPrincipal
         {
-            Plane = CallerPrincipalPlane.Workforce, SystemUserId = Guid.Empty, ContactId = ContactA,
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = Guid.Empty,
+            ContactId = ContactA,
             ProjectAccess = Array.Empty<CallerProjectAccess>(),
         };
 
@@ -309,7 +323,7 @@ public class ExternalDataServiceTests
             CreatePath.Event => ExternalDataService.BuildEventCreatePayload(
                 RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
             CreatePath.Document => ExternalDataService.BuildDocumentCreatePayload(
-                ExternalDataService.DocumentParentKind.Project, RootId,new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
+                ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
         };
         body["sprk_CreatedByContact@odata.bind"] = $"/contacts({OtherContact:D})";
@@ -387,7 +401,7 @@ public class ExternalDataServiceTests
                 RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
             // The upload route's body is the file only; the pointers are built server-side from the SPE upload.
             CreatePath.Document => service.CreateDocumentAsync(
-                ExternalDataService.DocumentParentKind.Project, RootId,new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),
+                ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
         };
     }

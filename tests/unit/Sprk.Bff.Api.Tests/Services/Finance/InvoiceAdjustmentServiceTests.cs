@@ -209,10 +209,10 @@ public sealed class InvoiceAdjustmentServiceTests
                     : token.IsCancellationRequested
                         ? Task.FromCanceled<Dictionary<string, object?>>(token)
                         : Task.FromResult(new Dictionary<string, object?>
-                    {
-                        ["sprk_totalamount"] = Invoice.GetAttributeValue<Money>("sprk_totalamount").Value,
-                        ["versionnumber"] = 5L,
-                    }));
+                        {
+                            ["sprk_totalamount"] = Invoice.GetAttributeValue<Money>("sprk_totalamount").Value,
+                            ["versionnumber"] = 5L,
+                        }));
             Records.Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 5L, It.IsAny<CancellationToken>()))
                 .Callback((string _, Guid _, Dictionary<string, object?> fields, long _, CancellationToken _) =>
                 {
@@ -349,21 +349,21 @@ public sealed class InvoiceAdjustmentServiceTests
         Guid? version = null, Guid? policy = null, string code = "BILL-DISCOUNT", RuleType type = RuleType.ApprovedRate,
         DateOnly? from = null, DateOnly? to = null, bool current = true, int number = 1, RuleSetScope scope = RuleSetScope.ClientDefault, Guid? ruleSet = null,
         string? ruleTypeText = null) => new()
-    {
-        PolicyId = policy ?? Guid.NewGuid(),
-        PolicyCode = code,
-        PolicyVersionId = version ?? Guid.NewGuid(),
-        RuleSetId = ruleSet ?? RuleSet,
-        Scope = scope,
-        RuleType = ruleTypeText ?? ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture),
-        ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.",
-        ClauseLocation = "Section 4.2, page 3",
-        ShortHeadline = "Volume discount",
-        InForceFrom = from ?? new DateOnly(2026, 1, 1),
-        InForceTo = to,
-        IsCurrent = current,
-        VersionNumber = number,
-    };
+        {
+            PolicyId = policy ?? Guid.NewGuid(),
+            PolicyCode = code,
+            PolicyVersionId = version ?? Guid.NewGuid(),
+            RuleSetId = ruleSet ?? RuleSet,
+            Scope = scope,
+            RuleType = ruleTypeText ?? ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.",
+            ClauseLocation = "Section 4.2, page 3",
+            ShortHeadline = "Volume discount",
+            InForceFrom = from ?? new DateOnly(2026, 1, 1),
+            InForceTo = to,
+            IsCurrent = current,
+            VersionNumber = number,
+        };
 
     // =========================================================================================
     // Add: the amount and the totals are 016's (FR-32, FR-07, D-42, I-1, D-130)

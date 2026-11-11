@@ -1,5 +1,17 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-07 — ACME upgraded to SpaarkeMaster 1.3.0.0 (owner go given directly in this session)
+
+- **Publish:** SpaarkeMaster 1.3.0.0 published from master `d53d67f604` (`publish-dataverse-solutions-manifest.yml`; dry run first, then publish). The store's `latest` is now 1.3.0.0. ebilling confirmed its pending field-security lock targets 1.3.0.1.
+- **Import:** customer-provisioning cannot act on a relayed go, so ontology ran it. `Import-SpaarkeMasterPackage.ps1 -WhatIf` planned a staged upgrade 1.2.3.1 → 1.3.0.0 (managed); the real run completed in ~49 min, and the read-back shows only SpaarkeMaster 1.3.0.0 managed. Components that 1.3.0.0 removed had no data on ACME (checked by customer-provisioning beforehand).
+- **Post-checks:** `Test-RolePrivilegeExpectations.ps1` against `spaarkemaster-1.3.0.0.json` passed for all 7 Spaarke roles. The second ontology writer field-security profile now exists, and the stamp's writer identity was added to it (read back). The service roles' holders are application users only. No role was added to the default team (#2618). `/healthz` returned 200.
+
+## 2026-11-06 — ACME: ontology writer identity provisioned (#2605); dev UAT test data for 160/161
+
+- **ACME (owner go given directly in this session; customer-provisioning could not apply it from theirs):** created the stamp's ontology writer identity, attached it to the BFF App Service (production and staging), set the writer app setting on both, and created its Dataverse application user in the customer business unit with the ontology service role and the writer field-security profile. Every step was read back; the role's holders are application users only. The BFF restarted; `/healthz` returned 200 afterwards.
+- **Pending on ACME:** the second writer profile does not exist until SpaarkeMaster 1.3.0.0 (upgrade awaiting the owner in customer-provisioning's session). Customer-provisioning's #2605 step adds it, and its bicep adopts the identity. Identifiers are in customer-provisioning's ACME run log, not here.
+- **Dev test data (UAT round 3, owner asked):** two `zz-` inbound communications classified as a fee or scope change, on MAT-34929-0040 (no budget) and REAL-2026-123456.01 (has a budget). The nightly evaluator (02:30Z) raises the "Fee or scope change, no budget revision" items; delete both rows after the owner's 160/161 checks.
+
 ## Task 111 - WizardShell consumer regression and deploy (2026-10-08)
 
 Environment: **spaarkedev1** (https://spaarkedev1.crm.dynamics.com) only. Owner approval D-71 (2026-10-08). BFF and other environments untouched.

@@ -173,6 +173,34 @@ public sealed class GraphRestAppRoleParityVerifier : IGraphAppRoleParityVerifier
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<GraphAppRoleExtrasResult> FindAnyRolesAsync(
+        string servicePrincipalObjectId,
+        string tenantId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(servicePrincipalObjectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        try
+        {
+            var (graph, assignments) = await ReadAsync(servicePrincipalObjectId, tenantId, cancellationToken).ConfigureAwait(false);
+            var held = assignments
+                .Select(a => graph.NameOf(a.AppRoleId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return held.Count == 0
+                ? new GraphAppRoleExtrasResult.None()
+                : new GraphAppRoleExtrasResult.Found(held);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "T3 writer check: appRoleAssignments read failed for SP {SpId}", servicePrincipalObjectId);
+            return new GraphAppRoleExtrasResult.Unknown(
+                $"Could not read the identity's Graph app-role assignments: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private async Task<(GraphResourcePrincipal Graph, IReadOnlyList<GraphAppRoleAssignment> Assignments)> ReadAsync(
         string uamiSpId, string tenantId, CancellationToken ct)
     {

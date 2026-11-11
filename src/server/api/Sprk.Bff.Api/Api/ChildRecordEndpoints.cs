@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -137,6 +138,16 @@ public static class ChildRecordEndpoints
     /// <summary>The payload is not a Web API payload this route accepts.</summary>
     internal const string InvalidPayloadCode = "child_record.invalid_payload";
 
+    /// <summary>
+    /// Task 049 fix round 2: the <c>secure</c> query parameter is not <c>true</c> or <c>false</c>, or asks for a table whose
+    /// create cannot be made secure (only a project or a work assignment can be). Nothing is read or written.
+    /// </summary>
+    internal const string SecureIntentInvalidCode = "child_record.secure_intent_invalid";
+
+    /// <summary>Task 049 fix round 2: the tables a create can ask to be secure from creation.</summary>
+    internal static readonly IReadOnlySet<string> SecureIntentTables =
+        new HashSet<string>(StringComparer.Ordinal) { "sprk_project", "sprk_workassignment" };
+
     /// <summary>The caller's own rights refused the write (a table privilege, a field-secured or server-owned column).</summary>
     internal const string DeniedCode = "child_record.denied";
 
@@ -208,7 +219,11 @@ public static class ChildRecordEndpoints
                 "Owners team under a secure record) and records the caller as its creator person. The optional query " +
                 "parameters mappingSourceEntity and mappingSourceId name the record to copy mapped fields from (fill-only; " +
                 "read as the caller: one the caller cannot read gives no mapped values and a warning, never an error). " +
-                "Without them a matter or project infers the source from what it is filed under; other tables map nothing.")
+                "Without them a matter or project infers the source from what it is filed under; other tables map nothing. " +
+                "The optional query parameter secure=true (sprk_project and sprk_workassignment only) creates the record " +
+                "secure from creation: the caller first needs Write and the table's Share privilege on the record as an " +
+                "ordinary create would make it (the provision-project delegation rule, refused in its 403 shape), and the " +
+                "record is created owned by the Secure Record Owners team and shared to the caller before anything else.")
             .Produces(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -249,6 +264,10 @@ public static class ChildRecordEndpoints
     /// a missing, unreadable or malformed source is one outcome, no mapped value and one warning, never a refusal. With no
     /// source named, every other table's create is exactly what it was: no mapping is asked for (its browser writers still
     /// map on the client until their wizard moves, tasks 023-029).</para>
+    /// <para><b>Secure from creation (task 049 fix round 2).</b> <paramref name="secure"/> = <c>true</c> asks for the record to
+    /// be secure from creation (<see cref="RecordCreationRequest.SecureFromCreation"/>); only <see cref="SecureIntentTables"/>
+    /// accept it, and a value that is not <c>true</c> or <c>false</c> is 400 <see cref="SecureIntentInvalidCode"/>. The
+    /// caller's rights refusal is rendered in the delegation filter's own shape (<see cref="DelegationRuleFilter.DenyResult"/>).</para>
     /// </remarks>
     internal static async Task<IResult> CreateAsync(
         string table,
@@ -259,11 +278,16 @@ public static class ChildRecordEndpoints
         ILogger<Program> logger,
         CancellationToken ct,
         [FromQuery] string? mappingSourceEntity = null,
-        [FromQuery] string? mappingSourceId = null)
+        [FromQuery] string? mappingSourceId = null,
+        [FromQuery] string? secure = null)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         if (!CreateTables.Contains(entity))
             return Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode, $"'{table}' records are not created here.");
+
+        var secureIntent = SecureIntentOf(entity, secure, out var secureProblem);
+        if (secureProblem is not null)
+            return secureProblem;
 
         RecordCreationMapping? mapping = null;
         if (MappingSourceOf(entity, mappingSourceEntity, mappingSourceId) is { } source)
@@ -287,6 +311,7 @@ public static class ChildRecordEndpoints
                 {
                     CorrelationId = httpContext.TraceIdentifier,
                     Mapping = mapping,
+                    SecureFromCreation = secureIntent,
                 },
                 RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
                 ct)
@@ -331,6 +356,34 @@ public static class ChildRecordEndpoints
         return (table, id);
     }
 
+    /// <summary>
+    /// Task 049 fix round 2: the <c>secure</c> query parameter. Absent or empty is no intent; <c>true</c> / <c>false</c>
+    /// (any case) are the intent; anything else, or <c>true</c> for a table outside <see cref="SecureIntentTables"/>, is a
+    /// 400 <see cref="SecureIntentInvalidCode"/> in <paramref name="problem"/>. No I/O.
+    /// </summary>
+    internal static bool SecureIntentOf(string entity, string? secure, out IResult? problem)
+    {
+        problem = null;
+        if (string.IsNullOrWhiteSpace(secure))
+            return false;
+
+        if (!bool.TryParse(secure.Trim(), out var asked))
+        {
+            problem = Problem(StatusCodes.Status400BadRequest, SecureIntentInvalidCode,
+                "The 'secure' query parameter must be 'true' or 'false'. Nothing was created.");
+            return false;
+        }
+
+        if (asked && !SecureIntentTables.Contains(entity))
+        {
+            problem = Problem(StatusCodes.Status400BadRequest, SecureIntentInvalidCode,
+                $"A {Noun(entity)} cannot be created secure: only a project or a work assignment can be. Nothing was created.");
+            return false;
+        }
+
+        return asked;
+    }
+
     /// <summary>The route's code for a create that ended without a decision.</summary>
     internal const string NoDecisionCode = "child_record.no_decision";
 
@@ -369,6 +422,13 @@ public static class ChildRecordEndpoints
             { Kind: RecordCreationRefusalKind.BlockedColumn } => Problem(StatusCodes.Status403Forbidden, DeniedCode, refusal.Detail),
             { Kind: RecordCreationRefusalKind.Forbidden, Code: RecordCreationRefusal.DeniedCode } =>
                 Problem(StatusCodes.Status403Forbidden, DeniedCode, refusal.Detail),
+            // Task 049 fix round 2 (UAC-r2 D1): the secure-from-creation create's rights refusal is the delegation filter's,
+            // in the filter's own shape.
+            {
+                Kind: RecordCreationRefusalKind.Forbidden, Code: DelegationRuleFilter.DenyWriteRequired
+                    or DelegationRuleFilter.DenyShareRequired or DelegationRuleFilter.DenyCheckFailed
+            } =>
+                DelegationRuleFilter.DenyResult(refusal.Code, refusal.Detail, traceId),
             { Kind: RecordCreationRefusalKind.Invalid, Code: RecordCreationRefusal.InvalidPayloadCode } =>
                 Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, refusal.Detail),
             { Kind: RecordCreationRefusalKind.Invalid, Code: RecordCreationRefusal.TableUnsupportedCode } =>
@@ -731,6 +791,26 @@ public static class ChildRecordEndpoints
             return Problem(StatusCodes.Status403Forbidden, DeniedCode,
                 $"Column '{serverOwned}' is set by the server — omit it.");
         }
+
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step BEFORE
+        // anything is checked or written (the update planner, as the caller), so the re-file core's checks and the PATCH see the
+        // pair as it will be written. A failed read is the caller's own failure; nothing is written.
+        var prepared = await OwnedChildWrite.KeepRegardingPairWholeAsync(user, entity, entitySet, id, mapped.Item!, logger, ct)
+            .ConfigureAwait(false);
+        if (prepared.Refusal is { } pairRefusal)
+        {
+            return pairRefusal switch
+            {
+                { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
+                    $"The {Noun(entity)} was not saved: {pairInvalid}"),
+                { ParentUnavailable: true } => ParentNotFound(entity),
+                { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
+                _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not updated."),
+            };
+        }
+
+        mapped = mapped with { Item = prepared.Item };
 
         OwnedChildWrite.RefileOutcome outcome;
         try

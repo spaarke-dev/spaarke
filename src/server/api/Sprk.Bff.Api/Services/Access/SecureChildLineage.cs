@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// are named to the ownership resolver (<see cref="Table.LookupOrder"/>, read by
 /// <c>RecordOwnershipContext.OrderedParentsOf</c>), and the first one the row holds is its PRIMARY parent: the one whose
 /// business unit decides an ordinary row's owner. It matches the row's writer: a document's parent document, then its typed core
-/// lookups, then its <c>sprk_related*</c> links (<c>EmailAttachmentProcessor</c>); an analysis's document
+/// lookups, then its <c>sprk_related*</c> links (<c>DocumentAssociationMap</c>, which the document creates file through); an analysis's document
 /// (<c>AnalysisEndpoints</c>, <c>AppOnlyAnalysisService</c>); a Decision Record's typed core. A Signal and a Decision Record
 /// name their core record and subject first (<c>RecordOwnershipContext.ForExistingRowAsync</c>). Secure-if-any reads every
 /// parent, so the order never decides whether a row is secure.</para>
@@ -155,7 +155,7 @@ internal static class SecureChildLineage
         };
 
     /// <summary>UAC task 194b: a document's primary order — its parent document, then its typed core lookups, then the rest in
-    /// declaration order (the <c>sprk_related*</c> links), as <c>EmailAttachmentProcessor</c> names them.</summary>
+    /// declaration order (the <c>sprk_related*</c> links), as a document's parent link and <c>DocumentAssociationMap</c> name them.</summary>
     private static int DocumentPrimaryRank(string column) => column switch
     {
         "sprk_parentdocument" => 0,

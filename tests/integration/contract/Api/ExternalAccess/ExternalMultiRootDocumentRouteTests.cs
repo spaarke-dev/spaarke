@@ -254,7 +254,7 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
             case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
             case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
             case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
-            // "missing": the matter record does not exist.
+                // "missing": the matter record does not exist.
         }
 
         var id = _fixture.Data.AddDocument("projects", RecordA, "Unknown secure state", ("_sprk_matter_value", Hidden));

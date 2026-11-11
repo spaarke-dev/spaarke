@@ -322,6 +322,10 @@ internal static class MappingSourceReadProbe
             return new MappingSourceRead(true, null, null);
         }
 
+        // Task 049c (UAC-r2 A2): an Allowed answer that arrives after the read was cancelled (a probe that does not observe its
+        // token) starts no app-only read of the source.
+        ct.ThrowIfCancellationRequested();
+
         Entity? record;
         try
         {

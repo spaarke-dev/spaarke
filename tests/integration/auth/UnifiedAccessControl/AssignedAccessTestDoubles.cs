@@ -383,60 +383,166 @@ internal static class AssignedAccessTestDoubles
         {
             if (FailScan)
                 throw new HttpRequestException("Simulated scan failure.");
-            var roots = Roots
-                .Where(kv => kv.Key.Item1 == rootType && kv.Value.Any(v => v.Value is not null && fields.Contains(v.Key, StringComparer.OrdinalIgnoreCase)))
-                .Select(kv => new AssignedRootRef(rootType, kv.Key.Item2, Modified.TryGetValue(kv.Key.Item2, out var m) ? m : null))
-                .ToList();
+            var all = AssignedRoots(rootType, fields).ToList();
+            var roots = all.Where(r => !PastScanBound.ContainsKey(r.RootId)).ToList();
             var ceiling = ScanCeiling ?? MaxScanRows;
             return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>(
-                roots.Count > ceiling ? (roots.Take(ceiling).ToList(), true) : (roots, false));
+                roots.Count > ceiling ? (roots.Take(ceiling).ToList(), true) : (roots, roots.Count < all.Count));
         }
+
+        /// <summary>
+        /// Task 049 (F2): the recent-change scan — the roots with an Assigned column set whose <see cref="Modified"/> is at or
+        /// after <paramref name="modifiedSince"/>, newest first (the production filter and order are pinned by
+        /// <c>AssignedAccessStoreODataTests</c>). It reaches the roots in <see cref="PastScanBound"/> too: its bound is not
+        /// the full scan's.
+        /// </summary>
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedAssignedRootsAsync(
+            ExternalGrantRootType rootType, IReadOnlyCollection<string> fields, DateTimeOffset modifiedSince, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            Interlocked.Increment(ref _recentScanCalls);
+            RecentScanSince = modifiedSince;
+            var roots = AssignedRoots(rootType, fields)
+                .Where(r => r.ModifiedOn is { } m && m >= modifiedSince)
+                .OrderByDescending(r => r.ModifiedOn)
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
+        }
+
+        private IEnumerable<AssignedRootRef> AssignedRoots(ExternalGrantRootType rootType, IReadOnlyCollection<string> fields)
+            => Roots
+                .Where(kv => kv.Key.Item1 == rootType && kv.Value.Any(v => v.Value is not null && fields.Contains(v.Key, StringComparer.OrdinalIgnoreCase)))
+                .Select(kv => new AssignedRootRef(rootType, kv.Key.Item2, Modified.TryGetValue(kv.Key.Item2, out var m) ? m : null));
+
+        /// <summary>Task 049 (F2): roots the FULL scan's page does not reach (past its bound); it then reports truncated.</summary>
+        public ConcurrentDictionary<Guid, bool> PastScanBound { get; } = new();
+
+        private int _recentScanCalls;
+
+        /// <summary>Task 049 (F2): how many recent-change scans ran.</summary>
+        public int RecentScanCalls => Volatile.Read(ref _recentScanCalls);
+
+        /// <summary>Task 049 (F2): the last recent-change scan's lower bound.</summary>
+        public DateTimeOffset? RecentScanSince { get; private set; }
 
         /// <summary>Task 114: the roots whose Access Permission is Restricted (what the production scan's filter selects).</summary>
         public ConcurrentDictionary<(ExternalGrantRootType Type, Guid Id), bool> RestrictedRoots { get; } = new();
+
+        private IEnumerable<AssignedRootRef> RestrictedRootRefs(ExternalGrantRootType rootType)
+            => RestrictedRoots.Keys
+                .Where(k => k.Type == rootType)
+                .Select(k => new AssignedRootRef(rootType, k.Id, Modified.TryGetValue(k.Id, out var m) ? m : null));
 
         internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
             ExternalGrantRootType rootType, CancellationToken ct)
         {
             if (FailScan)
                 throw new HttpRequestException("Simulated scan failure.");
-            var roots = RestrictedRoots.Keys
-                .Where(k => k.Type == rootType)
-                .Select(k => new AssignedRootRef(rootType, k.Id, Modified.TryGetValue(k.Id, out var m) ? m : null))
+            var all = RestrictedRootRefs(rootType).ToList();
+            var roots = all.Where(r => !PastScanBound.ContainsKey(r.RootId)).ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, roots.Count < all.Count));
+        }
+
+        /// <summary>
+        /// Task 049 (fix round 2): the Restricted recent-change scan — the Restricted roots whose <see cref="Modified"/> is at
+        /// or after <paramref name="modifiedSince"/> (the production filter and order are pinned by
+        /// <c>AssignedAccessStoreODataTests</c>). It reaches the roots in <see cref="PastScanBound"/> too.
+        /// </summary>
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedRestrictedRootsAsync(
+            ExternalGrantRootType rootType, DateTimeOffset modifiedSince, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            Interlocked.Increment(ref _recentRestrictedScanCalls);
+            var roots = RestrictedRootRefs(rootType)
+                .Where(r => r.ModifiedOn is { } m && m >= modifiedSince)
+                .OrderByDescending(r => r.ModifiedOn)
                 .ToList();
             return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
+        }
+
+        private int _recentRestrictedScanCalls;
+
+        /// <summary>Task 049 (fix round 2): how many Restricted recent-change scans ran.</summary>
+        public int RecentRestrictedScanCalls => Volatile.Read(ref _recentRestrictedScanCalls);
+
+        private int _recentLedgerScanCalls;
+
+        /// <summary>Task 049 (fix round 2): how many ledger recent-change scans ran.</summary>
+        public int RecentLedgerScanCalls => Volatile.Read(ref _recentLedgerScanCalls);
+
+        private List<AssignedRootRef> LiveLedgerRoots()
+        {
+            lock (_gate)
+            {
+                // The production OData filter's predicate (task 158 r1): live rows, inherited-share provenance rows left out.
+                // AssignedAccessStoreODataTests pins the production filter itself over an evaluating Web API double.
+                return Ledger.Where(r => r.State != AssignedAccessState.Revoked && InheritedSourceOf(r.SourceField) is null)
+                    .Select(RootOf).Where(r => r is not null).Select(r => r!.Value).Distinct().ToList();
+            }
         }
 
         internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
         {
             if (FailScan)
                 throw new HttpRequestException("Simulated scan failure.");
-            lock (_gate)
-            {
-                // The production OData filter's predicate (task 158 r1): live rows, inherited-share provenance rows left out.
-                // AssignedAccessStoreODataTests pins the production filter itself over an evaluating Web API double.
-                var roots = Ledger.Where(r => r.State != AssignedAccessState.Revoked && InheritedSourceOf(r.SourceField) is null)
-                    .Select(RootOf).Where(r => r is not null).Select(r => r!.Value).Distinct().ToList();
-                return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
-            }
+            var all = LiveLedgerRoots();
+            // A root in PastScanBound is past the full ledger scan's page: it then reports truncated. Like the production scan,
+            // each root carries its ledger row's change time (the fake keeps one per root: Modified).
+            var roots = all.Where(r => !PastScanBound.ContainsKey(r.RootId))
+                .Select(r => r with { ModifiedOn = Modified.TryGetValue(r.RootId, out var m) ? m : null }).ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, roots.Count < all.Count));
+        }
+
+        /// <summary>
+        /// Task 049 (fix round 2): the ledger recent-change scan — roots holding a live ledger row changed at or after
+        /// <paramref name="modifiedSince"/>. The fake keeps no per-row change time, so a root's <see cref="Modified"/> stands
+        /// for its ledger rows' (the production filter and order are pinned by <c>AssignedAccessStoreODataTests</c>). It
+        /// reaches the roots in <see cref="PastScanBound"/> too.
+        /// </summary>
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedLedgerRootsAsync(
+            DateTimeOffset modifiedSince, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            Interlocked.Increment(ref _recentLedgerScanCalls);
+            var roots = LiveLedgerRoots()
+                .Select(r => r with { ModifiedOn = Modified.TryGetValue(r.RootId, out var m) ? m : null })
+                .Where(r => r.ModifiedOn is { } m && m >= modifiedSince)
+                .OrderByDescending(r => r.ModifiedOn)
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
         }
 
         /// <summary>
         /// Owner round 71: live Assigned-To rows whose every root lookup is empty — the production OData predicate, pinned
         /// itself by <c>AssignedAccessStoreODataTests</c>.
         /// </summary>
-        internal override Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(CancellationToken ct)
+        internal override Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(
+            Guid? afterId, CancellationToken ct)
         {
             if (FailRootlessScan)
                 throw new HttpRequestException("Simulated rootless-ledger scan failure.");
             lock (_gate)
             {
+                // Fix round 3 (K4): id order, after the cursor, capped at RootlessScanCap (the production page size, MaxScanRows).
+                RootlessScanAfter.Add(afterId);
                 var rows = Ledger.Where(r => r.State != AssignedAccessState.Revoked && RootIdOf(r) is null
-                                             && InheritedSourceOf(r.SourceField) is null)
+                                             && InheritedSourceOf(r.SourceField) is null
+                                             && (afterId is not { } after || r.Id.CompareTo(after) > 0))
+                    .OrderBy(r => r.Id)
                     .Select(Clone).ToList();
-                return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>((rows, false));
+                return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>(
+                    rows.Count > RootlessScanCap ? (rows.Take(RootlessScanCap).ToList(), true) : (rows, false));
             }
         }
+
+        /// <summary>The page size of the rootless-ledger scan (production: <see cref="AssignedAccessStore.MaxScanRows"/>).</summary>
+        public int RootlessScanCap { get; set; } = AssignedAccessStore.MaxScanRows;
+
+        /// <summary>The cursor each rootless-ledger scan was asked to start after, in call order.</summary>
+        public List<Guid?> RootlessScanAfter { get; } = new();
 
         /// <summary>
         /// Models the record's DELETION as Dataverse performs it for a matter or work assignment: the record is gone and the
@@ -567,6 +673,9 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public Action<int>? BeforeGrantQuery { get; set; }
 
+        /// <summary>When true, every <c>systemusers</c> query throws (the create-grant job's grantor check, fix round 3).</summary>
+        public bool FailSystemUserQueries { get; set; }
+
         /// <summary>Slice C2b: the <c>$top</c> of every grant-table query, in order (null when none was asked).</summary>
         public List<int?> GrantQueryTops { get; } = new();
 
@@ -635,6 +744,9 @@ internal static class AssignedAccessTestDoubles
                     GrantQueryTops.Add(top);
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
             }
+
+            if (FailSystemUserQueries && entitySetName == "systemusers")
+                throw new HttpRequestException("Simulated systemuser read failure.");
 
             if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
                 throw new HttpRequestException("Simulated root-owner read failure.");
@@ -827,7 +939,7 @@ internal static class AssignedAccessTestDoubles
 
             if (!root.Success)
             {
-                var person =Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+                var person = Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
                 if (!person.Success)
                     throw new InvalidOperationException($"Unexpected grant filter: {filter}");
                 var personId = Guid.Parse(person.Groups[1].Value);

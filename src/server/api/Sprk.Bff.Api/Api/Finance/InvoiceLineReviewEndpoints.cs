@@ -58,7 +58,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision - one decision on one line
         group.MapPost("/invoices/{invoiceId:guid}/lines/{lineId:guid}/decision", DecideLine)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLine")
             .WithSummary("Accept, reduce or disallow one invoice line")
@@ -76,7 +76,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/decisions - one action and reason on selected lines
         group.MapPost("/invoices/{invoiceId:guid}/lines/decisions", DecideLines)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLines")
             .WithSummary("Apply one action and reason to several invoice lines")
@@ -93,7 +93,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/accept-clean - Accept all Clean
         group.MapPost("/invoices/{invoiceId:guid}/lines/accept-clean", AcceptClean)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("AcceptCleanInvoiceLines")
             .WithSummary("Accept every Clean line of an invoice")

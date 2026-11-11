@@ -50,9 +50,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     private readonly EmailProcessingOptions _emailProcessingOptions;
     private readonly RecordContainerResolver _containerResolver;
 
-    /// <summary>FR-26 core-ancestor derivation for the To Do write path (task 052).</summary>
-    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
-
     /// <summary>
     /// Write-path invariant I-6 (task 080): the BU default owner team every record created here is owned by.
     /// Required, not optional (ADR-032) — it is registered unconditionally, and a missing one must fail at
@@ -113,7 +110,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
         RecordContainerResolver containerResolver,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         Sprk.Bff.Api.Services.RecordCreation.RecordCreationService recordCreation,
         IDataverseUserClient callerDataverse,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccess,
@@ -140,8 +136,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             ?? throw new ArgumentNullException(nameof(callerAccess));
         _http = http
             ?? throw new ArgumentNullException(nameof(http));
-        _coreAncestors = coreAncestors
-            ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownershipResolver = ownershipResolver
             ?? throw new ArgumentNullException(nameof(ownershipResolver));
         _identity = identity
@@ -2527,15 +2521,15 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <summary>The request's optional references: (column, target table, chosen id). Their columns are the registry's.</summary>
     private static IEnumerable<(string Column, string Target, Guid? Id)> QuickCreateReferences(
         QuickCreateEntityType entityType, QuickCreateRequest request) => entityType switch
-    {
-        QuickCreateEntityType.Matter =>
-        [
-            (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
+        {
+            QuickCreateEntityType.Matter =>
+            [
+                (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
             ("sprk_practicearea", "sprk_practicearea_ref", request.PracticeAreaId),
         ],
-        QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
-        _ => [],
-    };
+            QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
+            _ => [],
+        };
 
     /// <summary>A lookup in the service's Web API payload: the target table and the record (no entity set to guess).</summary>
     private static Dictionary<string, object?> LookupValue(string relatedTable, Guid recordId) => new(StringComparer.Ordinal)
@@ -2766,6 +2760,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
                 => new(refusal.Code, Forbidden, refusal.Detail),
 
+            // ── Invalid: a value copied from a secure source files the row, which would not be secure (task 022 fix round 3).
+            // The same request is refused every time: passed through with the service's words, never the generic 500. ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.MappingSourceSecureFilingCode)
+                => new(refusal.Code, StatusCodes.Status400BadRequest, refusal.Detail),
+
             // ── OwnerUnresolved (stays 403) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
@@ -2864,6 +2864,20 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         };
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>A thin adapter over the ONE server create</b> (field mapping task 030a, spec FR-18): the request becomes
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s Web API payload, created as the CALLER (WhoAmI
+    /// under their own token, ADR-028), and the service's refusal becomes this route's existing codes (<see cref="MapTodoRefusal"/>,
+    /// NFR-07). The adapter writes only what the user entered and the records the request names: the record regarding with its
+    /// ADR-024 pair (which describes the RECORD, never a carrier), the document and communication carriers, and the requested
+    /// Assigned To. Everything a To Do inherits is the service's: field mapping from what it is filed under (fill-only, read as
+    /// the caller), the caller checks on the merged row (AppendTo on every record named, ADR-008 path A), the I-1 stamp derived
+    /// before the create (from the record, else the single carrier; two carriers and no record stamp nothing), the inherited
+    /// Access Permission, the record-first owner and the creator person.</para>
+    /// <para><b>Assigned To.</b> The contact the request names wins, in the caller's payload. Else a mapped value; else the
+    /// caller's own linked contact (task 141, read as before), as a post-mapping default on the table's for-person column, so
+    /// the Daily Briefing finds the To Do (task 083). A caller with no linked contact still gets their To Do, with a warning.</para>
+    /// </remarks>
     public async Task<CreateTodoResponse?> CreateTodoAsync(
         CreateTodoRequest request,
         string userId,
@@ -2878,190 +2892,159 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             return null; // endpoint validates Name; guard defensively.
         }
 
-        // Core sprk_todo body (mirrors CreateTodoWizard's todoService.createTodo — statecode/statuscode Open+Active).
-        var entity = new Microsoft.Xrm.Sdk.Entity("sprk_todo");
-        entity["sprk_name"] = name;
-        entity["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);   // Active
-        entity["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1);  // Open
+        const string TodoTableName = "sprk_todo";
+        var rule = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(TodoTableName)
+            ?? throw new InvalidOperationException($"'{TodoTableName}' has no record-creation rule.");
+        var forPerson = rule.ForPerson
+            ?? throw new InvalidOperationException($"'{TodoTableName}' declares no for-person column.");
+
+        // The user's own values (mirrors CreateTodoWizard's todoService.createTodo — statecode/statuscode Active+Open).
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["sprk_name"] = name,
+            ["statecode"] = 0,  // Active
+            ["statuscode"] = 1, // Open
+            ["sprk_priorityscore"] = request.PriorityScore,
+            ["sprk_effortscore"] = request.EffortScore,
+        };
 
         if (!string.IsNullOrWhiteSpace(request.Description))
         {
-            entity["sprk_description"] = request.Description!.Trim();
+            payload["sprk_description"] = request.Description!.Trim();
         }
 
-        // sprk_duedate is Date-Only — write UTC-midnight of the supplied yyyy-MM-dd (best-effort parse).
+        // sprk_duedate is Date-Only: the supplied yyyy-MM-dd (best-effort parse; an unparseable date is left out, as before).
         if (!string.IsNullOrWhiteSpace(request.DueDate)
             && DateOnly.TryParse(request.DueDate, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var due))
         {
-            entity["sprk_duedate"] = due.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            payload["sprk_duedate"] = due.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        // Priority/Effort scores (client resolved the choice → 0-100 score, mirroring the wizard).
-        entity["sprk_priorityscore"] = request.PriorityScore;
-        entity["sprk_effortscore"] = request.EffortScore;
-
-        // Assignee → CONTACT (sprk_assignedto migrated systemuser → contact, 2026-06-21).
-        if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
-        {
-            entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
-        }
-        else
-        {
-            // Task 083 (#1044 writer half): task 080 made the owner a BU default team (above), so nothing on
-            // the row names the person it is for, and the Daily Briefing (UAC-r2 task 152's people-targeting
-            // surface, which matches sprk_assignedto through the SAME link) could not find it. Default to the
-            // CALLER's linked contact — task 141's link, read through IIdentityNormalizationService exactly as
-            // 141's contract directs (141-link-contract.md §6): resolve the caller's systemuserid with the
-            // existing task-067 resolver (already done by the endpoint into ownerSystemUserId), then
-            // ResolveAsync(...).ContactId. Two contacts on one oid, or an inactive one, resolve to null (141's
-            // ambiguity rule) — never refused: a To Do that is hard to find beats a refused one. Do NOT call
-            // ContactIdentityBinder here; linking is the reconciliation job's and the sign-in resolver's job.
-            Guid? callerContactId = null;
-            if (Guid.TryParse(ownerSystemUserId, out var callerSystemUserId))
-            {
-                try
-                {
-                    callerContactId = (await _identity.ResolveAsync(callerSystemUserId, cancellationToken)
-                        .ConfigureAwait(false)).ContactId;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "The caller's linked contact could not be resolved for {CallerId}", callerSystemUserId);
-                }
-            }
-
-            if (callerContactId is { } resolvedContactId && resolvedContactId != Guid.Empty)
-            {
-                entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", resolvedContactId);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and the "
-                    + "caller has no linked contact, so sprk_assignedto is left blank; the To Do is still "
-                    + "created (never refused) but will not surface in the caller's Daily Briefing until the "
-                    + "link exists",
-                    ownerSystemUserId ?? "(unresolved)",
-                    "caller_has_no_linked_contact");
-            }
-        }
-
-        // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
+        // Regarding (the filed record) — the entity-specific lookup and the ADR-024 pair naming that record.
+        string? targetTable = null;
         if (!string.IsNullOrWhiteSpace(request.RegardingEntityType)
             && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
             && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
         {
-            entity[reg.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(reg.LogicalName, regardingId);
-            entity["sprk_regardingrecordid"] = regardingId.ToString();
+            targetTable = reg.LogicalName;
+            payload[reg.LookupAttribute] = LookupValue(reg.LogicalName, regardingId);
+            payload["sprk_regardingrecordid"] = regardingId.ToString();
             if (!string.IsNullOrWhiteSpace(request.RegardingRecordName))
             {
-                entity["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
+                payload["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
             }
 
-            // Best-effort record-type ref (denormalized ADR-024 resolver lookup). Non-fatal — the typed lookup
-            // above is the load-bearing relationship; a missing record-type ref only affects cross-entity display.
+            // The relative record URL beside the id and name (045c, gap G5): the writer holds the table and the id, and
+            // RegardingRecordType owns the format every other writer of the pair uses. The reference number needs a read of
+            // the record, which this adapter does not make, so it is left unset (never guessed).
+            payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(reg.LogicalName, regardingId.ToString("D"));
+
+            // Best-effort record-type ref (the denormalized ADR-024 resolver lookup): the typed lookup above is the
+            // load-bearing relationship; a missing type only affects cross-entity display.
             var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
                 .ConfigureAwait(false);
             if (recordTypeId is { } rtId && rtId != Guid.Empty)
             {
-                entity["sprk_regardingrecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", rtId);
+                payload["sprk_regardingrecordtype"] = LookupValue(RecordTypeEntity, rtId);
             }
+        }
 
-            // FR-26 core-ancestor stamp (task 052) — applied AFTER the typed lookup so it cannot be
-            // overwritten. Two of the three types this picker offers are CORE (Matter, Project) and stamp
-            // only themselves; INVOICE is child-class, so the add-in can already file a To Do under an
-            // invoice today and that To Do would otherwise carry no matter/project stamp — invisible to
-            // everyone whose access comes from the invoice's matter.
-            var stamp = await _coreAncestors
-                .StampAsync(entity, reg.LogicalName, regardingId, cancellationToken)
-                .ConfigureAwait(false);
+        // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed. Independent of the
+        // record regarding: both may be written to the same sprk_todo. Neither touches the pair, which describes the RECORD.
+        if (request.DocumentId is { } documentId && documentId != Guid.Empty)
+        {
+            var carrier = TodoRegardingMap["Document"];
+            payload[carrier.LookupAttribute] = LookupValue(carrier.LogicalName, documentId);
+            targetTable ??= carrier.LogicalName;
+        }
 
-            if (!stamp.Succeeded)
+        if (request.CommunicationId is { } communicationId && communicationId != Guid.Empty)
+        {
+            var carrier = TodoRegardingMap["Communication"];
+            payload[carrier.LookupAttribute] = LookupValue(carrier.LogicalName, communicationId);
+            targetTable ??= carrier.LogicalName;
+        }
+
+        // Assigned To → CONTACT: the requested one, in the caller's payload (checked as the caller); else the caller's own
+        // linked contact as a post-mapping default (task 083, #1044 writer half).
+        // Order on the row: the requested contact, else a value the matching field-mapping profile
+        // fills, else the caller's linked contact. The caller's contact is only a default: the service drops it, with a warning,
+        // when the caller may not AppendTo it.
+        Dictionary<string, object?>? defaults = null;
+        var callerHasNoContact = false;
+        if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
+        {
+            payload[forPerson.Column] = LookupValue(forPerson.RelatedTable, contactId);
+        }
+        else if (Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
+                 && await ResolveMakerContactIdAsync(callerSystemUserId, cancellationToken).ConfigureAwait(false) is { } callerContact)
+        {
+            defaults = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                // NFR-01 fail-closed, expressed in THIS method's existing error contract: a null return
-                // is what every other guard here uses, and the endpoint maps it to a failure. Creating
-                // the To Do without the stamp would be a silent inheritance hole, which is worse.
-                _logger.LogError(
-                    "Create To Do aborted: core-ancestor derivation failed for {RegardingType} {RegardingId}. {Error}",
-                    reg.LogicalName, regardingId, stamp.Error);
-                return null;
-            }
+                [forPerson.Column] = new Microsoft.Xrm.Sdk.EntityReference(forPerson.RelatedTable, callerContact),
+            };
+        }
+        else
+        {
+            callerHasNoContact = true;
         }
 
-        // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed.
-        // Independent of the record regarding above: both may be written to the same sprk_todo (constraint:
-        // "Setting only one when both are available is a defect, not a graceful degradation"). Does NOT touch
-        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md).
-        // When a record regarding was chosen above, the stamp is that record's and a carrier adds none (the pair names
-        // the record: CoreAncestorResolver.ClassifyStampSource reads every carrier as a carrier). When NO record was
-        // chosen, a single carrier IS what the To Do is filed under (ClassifyStampSource rule 5) — so it is stamped
-        // from that carrier below (unified-access-control-r2 task 156, verifier round 1 item 8).
-        if (request.DocumentId is { } documentId
-            && documentId != Guid.Empty
-            && TodoRegardingMap.TryGetValue("Document", out var docCarrier))
-        {
-            entity[docCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(docCarrier.LogicalName, documentId);
-        }
+        // Field mapping from what the To Do is filed under (the source is inferred by the service), read as the caller (FR-04).
+        var token = _http.HttpContext is { } context ? TokenHelper.ExtractBearerTokenOrNull(context) : null;
+        var outcome = await _recordCreation.CreateAsync(
+                new Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest(
+                    TodoTableName,
+                    new Sprk.Bff.Api.Services.RecordCreation.RecordCreationPayload.WebApi(
+                        System.Text.Json.JsonSerializer.SerializeToElement(payload)))
+                {
+                    Mapping = Sprk.Bff.Api.Services.RecordCreation.RecordCreationMapping.ForCaller(_callerAccess, token),
+                    PostMappingDefaults = defaults,
+                },
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationPrincipal.ForCaller(
+                    _callerDataverse, Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null),
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        if (request.CommunicationId is { } communicationId
-            && communicationId != Guid.Empty
-            && TodoRegardingMap.TryGetValue("Communication", out var commCarrier))
+        if (outcome.Refusal is { } refusal)
         {
-            entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
-        }
-
-        // Carrier-only To Do (no record regarding): stamp it from what it is filed under, so it is BORN with the copy the
-        // storage resolver compares and the reconciliation job keeps fresh. Before this, the carrier-only To Do was
-        // created with no copy, so its first upload answered 409 container_ancestor_stale until the re-stamp landed, and
-        // until then it inherited none of the carrier's project / matter / work assignment (C10 part 2: a child of a
-        // secure record is secure). The ONE classification rule decides: exactly one carrier → that record; a document
-        // AND an email with no record → AmbiguousSource → nothing is stamped (the storage resolver refuses it as
-        // ambiguous, and it inherits nothing — fail closed). Same fail-closed contract as the record regarding above.
-        if (!entity.Contains("sprk_regardingrecordid")
-            && Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.ClassifyStampSource(
-                    "sprk_todo", entity,
-                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.PartyRegardingColumnNames("sprk_todo"))
-                is { Kind: Sprk.Bff.Api.Services.Dataverse.StampSourceKind.Source, Source: { } carrierSource })
-        {
-            var carrierStamp = await _coreAncestors
-                .StampAsync(entity, carrierSource.Intermediate, carrierSource.Id, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (!carrierStamp.Succeeded)
+            _logger.LogWarning(
+                "Create To Do refused: {Kind} {ServiceCode}, correlationId={CorrelationId}",
+                refusal.Kind, refusal.Code, outcome.CorrelationId);
+            if (MapTodoRefusal(refusal, targetTable) is { } problem)
             {
-                _logger.LogError(
-                    "Create To Do aborted: core-ancestor derivation failed for its {CarrierType} {CarrierId}. {Error}",
-                    carrierSource.Intermediate, carrierSource.Id, carrierStamp.Error);
-                return null;
+                throw problem;
             }
+
+            return null; // the route's existing generic failure (403 OFFICE_010, non-transient kinds); nothing was written
         }
 
-        // Task 173 (owner round 81): the record regarding was stamped (and its Access Permission set) BEFORE the carriers were
-        // added, so with a record AND a carrier the value is computed again over every parent the To Do now names — the
-        // carrier's filing may be the more restrictive. A carrier-only To Do was already decided by its own stamp above.
-        if (entity.Contains("sprk_regardingrecordid")
-            && (entity.Contains("sprk_regardingdocument") || entity.Contains("sprk_regardingcommunication")))
+        if (outcome.CreatedId is not { } todoId)
         {
-            await _coreAncestors.ApplyInheritedAccessPermissionAsync(entity, cancellationToken).ConfigureAwait(false);
+            return null; // neither a row nor a refusal: never a 201 (fail closed)
         }
 
-        // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
-        // never an individual. RECORD-FIRST — the To Do belongs with what it is filed against: the record regarding
-        // first, then the document or email it was created from, and only when there is neither, the acting user.
-        // Before this, a resolved caller owned the To Do and an unresolved one silently left it app-owned in ROOT.
-        var (todoTeamId, todoCreatorPerson) = await ResolveTodoOwnerTeamAsync(
-            entity, request, userId, ownerSystemUserId, cancellationToken).ConfigureAwait(false);
-        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", todoTeamId);
-        // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the To Do the app creates.
-        Spaarke.Dataverse.RecordCreatorPersonColumn.StampIfKnown(entity, todoCreatorPerson);
-
-        var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+        if ((callerHasNoContact || defaults is not null) && !Wrote(outcome, forPerson.Column))
+        {
+            // Two different reasons, never one: no link to offer, or a contact that was offered but the service did not write
+            // (the caller may not AppendTo it, or it could not be checked). The second is named by the service's own warning.
+            var reason = callerHasNoContact ? "caller_has_no_linked_contact" : "caller_contact_not_appendable";
+            var detail = callerHasNoContact
+                ? "the caller has no linked contact"
+                : outcome.MappingWarnings
+                    .FirstOrDefault(w =>
+                        w.Code == Sprk.Bff.Api.Services.RecordCreation.RecordCreationWarning.DefaultValueDroppedCode
+                        && string.Equals(w.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))
+                    ?.Detail
+                  ?? "the caller's contact was not written";
+            _logger.LogWarning(
+                "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and {Detail}, so "
+                + "sprk_assignedto is left blank; the To Do is still created (never refused) but will not surface in the "
+                + "caller's Daily Briefing",
+                ownerSystemUserId ?? "(unresolved)",
+                reason,
+                detail);
+        }
 
         _logger.LogInformation(
             "Create To Do completed: Id={TodoId}, Name={Name}, Regarding={RegardingType}",
@@ -3071,64 +3054,74 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     }
 
     /// <summary>
-    /// The owner team for a new To Do (task 080): the default owner team of the business unit of whatever the To Do
-    /// is filed against — the regarding record, else its document carrier, else its communication carrier — or the
-    /// acting user's when it is filed against nothing.
+    /// The To Do route's answer to a refusal of the unified create (NFR-07, ADR-019: the route's existing codes, unchanged):
+    /// no owner → 403 <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> with the words it had; a record the request names
+    /// that the caller may not use, or that does not exist → the route filter's ONE uniform refusal (403
+    /// <see cref="OfficeErrorCodes.AccessDenied"/>, <see cref="Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode"/>),
+    /// so "denied" and "not found" stay indistinguishable. A TRANSIENT refusal, one a retry can clear (<c>Unavailable</c>: a check
+    /// or the owner decision faulted, including an I-1 stamp that could not be read; <c>Undecided</c>: whether the create may
+    /// stand could not be decided; <c>Upstream</c> whose status is 429, 503 or 504), keeps the route's existing code and status,
+    /// 403 <see cref="OfficeErrorCodes.CannotCreateEntity"/> (OFFICE_010), but says to try again (<see cref="TransientDetail"/>).
+    /// Every other refusal (an I-1 stamp that cannot be derived, a privilege or column refusal, an upstream 400, 403 or 404, an
+    /// unknown kind) is <see langword="null"/>: the route's existing generic failure, 403 OFFICE_010 (fail closed). Nothing was
+    /// written in any case.
     /// </summary>
     /// <remarks>
-    /// Task 146 (secure-if-any): EVERY parent the To Do carries is passed — the record regarding, its core-ancestor
-    /// stamps, and the document / email carriers — with the first named as the primary (its business unit decides an
-    /// ordinary To Do). Any secure parent makes the To Do the named Secure team's; any named-but-unreadable parent
-    /// refuses rather than being skipped (a carrier could be the secure one). Before 146 only the first target was
-    /// passed, so a To Do on an ordinary matter carrying a SECURE document was owned in the ordinary unit.
+    /// <para>An <c>Upstream</c> refusal's status is the one <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf"/>
+    /// gives it (the caller's Dataverse status, 408 as 504 and any other 5xx or a call that never left the BFF as 503), so this
+    /// route and the HTTP adapters of the same service agree on which upstream failures are transient. The detail carries no
+    /// exception text, record id or service reason.</para>
+    /// <para>Unlike <see cref="MapQuickCreateRefusal"/>, an <c>Undecided</c> refusal that carries a provisioning or secure-create
+    /// code is not passed through under that code: this route has one error code (OFFICE_010) and a fixed detail, so every
+    /// <c>Undecided</c> refusal says to try again and, if it keeps failing, to contact an administrator. The code stays in the log.</para>
     /// </remarks>
-    /// <exception cref="SdapProblemException"><see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> (403) when no team
-    /// resolves. Thrown rather than returned as null so the endpoint can tell this refusal from its generic one.</exception>
-    private async Task<(Guid Team, Guid? CreatorPerson)> ResolveTodoOwnerTeamAsync(
-        Microsoft.Xrm.Sdk.Entity todo,
-        CreateTodoRequest request,
-        string userId,
-        string? ownerSystemUserId,
-        CancellationToken cancellationToken)
-    {
-        (string? LogicalName, Guid? Id) target =
-            !string.IsNullOrWhiteSpace(request.RegardingEntityType)
-            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
-            && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var regarding)
-                ? (regarding.LogicalName, regardingId)
-                : request.DocumentId is { } documentId && documentId != Guid.Empty
-                    ? (TodoRegardingMap["Document"].LogicalName, documentId)
-                    : request.CommunicationId is { } communicationId && communicationId != Guid.Empty
-                        ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
-                        : (null, null);
+    /// <param name="refusal">The service's refusal.</param>
+    /// <param name="targetTable">What the To Do is filed against (the record, else a carrier), or <see langword="null"/>.</param>
+    internal static SdapProblemException? MapTodoRefusal(
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string? targetTable) => refusal.Kind switch
+        {
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
+                when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
+                    is StatusCodes.Status429TooManyRequests
+                    or StatusCodes.Status503ServiceUnavailable
+                    or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
+                OfficeErrorCodes.RecordOwnerUnresolved,
+                OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
+                targetTable is not null
+                    ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
+                      + "Check that the item still exists and that you can open it."
+                    : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
+                      + "administrator to check your user record's business unit.",
+                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved)),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied => new SdapProblemException(
+                OfficeErrorCodes.AccessDenied,
+                "Forbidden",
+                Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail,
+                StatusCodes.Status403Forbidden,
+                new Dictionary<string, object>
+                {
+                    [AssigneeReasonCodeExtension] = Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode,
+                }),
+            _ => null,
+        };
 
-        // UAC task 194b fix round R (B3): in sprk_todo's primary order (ForChild → ForRow) — the subject, then the document
-        // carrier, then the email carrier: the rule above, as the reconciler asks the written row; never a primary named here.
-        var todoOwner = await _ownershipResolver.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo) with
-            {
-                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
-                    ? callerSystemUserId
-                    : null,
-                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-                // Task 146 c1-r1 (owner round 13 item 9): the Office user is the person who asked.
-                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
-                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
-                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
-            },
-            cancellationToken).ConfigureAwait(false);
-        var teamId = todoOwner.IsOwned ? todoOwner.OwningTeamId : null;
+    /// <summary>
+    /// What the add-in pane shows for a To Do create that failed for a reason a retry can clear (<see cref="MapTodoRefusal"/>).
+    /// Nothing was saved. No exception text, record id or service reason.
+    /// </summary>
+    internal const string TransientDetail =
+        "The To Do could not be created right now, and nothing was saved. Try again in a moment. "
+        + "If it keeps failing, contact your administrator.";
 
-        return teamId is { } resolvedTeam ? (resolvedTeam, todoOwner.CreatedByPerson) : throw new SdapProblemException(
-            OfficeErrorCodes.RecordOwnerUnresolved,
-            OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
-            target.LogicalName is not null
-                ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
-                  + "Check that the item still exists and that you can open it."
-                : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
-                  + "administrator to check your user record's business unit.",
-            OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
-    }
+    /// <summary>403 OFFICE_010 (the route's existing code and status) with <see cref="TransientDetail"/>.</summary>
+    private static SdapProblemException TransientTodoRefusal() => new(
+        OfficeErrorCodes.CannotCreateEntity,
+        OfficeErrorCodes.GetTitle(OfficeErrorCodes.CannotCreateEntity),
+        TransientDetail,
+        OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.CannotCreateEntity));
 
     /// <inheritdoc />
     public IAsyncEnumerable<byte[]> StreamJobStatusAsync(

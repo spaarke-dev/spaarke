@@ -274,7 +274,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             _logger.LogWarning("Invoice submission {SubmissionId}: a resume was asked for, but it links no invoice; no after-commit step ran", submissionId);
             return new SubmissionAfterStepsResult
             {
-                Status = SubmissionAfterStepsStatus.Refused, SubmissionId = submissionId, ReasonCode = InvoiceLinkMismatchCode,
+                Status = SubmissionAfterStepsStatus.Refused,
+                SubmissionId = submissionId,
+                ReasonCode = InvoiceLinkMismatchCode,
             };
         }
 
@@ -286,7 +288,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         if (gate.Status != SubmissionCommitGateStatus.Passed)
         {
             return Stop(SubmissionAfterStepsStatus.Undone, submissionId, invoiceId, gate.ReasonCode ?? SubmissionReasonCodes.FileUnservable)
-                with { UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld };
+                with
+            { UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld };
         }
 
         // 016 again (idempotent; the persister's Resumed path re-runs it too). A fault is a totals Retry after the Signals and the record.
@@ -499,7 +502,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             // The totals failed after the commit: the Signals and the record are written; the redelivery re-runs the totals, then the rest.
             return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, totalsRetryCode)
-                with { SignalsWritten = written, DecisionRecordId = recordId };
+                with
+            { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
         // ── 3. Index the accepted invoice (task 152, FR-43, NFR-03): the invoice index is built from the invoice's structured records, never from
@@ -519,7 +523,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 _logger.LogWarning("Invoice submission {SubmissionId}: the index job of invoice {InvoiceId} could not be queued ({Fault}); it stays Processing for a retry",
                     submissionId, invoiceId, ex.GetType().Name);
                 return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, IndexEnqueueFailedCode)
-                    with { SignalsWritten = written, DecisionRecordId = recordId };
+                    with
+                { SignalsWritten = written, DecisionRecordId = recordId };
             }
         }
 

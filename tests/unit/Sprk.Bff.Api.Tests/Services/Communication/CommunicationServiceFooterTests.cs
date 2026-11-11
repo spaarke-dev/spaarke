@@ -59,11 +59,11 @@ public class CommunicationServiceFooterTests
             => Task.FromResult(TrackingTokenVerification.Invalid);
     }
 
-    private static TrackingFooterGate Gate(bool enabled) =>
+    private static TrackingFooterGate Gate(bool enabled, string? template = null) =>
         new(Mock.Of<IOptionsMonitor<TrackingFooterOptions>>(m => m.CurrentValue == new TrackingFooterOptions
         {
             Enabled = enabled,
-            MessageTemplate = "Filed with Spaarke re {record-ref}. Ref: {signed-token}",
+            MessageTemplate = template ?? "Filed with Spaarke re {record-ref}. Ref: {signed-token}",
             SigningKeySecretName = "kv-secret-name",
         }));
 
@@ -73,7 +73,7 @@ public class CommunicationServiceFooterTests
         DefaultMailbox = SenderEmail,
     };
 
-    private static CommunicationService BuildSut(RecordingEmailSender sender, ITrackingTokenSigner signer, TrackingFooterGate gate)
+    private static CommunicationService BuildSut(RecordingEmailSender sender, ITrackingTokenSigner signer, TrackingFooterGate gate, List<Entity>? created = null)
     {
         var options = MinimalOptions();
         var senderValidator = new ApprovedSenderValidator(
@@ -86,7 +86,9 @@ public class CommunicationServiceFooterTests
             new ICommunicationArchiver[] { new EmailArchiver(new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>())) });
 
         var entity = new Mock<IGenericEntityService>();
-        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ReturnsAsync(Guid.NewGuid());
+        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created?.Add(e))
+            .ReturnsAsync(Guid.NewGuid());
         entity.Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -116,6 +118,16 @@ public class CommunicationServiceFooterTests
             : null,
     };
 
+    private static SendCommunicationRequest EmailRequestFor(string? entityName) => new()
+    {
+        To = new[] { "recipient@contoso.com" },
+        Subject = "Kickoff",
+        Body = "hello there",
+        BodyFormat = BodyFormat.HTML,
+        CommunicationType = CommunicationType.Email,
+        Associations = new[] { new CommunicationAssociation { EntityType = "sprk_matter", EntityId = MatterId, EntityName = entityName } },
+    };
+
     private static HttpContext UserContext()
     {
         var identity = new ClaimsIdentity(new[]
@@ -139,6 +151,51 @@ public class CommunicationServiceFooterTests
         body.Should().Contain("Filed with Spaarke re Acme Matter"); // rendered {record-ref}
         body.Should().Contain(Token);                            // rendered {signed-token}
         body.Should().Contain("<hr");                            // transparent, visible HTML disclosure (ADR-028)
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SendAsync_RegardingWithoutAName_FooterNamesANeutralRecord_NeverTheLogicalNameOrId(string? entityName)
+    {
+        var sender = new RecordingEmailSender();
+        var created = new List<Entity>();
+        var defaultTemplate = new TrackingFooterOptions().MessageTemplate;
+        var sut = BuildSut(sender, new StubTokenSigner(Token), Gate(enabled: true, defaultTemplate), created);
+
+        await sut.SendAsync(EmailRequestFor(entityName), httpContext: null, CancellationToken.None);
+
+        var body = sender.LastRequest!.Communication.Body;
+        body.Should().Contain("regarding a Spaarke record.");
+        body.Should().NotContain("sprk_").And.NotContain(MatterId.ToString());
+        body.Should().Contain($"Ref: {Token}");
+    }
+
+    [Fact]
+    public async Task SendAsync_RegardingWithoutAName_StoredRegardingNameIsStillNotSet()
+    {
+        var sender = new RecordingEmailSender();
+        var created = new List<Entity>();
+        var sut = BuildSut(sender, new StubTokenSigner(Token), Gate(enabled: true), created);
+
+        await sut.SendAsync(EmailRequestFor(null), httpContext: null, CancellationToken.None);
+
+        var row = created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Which;
+        row.Contains("sprk_regardingrecordname").Should().BeFalse("the footer wording is not stored as the regarding name");
+    }
+
+    [Fact]
+    public async Task SendAsync_RegardingWithAName_FooterAndStoredNameAreTheName()
+    {
+        var sender = new RecordingEmailSender();
+        var created = new List<Entity>();
+        var sut = BuildSut(sender, new StubTokenSigner(Token), Gate(enabled: true, new TrackingFooterOptions().MessageTemplate), created);
+
+        await sut.SendAsync(EmailRequestFor("Acme Matter"), httpContext: null, CancellationToken.None);
+
+        sender.LastRequest!.Communication.Body.Should().Contain("regarding Acme Matter.").And.NotContain("a Spaarke record");
+        created.Single(e => e.LogicalName == "sprk_communication").GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("Acme Matter");
     }
 
     [Fact]

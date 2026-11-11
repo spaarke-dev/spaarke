@@ -1276,7 +1276,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .Should().Be(matterType);
         ShouldBeSecure(workAssignment, "re-filed under a secure matter");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
             "the secure matter's sharee is mirrored — nothing is held");
     }
 
@@ -1657,7 +1657,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         fields["sprk_issecure"].Should().Be(true, "flagged in the create itself");
         ShouldBeSecure(created, $"created under a {table} of a secure {parentTable}");
         _fixture.ShareMaskOf(created, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
             "the secure parent's sharee, as if filed directly under it");
     }
 
@@ -1763,7 +1763,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .Should().Be(secureInvoice.ToString("D"), "the pair moves with the invoice lookup it repeated");
         ShouldBeSecure(workAssignment, "re-filed under an invoice of a secure matter");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)));
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)));
     }
 
     /// <summary>
@@ -1912,6 +1912,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         await viaCore.Should().ThrowAsync<RecordOwnerUnresolvedException>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object, new StampWorld().Restamper,
             [
                 new FieldMappingRuleDto
@@ -1982,6 +1983,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)>
         PushMatterOnto(Guid workAssignment, Guid matter) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [
@@ -2130,6 +2132,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [

@@ -437,7 +437,9 @@ least as strict as the matter.
   `teamName` the setup script creates from `config/restricted-content-owner-role.json`. Set one without the other and no
   team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
   pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
-  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
+  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id. A mirrored
+  share on a hard-deny row (a Secure root's sharee on its `sprk_policy` or `sprk_policyversion` child) carries Read only,
+  whatever the root share carries (#2560); the share reconcile narrows a wider one and logs `HardDenyRowShareWiderThanRead`.
 - **Reading billing rules across the customer (`Billing Rule Reader`; ebilling-r1 task 089d, owner 2026-11-03 and
   2026-11-04).** A billing rule (`sprk_policy`) sits in the customer's top business unit, and Billing Administrator reads rules
   at Deep from the admin's own unit, so an admin homed in a child unit cannot read it, and the rule-exclude route refuses that

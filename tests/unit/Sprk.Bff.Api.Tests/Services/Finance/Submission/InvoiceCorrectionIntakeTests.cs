@@ -22,12 +22,12 @@ internal static class CorrectionSeed
 
     public static Entity Invoice(Guid? firm = null, string coreColumn = "sprk_matter", string coreEntity = "sprk_matter", Guid? coreId = null,
         int state = InvoiceStatusCodes.StateActive, int status = InvoiceStatusCodes.InReview) => new("sprk_invoice", OldInvoiceId)
-    {
-        [InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", firm ?? InvoiceSubmissionServiceTests.FirmId),
-        [coreColumn] = new EntityReference(coreEntity, coreId ?? InvoiceSubmissionServiceTests.MatterId),
-        ["statecode"] = new OptionSetValue(state),
-        ["statuscode"] = new OptionSetValue(status),
-    };
+        {
+            [InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", firm ?? InvoiceSubmissionServiceTests.FirmId),
+            [coreColumn] = new EntityReference(coreEntity, coreId ?? InvoiceSubmissionServiceTests.MatterId),
+            ["statecode"] = new OptionSetValue(state),
+            ["statuscode"] = new OptionSetValue(status),
+        };
 
     /// <summary>The invoice's own submission; finished (Accepted) unless <paramref name="status"/> says otherwise (task 097 second review F1).</summary>
     public static Entity Submission(string number = Number, Guid? firm = null, Guid? matter = null, Guid? id = null,
