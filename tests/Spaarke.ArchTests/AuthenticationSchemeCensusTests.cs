@@ -75,6 +75,11 @@ public sealed class AuthenticationSchemeCensusTests
         "GET /api/v1/external/invoice-submissions",
         "GET /api/v1/external/invoice-submissions/firm-records",
         "GET /api/v1/external/invoice-submissions/{id:guid}",
+        // ebilling-r1 task 130b (FR-38): the firm outcome of an invoice / a submission, on the collaboration group behind
+        // CallerPrincipalAuthorizationFilter and FirmOutcomeAuthorizationFilter (a non-systemuser caller, the item's firm among the
+        // caller's active firms, Read on its core record, not hidden by the (a') predicate; every refusal the same 403).
+        "GET /api/v1/external/ebilling/invoices/{invoiceId:guid}/outcome",
+        "GET /api/v1/external/ebilling/submissions/{submissionId:guid}/outcome",
         "GET /api/v1/external/invoices/{id:guid}/documents",
         "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions",

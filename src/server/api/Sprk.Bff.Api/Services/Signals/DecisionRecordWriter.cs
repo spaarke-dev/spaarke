@@ -1241,8 +1241,18 @@ public sealed class DecisionRecordWriter
     /// <summary>The most rows the billing "already recorded" lookup reads (see <see cref="FindBillingRecordsAsync"/>).</summary>
     private const int BillingLookupTop = 10;
 
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when the decision id is recorded with the same billing action and
+    /// other, readable content (the request is not a repeat of the recorded decision).</summary>
+    internal const string BillingOtherContentRefusal =
+        "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.";
+
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when a record under the decision id has the same billing action
+    /// but its content hash cannot be read (nothing is proven either way).</summary>
+    internal const string BillingContentUnreadableRefusal =
+        "This decision id is already recorded on its subject with the same billing action, but the recorded content cannot be read; nothing was written.";
+
     /// <summary>
-    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the three line codes, the invoice for every other
+    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the line codes (accept, reduce, disallow and add-line), the invoice for every other
     /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
     /// <see cref="WriteBillingDecisionAsync"/> only; <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> neither reads nor
     /// changes it. Built from the catalog's billing set, so every billing code has a subject; but a NEW line-level code that is not named in
@@ -1253,7 +1263,7 @@ public sealed class DecisionRecordWriter
     private static readonly FrozenDictionary<string, string> BillingSubjectByCode = DecisionActionCatalog.BillingActions
         .ToFrozenDictionary(
             d => d.Code,
-            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" ? BillingLineEntity : BillingInvoiceEntity,
+            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" or "add-line" ? BillingLineEntity : BillingInvoiceEntity,
             StringComparer.Ordinal);
 
     /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
@@ -1340,10 +1350,11 @@ public sealed class DecisionRecordWriter
             {
                 // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
                 // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
-                // be read proves nothing either, so it is refused the same way, never written over with a second record.
+                // be read proves nothing either, so it is refused the same way (same reason), never written over with a second record; its
+                // message says so, so a caller can tell it from proven other content (ebilling-r1 164a fix round K2).
                 throw new DecisionRecordRefusedException(
                     DecisionRecordRefusalReason.ReviewInvalid,
-                    "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
+                    sameCode.Any(r => r.Hash is null) ? BillingContentUnreadableRefusal : BillingOtherContentRefusal);
             }
 
             if (existing.Id != Guid.Empty)

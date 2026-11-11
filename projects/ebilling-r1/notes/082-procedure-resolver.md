@@ -1,0 +1,1403 @@
+# Task 082 - Procedure resolver
+
+Branch `task/ebilling-082`, from `work/ebilling-r1` at `dfcc9b7355`. Not merged into work. Nothing was written to Dataverse; the only live call was the read-only step 0 count below.
+
+## Status: slice 082a done (step 0 and step 1); the rest is split
+
+The POML is 3-4 days of FULL-rigor work. This session delivered the first, self-contained slice and stopped, with a split for the rest (section "Split for the rest of 082"). Two design points the POML does not answer must be decided before 082c (section "Questions before 082c").
+
+## Step 0
+
+### Merge of origin/master: not done here (deviation 1)
+
+`origin/master` had 209 commits that `work/ebilling-r1` does not have. Of the files this task touches, master changes only two ArchTest files that 082a does not edit (`ContactCreateOwnerPolicyGuardTests.cs`, `RouteAuthorizationGuardTests.Ledger.cs`). Merging master in a task branch would put those 209 commits into the main session's merge of 082, beside 092 and 095d. The main session owns master merges into work. Task 070 is on master (`BillingRuleCatalogue.cs` is in `origin/master`), so the model 7.2 precondition holds.
+
+### Dev count (read-only, 2026-11-04, Dataverse MCP)
+
+| Query | Result |
+|---|---|
+| `sprk_workassignment` rows | 32 |
+| rows with both `sprk_regardingmatter` and `sprk_regardingproject` set | **0** |
+| rows with both set, joined to their project (to compare the matter with the project's pair) | 0 rows |
+
+No work assignment carries both lookups, so none can carry "the project's matter only". **The escalation trigger did not fire.**
+
+## Step 1 (082a): CoreRecordChain and NamePairParentAsync
+
+### What landed
+
+- **`SecureRootInheritance.NamePairParentAsync`** (internal static), with the closed result **`PairParentAnswer`** = `None | Parent(Table, Id) | NotAFilingParent(Unrepeated?) | Unknown(Reason)` (an abstract record with a private constructor; the four answers are nested sealed records).
+  - It is the pair rule of the private `NameParentsAsync`, moved out with no logic change. `NameParentsAsync` now calls it and maps the answers back: `Parent` adds the parent, `NotAFilingParent` with a reason sets `unrepeated` (#1616), `Unknown` sets `unknown`. The order of the checks, the messages, the type cache, the `faultedTypes` set and the logged warning are unchanged.
+  - `NameParentsAsync` stays private. `PairParentAsync` / `ExistingPairParentAsync` (the ownership resolver's pair read) are not touched.
+- **`CoreRecordChain`** (`Services/Signals/Billing/CoreRecordChain.cs`, public static, no DI registration):
+  - Matter: `[M 0]`, nothing read.
+  - Project: one row read (the pair columns), then the pair through `NamePairParentAsync`. `Parent` is distance 1; `None` and `NotAFilingParent` give no parent; `Unknown` throws `CoreRecordChainUnreadableException`.
+  - Work assignment: one row read of `SecureRootInheritance.TypedFilingColumns[sprk_workassignment]`; each set lookup is distance 1. The pair is not read (it files under nothing on its own, #1616), and the intermediate lookups are not read (#1630 is not followed).
+  - A parent's own parent is never read. A core record that is not found throws; a read fault propagates.
+  - A pair naming the record itself names no parent; the same parent twice is one link. Order: distance 0, then the parents by table and id.
+- **`CoreRecordChainNoMultiHopGuardTests`** (ArchTests): a source scan of `CoreRecordChain.cs`, line comments ignored. It fails on `NameParentsAsync`, `FindFilingParentsAsync`, `IntermediateFilingColumns`, `IntermediateParentColumns`, `TypedLookupsOf` or `ReadSecureParentsAsync`, and when the file does not call `NamePairParentAsync` or does not reuse `TypedFilingColumns`. Controls: three planted references and a hand-parsed pair fire; the sanctioned shape and a comment naming the forbidden members do not.
+
+### Decisions
+
+1. **`pairType` is a `Guid?`, not the `EntityReference?` of the old 082 POML signature.** `NameParentsAsync` holds the type as a `Guid?` (`FilingFacts.PairType`), so the extraction keeps that; `CoreRecordChain` passes the lookup's id. uac-r2 to confirm.
+2. **Two optional parameters were needed to keep `NameParentsAsync` unchanged:** `repeatedIds` (a pair repeating a typed parent or intermediate lookup names nothing separate, the #1630 identity rule) and `faultedTypes` (the batched walk's #1410 F3 set). Both default to `null`. uac-r2 to confirm.
+3. **`NotAFilingParent` carries the #1616 reason** when a matter- or project-typed pair sits on a table whose pair does not file on its own (a work assignment). That keeps the answer set closed at four while `NameParentsAsync` still sets `unrepeated`. `CoreRecordChain` never meets that case (it reads the pair on a project only).
+4. **A core record that is not found faults** (`CoreRecordChainUnreadableException`), as an unreadable row does, so the job retries and then fails. A missing record has no chain to judge on.
+5. **A parent that no longer exists is not read.** One read per record (the constraint). A deleted parent holds no assignment rows, so it confers nothing in the resolver.
+6. **`CoreRecordChain` is static, not a DI service.** It needs only the app-only `IGenericEntityService` and a logger, which the resolver (082b) will pass. No registration is added (CLAUDE.md §11).
+
+### Component justification (CLAUDE.md §11)
+
+- **Existing:** `SecureRootInheritance`'s walks (`NameParentsAsync`, `FindFilingParentsAsync`) and its maps.
+- **Extension:** the walks follow intermediates and climb past the direct parent, which D-172 forbids for billing. The maps and the pair rule are reused, not copied. Only the one-row read and the distance are new.
+- **Cost of doing nothing:** a project's or work assignment's invoice never sees its parent's Procedures and overrides.
+- **New surface:** one internal static method and one internal closed record on `SecureRootInheritance` (extracted, not new logic); one public static class and one exception type in `Services/Signals/Billing`. No endpoint, no registration, no package.
+
+### Seeding proofs (each restored; `cmp` confirmed the file identical)
+
+The POML's proof (a) names a resolver test ("M's Procedure does not apply on W1"), which belongs to 082b; it must be re-run there. Proof (b) (the firm condition) is 082b's. 082a ran these:
+
+| Change | Result |
+|---|---|
+| (a) at chain level: `CoreRecordChain` also reads a work assignment's project parent and adds that project's own parent | 2 of 25 failed: "a work assignment typed under a project is [W 0, P 1]; the project's matter is not in it (no second hop)", and the both-lookups case (the extra hop read a project row that the test does not seed) |
+| (c) the shared rule: `NamePairParentAsync` answers `None` for a pair id that is not a record id | 2 of 895 failed (`~CoreRecordChainTests\|~SecureRoot`): the two "not a record id" cases of "a project pair UAC answers Unknown for fails closed". **Found in passing:** no uac-r2 test failed, so before this task nothing tested `NameParentsAsync`'s "does not hold a record identifier" branch (no test in `tests/` names it). Because `NameParentsAsync` now calls the same method, 082a's tests pin that branch for both callers. Reported to the main session; no issue filed, since the gap is closed by this change. |
+
+### Code review and ADR check (Step 9.5)
+
+Scope: the four files of commit `4e98e82a10`. No F-class finding.
+
+- **K4:** `NamePairParentAsync` checks its non-nullable arguments with `ArgumentNullException.ThrowIfNull`, as `PairParentAsync` does next to it. No real path passes null.
+- **K4:** the chain row is read with `NoLock`, like every other loader read. A dirty read during a re-file could name the old or the new parent; the evaluation of that moment is then judged on one of the two states.
+- **K1:** `PairParentAnswer` is closed by a private constructor, but records also get a protected copy constructor, so code inside the BFF assembly could still derive from it. Only deliberately adversarial code in our own repo could do that.
+- **Metrics:** `CoreRecordChain.cs` 138 lines, one public method, about 12 branches. `SecureRootInheritance.cs` +114/−43: the pair block moved into one method, and `NameParentsAsync` got shorter. Nothing new in that file except the extraction.
+- **ADR check (applied inline, not as a separate skill run):** ADR-002 (no write, no plugin), ADR-010 (no DI registration added; a static reader), ADR-001 / ADR-008 (no endpoint), ADR-038 (unit tests in the billing test folder; an ArchTest with must-fire and must-not-fire controls). No conflict. §10: placement is the BFF, `Services/Signals/Billing`, beside the loader that calls it; no package; the publish size is below.
+
+### Gates
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `~CoreRecordChainTests` (new) | 25/25 |
+| Unit `~SecureRoot\|~SecureChild\|~RecordOwnership\|~Inherit\|~ExternalAccess` (the extraction, no logic change) | 6649/6649 |
+| Spaarke.ArchTests (full) | 2009/2009 (4 new: 1 real-file check, 3 controls, one a 3-case theory) |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | none; no package or csproj changed |
+| Publish size: `git archive` of each commit, `dotnet publish -c Release -r linux-x64 --self-contained false`, uncompressed, 169 files each | fresh master `origin/master` 136,945,312 B; base `dfcc9b7355` 137,254,816 B; this branch 137,271,204 B. **Against master: +325,892 B**, most of it ebilling-r1 work not yet on master. **This task alone: +16,388 B** (dll +13,824, pdb +2,564). |
+
+### Reviews still owed
+
+- **uac-r2:** the extracted entry point (decisions 1-3 above: `Guid?` type, the two optional parameters, the reason on `NotAFilingParent`) and the reuse of `TypedFilingColumns`. 087 edits `SecureRootInheritance.cs` after this merges.
+- **ontology-r1:** the owner review of `CoreRecordChain` now; of the loader and evaluator change in 082c.
+- The adversarial passes are the main session's (two, `tenant-isolation`).
+
+## Questions before 082c
+
+1. **How a gap holds the invoice on each channel.** Model 7.1 says a gap raises one blocking internal finding and holds the invoice. 114's POML says an Override releases "a gap-held **internal** submission" through 105's path, which overrides a held submission (Rejected, reason Blocked, D-101). So on the internal channel the gap finding must make the outcome Blocked. The POML does not say what a gap does on an **SPA** submission: today a deciding finding there is an automatic rejection (`InvoiceSubmissionProcessor.Classify`), and a gap is not a rule failure, so it must not reject (I-5). Options: (a) a gap holds both channels as Blocked, and only internal submissions can be overridden (an SPA one waits for a check that clears it); (b) a gap on SPA is a new held kind. This changes `InvoiceSubmissionProcessor.Classify` and 073's decider, which are not in the POML's file list.
+2. **089c pass-2 K1, a rule dropped by a newer Procedure Version.** Proposed decision for 082b's pin resolution: a rule applies for a work date only when it has a Published policy version under the Procedure Version chosen for that date (model 7.2). So a dropped rule applies in v1's window and on a record pinned to v1, and nowhere else, whatever its `sprk_enabled`. A record rule runs only in its base rule's slot: when the base rule's policy is resolved for that date (before exclusion). That also covers 089c pass-1 K3 (a deleted base rule, or a retired Procedure, strands an enabled record rule: its base is not resolved, so it never runs) and deviation 4 (the record rule copies the current version, but runs only where its base is in force). The owner's open question (refuse the change for a record that is not pinned) is a 089c route question, not a resolver one.
+
+## Split for the rest of 082
+
+| Slice | Scope | Files | Notes |
+|---|---|---|---|
+| **082b** | `ProcedureResolver`: the reads (assignment and override rows on the chain, Procedures by All records / Firm / assigned ids, Procedure Versions, rule sets, policies, policy versions with `sprk_procedureversion` and `sprk_publishstate` Published, record-scoped sets on the chain), each once per invoice; the pure resolution per work date (sources, firm condition, Exclude and Pin with distance, versions and gaps, rule excludes, record rules in their base rule's slot); `BillingRuleCatalogue` Replace / Additive / Split with the pinned list. The 089 must-items: ignore an assignment to a retired Procedure (089b review 2 K1); an assignment row with every core lookup null contributes nothing (080 limit); K3 and the K1 decision above; deviation 5 (an empty set, or an Off rule with no version, contributes nothing). | `ProcedureResolver.cs`, `BillingRuleCatalogue.cs`, `ProcedureResolverTests.cs` | Pure plus reads; no loader change yet. Seeding proof (a) and (b) here. |
+| **082c** | Loader and evaluator re-keyed: `LoadRulesAsync` takes the resolver's rules (the `sprk_procedure` null filter and the row re-check removed, the 081 MUST-DO), candidates carry rank, Procedure Version and source; the evaluator's precedence by classification and rank (D-39 `PrecedenceKey` kept); per-line dates from the one resolution; the gap finding (new reason code, `BillingSystemFindings`) and the hold; `BILL-SYSTEM-SUBMISSION` exemption unchanged. Check every `LoadRulesAsync` caller (102's adjustment rule list). | `BillingFactLoader.cs`, `InvoiceComplianceEvaluator.cs`, `BillingSystemFindings.cs`, `InvoiceSubmissionAfterSteps.cs`, `FinanceModule.cs`, loader and evaluator tests | Needs question 1 answered. The ontology-r1 owner review is of this slice. |
+| **082d** | The 7.4 snapshot members in `sprk_findingsjson` (one hunk in `InvoiceSubmissionPersister.cs`), the bounded Decision Record summary, the ratchet ArchTest over `sprk_currentversion` readers, NFR-01 timing on 150 lines, publish-size delta. | `InvoiceSubmissionPersister.cs`, `CurrentVersionReaderRatchetTests.cs` | After 092 and 095d merge, which also edit the persister. |
+
+## 082a review and decisions (2026-11-04)
+
+### Reviews
+
+- **uac-r2 review: OK, no F.** Decisions 1-3 (the `Guid?` pair type, the two optional parameters, the reason on `NotAFilingParent`) are confirmed equivalent to the old code branch by branch. Notes:
+  - **U1** (fixed here): a comment on the `NoLock = true` app-only read in `CoreRecordChain`. It serves procedure selection only, is NOT an access decision, and must not be reused to judge access.
+  - **U2** (fixed here): the "pair id is not a record id" cases are now in uac-r2's own access suite, one per caller, in `SecureRootInheritanceTests`: `AProjectWhosePairIdIsNotARecordId_IsUnverifiable_ThroughTheRecordWalk` (through `ReadSecureParentsAsync`, the public entry to the private `NameParentsAsync`) and `NamePairParentAsync_APairIdThatIsNotARecordId_IsUnknown` (direct, on a project and a work assignment).
+  - **U3** (acceptance criterion for 082b / 082c, below).
+- **ontology-r1 review: OK, no F.** The chain matches D-172 and D-177 (3), (8), (9). Notes:
+  - **O1** (082b criterion, below).
+  - **O2** (082c criterion, below).
+  - **O3:** `NoLock` during a re-file is accepted as K4.
+  - **The K1 proposal (item 2 under "Questions before 082c") is CONFIRMED** by ontology (D-177 (1), (2), (14); D-175; D-202): a rule applies on a date only with a Published version under that date's Procedure Version, regardless of `sprk_enabled`. A record rule runs only where its base rule is resolved for that date, before exclusion. This also closes 089c K3.
+- **Adversarial pass 1: no F.** Four known-limit findings, K1 to K4.
+  - **K1 (fixed here):** the no-multi-hop guard was a deny-list. `CoreRecordChainNoMultiHopGuardTests` is now an allow-list (below).
+  - **K2 (fixed here):** the `PairParentAnswer` switch in `CoreRecordChain` had no `default`. It now handles `None` and `NotAFilingParent` explicitly (no parent, no fault), `Unknown` (throws, as before), and `default:` throws `UnreachableException` naming the answer type. **No unit test:** `NamePairParentAsync` / `ReadAsync` has no seam for injecting an answer, so a fake future answer cannot be fed in. (A non-sealed record has a protected copy constructor, so code in the BFF assembly could derive from the base type; the private constructor only stops other assemblies.) The `default` guards a fifth nested record added later.
+  - **K3 and K4:** see the 082b and 082c criteria and the census below.
+- Adversarial pass 2: no F; K1, K2 and K4 fixed in 42a4af82ee.
+
+### Fixes in this round
+
+- **Guard allow-list.** Any `SecureRootInheritance.<member>` reference in `CoreRecordChain.cs` outside {`TypedFilingColumns`, `PairNamesAParentOnItsOwn`, `PairIdColumn`, `PairTypeColumn`, `NamePairParentAsync`, `Matter`, `Project`, `WorkAssignment`} fails (the members the file really uses). A reference to `CoreAncestorResolver` fails. An intermediate literal fails: the lookup columns and tables are read live from `SecureRootInheritance.IntermediateFilingColumns` and `IntermediateParentColumns` (`sprk_regardinginvoice`, `sprk_regardingevent`, `sprk_invoice`, `sprk_event`, and the columns on those that name a matter or project), so the list cannot drift. The by-name deny list stays as a second net. One must-fire control per class (a member outside the allow-list, `CoreAncestorResolver`, an intermediate literal), each planted into a copy of the real text. Must-not-fire: the real file and a synthetic sanctioned shape.
+- **Seeding proof:** planting `OwnerLookupsThroughIntermediatesAsync` in `CoreRecordChain.cs` made the guard fail (see the 082a fix-round gates below).
+
+### OWNER DECISIONS (2026-11-04, typed in session c7)
+
+- **Gap hold on SPA.** Owner: "if this is flagged when the SPA user (a partner user) then the user needs to receive the warning message so they can fix it at that time. whichever is the rights way to ensure the issue is surfaced to the SPA user".
+  - 082c criterion: an SPA submission with a gap is never auto-rejected and never silently held. The partner user gets a descriptive warning at submit time (the submit response and the SPA status view), naming what is missing in terms the partner can act on, with a reason code so it can be tracked. The internal channel holds as Blocked and stays overridable. 082c designs the exact shape (classifier and 073 decider) and shows it to uac-r2 / SPA-r3. This answers Question 1 above.
+- **Record-rule date window.** Owner chose "Only from its own effective-from". A record rule runs only on work dates on or after its own effective-from. Earlier dates are judged by the base version in force on that date, without the record's change. This answers ontology's deviation 4 question (option 1).
+
+### Acceptance criteria carried forward
+
+**082b**
+- **U3, disclosure test:** the chain may include a Secure parent (a project under a Secure matter, or a work assignment under a Secure project). Billing outputs judged with that parent's Procedures must not carry the parent record's id or name to readers: findings JSON, line reasons, Signals, the review page, the add-in replay. Procedure and rule names are OK. Test: a project under a Secure matter, findings rendered, and no matter id or name in the reader-facing output. Inventory any existing output that already names the core or parent record; it belongs with the owner's open 095a question.
+- **O1, order-swap test:** a work assignment with both a matter and a project lookup gives [W0, M1, P1]. The table-then-id sort is for stability only, NOT precedence. D-177(3): Exclude wins, and two different pins raise a blocking gap. A resolver test swaps the order and expects the same result. It needs seeded data; dev has 0 such rows.
+- **K1 / K3 date rule:** a rule applies on a date only with a Published version under that date's Procedure Version, regardless of `sprk_enabled`; a record rule runs only where its base rule is resolved for that date, before exclusion. Plus the owner's limit: a record rule runs only on work dates on or after its own effective-from; earlier dates use the base version in force that day, without the record's change.
+
+**082c**
+- **O2:** when the job runs out of retries after a `CoreRecordChainUnreadableException`, the submission ends held or blocked with a stated reason. It never passes, and is never judged on [W0] alone. Needs a must-fire test.
+- **Review K3 (permanent vs transient):** the reason shown says whether the chain fault is permanent (a core record not found, a pair UAC answers Unknown for) or transient (a read fault), so the operator knows whether a retry can help.
+- **The owner's SPA warning-at-submit requirement** (above): the partner user gets the warning with a reason code at submit time and in the SPA status view; never auto-rejected, never silently held.
+- **Census open item:** none from dev (below); 082c still decides "backfill or fault" for a linked project with an empty pair on another environment.
+
+### Census (review K4): projects linked to a matter with no BFF-managed pair
+
+Read-only on dev, 2026-11-04, through the Dataverse MCP `read_query`, the same route as the step 0 count. The Project to Matter N:N is `sprk_Project_Matter_nn`, intersect `sprk_project_sprk_matter`.
+
+| Query | Result |
+|---|---|
+| `sprk_project` rows | 30 |
+| `sprk_project_sprk_matter` link rows | 7 (7 distinct projects) |
+| of those, projects with an empty `sprk_regardingrecordid` or `sprk_regardingrecordtype` | **0** |
+| of those, projects whose pair id equals the linked matter's id | 7 of 7; the pair type on all 7 is the `sprk_matter` record type |
+
+**Count: 0.** Every project linked through the N:N also has a BFF-managed pair naming the same matter, so on dev no linked project would lose its matter from the chain. Dev is not the whole estate: today a linked project with an empty pair gets [P0] with no fault (`None` is "no parent"), so 082c should decide "backfill or fault" before another environment is judged. Nothing was written to Dataverse.
+
+### 082a fix-round gates
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `~CoreRecordChain\|~SecureRoot\|~SecureChild` | 1864/1864 (7 new: 3 + 4 cases of the two U2 tests) |
+| ArchTests `~CoreRecordChain` | 9/9 (3 new must-fire controls) |
+| Guard seeding proof: `nameof(SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync)` planted in `CoreRecordChain.cs` | 1 failed ("... is not in the allow-list"); restored, `cmp` identical, 9/9 again. The old deny-list did not name this member, so it would have passed. |
+| U2 seeding proof: `NamePairParentAsync` answers `None` for a pair id that is not a record id | 7 of 9 matched tests failed (all 7 new U2 cases); restored, 1864/1864 |
+
+## Slice 082b: ProcedureResolver and the Replace / Additive / Split classification (2026-11-04)
+
+Branch `task/ebilling-082b`, from `origin/work/ebilling-r1` at `0735a566e5`. Nothing was written to Dataverse; no live call was needed.
+
+### What landed
+
+- **`BillingRuleCatalogue.PrecedenceOf(RuleType)`** and the enum **`BillingRulePrecedence`** (Replace, Additive, Split). An exhaustive switch over the 14 billing types, taken from the reviewed table in `rule-set-scope-design.md` 3.3. A non-billing type throws. ExpenseRule is the only Split type. AddedFee is Replace, keyed by `PrecedenceKey` (D-39). The evaluator applies the classification in 082c; nothing reads it yet.
+- **`ProcedureResolver`** (`Services/Signals/Billing/ProcedureResolver.cs`). A public static class with no DI registration, like `CoreRecordChain`.
+  - `ReadAsync(entities, logger, core?, firmId, ct)` reads every row once and returns a `ProcedureResolution`.
+  - `ProcedureResolution.RulesOn(workDate)` is pure. It returns `ProcedureRulesOnDate`: the Procedures applied (version, rank, sources, deciding rows), the rules in force (the policy version content plus the Procedure whose slot each rule takes), the rules excluded, the Procedures excluded, and the gaps.
+  - `ForReaders()` is the reader-facing projection (U3).
+- **Reads, each once per invoice** (ids chunked at 500, every query paged, every row re-checked after its query):
+  1. the chain (`CoreRecordChain`);
+  2. the active `sprk_procedureassignment` rows on the chain;
+  3. the Active Billing Procedures that apply to all records, apply to the invoice's firm, or are assigned (Follow or Pin) on the chain;
+  4. their versions;
+  5. their rule sets;
+  6. the chain's record-scoped sets (Record, or Firm record of the invoice's firm, with exactly one core lookup naming a chain record);
+  7. those sets' enabled, active Billing policies;
+  8. those policies' Published versions.
+
+  `sprk_currentversion` is never read (7.2), and `BILL-SYSTEM-SUBMISSION` is skipped (D-125).
+
+### Semantics as implemented (for the ontology-r1 owner review)
+
+1. **Sources and the firm condition (6.1, O-20).** A Procedure has three possible sources: All records, Firm (Applies to = Firm, naming the invoice's firm), and Manual (a Follow or Pin row on the chain).
+   - The firm condition (the Procedure's Firm is empty or is the invoice's firm) is checked before any source counts, so it applies to all three.
+   - "Assigned records only" with no assignment on the chain has no source: not applicable, no gap.
+   - Retired Procedures are filtered in the query and re-checked (089b K1).
+2. **Procedure-level rows (6.5, D-177 (3)).**
+   - The rows at the nearest distance decide, whatever their mode. An Exclude among them wins, so a d1 Exclude is lifted only by a d0 row.
+   - Level: Manual d0 or Manual d1 when a deciding row exists, else Firm, else All records.
+   - Rank: `(Level, -Distance, FirmSpecific)`, where Distance is the deciding row's distance (0 for a computed source) and FirmSpecific means the Procedure names a firm.
+3. **Version per date (7.1, 7.2).**
+   - Each deciding row makes a choice: a Pin names its version; a Follow, or a computed source alone, takes the version in force on the date.
+   - "In force" means Active or Superseded with an effective-from, inside the half-open [from, to) window (model 3.1).
+   - Two versions in force on the date throw `ProcedureResolutionFaultException` (I-P1).
+   - Before the first in-force version's from: not applicable. A Draft-only Procedure, or one whose only versions are Retired, is also not applicable.
+   - Otherwise a date in no window is a gap: `HoleBetweenVersions` when a later version exists, else `AfterLastVersion`.
+   - A pin to a Retired version is `PinnedVersionRetired`. A pin to a Draft version, or to a version that is missing or belongs to another Procedure, is `PinnedVersionNotInForce`.
+   - Deciding rows that make different choices for the date raise `ConflictingParents`.
+4. **Rules (7.2; 089c K1 confirmed by ontology-r1).** For each enabled policy of the Procedure's set, only the Published policy versions linked to the chosen Procedure Version count. The latest one with effective-from on or before the date applies, so corrections apply from their own date. A rule that a later version dropped is still enabled, but it has no version under the later Procedure Version, so it applies only in the earlier window, or on a record pinned to the earlier version.
+5. **Rule-level overrides (6.3, 6.5).**
+   - Rows for this firm (row Firm empty or equal to the invoice's firm) and the record rules based on the rule are grouped as overrides of their base rule. The overrides at the nearest distance decide.
+   - A plain Exclude among them removes the rule. Otherwise the rows are changes: each record rule whose own version is in force on the date runs in the base rule's slot, with the base rule's Procedure and rank, and the base rule is listed as excluded (`ReplacedByRecordRule`).
+   - A record rule is paired with its change's Exclude row by the same chain record and the same firm as its set. A record rule whose Exclude row is missing still counts as a change.
+6. **Record rule slot (089c K3, confirmed).** A record rule is considered only through its base rule, so only when the base rule was resolved for that date, before exclusion. That covers a dropped rule, a retired Procedure, and a deleted base (`sprk_basedonversion` names a version that is not among the rows read).
+7. **Owner decision (record-rule date window).** A record rule runs only on dates on or after its own effective-from (the latest Published version with from on or before the date). On earlier dates the change is not in effect, so the base version in force on that date runs and is not excluded.
+8. **U3 (`ForReaders`).** An allow-list DTO built field by field. It carries Procedure names, Procedure Version numbers, rule codes, level and distance, the pin flag and the record-rule flag. It carries no record id, record name, override reason, row id or Procedure id. The internal basis (`ProcedureOverrideRow.ChainRecord`, `Reason`) is for the 7.4 snapshot only.
+
+### Decisions and deviations (each one line; owner or reviewer to confirm)
+
+1. **A Follow and a Pin at the same distance that choose different versions are a gap (`ConflictingParents`).** D-177 (3) names only two different pins. A version disagreement between two d1 parents is read as the same conflict, failing closed with a hold. **Open for ontology-r1.**
+2. **A pinned version's rules apply before its own window.** For work dated before the pinned version's first policy version, the earliest Published policy version under it is taken ("whatever the date", 7.2). **Open for ontology-r1.**
+3. **An Exclude row with a record rule paired is a change.** Before the record rule's effective-from, that Exclude does not remove the base rule (the owner's decision, applied to the pair). A plain Exclude removes the rule on every date.
+4. **Among rule-level overrides at one distance, a plain Exclude wins over a change.** This is D-177 (3) applied to rule-level rows, which 6.5 says "follow the same rules". A nearer change that is not yet in effect keeps the base in force even when a farther plain Exclude exists, because the nearer row wins.
+5. **In force means Active or Superseded** (model 3.1, `ProcedureService.IsInForce`), although the 7.1 pseudo code says "Active". A Superseded version stays in force for its own window.
+6. **The rule set's `statuscode` is not required.** The Procedure Version's status and the policy version's `sprk_publishstate` decide. The set's statecode must be Active.
+7. **Inactive assignment rows (statecode not 0) are ignored.** The BFF only deletes rows, so an inactive row exists only if someone deactivated it outside the BFF.
+8. **Fail closed on rows the BFF never writes.** An unknown override mode, a mode other than Excluded on a rule-level row, or an unknown or empty Applies to on an Active Procedure throws `ProcedureResolutionFaultException`. An override row whose core lookups name no chain record, and a record-scoped set without exactly one core lookup or of another firm, contribute nothing.
+9. **Not in 082b:** the rate card per Procedure Version (7.4 / 085). The output names the Procedure Version id; 085 or 082d maps it to the card. The rank-based displacement (Replace types) is the evaluator's (082c), because it depends on gate and handler acceptance.
+10. **POML proof (a) re-targeted**, per the 082a notes, to the resolver test "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P".
+11. **For 082c:** legacy ClientDefault and Firm sets (no `sprk_procedure`) are not read by the resolver. 082c decides whether the loader keeps loading them beside the resolver until 075's copy-forward, or drops them.
+
+### U3 inventory: existing outputs that already name the core or parent record (read-only, for the owner's open 095a question)
+
+| Surface | Names the core record? | Names a parent? |
+|---|---|---|
+| `sprk_findingsjson` (`InvoiceSubmissionPersister.cs:2016-2051`) | No (`invoiceName` is the firm, invoice number and date, `:239`) | No |
+| Finding facts and templates (`BillingRuleCatalogue.cs:221`; `BillingCoreRecordFacts`, `BillingFactSet.cs:211`) | No: CoreRecordWindow cites the open and close dates only | No |
+| Billing Signals (`BillingFindingSignalMapper.cs`; subjects are the invoice and its lines, `InvoiceSubmissionPersister.cs:247`) | Not found (`SignalWriter` not read in full) | Not found |
+| Internal review read model (`InvoiceReviewReadService.cs:48`, `:59`, `:658-675`, `ReviewCoreRecordDto(Type, Id, Name)`) | **Yes: id and name** of the invoice's own core record | No |
+| Firm-facing `GET /invoice-submissions/firm-records` (`ExternalInvoiceSubmissionEndpoints.cs:351`) | **Yes: ids** of the caller's own readable core records, no names | No |
+| Add-in replay | No findings-replay surface found in the BFF (only idempotency replay) | n/a |
+| Record-rule codes (`BRR-` plus a derived id, `ProcedureAssignmentService.cs:1444`) | No. The derived id is a hash of (core table, record, firm, base rule), so someone who knows a record id could confirm that a code belongs to it (a K-class oracle). | Same |
+
+No surface names a parent core record today. 082d must keep `ChainRecord` and `Reason` out of any reader-facing member of `sprk_findingsjson`. Model 7.4 lists "chain record" in the submission snapshot while U3 lists findings JSON as reader-facing. **082d must resolve that tension**: for example, an internal-only member that the review read model never projects, or the distance only.
+
+Resolved in 082d: the internal-only member (`procedureSnapshot`); see "082d implementation", "The ~:247 tension, resolved".
+
+### 082b gates and seeding proofs
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `~ProcedureResolverTests\|~BillingRulePrecedenceTests\|~CoreRecordChain\|~BillingFactLoader\|~InvoiceComplianceEvaluator\|~BillingRuleCatalogue` | 572/572 (49 resolver cases and 20 precedence cases are new) |
+| ArchTests `~CoreRecordChain\|~RecordOwnerAssignmentCensus\|~WaivedRuleFamily\|~BillingRuleDefinitionCaller\|~Billing\|~Procedure` | 169/169 |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | No vulnerable packages; no package or project file changed |
+| Publish size, `linux-x64`, framework-dependent, base `0735a566e5` vs HEAD | 137,296,440 → 137,431,980 bytes (+135,540, about 0.13 MB); `Sprk.Bff.Api.dll` +115,712 |
+| Proof (a), re-targeted: `CoreRecordChain` adds a project parent's own parents (a second hop) | 2 of 46 failed: "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P" and "a Pin keeps its version for work dated in a later version's window". Restored, `cmp` identical. |
+| Proof (b): the firm condition is skipped when manual rows exist | 1 of 46 failed: "a manually assigned Procedure naming firm F does not apply to G's invoice on that record". Restored. |
+| Extra mutation (c): `decisive.Any(Excluded)` → `.All(...)` | Both O1 "Exclude wins" cases failed (run with (d)-(g); `All` over no rows also excludes every unassigned Procedure, so that run's 22 failures were confounded) |
+| Extra mutations (d)-(g), rerun without (c): record rule judged at `DateOnly.MaxValue`; rules not filtered by the chosen Procedure Version; rule-exclude firm filter dropped; chain record ids appended to the reader-view Procedure name | 7 of 49 failed, each a targeted test: the owner date window, record rule per firm, K1/K3 dropped base, versions per window, Pin in a later window, rule excluded for firm F, U3. Restored. |
+| Fail-closed fix (`b7d3589bed`): unknown or empty Applies to throws; an unnamed Procedure reads "(unnamed Procedure)" | The 3 new cases failed before the fix and pass after |
+
+## 082b review and fix round (2026-11-04)
+
+Branch `task/ebilling-082b`, from `0e264aaa04`. Nothing was written to Dataverse; no live call. Where the coordinator's correction from ontology-r1 D-203 (5)-(7) (items A1, A2, A6) conflicts with the first fix brief, the correction is followed.
+
+### Reviews received
+
+- **uac-r2: U3 APPROVED, no F.** One known-limit note, K1: `Level` and `Distance` in `ForReaders()` show that a parent at that level holds a Procedure assignment. That is accepted while Procedures stay catalogue-level. If Procedures are ever created per record, or named from the record, it becomes F and the two fields must go. A one-line comment now sits at `ForReaders()`.
+- **ontology-r1 D-203** (recorded in full below).
+- **Adversarial pass:** two F1 (retiring the first or only version switches the Procedure off; the content of a removed change comes back), one F3 (the firm condition untested for an All-records Procedure), and K1 to K6.
+
+### Findings and what changed
+
+| Finding | What changed | Tests (all fail against the old file unless marked regression) |
+|---|---|---|
+| **F1 #1: retiring the first or only version** | `ChooseVersion` runs the F2-d test first (`NotApplicableOn`). "Before the Procedure's first version opened" now means before the earliest effective-from over Active, Superseded **and Retired** versions that have one (`ProcedureVersionRow.OpenedAWindow`). Retired versions stay out of the in-force set, so work in a Retired version's window, or after the last end, is a gap (model 3.1 I-P5). A Draft never opens a window. The whole Procedure retired is untouched: the Procedure query filters it, so no gap. | V1 Superseded then Retired + V2 Active: Feb 1 is a gap, Mar 15 is V2, a date before Jan 1 is not applicable; the only version Retired: any date from its from-date is a gap, a date before is not applicable; with an end: after the end is `AfterLastVersion`; retiring the Procedure raises no gap (regression, 3 version statuses) |
+| **F1 #2: the content of a removed change comes back** | `RecordRuleVersionOn` counts only the versions of the **current episode** (below). This replaces the brief's "highest-numbered Published version only", which breaks an edit inside one episode (coordinator A2). | removal then re-change: Jan 20 and Apr 1 give the base rule, Jul 1 gives v2; an edit inside one episode: v1, then v2 between its from-date and v3's, then v3 (regression for the rule it replaces) |
+| **F3: firm condition untested for All-records** | Tests only. | An All-records Procedure naming F applies to F and not to G, on a matter and with no core record; the same Procedure also assigned on the matter still does not apply to G (the case the seeding mutation reaches) |
+| **K1: record-rule pairing** | `RuleOverridesOf` finds a record rule by its **derived id**, `ProcedureAssignmentService.RecordRulePolicyIdFor(RecordRuleSetIdFor(table, record, firm), basePolicyId)` (the helpers are reused, not copied). `RequireBasedOn` then checks that every Published version of it names a version of its base rule; if not, `ProcedureResolutionFaultException`. A cleared link can no longer turn the change's Exclude into a plain Exclude. | a cleared based-on link, and one naming another rule's version, both throw |
+| **K2: ToString leaks** | `PrintMembers` on `ProcedureOverrideRow`, `AppliedProcedure`, `RecordRuleSlot` and `ProcedureGap`: names, numbers, kinds, distance and counts only. Xmldoc on `ProcedureResolutionFaultException`, `RulesOn` and the class remarks: `ex.Message` names ids for operators and must never be shown to a reader (see the 082c criteria). | each record's `ToString()` holds no id, row id, Procedure id, reason or matter name, both built directly and from a resolution over a Secure matter |
+| **K4: wording** | The comment at `RulesOf` and one test name now say "enabled is required but not sufficient". `sprk_enabled` is Off only for a removed record rule or a rule of a retired Procedure; it never picks a version, and "dropped" is never inferred from Off. | (comment only) |
+| **K6: malformed rows** | A row naming both a Procedure and a rule, or neither, throws `ProcedureResolutionFaultException`, after the "core lookups name no chain record" skip. | both throw |
+
+### D-203 (ontology-r1), as received
+
+- **Q1:** a Follow and a Pin that choose different outcomes for the date (two versions, or a version vs none) are a `ConflictingParents` gap. If they choose the same version, no gap.
+- **Q2:** keep the earliest Published policy version under the pin. The F2-d applicability test runs FIRST: work dated before the Procedure's first Active version is not applicable, pinned or not. A Retired pinned version is a gap.
+- **Deviation 1** (Superseded Procedure Versions are in force for their window; Retired is a gap) and **deviation 2** (only the Exclude paired with a record rule is date-limited; a plain Exclude removes the base on every date): agreed.
+- **(5) / A1, retiring a version is a gap:** agreed, with (a) the model 7.1 applicability test ("at least one Active version") widened the same way, to Active, Superseded or Retired; (b) it must NOT fire when the whole Procedure is retired (a normal end of life: its policies are Off, its dates not applicable); (c) prefer that 081 refuses to retire a version that was never Active, or record a fail-closed known limit.
+- **(6) / A2, a change removed and made again:** count only the versions published since the last removal (the current episode). Inside the episode the latest version whose from-date is on or before the work date applies. Before the episode's first from-date the base rule runs.
+- **(7) / A6, `sprk_enabled`:** "required but not sufficient". The enabled filter only switches off a removed record rule and a policy whose Procedure was retired. It never picks a version.
+
+### Decisions made in this round (confirm or correct)
+
+1. **Episode boundary (A2).** The current episode starts at the **`createdon` of the change's Exclude row**: a version counts if its `createdon` is on or after it. Why this and not the version number: an edit adds a version in the same episode, so version numbers do not mark episodes. Why it holds: `ProcedureAssignmentService` writes the Exclude row, the version and the switch-on in one transaction (row first), and a removal deletes the row, so the next change has a newer row. A version of the current episode is never created before its row. `ProcedureOverrideRow.CreatedOn` and `ResolvedPolicyVersion.CreatedOn` (internal) carry the two values; both queries now read `createdon`.
+   - **No Exclude row, or one with no `createdon`:** no boundary is known, so every version counts (the earlier behaviour). A version with no `createdon` beside a known boundary does not count.
+   - **Model 6.3 check.** "Remove an override: the base rule runs again for invoices checked from then on." This matches: between a removal and the next change the record rule is Off and not read, so the base runs; once a re-change exists, dates before its first from-date also get the base, and the removed change's v1 is never used again (Jan 20 gives the base in the removal test).
+2. **Gap kind for a Retired version's window** is `HoleBetweenVersions` (its doc already reads "a hole, or a withdrawn version's window"). A date past the last end with no successor stays `AfterLastVersion`.
+3. **Follow vs Pin (D-203 Q1).** A version beside "none" (a gap) is `ConflictingParents` too, not the first gap's own kind. Rows that all end in a gap keep the first gap. When rows agree on a version the result is `Pinned` if any of them pins; before, `Pinned` followed the RowId order of the deciding rows, which is random (found while writing the agree test).
+4. **Pins run the F2-d test first (D-203 Q2).** The old test "a pinned version's rules apply before its effective-from" (one version from Mar 1, pin, Jan 15) now gives *not applicable*; it was replaced by two: a pin dated inside the Procedure but before the pinned version's window takes that version's earliest policy version, and a pin dated before the Procedure's first version is not applicable for a pin to an Active, a Retired and a Draft version alike (after that date the pin's own outcome decides).
+5. **081 `RetireVersionAsync` was NOT changed (A1 c).** It cannot refuse a Draft cheaply: "retire" is the only way to discard a Draft (`ProcedureService` has no delete, and `procedure.draft_exists` tells the user to "publish or retire it before creating another"). An existing test relies on a Draft being retired without publishing (`Update_ScopeChange_AfterADraftWasRetiredWithoutPublishing_Succeeds`). Refusing would remove the discard path, which is a 081 contract change, not a resolver fix. ~~Recorded as a fail-closed known limit: a Draft that has an effective-from and is then retired counts as a Retired version with a from-date, so it can open a window early.~~ **FIXED in round 2 (D-203 (9)), no longer a known limit:** a Retired version counts as having opened a window only when a Published policy version sits under it (see "082b re-check and fix round 2", F1). The alternative recorded here as "for later" is what shipped.
+6. **Model 7.1 text** ("at least one Active version"): ~~not edited here~~ edited in round 2 (D-203 (10)); see the section below.
+7. **`RequireBasedOn` checks every Published version of a record rule**, as `EnsureRecordRuleAsync` does before it writes. If a path is ever added that edits a record rule by adding a version (today `RuleSetService` refuses record-scoped sets), it must copy `sprk_basedonversion`, or the resolver faults.
+
+### Known limits (K)
+
+- **K3 (082c criterion):** 082c must run the gate before it calls `BillingRuleCatalogue.PrecedenceOf`, which throws for a non-billing rule type.
+- **K5:** the change's start is a UTC date (`sprk_inforcefrom` is written as `UtcNow` and read as its UTC date) and errs strict (coordinator's classification).
+- ~~**Draft retired with a from-date:** decision 5 above.~~ Fixed in round 2 (D-203 (9)).
+- **`createdon` tie** (wording corrected in round 2, re-check K4): an older episode's version counts as current only if the change, its removal and the re-change ALL fall in one stored second (the older version's `createdon` must be equal to or after the new Exclude row's, and it cannot be later than the removal). That is three BFF calls in one second; not seen. The boundary has not been checked against live Dataverse timestamps (no live call here).
+- **A record rule whose policy id is not the BFF-derived one** (made by hand) is not recognised; its Exclude reads as a plain Exclude. The BFF never writes one.
+- **`ToString` of other records still prints ids:** `ExcludedProcedure` (Procedure id), `ExcludedRule`, `ResolvedRule` and `ResolvedPolicyVersion` (policy and version ids), `CoreRecordLink` (record id). The brief named four types. They carry no override reason, and a collection member never prints its elements, but a direct `ToString()` of one is the same class of leak. Not changed; now an 082c / 082d criterion (round 2, re-check K6, below).
+
+### Criteria carried forward
+
+**082c**
+- `ex.Message` of `ProcedureResolutionFaultException` (it names row, Procedure and rule ids) must never be shown to a reader. In particular the SPA warning at submit time (owner decision above) is built from a reason code and `ForReaders()` only, never from the exception text.
+- K3 above: gate before `PrecedenceOf`.
+- A gap raised for a Retired version's window (`HoleBetweenVersions`) reads the same as any hole to the partner; the reason code can tell them apart if 082c wants to.
+
+**082d snapshot design (uac-r2, binding)**
+- Store ids; never recompute.
+- Chain ids, Procedure Version ids, override row ids and reasons go in an app-only or field-secured part of the snapshot.
+- The findings JSON carries only the `ForReaders()` projection.
+- Names in the internal part are resolved at read time, behind the record check, and never frozen.
+
+**#2563 (existing output that names the core record)**: `InvoiceReviewReadService` returns the core record name after the invoice check only. uac-r2 triaged it as **not a defect** under the current access model and closed it: an internal caller who passes the invoice check is already a sharee of a Secure core record (an invoice is a codified secure child), a non-Secure record's name is the invoice lookup's display name, and the finance routes are internal-only (step 0). A correction narrowed the third point: the review header shows nothing beyond what the finance authorization filter already allows for the invoice itself; any change to that filter belongs to unified-access-control-r2. **Reopen if `sprk_invoice` stops being a codified secure child, or if any finance route starts admitting external callers.**
+
+### Supersedes (in the 082b notes above)
+
+- "Semantics as implemented" 3: a Draft-only Procedure is still not applicable, but a Procedure whose only versions are Retired is now a gap from the earliest Retired from-date; the not-applicable date is the earliest from over Active, Superseded and Retired versions.
+- Item 4 and the K1 / K3 date rule above: read "regardless of `sprk_enabled`" as "enabled is required but not sufficient".
+- Item 5 and 7: a record rule's versions are those of the current episode (decision 1), not "the latest Published version with from on or before the date" over all of them. Pairing is by the derived id, not by `sprk_basedonversion`.
+- Decision 2 (a pinned version's rules apply before its own window) holds only once the Procedure is applicable (decision 4).
+- The first fix brief's "highest-numbered Published version only" was replaced by the episode rule (A2).
+- Round 2 supersedes two lines of the above: the not-applicable date is the earliest from over Active, Superseded and Retired-with-a-Published-policy-version versions (a Retired Draft that never had one opens nothing); and "a record rule whose Exclude row is missing still counts as a change" (Semantics 5, and the "no boundary: every version counts" case) is now a `ProcedureResolutionFaultException`.
+
+### Fix-round gates and seeding proofs
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `ProcedureResolver\|BillingRulePrecedence\|CoreRecordChain\|BillingRule` | 550/550 (the resolver class alone: 76, was 49) |
+| ArchTests `CoreRecordChain\|Billing` | 102/102 |
+| New tests against the old `ProcedureResolver.cs` (HEAD copied back, then restored byte-identical) | 15 to 16 of 76 failed: K6 x2, K2 x2, K1 x2, retiring the first / only version x3, the removal then re-change test, the pin before the Procedure's first version x3, a version beside none x2, and the Follow / Pin agree case on one parent order (it depends on the random RowId order, so it fails in some runs). The other new tests are regressions on behaviour that already held (F3, an edit inside one episode, a Superseded / Retired mix, retiring the Procedure, Follow vs Pin conflict, the pin's earliest policy version). |
+| Seeding proof F3: firm check skipped when the Procedure has rows on the chain (`&& !procedureRows[procedure.Id].Any()` at the firm check) | 2 failed: the new "All-records naming F, also assigned" test and the existing manual-assignment test. Restored, `cmp` identical. |
+| Seeding proof F3b: firm check skipped for an All-records source | 2 failed: both new F3 tests. Restored. (The brief's mutation only reaches a Procedure with rows on the chain, so the no-assignment case needed this second one.) |
+| Seeding proof F1 #1: the Retired from-date term removed from `OpenedAWindow` | 3 failed: first version retired, only version retired, only version retired with an end. Restored. |
+| Seeding proof F1 #2: the latest of ALL record-rule versions (no episode filter) | 1 failed: the removal then re-change test. Restored. |
+| Seeding proof A2: only the highest-numbered version of the episode counts (the rule the correction replaced) | 1 failed: the edit-inside-one-episode test. Restored. |
+| Publish size | Not re-measured: no package or project change, and the fix adds about 170 lines of resolver code against the +0.13 MB measured for 082b. |
+
+## 082b re-check and fix round 2 (2026-11-04)
+
+Branch `task/ebilling-082b`, from `35eb5310ec`. Nothing was written to Dataverse; no live call. Inputs: ontology-r1 D-203 (8)-(10) (binding) and the re-check items K2-K6.
+
+### D-203 (8)-(10), as received
+
+- **(8) Episode boundary on `createdon`: accepted.** (a) compare with `>=` (kept as is); (b) a same-second test: a version written in the Exclude row's own transaction counts when the two stamps are equal; (c) a source-scan guard, with must-fire and must-not-fire controls: no writer sets `overriddencreatedon` on `sprk_policyversion` or `sprk_procedureassignment`. Known limit: removing and re-making the same change within one second. A sturdier marker (a lookup from the Exclude row to the first version) is a schema change and is NOT in R1.
+- **(9) A never-Active Draft that is retired.** Preferred fix, no schema: a Retired Procedure Version counts toward the "not applicable before" date only if it has at least one Published policy version OR a published rate card. Check that 081's publish reliably sets `sprk_publishstate` = Published. Must-fire: retire an Active version, gap. Must-not-fire: retire a never-published Draft, not applicable, no gap. If any path leaves an Active version with no Published policy version and no published card, keep the fail-closed known limit and report the path.
+- **(10) Model 7.1 wording:** "at least one Active version" becomes Active, Superseded or Retired (D-203 (5a)), and (9) for the Draft outcome. We own the file; the commit goes to ontology.
+- Follow vs Pin (a version vs none gives `ConflictingParents`) and Pinned = any deciding row pins: confirmed.
+
+### What changed
+
+| Item | What changed | Tests |
+|---|---|---|
+| **F1 / D-203 (9): a discarded dated Draft opened a window** | `ProcedureVersionRow.OpenedAWindow` is now a method over the set of Procedure Version ids that have a Published policy version (built once from the rows already read: no new read; the same test as `ProcedureService.ScopeLockedAsync`). Active or Superseded with an effective-from still count; a **Retired** version counts only when its id is in that set. It feeds `NotApplicableOn` (the F2-d date) and the gap-kind test in `ByDate` (a Retired window is a hole only if the version was in force). `NotApplicableOn` and `ByDate` became instance methods to reach the set. | must-fire: retire an Active version that had Published rules, a gap. Must-not-fire: a never-published dated Draft retired, not applicable on every date, no gap. A Draft v2 dated before Active v1 (publish refused on overlap) then retired: no gap on a date before v1; control: the same version with a Published rule is a gap. Gap kind: a Retired window is `HoleBetweenVersions` with a Published rule under it and `AfterLastVersion` without. The five existing Retired tests got a Published policy version under the Retired version, so they keep meaning "a version that was in force". |
+| **D-203 (8b): same second** | Test only. `>=` was already the comparison. | A version stamped equal to its Exclude row's `createdon` counts; a version a second older (a removed change's) does not. Every `ChangeRule` fixture writes the row and the first version with one stamp, so eight existing record-rule tests also pin the equal case. |
+| **D-203 (8c): `overriddencreatedon`** | New ArchTest `OverriddenCreatedOnWriteGuardTests`. | See the guard below. |
+| **Re-check K2: an episode with no version** | `RecordRuleVersionOn`: when the Exclude row has a `createdon` and the record rule has Published versions but none was created on or after it (or none has a `createdon`), it throws `ProcedureResolutionFaultException` instead of falling back to the base rule. A date before the episode's first effective-from is NOT this case (the episode has a version; the base runs). | all-older and no-`createdon` versions fault; a date before the episode's first effective-from does not fault and gives the base rule. |
+| **Re-check K3: an enabled record rule with no paired Exclude row** | `RuleOverridesOf` throws `ProcedureResolutionFaultException` (it used to count every version). The row is looked up on the same record and firm as the set. The `RecordRuleVersionOn` parameter is no longer nullable. | no Exclude row at all, and only a plain (all-firms) Exclude beside a Firm-record rule for F: both fault. |
+
+**The guard (D-203 (8c)).** `tests/Spaarke.ArchTests/OverriddenCreatedOnWriteGuardTests.cs` scans every `.cs` file under `src/server` (comments removed, any casing) for the column name. It is wider than the two tables: any mention fails, except the one baseline entry, `RecordTableRules.cs` (`CommonServerOwnedColumns`, the list of columns a caller payload may NOT set), which a second test proves sits in that statement. A ratchet: a new file or a second mention in the baseline file fails; a baseline entry with no mention fails, so it is removed. Controls: planted writes in the real `RuleSetService.cs` and `ProcedureAssignmentService.cs` fire (four lines: quoted name, another casing, the assignment table, a property); a comment and the two real writer files do not. Not covered: a name built at run time; a `//` inside a string before the name; client TypeScript and scripts (no hit today).
+
+### 081 publish-state finding (D-203 (9) check)
+
+- **The only path to Active** is `ProcedureService.PublishVersionAsync`. In ONE transaction it sets the version Active, the predecessor Superseded, and (`RuleSetService.PlanProcedureVersionPublishAsync`) marks every Accepted Draft policy version under the version `sprk_publishstate` = Published with `sprk_inforcefrom`; a Proposed rule refuses the whole publish, a Rejected one stays Draft. `ChangeDatesAsync` and `RetireVersionAsync` never set Active. No script or seed sets a version Active (the `scripts/ebilling` files are schema deploys). So an Active version that had at least one Accepted rule always has a Published policy version.
+- **Path found with none: a version published with NO Accepted rule** (an empty rule set, or every rule rejected). It becomes Active with no Published policy version and no card. If it is later retired, the resolver reads it as never opened: no hold for its window. This is the same limit `ScopeLockedAsync` already documents. It cannot be told from a discarded Draft without a schema marker, so it is **kept as a known limit and named here**. Its effect is narrow: the version judged nothing, so no rule is skipped; what is lost is only the "No procedure associated" hold for work in that window. **For ontology-r1 to confirm: this path reads as fail-open on the hold (not fail-closed), because it cannot be separated from the discarded Draft that D-203 (9) wants not applicable.** If ontology wants it held, the fix is a marker (for example a 081 publish that refuses a version with no Accepted rule), not a resolver test.
+- **Policies read are enabled and Active only.** A Published policy version under a retired version is seen only while its policy is enabled. The only writers of `sprk_enabled` = No on a Billing policy are a Procedure retire (the Procedure is then not read at all), a record-rule removal (a record rule has no Procedure Version), and a new Draft rule (Off until its publish turns it On). So no individual switch-off hides a retired version's rules.
+- **Pre-081 data** (policy versions with no `sprk_publishstate`) are never loaded, by any resolver test. Rollout note, with K5 below.
+
+### Rate cards
+
+The resolver reads no rate card. The 080 schema has `sprk_ratecard.sprk_procedureversion`, but no BFF code reads or writes it yet (`RateCardImportService` and `RateCardWorkbook` do not name `sprk_procedureversion`; 085 owns that). So "or a published rate card" has nothing to read today, and no new read was added. **Task 085 must extend `ProcedureVersionRow.OpenedAWindow` (and `ProcedureService.ScopeLockedAsync`) with a published-card test when it keys the card to the Procedure Version**, with a must-fire (a Retired version with only a published card is a gap) and a must-not-fire (no card, no rule: not applicable). The xmldoc on `OpenedAWindow` says so.
+
+### Decisions in this round (confirm or correct)
+
+1. **A pin to a retired, never-published Draft is still `PinnedVersionRetired`.** `Pinned()` is unchanged: a pin names a version the user chose, and an unusable one is a gap whatever its history. The F2-d test still runs first, so before the Procedure's first opened version it is not applicable.
+2. **K2 does not fire for a record rule with no Published version at all** (a Draft-only rule): the brief says "has versions but none in the episode". Such a rule falls to the base rule as before. The BFF writes the rule's first version Published, so the state needs a hand edit. Not changed; noted for review.
+3. **The guard is wider than the brief's two tables** (any mention of the column under `src/server`), because the baseline has one known, harmless mention and a wider scan needs no judgment about "near".
+4. **`RecordRuleSlot.Exclude` and `ExcludedRule.Overrides` stay nullable / possibly empty in their types** although a record rule now always has its row; changing the public record shapes is not part of this round.
+
+### Known limits (round 2)
+
+- **Version published with no rule, then retired:** above. Same limit as `ScopeLockedAsync`.
+- **Removing and re-making the same change within one second** (D-203 (8) known limit): see the corrected `createdon` tie wording above (the change, its removal and the re-change all in one stored second). A lookup from the Exclude row to its first version is a schema change and is not in R1.
+- **Re-check K5, `RequireBasedOn` on pre-081 data.** `RequireBasedOn` faults on a record rule whose Published version has no `sprk_basedonversion` (or names another rule's version). A record rule written before 081 / 089 has none. This is a **data-migration note**: before an environment that holds older record rules is judged by the resolver (082c), check them, and backfill the link or retire the rule. Dev has no such rows known (not queried here).
+
+### Criteria carried forward
+
+**082c / 082d**
+- **Re-check K6, `ToString` of the remaining records.** `ExcludedProcedure`, `ExcludedRule`, `ResolvedRule`, `ResolvedPolicyVersion` and `CoreRecordLink` still print ids (Procedure, policy, version and record ids). Beside the rule that `ex.Message` is never shown to a reader, no code in 082c or 082d may log, format or serialise one of these with `ToString()` or an interpolated string into a reader-facing surface. **`CoreRecordLink` and `ProcedureResolution.Chain` matter most**: they print the chain's record ids, and the chain may include a Secure parent. Preferred fix when 082c touches them: a `PrintMembers` that prints names, numbers and distance only, as the four reviewed records do, with the same kind of test.
+- **K5 migration check** above, in the 082c rollout checklist.
+
+**Task 117 (core-record delete)**
+- **The delete planner switches the record rule Off in the same transaction that removes the assignment rows** (the change's Exclude row). The resolver now faults on an enabled record rule with no Exclude row (re-check K3). If the rows go first and the rule is switched Off later, any invoice on that core record is unresolvable (the job retries) until the no-plugin sweep retires the rule. Needs a test: after the planner runs, no enabled record rule is left on the record without its Exclude row.
+
+**Task 085 (rate card per Procedure Version)**
+- Extend `ProcedureVersionRow.OpenedAWindow` and `ProcedureService.ScopeLockedAsync` with a published-card test (see "Rate cards").
+
+### Round 2 gates and seeding proofs
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `ProcedureResolver\|BillingRulePrecedence\|CoreRecordChain` (filtered) | 133/133 (the resolver class alone: 88, was 76: 12 new cases in 8 methods) |
+| ArchTests `CoreRecordChain\|Billing\|OverriddenCreatedOn` (filtered) | 109/109 (the new guard: 7 cases in 4 methods) |
+| New tests against the HEAD `ProcedureResolver.cs` (copied back, then restored; `cmp` identical) | 7 of 88 failed: K2 x2, K3 x2, and three of the F1 tests (the never-published Draft retired, the Draft refused at publish then retired, the gap kind without a Published rule). The other new cases are controls or regressions that held before (the must-fire retire, the control with a Published rule, the gap kind with one, the same-second test, the K2 date-before-first-from control). |
+| Seeding proof F1: the published-policy condition dropped from `OpenedAWindow` (`\|\| Status == Retired` alone) | 3 of 88 failed: the must-not-fire test, the Draft-refused-then-retired test, and the gap kind without a rule. Restored, `cmp` identical. |
+| Seeding proof 8b: `created >= episodeStart` changed to `>` | 10 of 88 failed: the new same-second test, the new K2 date-before-first-from control, and eight existing record-rule tests whose fixtures write the row and the version with one stamp. Restored, `cmp` identical. |
+| Seeding proof 8c: `e["overriddencreatedon"] = DateTime.UtcNow` appended to the real `ProcedureAssignmentService.cs` | the source-scan test failed with `ProcedureAssignmentService.cs: 1 mention(s) of overriddencreatedon (line 1523), 0 allowed` (and the must-not-fire control, which scans the real writers, failed with it). Restored, `cmp` identical, `git diff` clean. |
+| Publish size | Not re-measured: no package or project change; about 40 net lines of resolver code. |
+
+### Round 2 scoped re-check (2026-11-04)
+
+No F-class finding. All six round-2 claims hold in the code; the filtered unit tests (133) and the ArchTests (7) pass. 082b merged into work at 7061b5b7ec.
+
+- **K (new, transient): an evaluation that overlaps a create or re-change.** `ProcedureResolver.cs:756-763` reads the overrides first and the enabled policies and versions later, all with NoLock. An evaluation that lands between those reads can see the record rule enabled but no Exclude row (K3 throws), or the row and the enabled rule but no new version (K2 throws). The fault is thrown and the job retries, so it fails closed and clears on the next read. No fix. **082c criterion:** expect an occasional transient `ProcedureResolutionFaultException` on a record being changed; the retry path must not raise a hold or reach a reader for it before retries are exhausted.
+- **K (documented): guard limits.** The `overriddencreatedon` guard strips `//` without regard to string literals and does not strip `/* */`. The second only gives false failures (the safe direction).
+- **Task 117 ordering** (already a criterion): if the delete planner removes the Exclude rows before switching the rule Off, the K3 fault fires.
+
+**ontology-r1 on the round-2 result (2026-11-04).** The 9854ccee25 wording is right on all three points.
+- **D-203 (11) confirmed as a known limit:** a version published with no Accepted rule, then retired, raises no hold for its window. ontology does not ask for the 081 refusal (refusing an empty version would change product behaviour: an every-rule-rejected or documents-only version may be published on purpose; that is the owner's call). If the owner later wants it held, the 081 refusal is the place.
+- **Transient fault accepted, with a binding 082c criterion:** no hold and no reader warning while retries remain; once retries are exhausted the submission ends **held**, with the blocking internal finding naming the cause, never passed. Tests for both halves: a retry clears with no hold; exhausted retries end held.
+
+## 082c-1 implementation (2026-11-04)
+
+Brief `notes/082c-brief.md` section 5 item 1, under the binding answers of section 7 (uac-r2; ontology D-205). Branch `task/ebilling-082c-1` from `work/ebilling-r1` at 6824af3bef. Criteria C1-C10, C12, C17, the C6 comment, the C20 read-only items.
+
+### What changed
+
+- **Loader (C1-C4, C10).** `LoadAsync` reads the legacy sets and calls `ProcedureResolver.ReadAsync` once, beside them. `LoadRulesAsync` is renamed `LoadLegacyRulesAsync`, and its `sprk_procedure IS NULL` comment is rewritten as the D-205 item 1 partition, which goes away with the legacy read at 075's copy-forward. `RequireDisjoint` throws `ProcedureResolutionFaultException` when a policy version is in both streams. The Duplicate gate looks at both streams, through `ProcedureResolution.PolicyVersions` (every Published version the resolution read). `BillingLoadedFacts.Procedures` carries the resolution. `Rules` holds the legacy stream only; the evaluator throws if it finds a Procedure candidate there.
+- **Candidates (C5).** `BillingRuleCandidate` gains `Source` (Legacy or Procedure), `Rank`, `ProcedureId` and `ProcedureVersionId`.
+  - Legacy candidates use `LegacyRank(scope)`: ClientDefault is (AllRecords, 0, false), Firm is (Firm, 0, true).
+  - Procedure candidates come from `ProcedureCandidate(ResolvedRule)`. Their rank is that of the `AppliedProcedure` whose slot they take; a record rule takes its base rule's.
+- **Evaluator (C5-C9).** Legacy versions are selected per date, as before. Procedure rules come from `RulesOn(d)`, memoized per distinct subject date (the line date, else the invoice date, else `ReceivedOn`).
+  - **Precedence** is decided per subject and per `PrecedenceKey`, by `PrecedenceOf` and rank, for both streams:
+    - **Replace** keeps only the top valid rank. Valid means gate-accepted, handler-accepted and not downgraded. Ties all apply. A displaced Replace version is never run.
+    - **Additive** keeps every version.
+    - **Split** (ExpenseRule) keeps a displaced version but drops its `ExpenseAmountOverCap` findings. The C6 comment sits at that line.
+  - **C7:** `PrecedenceOf` is called only on gate-accepted definitions.
+  - **C8:** a refusal counts as covered only where a version of the same Replace key judged the subject at an equal or higher rank.
+  - `BillingEvaluationResult.Gaps` exposes each gap, with the subjects dated on it.
+- **Interim fail-closed rule.** `InvoiceSubmissionProcessor` throws `ProcedureGapNotYetHeldException` when the evaluation has any gap. The throw sits at one marked spot (`// 082c-1 interim: replaced by the gap hold in 082c-2.`). Resolver faults are not caught; they propagate. The job retries, and on the final delivery the submission ends Failed (`processing_failed`), never Accepted. The persister is not touched.
+- **Adjustment caller.** The `LoadRules` delegate is now `(firmId, CoreRecordReference? core, DateOnly date, ct)`.
+  - `BillingFactLoader.LoadRulesOnAsync` returns one legacy version per policy (`SelectVersion`), plus every Procedure rule in force on the date, with no precedence.
+  - The core record is the invoice's single lookup (`SingleCoreOf`). An invoice with none or several gets Unavailable.
+  - A Procedure rule's DTO `Scope` is `"Procedure"`.
+- **C12 (correction interim).** `PatchFindingsAsync` throws when the after-side has a gap, keyed `(ProcedureId, WorkDate, Kind)`, that the before-side lacks. The findings step then fails, the correction is Incomplete and nothing is patched.
+- **C17.** `PrintMembers` on `ExcludedProcedure`, `ExcludedRule`, `ResolvedRule`, `ResolvedPolicyVersion` and `CoreRecordLink`. None of them prints an id, a rule body, free text or a reason.
+- **C20.** `scripts/ebilling/Get-EbillingLegacyRuleOverlap.ps1` makes GET requests only, through a single `Invoke-DvGet`. The checklist types are pinned in the script because they cannot be derived from PowerShell; `BillingRulePrecedenceTests` fails if that line drifts from `PrecedenceOf`.
+
+### Decisions and deviations
+
+- `BillingRuleCandidate.Scope` is now nullable: it is null on a Procedure rule. `ReadSystemPolicyAsync` still sets ClientDefault (untouched).
+- `Rank` defaults to the legacy ClientDefault rank, so a candidate built elsewhere without a rank ranks lowest.
+- A Procedure candidate's `ProcedureVersionId` is the policy version's own link (null on a record rule's version). So one version maps to one candidate, whatever the date; the evaluator faults if one version ever maps to two.
+- C4 is checked twice: by the loader over the whole read, and by the evaluator over what was resolved.
+- **Expected outcome changes (C8; D-205 items 2 and 3; not escalated):**
+  1. A refused firm (higher-rank) Replace version is no longer covered by a judged client default, so its subjects stay `rules.not_checked`. Two F2 tests and one persister test were reworked, and the reverse case is the new must-not-fire test.
+  2. Under Split, a displaced client-default ExpenseRule keeps its code check, with its own consequence (which may be Reject). Two D-39 / 073 tests were reworked.
+  3. Legacy Additive types now add (D-205 item 2): a client-default RequiredData or NonBillableActivity rule applies beside the firm's.
+- **Split, literal reading (for ontology):** a valid higher-ranked ExpenseRule with no cap still displaces a lower version's cap, as D-39 did for the whole version. Ontology should say whether a cap-less higher version ought to leave the lower cap in force.
+- **AiObservation** is Additive in the catalogue, although D-205's list omits it. The script counts it on its own line.
+- The adjustment path now filters `IsCitableType` after selection; before, it filtered before `SelectVersion`. The two differ only where two versions of one policy overlap.
+- `ProcedureResolution.DatesResolved` was added for the C9 test. It is a counter and decides nothing.
+
+### Dev counts (GET only, https://spaarkedev1.crm.dynamics.com, as ralph.schroeder@spaarke.com)
+
+| Item | Count |
+|---|---|
+| `sprk_ruleset` rows (so legacy sets, Procedure sets and record sets) | 0 |
+| `sprk_procedure` | 0 |
+| Billing `sprk_policy` | 1 (the system policy, no rule set) |
+| `sprk_policyversion` | 10 |
+| Overlapping (firm, checklist type) pairs | **0** |
+| Firms affected | 0 |
+| K5: record rules whose Published version lacks `sprk_basedonversion` | **0** |
+
+Dev has no rule sets to migrate, so the census is only meaningful on an environment with authored sets.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` (BFF and test project) | 0 warnings, 0 errors |
+| Filtered unit (`ProcedureResolver\|BillingFactLoader\|InvoiceComplianceEvaluator\|BillingRule\|InvoiceAdjustment\|InvoiceCorrection\|InvoiceSubmissionProcess\|BillingSystemFindings\|CoreRecordChain\|BillingEvaluat`) | 1516/1516 |
+| Namespaces `.Signals.Billing` + `.Finance` + the processing flow, once | 7203 passed, 3 skipped, 0 failed (of 7206) |
+| ArchTests (`Billing\|CoreRecordChain\|Procedure\|AccessTableReader\|ADR010\|FindingsJson\|RecordOwnerAssignmentCensus\|Finance\|ExceptionMessage`) | 226/226 |
+| Before the test updates | 5 existing tests failed under the new precedence (4 evaluator tests, 1 persister F2 test). All are the C8 / C6 outcome changes above; reworked |
+| Seeding: resolver call replaced by an empty resolution | 5 of 53 loader tests failed, including C2 end-to-end (also C3-second, C4, C9, C10). Restored, `cmp` identical |
+| Seeding: partition removed (query condition and re-check) | 7 of 53 failed, including the C3 second must-fire (also C2, C3, C4, C9, C10, adjustment). Restored, `cmp` identical |
+| Seeding: gap allowed through (`Gaps.Count < 0`) | 2 of 79 failed: the processor interim test and the end-to-end flow test. Restored, `cmp` identical |
+| Extra seeding: C12 check disabled | 1 of 15 failed: the C12 test. Restored, `cmp` identical |
+| Extra seeding: precedence forced to Replace (D-39 all-replace) | 7 Additive / Split / C8 tests failed. Restored, `cmp` identical |
+| Extra seeding: `RulesOn` per subject instead of the memo | the C9 test failed. Restored, `cmp` identical |
+| Publish size (`dotnet publish -c Release`; base 6824af3bef archived and published the same way) | total 137,499,800 -> 137,507,420 bytes (+7,620); `Sprk.Bff.Api.dll` 25,276,928 -> 25,293,824 (+16,896). No package change |
+
+### For 082c-2
+
+- The interim throw goes when the gap hold lands. It is one spot in the processor, and `ProcedureGapNotYetHeldException` is deleted with it.
+- `BillingEvaluationResult.Gaps` carries `AppliesToInvoice` and `LineIndexes` for each gap, for the C11 `rules.not_checked` lines.
+- The C12 interim in the correction stays until 082d / 101.
+
+## 082c-1 adversarial pass and fix round 1
+
+Fixes follow the adversarial review of 082c-1 and ontology D-205. One commit per fix; the C8 tie and K4 each have their own commit so either can be reverted alone.
+
+| Finding | Fix |
+|---|---|
+| F1: a capless higher-ranked ExpenseRule displaced a lower version's cap | Under Split, `top` is taken from the valid versions that state a cap (`MaxAmountPerItem` non-null). Only those can put a lower version into `capDisplaced`; the code check is never displaced. This settles the "Split, literal reading" question above (ontology D-205 ruling). A deliberate "no cap on this record" is a rule-level Exclude, or a record rule in the base's slot, never precedence. Two tests that pinned the defect now use a capped higher version; new tests: capless higher version leaves the lower cap firing (must-fire), capped higher version displaces, capless at a tie applies beside it |
+| Cosmetic: a displaced cap was still listed as skipped in the currency "not checked" finding | A cap displaced on every subject it applies to is left out of the skipped list (test added) |
+| F2: C12 compared gaps as `(ProcedureId, WorkDate, Kind)`, so a line moved onto a date that already had another subject's gap brought in no new key | Compared per subject: `(ProcedureId, Kind, subject)` from `AppliesToInvoice` and `LineIndexes`; any after-side triple not in the before set refuses the correction. Must-fire: the fee line is moved onto the received date, where the undated expense line already holds a gap. Must-not-fire neighbour: an Hours correction applies |
+| F1-low: a C12 refusal surfaced as the generic 503 Incomplete ("Repeat the same request"), which never clears a gap | New `CorrectionProcedureGapException`, mapped to `CorrectionStatus.ProcedureGap` and a fixed-text 409 `ebilling.correction.procedure_gap` (same pattern as `CorrectionFirmMissingException`). No id, no `ex.Message`. Test covers the status, code, fixed detail and the HTTP mapping |
+| C8 tie (confirmed by ontology): a refused version was covered by a tie-mate | `RefusalScopeOf` covers a refused version's subject only for a Replace rule of strictly HIGHER rank (`> 0`, was `>= 0`). Tie test: Firm-level TimeIncrement 0.1 and 0.5, the 0.5 refused, a 0.3 line stays `rules.not_checked` (own commit) |
+| K2: a record rule's code prints a policy id | `PolicyCode` of a record rule is `BRR-` + the policy id. `ResolvedPolicyVersion`, `ResolvedRule` and `ExcludedRule` `PrintMembers` print the token `record rule` for such a code; C17 test extended |
+| K4: the invoice date after the last version, in a hole, or before the first, held the whole invoice | **K4 resolved by ontology rule (c).** The invoice subject keeps the invoice date for a Procedure's version whenever that Procedure has one on it. A Procedure with none on the invoice date is judged, for the invoice subject only, by its version on the LATEST dated line's work date. The invoice-date gap stands only when that date has none either, or when no line is dated. Legacy selection and line subjects are unchanged; no new `RulesOn` call (C9's one resolution and memo per date hold, tested). One existing gap test changed: the invoice no longer holds the gap when the dated lines are inside the window (own commit) |
+
+### Open items
+
+- **K1:** the interim throw retries the full pipeline. Acceptable because 082c-1..3 and 114 ship together.
+- **K4:** resolved by rule (c) above; nothing open with ontology.
+- **C20 census and the pair create test** belong to 082c-2.
+- **ForReaders and record rules (reported, not changed):** `ProcedureRulesOnDate.ForReaders()` builds `ProcedureReaderRule.PolicyCode` from `r.Version.PolicyCode`. For a record rule (`RecordRule is not null`) that is the `BRR-` code, which carries the record rule's policy id. The reader contract is uac-r2's; the decision on whether to blank or replace the code for record rules is theirs. The excluded-rule list is not affected (it carries the base rule's code).
+
+## 082c-1 scoped re-checks and fix round 2
+
+Two scoped re-checks of the round-1 fix range, then one fix round.
+
+- **Ontology: PASS on the fix range.** One point, binding (item 1 below): the C12 correction message said "cannot be applied", but the value IS saved and only the rules were not re-run.
+- **Our re-check: no F-class finding.** One F4 (item 1, the same message point) and four K items (K1, K2, K4 depth, below), all fixed here. K3 is recorded only.
+
+| Item | Fix |
+|---|---|
+| F4 (ontology, binding): the C12 409 `ebilling.correction.procedure_gap` told the reviewer the correction "cannot be applied" | `CorrectionCodes.ProcedureGapDetail` is now exactly: "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected." Status 409 and the code are unchanged. The log line says the same ("saved ... its rules were not re-run; the correction stays unapplied and holds approval"), and the status is the same outcome: the value is written, the follow-through is not, so `ReadUnappliedAsync` still lists the correction and approval answers 409 `corrections_pending`. Test (end to end over the approval world): after the outcome the date is stored, the stored findings are unchanged, and `ApproveAs` is refused with `corrections_pending` and writes nothing |
+| K1: the adjustment options used `RulesOn(invoiceDate)` only, so a rule that judged the invoice subject through the rule (c) fallback could not be cited (a cited rule must be in the options) | `BillingFactLoader.RulesInForceOn` / `LoadRulesOnAsync` and the `InvoiceAdjustmentService.LoadRules` seam take the latest dated line's work date. The service reads it from the invoice's Fee and Expense lines' stored `sprk_eventdate` (a correction already writes that column; an Adjustment line is never counted). Legacy selection is unchanged. Tests: the fallback rule is in the options and citable; no dated line gives none; the latest of several dates is used and an Adjustment line's date is not |
+| K2: the fallback keyed on "absent from `Procedures`", so it also lifted a `ConflictingParents` (pin vs follow) gap on the invoice date | **One shared definition**, `ProcedureRulesOnDate.FallbackProcedureIds` (+ `RulesWithFallback`), used by the evaluator and by the adjustment options (the loader). It lifts a Procedure with a hole, an end, or one not yet applicable on the invoice date, and only when it is applied on the work date. `ConflictingParents` and the pin gaps (`PinnedVersionRetired`, `PinnedVersionNotInForce`) stand. Tests: a ConflictingParents gap on the invoice date is not lifted (must-fire, evaluator end to end with a Follow and a Pin of version 1); a theory over all five gap kinds; a not-yet-applicable Procedure is lifted; the holes and ends tests of round 1 still hold |
+| K4 depth (code was correct by trace) | Tests: with several Procedures only the one without an invoice-date version falls back (the other keeps the invoice date's version 2, not the line's version 1); a fallback date that is itself in a hole leaves the gap standing (both the line's and the invoice's); a refused capped higher version under Split leaves the lower cap firing |
+
+Test support: `ProcedureKit.Pin(name, versionNumber)` adds a Pin on the kit's Matter beside the Follow row.
+
+### Known limits (recorded, not changed)
+
+- **K3:** a line moved between two gap kinds of the same Procedure (for example a hole to an end) is refused by C12 although it is unjudged on both sides, because the per-subject triple includes the kind. Fixing it needs a stored gap to compare against (082d / 101). It is rare.
+- **K (ontology D-205, accepted):** a Follow-vs-Pin disagreement that exists only on the invoice date, while the parents agree on every work date, still holds the invoice (`ConflictingParents` is not lifted by the rule (c) fallback). The disagreement is real and will hold the next invoice too; a person resolves it with a distance-0 assignment or an Override.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (`ProcedureResolver\|BillingFactLoader\|InvoiceComplianceEvaluator\|BillingRule\|InvoiceAdjustment\|InvoiceCorrection\|InvoiceSubmissionProcessor\|InvoiceApproval\|BillingEvaluat\|CoreRecordChain`) | 1476/1476 |
+| Contract tests of the adjustment endpoints (compiled into the same project) | 58/58 |
+| ArchTests (`Billing\|CoreRecordChain\|Procedure\|ADR010\|FindingsJson\|Finance\|ExceptionMessage`) | 162/162 |
+| Seeding (old behaviour restored in the three production files, then put back, `cp` from backups) | 8 of 518 failed: the K1 must-fire and the latest-date test, the K2 must-fire and its three pin / conflict theory rows, the item 1 end-to-end test and the C12 text assertion |
+
+## 082c-2 implementation (2026-11-05)
+
+Branch `task/ebilling-082c-2` from `work/ebilling-r1` at 871751240a. Contract: `notes/082c-brief.md` (section 5 item 2; C11, C13 to C16, C18; section 3(c) with section 7 binding).
+
+### What changed
+
+| Part | Where |
+|---|---|
+| **The gap hold (C11, C13).** One pipeline finding per gapped Procedure, at its first date. It carries the name, the date and the kind, and no id. The blocking BILL-SYSTEM-SUBMISSION finding "No procedure associated with this invoice" goes on the SubmissionIntegrity Signal, one Signal with firm_missing; the note order is firm, then unresolved, then gap. Gapped lines are `rules.not_checked` with cause `procedure_gap`. Classify gives Internal Blocked, and SPA Accepted or AcceptedUncoded with `procedure_gap`, never AutoRejected | `InvoiceSubmissionProcessor` (`Classify`, `HoldFor`, `ProcedureGapFindings`), `InvoiceSubmissionPersister` (`TerminalFor`, `RulesNotChecked`, `RulesNotCheckedCause`, `Validate`, `SignalPlanJson`), `InvoiceSubmissionAfterSteps`, `BillingSystemFindings`, `BillingRuleCatalogue`, `BillingFindingSignalMapper` |
+| **Faults (C14, C15).** The job handler threads `finalDelivery` through as `job.IsFinalDelivery`. On an earlier delivery a resolver fault propagates and nothing is persisted. On the final delivery the invoice is held: Internal Blocked, SPA Accepted with `procedures_unresolved`. The hold has a blocking finding that names the cause (`chain_unreadable` / `rows_inconsistent`), no rule findings, and every line `rules.not_checked`. A fault that is not a resolver fault still propagates | `InvoiceSubmissionProcessor.EvaluateAsync` (`UnresolvedCauseOf`), `IInvoiceSubmissionProcessor`, `InvoiceSubmissionProcessingJobHandler` |
+| **Interim removed** | `ProcedureGapNotYetHeldException` and its throw are deleted |
+| **Approval.** Refused with `ebilling.approve.procedure_held` and a fixed detail. The check reads the stored submission state, not the system policy and not `sprk_reviewdetail` | `InvoiceProcedureHold` (new), `InvoiceApprovalService` |
+| **Codes and status view.** New codes `ebilling.submission.procedure_gap` and `ebilling.submission.procedures_unresolved`; the finding codes are flag-only. `InvoiceSubmissionView.Warning {code, message}` comes from `sprk_outcomereasoncode`, uses the R4 owner-approved texts verbatim, and is omitted when null. No pipeline finding and no Procedure name reaches the view (C18) | `SubmissionReasonCodes`, `BillingFinding`, `SubmissionHoldWarning`, `InvoiceSubmissionService.ToView` |
+| **Redaction (C16).** `ForReaders()` uses option (a): a record rule reads as its base code plus the existing `RecordRule` flag. The code is blank, with a warning log that carries no id, when the base is missing or is itself `BRR-` | `ProcedureResolver.ReaderCodeOf` |
+| **C16 guards.** `ReaderSentinel` flags `BRR-` codes, 32 hex characters and D-form GUIDs, with must-fire and must-not-fire controls. The ArchTest `ProcedureReaderRedactionGuardTests` covers 16 reader-surface types. It rejects `get_Message` on any `Exception`, and `ToString()` or AppendFormatted / Join / Format / Concat applied to a resolver record. The receiver of `object.ToString()` is inferred from the instruction before the call. It also has a control class | tests |
+| **`sprk_invoice.sprk_reviewdetail`.** A local choice, derived by `InvoiceReviewDetail.ReviewDetailOf`. Its writers are named in `InvoiceReviewDetailWritersGuardTests`. The column is in `ReadableColumns` (partner-readable; R4 renders it only while statuscode is In Review) and `MappingProtectedColumns`. It was added to `ParentLineage` AccessColumns["sprk_invoice"] in fix round 1 (uac-r2 F4), only so that app-only generic writes refuse it; it decides no access. Rollout: open firm holds that predate the column need a one-time backfill to 659490002 (R4, 2026-11-05; owner go per environment) | `InvoiceReviewDetail` (new), `InvoiceLifecycleService`, `InvoiceSubmissionPersister`, `InvoiceAssignFirmService` (one hunk in `ApplyPlan.Build`, one property, the plan init), `ExternalAccessModule`, `RecordTableRules`, `scripts/ebilling/Deploy-EbillingInvoiceReviewDetailColumn.ps1` (new) |
+| **Census** (brief (b), D-205 item 4) | `scripts/ebilling/Get-EbillingLegacyRuleOverlap.ps1` adds `projectsLinkedToAMatter` and `linkedProjectsWithAnEmptyPair` |
+
+### sprk_reviewdetail option values (pinned in `InvoiceReviewDetail` and in the script; for R4)
+
+| Value | Label | From |
+|---|---|---|
+| (blank) | normal review | none of the three |
+| 659490000 | Waiting for billing terms | `ebilling.submission.procedure_gap` |
+| 659490001 | Billing terms could not be checked | `ebilling.submission.procedures_unresolved` |
+| 659490002 | Waiting for the firm to be confirmed | `ebilling.submission.firm_missing` |
+
+Priority: firm, then could not be checked, then waiting for terms, then blank. In Review is `statuscode` 1 / `statecode` 0.
+
+Writers, by the ontology D-205 numbering (fix round 1 renumbered this list; the earlier text numbered them 1 to 4 in a different order):
+
+1. The persister's held create (In Review only, in the persist transaction). **Built.**
+2. The re-check that clears a gap or unresolved (082d / 101, ebilling-r2). Pending; no 082c-2 path clears one.
+3. The 095d-1 Set firm apply, recomputed from the Procedure reasons the findings still name (`InvoiceAssignFirmService`, `ApplyPlan.Build`). **Built.**
+4. The 095d-2 re-run. Pending.
+5. The 114 Override release. Pending.
+6. Every exit from In Review: `InvoiceLifecycleService.TransitionAsync` on every move, writing blank in the same write as the status. **Built.**
+7. The correction's Superseded close, writing blank in the same request (`BuildConditionalTransition`), and, as of fix round 1, its undo: `SubmissionCommitGate.ReopenSupersededAsync` derives the detail from the old invoice's remaining holds and passes it to `BuildSupersedeUndoRequest`. **Built.**
+8. The 089e chain close. **Not a writer.** C19 found that the close writes `sprk_signal` only; it never sets or clears an invoice's detail, so it is not on the pending list.
+
+Pending writers, listed in the guard: 2, 4 and 5. Each recomputes the detail from the invoice's remaining reasons in its own transaction and is added to `InvoiceReviewDetailWritersGuardTests.Writers` with it.
+
+### Decisions and deviations
+
+- **Column missing: skip with a warning logged once; never fail closed.** `ReviewDetailColumnProbe` makes one app-only `TopCount = 1` read.
+  - A present answer is cached for good.
+  - A missing answer is re-checked after 5 minutes.
+  - A probe that fails for any other reason answers present, so the write names the column and fails, rather than leaving a detail on a closed invoice.
+
+  Failing closed would refuse every status move in order to protect a label. The holds are unaffected: the persister and Set firm tests run with the column missing.
+- **The approval order is FR-20, then firm, then procedure.** An Internal gap (Blocked) is therefore refused `ebilling.approve.held` first, and `procedure_held` only after the 114 Override lifts FR-20.
+- **SPA gap over a 073 rejection** (brief section 6 open item; no escalation needed). `BuildFindingsJson` keeps the deciding finding `rejects=true` under kind Accepted, reason `procedure_gap`. The Signal plan presents those groups as Blocked, never as Rejects.
+- **An invoice-date-only gap** flags no line, but the invoice is still held by the pipeline finding and the reason.
+- **The existing `RecordRule` flag is kept;** no `IsRecordRule` was added. It is the one boolean option (a) allows. ForReaders gaps keep the enum kind name, which carries no id.
+- **Sentinel scope.** The sentinel scans the reader parts of the stored JSON (pipeline findings, line findings, the mapped system Signal's headline, sentence and facts) and the status-view warning. It does not scan internal id members (`policyId`, `invoiceId`). The unresolved test also checks that the whole stored JSON lacks the planted `ex.Message`.
+- **Writer 2 (the re-check that clears a gap) does not exist in 082c-2.** No path rewrites the stored hold markers. The 101 correction re-evaluation patches findings but not `reasonCode`, `pipelineFindings` or the line causes, and its C12 interim refuses a correction that brings in a new gap. The guard lists it as pending.
+- **The generic Update Record node and output mappings are not refused in 082c-2** (uac-r2's open question). Only field-mapping rules are refused, through `MappingProtectedColumns`. A stray node write cannot release a hold, because approval never reads the column, but partners could see wrong text until the next writer runs. Recommendation: add the column to the typed-writer-only list once ontology defines one. Ontology to confirm.
+- **The SpaarkeMaster solution source does not carry the column yet.** A new stamp gets it from the script until the next export.
+- **Census.** The create path is pinned by the client test `CreateProjectWizard.projectFiling.test.tsx` ("writes the N:N, THEN files the project under the matter through the BFF"). The count can still grow: a refused or secure-blocked filing keeps the link (with a visible warning), and a subgrid "Add existing" writes no pair. It is therefore a gate before each rollout, and task 195 (`ProjectsWithMatterLinkButNoPair`) reports the same count on every run.
+- **122 guard.** `InvoiceProcedureHold` reads `sprk_findingsjson` app-only. It is added to the 122 reviewed readers (row 11 of notes/122) in its own commit: the guard failed at af003e5704 and is fixed at db63310c54.
+- **Publish size.** The BFF's total publish size of 137.6 MB is pre-existing and far over the 55 / 60 MB thresholds. This slice adds +33 KB.
+
+### Known limits
+
+- ~~The Superseded undo reopens the old invoice with a blank detail~~ Fixed in fix round 1 (writer 7, the undo): the reopened invoice carries the detail its remaining holds derive.
+- Invoices held before the column exists read blank. There is no backfill.
+- If the column is deleted after it was found present, writes fail until a restart, because the present answer is cached for good.
+
+### uac-r2: who can reach the unresolved causes
+
+`rows_inconsistent` comes from an admin's Procedure changes. `chain_unreadable` comes from stored parent data. A partner writes neither, so a partner cannot trigger either hold.
+
+### Dev reads (GET only, https://spaarkedev1.crm.dynamics.com)
+
+| Read | Result |
+|---|---|
+| `Deploy-EbillingInvoiceReviewDetailColumn.ps1` dry run | `WOULD CREATE sprk_reviewdetail (Picklist)`; publish skipped; nothing written; exit 0 |
+| `... -Verify` | `GAPS: sprk_invoice.sprk_reviewdetail does not exist`; exit 1, as expected. `-Apply` was not run |
+| `Get-EbillingLegacyRuleOverlap.ps1` | `projectsLinkedToAMatter` 7; `linkedProjectsWithAnEmptyPair` **0**; every legacy and K5 count 0 |
+| Intersect metadata | `sprk_project_sprk_matter`, EntitySetName `sprk_project_sprk_matterset` |
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build`: BFF, unit tests, ArchTests | 0 warnings, 0 errors |
+| Filtered unit runs during the work | 1470/1470; 572/572; 282/282 (allow-list and auth); 182/182 |
+| The `.Signals.Billing` and `.Finance` namespaces, run once | 7245 passed, 3 skipped, 0 failed (of 7248) |
+| ArchTests (`InvoiceReviewDetail\|ProcedureReader\|Invoice\|External\|FindingsJson\|Lifecycle\|Status\|FirmHold\|Procedure\|RecordOwner\|Bff`) | 481/481 |
+| Publish size: `git archive` of 871751240a and of HEAD, each published with `dotnet publish -c Release -r linux-x64 --self-contained false` (192 files each) | 137,614,960 to 137,648,216 B (**+33,256**): `Sprk.Bff.Api.dll` +28,672, pdb +4,584. No package change |
+
+### Seeding proofs
+
+Each seed was restored from its backup, and the restored file checked `cmp`-identical.
+
+| Seed | Result |
+|---|---|
+| 1. The gap hold dropped from `Classify` | 10 of 151 failed |
+| 2. The final-delivery catch made to catch on every delivery (`finalDelivery &&` removed) | 3 of 103 failed (the C14 (1) theory, two rows, and the end-to-end test) |
+| 3. `ex.Message` planted in the unresolved pipeline finding | Sentinel test: 1 of 10 failed. ArchTest: failed with `InvoiceSubmissionProcessor::EvaluateAsync: reads an exception's Message` |
+| 4. A `BRR-` code planted in `ForReaders` | 1 of 92 failed (the uac-r2 (a) reader test) |
+| 5. The exit blank disabled | 14 of 124 failed (all 7 exit paths, and 7 transition tests that pin the blank) |
+| 6. The derivation priority swapped (unresolved before firm) | 4 of 48 failed |
+
+### For the next slices
+
+- **082c-3:**
+  - Render `view.warning` in the R4 section 3 shape: one warning MessageBar in a polite region.
+  - Add `warning?: { code, message } | null` to both client types.
+  - Add the 202 pre-check.
+- **114 (Override release):**
+  - Rewrite the stored hold state, or mark it released.
+  - Recompute the detail with `ReviewDetailOf(remaining reasons)` in the same transaction.
+  - Add the release to `InvoiceReviewDetailWritersGuardTests.Writers`.
+  - Expect, under the approval order, that an Internal gap answers `ebilling.approve.held` until 114 lifts FR-20.
+  - C22 (`DecidingIndexes`) is unchanged here.
+- **095d-2:**
+  - The re-run rewrites the stored firm and Procedure state, and recomputes the detail in its transaction.
+  - Add it to the guard.
+  - Merge with 095d-1c, which edits `InvoiceAssignFirmService` on another branch. This slice's changes to that file are: the review-detail lines in `ApplyPlan.Build` after the firm-hold clear, the `WriteReviewDetail` plan property, and the probe read before the plan.
+- **R4:**
+  - Use the option values above.
+  - In Review is `statuscode` 1 / `statecode` 0.
+  - `sprk_reviewdetail` is readable on `sprk_invoice`.
+  - Render the label only while the invoice is In Review (uac-r2 (b)).
+  - The two warning texts are the approved ones. The firm explanation line still needs the owner's OK (brief section 7).
+
+## 082c-2 fix round 1 (2026-11-05)
+
+Branch `task/ebilling-082c-2`, after adversarial pass 1 of 2. Merged `origin/work/ebilling-r1` first, then one commit per fix. Main-checkout and `spaarke-wt-ebilling-r1` working trees untouched; no live Dataverse writes.
+
+### The merge
+
+`origin/work/ebilling-r1` (c61f510080: 095d-1c, the Set firm Decision Record, `sprk_findingsjson` in `ParentLineage` AccessColumns for `sprk_invoicesubmission`, the `RecordTableRules.MappingProtectedColumns` entry, `FindingsJsonAppOnlyReadGuardTests` with `RefusalOnlyTypes`, `FindingsJsonFieldSecurityAgreementTests`) merged into the branch with `git merge` (no rebase).
+
+| File | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceAssignFirmServiceTests.cs` | The only conflict: `World.Service()`. 095d-1c passes its `Log` (a `CapturingLogger`); 082c-2 sets `ReviewDetailProbe` in an object initialiser. Both kept: `Log, new FixedTime(Now)) { ReviewDetailProbe = ReviewDetailProbe }`, with both fields. |
+| `ParentLineage.cs`, `RecordTableRules.cs`, `FindingsJsonAppOnlyReadGuardTests.cs`, `InvoiceAssignFirmService.cs`, the AccessTable census tests | Auto-merged; every entry of both sides is present (checked: `sprk_findingsjson` and `sprk_reviewdetail` in `MappingProtectedColumns`, the Set firm apply with its Decision Record and the detail line). |
+
+Gate after the merge: BFF build 0 warnings and 0 errors; filtered unit 3218 passed, 0 failed (5 skipped: live seam tests); ArchTests filtered 20 passed.
+
+### Fixes
+
+| # | Class | What | Where |
+|---|---|---|---|
+| 1 | F4 | `sprk_reviewdetail` is refused for app-only generic writes. It is in `AccessColumns["sprk_invoice"]` with the reason "it decides no access; it says why the invoice is held for review, and only its typed writers derive it", and stays in `RecordTableRules.MappingProtectedColumns`. The writers guard lists the two new naming sites (`InheritedAccessPermission` `.cctor` and `RefuseAppOnlyWrite`) as non-writers. No read-guard change was needed: the column is not field-secured. | `ParentLineage.cs` (AccessColumns entry, reason branch, doc item); tests `AccessTableAppOnlyWriterTests` (census row, new must-fire for the output mapping and the Update Record node, must-not-fire controls), `AccessTableReaderScanTests` (reason), `InvoiceReviewDetailWritersGuardTests` |
+| 2 | F3 | The C16 reader-redaction guard also flags an exception's `ToString()`, string interpolation of an exception or a resolver record (with a format specifier or an alignment too), the string operator `+` (the compiler lowers `"x" + ex` to a null-guarded `object.ToString`), `string.Format` / `Concat` / `Join` of one. New must-fire controls for each shape (13) and must-not-fire controls (6: `ex.GetType().Name` bare, concatenated, interpolated and formatted, a count). **No new real hit** in the 16 scanned reader-surface types (a source grep agrees: the only `ex.` use is `ex.GetType().Name` at `InvoiceAdjustmentService.cs:622`). | `ProcedureReaderRedactionGuardTests.cs` |
+| 3 | F2 | The supersede undo reopens the old invoice with the detail its remaining holds derive, in the same request as the status. `ReopenSupersededAsync` reads `InvoiceProcedureHold.ReasonsAsync` and `InvoiceFirmHold.IsHeldAsync` of the old invoice, calls `ReviewDetailOf`, and passes the result to `BuildSupersedeUndoRequest(..., int? reviewDetail = null)`. A read fault propagates (the undo is held and retried, as for the reads before it). The writers guard cannot list the gate (it names no column literal), so a new guard test pins that `SubmissionCommitGate.ReopenSupersededAsync` calls `ReviewDetailOf`, with a must-fire and a must-not-fire control. | `InvoiceLifecycleService.cs` (interface, `BuildSupersedeUndoRequest`, `BuildConditionalTransition`), `SubmissionCommitGate.cs` (`ReopenSupersededAsync`), `InvoiceReviewDetail.cs` (doc), `ApExportWorld.cs` (the fake) |
+| 4 | F3 | A no-firm Internal held create writes 659490002 on the invoice create (`PersistAsync` test; the same create has no `sprk_vendororg`). | `InvoiceSubmissionPersisterReviewDetailTests.cs` |
+| 5 | F4 | This file: the writers list is renumbered by D-205 (see "What changed" above), and writer 8 (the 089e chain close) is recorded as not a writer. | here |
+| 6 | K2 | `Deploy-EbillingInvoiceReviewDetailColumn.ps1 -Verify` also counts the reverse invariant: In Review invoices whose detail is blank while an open Procedure or firm hold exists, read the way the BFF reads them (the invoice's own `sprk_firmhold`; the stored submissions' outcome reason, `reasonCode`, `pipelineFindings[].reasonCode` and the `rules.not_checked` line causes; unparsable findings count as held, fail closed). It is a WARN, never a FAIL: an invoice held before the column existed reads blank until its next writer (no backfill), so only a count that grows after the 082c-2 build is deployed is a defect. Read-only GETs; it follows `@odata.nextLink` to 20,000 rows and says when it stopped at the cap. Parse-checked; the hold-reason helper was run offline over five stored shapes. Not run against Dev (no live call this round). | the script |
+| 7 | K1 | See "K1 outcome" below. | `SecureRootInheritance.cs`, `CoreRecordChain.cs`, `InvoiceSubmissionProcessor.cs` |
+| 8 | K4 (c) | See "K4 (b)/(c) outcome" below. | `ProcedureResolver.cs`, `InvoiceSubmissionProcessor.cs`, `InvoiceReviewReadService.cs` |
+
+### K1 outcome (uac-r2 authorised the additive edit in `SecureRootInheritance.cs`)
+
+`PairParentAnswer.Unknown` gains `Transient` (default false), set true on the two fault paths only: the `faultedTypes` repeat and the type read's catch. Every existing caller is unchanged (they match on the type and read `Reason`). `CoreRecordChain` passes it to a new `CoreRecordChainUnreadableException.Transient`; `InvoiceSubmissionProcessor.UnresolvedCauseOf` maps a transient chain to `rows_inconsistent` and every other chain to `chain_unreadable`, as before. `rows_inconsistent` is the only existing cause whose reader text says it may clear ("this may clear once a change in progress completes"); no reader text was added.
+
+Not done: `SecureParentsAnswer.UnknownIsTransient`. The only consumer of the flag is `CoreRecordChain`, which calls `NamePairParentAsync` directly and never sees a `SecureParentsAnswer`; threading the flag through `NamedParents` and the climb touches five sites in a 4,000-line file for no caller. Add it when a caller needs it.
+
+Test: `CoreRecordChainTests` pins that a pair type READ fault and a pair with no type both fail closed the same way (the same exception, the same message prefix) while `Transient` differs; `InvoiceSubmissionProcessorTests` pins the cause mapping (both ways). Seed: the flag removed from the two fault paths, one test fails (the chain pin).
+
+Wording to raise with the owner: `rows_inconsistent` reads "the procedure settings are inconsistent" for what is an outage. It is the best of the two existing texts but not a good one. A dedicated transient cause with its own R4 text is the clean fix.
+
+### K4 (b)/(c) outcome: contained part done, one point stopped
+
+Every writer of resolver-derived content into the three surfaces, by trace:
+
+| Surface | Writer | Resolver content | Through `ForReaders()`? |
+|---|---|---|---|
+| Stored findings `pipelineFindings`, then the system Signal and the status warning | `InvoiceSubmissionProcessor.ProcedureGapFindings` | the gapped Procedure's name, date, kind | **Now yes.** It reads `ProcedureGap.ForReaders()`, the one mapping that `ProcedureRulesOnDate.ForReaders()` also uses, instead of the internal record's members. |
+| `pipelineFindings` (unresolved) | `InvoiceSubmissionProcessor.EvaluateAsync` / `UnresolvedCauseOf` | the cause code only | Nothing resolver-derived is written (a fixed code); `ex.Message` is guarded by C16. |
+| Status view `warning` | `SubmissionHoldWarning.For(reasonCode)` | none (a code and fixed text) | Nothing resolver-derived is written. |
+| `lineFindings` | `RulesNotChecked*` | the cause code | Same. |
+| **`findings[].policyCode`, `signalPlan[].policyCode`, `signalPlanRefusals[].policyCode`, the Signal dedupe key** | `InvoiceSubmissionPersister.FindingEntryJson` (`:2254`), `SignalPlanEntryJson`, `BillingFindingSignalMapper` (`:231`, `:379`), from `BillingFactLoader.ProcedureCandidate` (`PolicyCode = version.PolicyCode`) | **a record rule's own `BRR-` code (and `policyId`)** | **No, and not changed.** |
+
+The last row is the open point. A rule judged in force through a record rule carries `PolicyCode = BRR- + policy id` into the stored findings, the plan and the Signal. These three are the join keys: the plan is the source the Signal is written from (part D writes it on every run), `InvoiceReviewReadService.PlanFor` matches a finding to its plan entry by `(subject, policyCode)`, and `InvoiceCorrectionReevaluation` keys its plan patches the same way. Writing the base code there would make the Signal reference the base rule (a different policy and version than the one that judged), break the finding-to-plan join for a record rule, and make a base rule and the record rule that replaces it collide on one dedupe key. So it needs a decision, not a mapping: (A) keep the internal key and add reader members (`recordRule` and the base `policyCode` through `ReaderCodeOf`) beside it, with every reader-facing consumer reading the reader members; or (B) store the base code plus the flag and key the plan by `policyVersionId`. Either is a change to the stored findings contract (schema 1) and to Signal identity. Not started; to uac-r2 and ontology. Until then the internal review route carries `ReviewFindingDto.PolicyCode` (a one-line comment now says any external or SPA mapping of it must go through `ForReaders()` first).
+
+Sentinel: `InvoiceSubmissionProcedureHoldTests.Sentinel_PlantedResolverOutput_ReachesNoStoredFindingsPlanOrView` plants a Procedure id, an override row id, a chain record id, a policy id, a typed reason and a `BRR-` code in the resolver's gap, runs the real gap writer, `BuildFindingsJson` and part D's mapper, and asserts none of them (in D, N or B form) appears in the stored JSON, the plan, the reader text or the status warning, and that the gap finding holds exactly the three reader members. Seed: the writer made to read the internal record (`g.ProcedureName + " " + g.Overrides[0].Reason`), the sentinel and two neighbours failed; restored `cmp`-identical. The test does not plant a `BRR-` rule finding in `findings[]`, because that is the open point above, not a defect this round can close.
+
+### Out of scope, as briefed
+
+`ForReaders()` consumers other than the gap writer (K4: uac-r2); the writers guard's run-time column names (K3); solution export of the column (before the master PR).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (the brief's filter plus `CoreRecordChain` and `SupersedeUndo`) | 3256 passed, 0 failed, 5 skipped (live seam tests) |
+| ArchTests (`InvoiceReviewDetail\|ProcedureReader\|FindingsJson\|AccessTable\|Redaction`, plus `CoreRecordChain` and `InvoiceFirmHold`) | 45 passed, 0 failed |
+
+### Seeding proofs (each restored `cmp`-identical from a backup)
+
+| Seed | Result |
+|---|---|
+| 1. The `InvoiceReviewDetail.Column` entry removed from `AccessColumns["sprk_invoice"]` | 6 failed: the new must-fire, the census equality, four column-form rows of the existing access-column theory |
+| 2. The new detector rules downgraded to the old ones (records only, no Concat scan) | the control test failed, naming 10 shapes it missed |
+| 3. The gate's undo made to pass no detail | 2 failed (the held-for-gap reopen and the firm / none test) |
+| 4. The persister's held create made to write no detail | 3 failed (the new no-firm test and the two existing gap / unresolved tests) |
+| 7. `Transient` removed from the type-read fault | 1 failed (the chain pin) |
+| 8. The gap writer made to read the internal record | 3 failed (the end-to-end sentinel and two neighbours) |
+
+## 082c-2 fix round 2 (2026-11-05)
+
+Branch `task/ebilling-082c-2`, from `4632366953`, after adversarial pass 2 and uac-r2's decision (option (i), binding). One commit per fix. Main-checkout and `spaarke-wt-ebilling-r1` working trees untouched; no live Dataverse writes.
+
+### Fixes
+
+| # | Class | What | Where |
+|---|---|---|---|
+| 1 | F2 | The status view's `warning` is kept only while the linked invoice is In Review (`statuscode` 1). The warning is still derived from the stored reason code by `ToView` (every other caller sees the stored view), but every status route reaches `WithReplacementNoteAsync`, and `SupersededSubmissionNote.ApplyAsync` already reads the page's invoice statuses for the replacement note; that one read now selects `statuscode In (Superseded, In Review)` and a view keeps its warning only if its invoice is in the In Review set. No linked invoice, any other status, or a status read fault: no warning (fail toward no stale text; a Warning is logged on the fault; the outcome code and status are unchanged). The by-email view does not copy `warning` (`InvoiceSubmissionByEmailView.From`), so the routes that carry it are the internal `GET /{id}` and the external `GET` and list; all three go through this one place. | `SupersededSubmissionNote.cs:104-131,186-224`; comments `InvoiceSubmissionService.cs:2340,2388`, `InvoiceSubmissionContracts.cs:323` |
+| 2 | F2 | The supersede undo probes the review-detail column before it builds the request, and passes no detail where it does not exist. `SubmissionCommitGate` takes an injectable probe like the persister (`ReviewDetailProbe`, default `Shared`); `ReopenSupersededAsync` calls `IsPresentAsync` (one read, then cached for the lifecycle builder, which reads only the cached answer) and hands `BuildSupersedeUndoRequest` a null detail when the column is missing. Before: in a process whose probe had not been asked (the held undo finished in a later delivery) the reopen named a column that does not exist, the transaction faulted, and the undo stayed held. | `SubmissionCommitGate.cs:131-132,559-564` |
+| 3 | F3 | The C14 (2) theory (both channels) plants a fault message with a GUID and a `BRR-` code, runs the job handler's real persist path, and `ReaderSentinel.Scan`s the reader parts of the stored `sprk_findingsjson` (`pipelineFindings`, `lineFindings`), `sprk_adminattention`, the created invoice's text attributes and `InvoiceSubmissionService.ToView(flow.Row)` (the row's own ids, e.g. its matter and invoice, are taken out first); and asserts the planted GUID (D and N forms), `Procedure row`, the message text and the `BRR-` prefix are nowhere in the whole submission row (every column, whatever its type), the invoice, or the Signals. Controls: the scan sees the hold's finding and the view's warning (SPA) or blocked outcome (Internal). | `InvoiceSubmissionProcessingFlowTests.cs` (`AResolverFault_FinalDelivery_IsHeld_EndToEnd`) |
+| 4 | F4 | Comments: `sprk_reviewdetail` IS in `ParentLineage` `AccessColumns["sprk_invoice"]` (only so that app-only generic writes refuse it); the 089e chain close is not a pending writer 8 (C19: it writes `sprk_signal` only); the generic paths are refused through `AccessColumns` AND `MappingProtectedColumns`. | `ExternalAccessModule.cs:541-543`, `InvoiceReviewDetailWritersGuardTests.cs:27-28,30-32` |
+| 5 | uac-r2 (i) | See "Option (i)" below. | `ProcedureResolver.cs:337-364`, `AdminAttentionText.cs:343-373`, `InvoiceAdjustmentService.cs:101-102` |
+| 6 | notes | K1, K2, K3, K4: see "Recorded, not changed". | here |
+
+### Option (i): the internal key stays, readers render reader members
+
+**Mapping.** `ProcedureRulesOnDate.ReaderCodeOf` is now two overloads over one rule: the resolver-time `ReaderCodeOf(ResolvedRule, ILogger?)` (unchanged behaviour) and `ReaderCodeOf(string storedPolicyCode, string? baseCode, ILogger?)` for a reader built from a STORED key, plus `IsRecordRuleCode(string?)` (the flag). A catalogue code is its own; a record rule's (`BRR-` prefix) is its base rule's code, or blank when none is given or it is itself a `BRR-` code (fail closed; the flag stays true). A stored findings entry does not carry the base code (see "Not done"), so the stored-key callers pass none and get blank plus the flag.
+
+**(a) Admin attention.** `AdminAttentionText.Describe` printed `"{code} ({policyCode} on ...)"` from the stored refusal's key (fed by `InvoiceSubmissionPersister.cs:709` and `FromFindings`). It now prints the reader form: a catalogue code as before, a record rule as `record rule` (the token `ResolvedPolicyVersion.Printable` already uses). `findings[].policyCode`, `signalPlan[]`, `signalPlanRefusals[]`, `signalWriteRefusals[]` and the Signal dedupe key are unchanged (the test asserts the stored key is still the key).
+
+**Signal title / description / sentence / facts / evidence: confirmed clean, by trace.** `SignalWriter` writes `sprk_name` = `ShortHeadline` (`:1822`), `sprk_sentence` (`:1817`), `sprk_factsnapshot` (`:1818`) and `sprk_evidencerefs` (`:1819`) from the request's headline, template, fact values and evidence; the policy code reaches only `sprk_policycode` (`:1809`), the dedupe key (`:628`, `:647`) and operator log messages. `BillingFindingSignalMapper` uses it at `:227` (an `ArgumentException` for a caller defect, never stored), `:231` (the dedupe prefix) and `:379` (the request's `PolicyCode`). New test: a finding judged under a `BRR-` policy keeps the key as `request.PolicyCode` and in the dedupe prefix and renders it in no headline, sentence, fact value or evidence kind/text/clause (`InvoiceSubmissionProcedureHoldTests.Sentinel_RecordRuleKey_IsTheSignalKey_ButInNoSignalText`).
+
+**Noticed, not changed (uac-r2 to rule):** an evidence line's `source` is `sprk_policyversion:<policy version id>` and its `ref` a reason code (`submission.procedure_gap|Flag`). That is the POLICY VERSION id of the rule that judged, in `sprk_evidencerefs`, an internal Signal column (see (c)). For a record rule it is the record rule's own version id: as stable a handle as the `BRR-` code was. Existing behaviour, same status as the key for readers; the new test checks only that the key is not in it.
+
+**(b) Sentinel over reader outputs built from stored findings.** `AdminAttentionTextTests`: a `BRR-` key planted in `signalPlanRefusals[]` and `signalWriteRefusals[]` of a stored findings object, read back through `FromFindings`, reaches the text as `record rule` and nowhere as the key or its hex; the stored entries still hold the key. Must-fire controls: `ReaderSentinel.Scan` finds the key in the key and in the stored copy. `ProcedureResolverTests.ReaderCode_OfAStoredKey` (6 cases) pins the mapping (catalogue, record rule with no / blank / resolvable / `BRR-` base). End to end through the handler: item 3.
+
+**(c) The Signal columns that store the key: internal readers only.** `sprk_signal.sprk_policycode` (`SignalWriter.cs:1809`) and `sprk_signal.sprk_dedupekey` (`:647`, built at `:628`). No external module exposes them. Grep (this tree):
+
+- `ReadableColumns` (the external module allow-list) is declared in three files only: `Infrastructure/DI/ExternalAccessModule.cs`, `Infrastructure/ExternalAccess/ExternalModuleRegistry.cs`, `Api/ExternalAccess/ExternalModuleDataEndpoints.cs`. `ExternalAccessModule.cs` contains no `signal` at all (case-insensitive); neither `sprk_policycode`, `sprk_dedupekey` nor `sprk_signal` is in any `ReadableColumns` set; `ExternalModuleColumnAllowListTests.cs` has no Signal case.
+- The only external-side mentions of `sprk_signal` are existence and taint probes, ids only: `ExternalDataService.cs:3073` (`ServiceRequestRelations`: does a row regarding the service request exist) and `ExternalInvoiceVisibility.cs:84` (`FamilyTables`: the invoice-family taint list). `sprk_policycode` / `sprk_dedupekey` are named in no `Infrastructure/` or `Api/ExternalAccess/` file.
+- `sprk_adminattention` and `sprk_findingsjson` are named in no external path either.
+
+**(d) `sprk_findingsjson` stays field-secured with no reader profile.** Pinned by `tests/integration/data-mutation/FinanceSubmission/FindingsJsonFieldSecurityAgreementTests.cs` (the script secures it for the writer profile 4/4/4 and "grants no reader profile"; the solution agrees and no other profile has access; controls fail on a reader grant, an unsecured column, a changed writer mask). No change.
+
+**Decision Record surfaces: NOT changed, internal, keep the key (for uac-r2 to rule on).** They are append-only and hashed; a shape change could make an idempotent repeat compare as "other content".
+
+| Surface | Where | Member |
+|---|---|---|
+| Auto-reject Decision Record facts | `InvoiceSubmissionAfterSteps.cs:1464` | `reasons[].policyCode` |
+| Override Decision Record facts | `SubmissionOverrideService.cs:1092` | `reasons[].policyCode` |
+| Approve / reject line decisions' resolved-set fact | `InvoiceLineDecisionService.cs:918` (`SetFact`) | `signals[].policyCode` |
+| Resolved Signal set stored in the findings and copied into those facts | `InvoiceSubmissionAfterSteps.cs:720` (`ResolvedSignalSet.ToJson`); read back by `DecisionRecordWriter.cs:1902` | `signals[].policyCode` |
+| Condition-cleared Decision Record facts | `DecisionRecordWriter.cs:820` | `policyCode` |
+
+**Reader surfaces after the change.**
+
+| Surface | Carries | Key? |
+|---|---|---|
+| Partner: status view (`GET /{id}`, external `GET`, list) | `outcomeReasonCode`; `warning` (fixed text, only while In Review) | none |
+| Partner: external invoice reads | `sprk_reviewdetail` (closed labels), `statuscode` | none |
+| Partner: Signals, `sprk_findingsjson`, `sprk_adminattention` | not exposed (no allow-list entry; findings field-secured, no reader profile) | n/a |
+| **Partner total** | | **none** |
+| Internal: `sprk_adminattention` text | catalogue code, or `record rule` | none (changed this round) |
+| Internal: Signal title, sentence, facts, evidence kind/text/clause | reader text from the rule | none (pinned by the new test) |
+| Internal: review DTO `ReviewFindingDto.PolicyCode` | `InvoiceReviewReadService.cs:153,777` | key next to `PolicyId` (uac-r2 K4 accepted; comment present) |
+| Internal: adjustment DTO `AdjustmentRuleOptionDto.PolicyCode` | `InvoiceAdjustmentService.cs:101,333` | key next to `RuleId` (K4; the same one-line comment added this round) |
+| Internal: Signal columns `sprk_policycode`, `sprk_dedupekey` | `SignalWriter.cs:1809,647` | key (internal join identity) |
+| Internal: Signal `sprk_evidencerefs` source | policy VERSION id | version id, noted above |
+| Internal: stored `sprk_findingsjson` members | `findings[]`, `signalPlan[]`, `signalPlanRefusals[]`, `signalWriteRefusals[]`, `resolvedSignalSet` | key (join key; field-secured) |
+| Internal: Decision Record facts | the five rows above | key (append-only; uac-r2 to rule) |
+| Operator logs | `SignalWriter` messages with `{PolicyCode}` (ADR-015 allows codes) | key; not a reader surface |
+
+**Not done (and why).** Reader members were not added to the stored JSON entries. The base code is only known where the rule is resolved (`ResolvedRule.RecordRule.BasePolicyCode`); carrying it to the entries means widening `BillingRuleCandidate` -> `BillingFinding` -> the mapped request -> `SignalPlanRefusal` and the correction re-evaluation's two entry writers (`InvoiceCorrectionReevaluation.cs:989,1378`), a change to the stored contract (schema 1). No reader reads such a member today: the only free-text consumer is the admin attention text, and it renders the same reader members from the key at read time. If an admin ever needs the base code in that text, that is the follow-up (carry `BasePolicyCode` on the candidate, write a `readerPolicyCode` beside the key, pass it as `baseCode` here).
+
+### Recorded, not changed
+
+- **K1.** Invoice status can change outside the BFF (a user editing the status in the model-driven app, a flow). The hold warning follows the status read at request time, so it follows such a change on the next read; nothing writes it back.
+- **K2 (for 095d-2).** Set firm (`InvoiceAssignFirmService.cs:981-983`) derives the review detail from ONE submission with `reasonCode: null`. 095d-2 (re-run running Procedures before Set firm) must switch to `InvoiceProcedureHold.ReasonsAsync` (all the invoice's submissions, as the supersede undo does) or a partial detail results.
+- **K3.** The C16 reader-redaction scan covers the 16 reader-surface types; the job handler and the 202 endpoint are outside it. Item 3's end-to-end sentinel is the cover for the handler path.
+- **K4.** The review-detail probe's "missing" answer is cached for 5 minutes (`ReviewDetailColumnProbe.RefreshInterval`); a column added by the deploy script is picked up within that time per process.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (the brief's filter: `Finance`, `Signals.Billing`, `RecordTableRules`, `ExternalModuleColumnAllowList`, `AccessTableAppOnlyWriter`, `ProcessingFlow`, `CoreRecordChain`, `SecureRootInheritance`, `AdminAttention`) | 8873 passed, 0 failed, 4 skipped (live seam tests) |
+| ArchTests (`InvoiceReviewDetail`, `ProcedureReader`, `FindingsJson`, `AccessTable`, `Redaction`) | 21 passed, 0 failed |
+| New test cases | 18: warning (7: In Review keeps; rejected, returned, cancelled, superseded drop; fault / missing / unlinked; one page read), undo (2), admin attention (2), Signal key (1), reader code (6); plus the C14 (2) theory extended (2 cases) |
+
+### Seeding proofs (each restored `cmp`-identical from a backup)
+
+| Seed | Result |
+|---|---|
+| 1. `SupersededSubmissionNote.cs` put back to the committed version (no warning gate) | 5 failed: the four exits and the fault case; the In Review control passes |
+| 2. The gate's probe call removed (`var detail = ReviewDetailOf(remaining)`) | 1 failed: the column-missing undo (the other 9 persister cases pass) |
+| 3. The processor writes the fault's message into the unresolved pipeline finding (`["detail"] = ex.Message`) | 2 failed: the C14 (2) theory, both channels |
+| 4. `AdminAttentionText.Describe` prints the stored key | 2 failed: both admin attention sentinels |
+| 5. `BillingSystemFindings.ProcedureGap` appends the policy code to a fact value | 1 failed: the Signal key sentinel |
+
+## 082c-2 script fix (ontology apply) (2026-11-05)
+
+The ontology peer applied the column on dev on 2026-11-05 (WhatIf, then Apply, then Verify). It found two defects in `scripts/ebilling/Deploy-EbillingInvoiceReviewDetailColumn.ps1` that the text-only `InvoiceReviewDetailScriptAgreementTests` could not see, and corrected the three option labels on dev by hand (`UpdateOptionValue`, then a `sprk_invoice`-only publish). The column on dev is as specified.
+
+- **Labels were blank.** `$Options` is `[ordered]@{ 659490000 = ... }` with int keys, and an int index on an `OrderedDictionary` reads by position, not by key (`([ordered]@{ 659490000 = 'a' })[659490000]` is `$null`). `New-ReviewDetailDef` therefore built the three options with blank labels, and `Get-ColumnGaps` compared the live labels against `$null`. Fix: `$Options[[object]$value]` at all four reads (the definition, and the three in the gap messages and the comparison). The labels are the ones `InvoiceReviewDetail.Options` pins.
+- **The reverse-invariant read always warned.** `Get-SubmissionHoldReasons` returned an empty `HashSet`, which the pipeline unrolls to `$null`, so `UnionWith($null)` threw and `-Verify` printed "could not be read". Fix: `return ,$reasons` at both returns. Audit: `Get-InvariantBreaks` had the same shape (`return @($rows.value)` unrolls an empty or one-row result); it now returns `,@(...)`. `Get-ColumnGaps` and `Get-Pages` already wrapped; `Get-HeldWithBlankDetail` returns a hashtable.
+- **Tests.** New `tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1` (Pester 5.7.1, 10 cases). The script cannot be dot-sourced (`using module`, runs against the environment), so the test lifts the functions and the constants they read out of the script's syntax tree and runs them over a double of the Dataverse calls. It asserts: the built definition carries the three values with the three labels; `Get-ColumnGaps` is clean for the pinned labels and names a blank live label, a missing option and an extra one; `Get-SubmissionHoldReasons` returns an empty set (not `$null`) that `UnionWith` accepts, and collects and fails closed as the BFF does; `Get-InvariantBreaks` returns an empty list, not `$null`. Wired into the `ontology-script-tests` job of `ci-standalone-checks.yml`. Seeds, each restored byte-identical: the whole script back to its previous version fails 6 of 10; only the label reads back fails 4; only the `Get-SubmissionHoldReasons` return back fails 1; only the `Get-InvariantBreaks` return back fails 1. `InvoiceReviewDetailScriptAgreementTests` still passes (9 of 9).
+- **`-Verify` on dev (read only), after the fix:** exit 0. PASS: the column exists as a local choice with the three pinned options, not field-secured; no non-In-Review invoice carries a review detail. The reverse invariant now reads and warns as designed: 8 of 13 In Review invoices with a blank review detail have an open firm hold (all expected 659490002), the no-backfill case for invoices held before the column existed.
+
+## 082c-2 fix round 3 (ontology F1/F2, uac-r2 U1-U3, 095d P0) (2026-11-05)
+
+Branch `task/ebilling-082c-2`, from `7a955cc983`. Six commits: F1, F2, U1-U3, P0, a guard follow-up, and this note.
+
+### F1: one open-hold derivation (ontology F1)
+
+**The defect.** Set firm recomputed the review detail from the Procedure reasons only, so a firm_missing marker the findings or the stored reason still carried was dropped. The invoice then read "ready to approve" while approval still refused it as held.
+
+**The helper.** `Submission/InvoiceOpenHolds.cs` (`ReasonsOf` `:51`, pure; `ReasonsAsync` `:79`, two app-only reads). It unites the firm hold (`InvoiceFirmHold.IsHeld`, new string overload; the invoice's own `sprk_firmhold`; `sprk_vendororg` empty) with the Procedure reasons (`InvoiceProcedureHold.ReasonsOf`) over every linked submission. Its XML doc says it is the only derivation future writers (re-check, 095d-2, 114 Override release) may use.
+
+| Caller | Where | Notes |
+|---|---|---|
+| Supersede undo | `SubmissionCommitGate.cs:553` (`ReasonsAsync`; `ReviewDetailOf` still called at `:558`, so the ArchTest `TheCommitGateUndoDerivesTheDetail` holds) | replaces the inline union that was there |
+| Set firm apply | `InvoiceAssignFirmService.cs:1079` (`ReasonsOf`, over the post-write findings, the stored reason, and the invoice's OTHER linked submissions read by `ReadStateAsync`) | the firm is set and the invoice's own hold is cleared in this write, so those two facts are passed false |
+| Approval | NOT wired through the helper (`InvoiceApprovalService.cs:341-342` GET, `:550` and `:559` POST) | see below |
+
+**Approval is not wired through the helper; an agreement pin proves it agrees.** Approval decides in three separate steps with three different refusal codes (`approve.held`, a firm need, `approve.procedure_held`) and its GET exposes `Held` and `FirmNeeded` separately. One helper that returns a set of reasons cannot express that without changing what approval answers. `InvoiceOpenHoldsTests` pins agreement instead: eight states over the real `ApprovalWorld` (firm only; firm and gap; gap only; unresolved only; own hold only; no firm only; unreadable findings; none). For each, the helper's detail and held answer equal approval's outcome and code, and the GET's `Held || FirmNeeded`. The pin covers the firm and Procedure holds. FR-20 (Blocked/Processing) and unapplied corrections refuse approval but carry no review-detail label by design. (Round 4, R4-2: this sentence said any new hold source in approval that the helper lacks would fail one of the eight; that was false, since no pin state plants the FR-20 hold or an unapplied correction and the helper reads neither.)
+
+**Unreadable holds fail closed: prefer 659490001.** When the findings JSON cannot be parsed, `InvoiceOpenHolds` yields `ProceduresUnresolved` (659490001, "Billing terms could not be checked"), never blank. That is the behaviour `InvoiceProcedureHold` already had (an unreadable findings document is an unresolved check) and `InvoiceFirmHold` already had for approval (unreadable counts as held). A read FAULT (the Dataverse call throws) propagates: the undo is held and retried (as every other read in it), and Set firm answers 503 from `ReadStateAsync`; the detail is never written from a failed read. The alternative, "keep the last value", was not needed.
+
+**The two checks asked for.**
+
+1. *Every exit from In Review still blanks the detail in the same write; the helper does not re-derive onto a non-In-Review invoice.* Exits: `InvoiceLifecycleService.TransitionAsync` writes `sprk_reviewdetail = null` in the status fields (`:529`); the correction's Superseded close does so in `BuildConditionalTransition` (`:458`). The helper is reached only for an In Review invoice: Set firm refuses any other status with `not_in_review` before the apply (`InvoiceAssignFirmService.cs:546-549`) and its invoice update is row-version conditioned (`:1010-1018`), so a status change between the read and the write is a conflict, never a label on a non-In-Review row; the undo runs only after it has read the old invoice as Superseded (`SubmissionCommitGate.cs`, the status check above `:553`) and writes the derived detail only in the same request that reopens it to In Review (`InvoiceLifecycleService.cs:463`); the held create writes it only when `initial == InReview` (`InvoiceSubmissionPersister.cs:607`). The ArchTest `InvoiceReviewDetailWritersGuardTests` still lists exactly those writers.
+2. *The partner view sees only the three closed labels or blank.* The column is a closed local choice: `InvoiceReviewDetail.Options` (`InvoiceReviewDetail.cs:53-58`, three values, pinned to the schema script by `InvoiceReviewDetailScriptAgreementTests`), written only through `ValueOf(ReviewDetailOf(...))` (`:65`, `:82`), which can produce only those three values or null. It is returned to partners through the invoice modules' `ReadableColumns` (`ExternalAccessModule.cs:544`), and, with U1 below, only while the invoice is In Review.
+
+**Tests and seeds.** New fixtures in production shape (`pipelineFindings[].reasonCode = "ebilling.submission.firm_missing"`, `lineFindings[]` with `rules.not_checked` and `cause`), renamed so a name says the state. Must-fire: the firm marker as a stored reason, a pipeline finding, a line finding, and all three (detail stays 659490002 and the real approval answers Held). Must-not-fire: markers cleared gives blank, a gap gives 659490000, unresolved gives 659490001. Another linked submission's gap is read too. Undo: unreadable findings reopen with 659490001; no firm on the invoice reopens "waiting for the firm". Files: `InvoiceOpenHoldsTests.cs` (new), `InvoiceAssignFirmServiceTests.cs`, `InvoiceSubmissionPersisterReviewDetailTests.cs`.
+
+| Seed (each restored `cmp`-identical) | Result |
+|---|---|
+| Set firm back to Procedure-only reasons | 6 failed |
+| Helper ignores the invoice's own firm facts (`invoiceHasNoFirm`, `invoiceHoldSet`) | 4 failed |
+| Undo skips the helper (inline union again) | 2 failed |
+| Unreadable findings yield blank | 5 failed |
+
+### F2: the gap headline (ontology F2)
+
+`BillingRuleCatalogue.ProcedureGapHeadline` (`BillingRuleCatalogue.cs:421`) is "No billing terms in force for some work dates" (was "No procedure associated with this invoice"; a gap means a Procedure IS associated but no version is in force on some work date). `BillingSystemPolicyTests.cs:394` pins it: 1 failed before, 52 passed after. **String mirrors: none under `src/` or `tests/`.** The old text remains in historical notes and POMLs only (`082-procedure-resolver.md`, `082c-brief.md`, `procedure-and-file-model.md`, `procedure-model-reviews.md`, `replan-eb-d-148.md`, `tasks/082-procedure-resolver.poml`, `tasks/114-override-releases-gap-hold.poml`); left as written.
+
+### U1: the external invoice read nulls the review detail outside In Review (uac-r2)
+
+New `Infrastructure/ExternalAccess/ExternalInvoiceReviewDetail.cs`: a pure projection (`Project`) that nulls `sprk_reviewdetail` and its `@formattedValues` label unless `statuscode` is In Review; absent, null or unreadable status nulls it (fail closed). **Hook: the narrowest one that exists.** No new endpoint, registration or descriptor member: the fetch route already had a server-side column mechanism (`serverProjected`: columns the server reads but strips unless the caller asked), so the status rides it (`ExternalModuleDataEndpoints.cs:353`), and the projection runs after the invoice predicate and before the strip (`:413-415`). The single-record route (`:611-622`) appends `statuscode` to the read when the caller asked for the detail but not the status, projects, and strips the status from the response. Only `sprk_invoice` modules are affected (`Applies`). A caller who asked for the detail but not the status is judged on the real status.
+
+Tests (`ExternalMultiRootListReadTests.cs`): grid and single record, each with must-fire (six statuses give null) and the positive control (In Review keeps it); per-row judging in a mixed page; detail without status; absent or garbled status; another entity untouched. Seeds: projection removed, 11 failed; server-side status read removed, 2 failed. Guards: `InvoiceReviewDetailWritersGuardTests.NonWriters` lists `IsDetail` and `NeedsStatusRead` (the projection's column match; it never writes a row), and `ExternalInvoiceVisibilityGuardTests.NotInvoiceSurfaces` lists `Applies` (names the table to decide a module; reads no row).
+
+### U2 and U3
+
+- **U2.** `SupersededSubmissionNote.cs:126-127` logs `ex.GetType().Name` as `{ExceptionType}` instead of the exception (C16). The Redaction ArchTests stay green. Noticed, not changed: lines 152 and 165 of the same file still log `ex`.
+- **U3.** `ProcedureResolver.IsRecordRuleCode` matches the `brr-` prefix with `OrdinalIgnoreCase` (`ProcedureResolver.cs:345`); `ProcedureResolverTests.cs` gains a lower-case `brr-` row.
+
+### P0: Set firm at phase P0 (095d, uac-r2 pre-P2 safety)
+
+**The defect.** `InvoiceAssignFirmService.ReadStateAsync` selected `sprk_trackingscope` unconditionally. At P0 the column does not exist, so the read faulted whole and EVERY Set firm answered 503 `unavailable`, before it reached its own 503 `scope_key_inactive` refusal.
+
+**The fix.** The scope column is selected only when the allocator's phase source says it exists (`InvoiceAssignFirmService.cs:1147`, `SubmissionColumnsFor`). The service has no handle on the phase, so `ITrackingNumberAllocator` gains `ScopeColumnExistsAsync`, beside `NumbersSubmissionsWithoutFirmAsync`, over the same process-wide forward-only `TrackingScopePhaseCache`: the two answers always agree. (Component justification: existing = the interface's P2 question; extension = it cannot tell P0 from P1, and the allocator owns the probe; cost of nothing = every Set firm 503 at P0.) P2 behaviour is unchanged. `HoldsStoredNumber` reads the scope with `GetAttributeValue`, which is null when the column was not read: false at P0, fail closed (409 "reload"); the allocator refuses a renumber before P2 first, so it is not reached there. Known limit: if the phase moves P0 to P1 between the two reads of one request (the 5-minute cache window), a legacy repeat of an already-applied decision answers 409 "reload" once; retryable.
+
+**Grep of `src/server` for other unguarded selects naming `ScopeColumn` or `sprk_trackingscope`:** none. Every other hit is a doc comment, the allocator's own phase-guarded code (`RenumberRowColumns` is "read only at P2", `AddSequenceScope` conditions on the scope only at P2, the row's scope is written only when the phase is not P0), the phase probe itself, or a write-refusal list (`ParentLineage.cs:1162` and `:1327`, `AccessColumns`; not a read). `sprk_scope` on the Procedure tables is a different column.
+
+**Tests and seed.** `InvoiceAssignFirmServiceTests.cs`: P0 asserts every issued submission ColumnSet lacks `sprk_trackingscope` and Set firm answers `scope_key_inactive` (not `unavailable`); P1 and P2 still select it (P2 assigns); the REAL allocator at P0 and P1 decides the select; an unreadable phase reads as P0. The test double faults a read that names the missing column, as Dataverse does. `TrackingNumberAllocatorTests.cs`: `ScopeColumnExistsAsync` is false only at P0 and reads and writes no row. Seed (unconditional select restored, `cmp`-identical restore): 3 failed, the three P0 cases.
+
+### Guard follow-up
+
+`InvoiceOpenHolds` names `sprk_firmhold` and `sprk_findingsjson`, so `InvoiceFirmHoldAppOnlyGuardTests` and `FindingsJsonAppOnlyReadGuardTests` failed on it after the F1 commit. Both lists name it now, with the identity rows in 095c section 15.2 and the task 122 table (row 12): app-only, through the `IGenericEntityService` the caller passes. The brief's ArchTest filter (`ReviewDetail|Redaction`) did not include those two; the broader guard run below does.
+
+### Recorded, not changed
+
+- **K (caller-scoped write).** A caller-scoped write can set the unsecured `sprk_reviewdetail` column (the schema leaves it unsecured; the generic write paths refuse it through `AccessColumns`, field mappings through `MappingProtectedColumns`, but a caller-scoped write the platform allows, from the form or `Xrm.WebApi`, can set it). It is a label, not a hold: approval never reads it. The next typed writer (Set firm, the undo, a status move) re-derives it, and U1 stops a non-In-Review row from showing it to a partner. `Deploy-EbillingInvoiceReviewDetailColumn.ps1 -Verify` catches a non-blank value outside In Review; it does NOT catch a wrong non-blank value inside In Review. Not fixed here (no code, by the brief).
+- **K2 above (for 095d-2) is partly met.** Set firm now derives through `InvoiceOpenHolds`, over every linked submission. 095d-2's re-run, which clears the firm markers, must derive through the same helper (`ReasonsAsync`) in its own write.
+- Approval is not on the helper (above); a new firm or Procedure hold source in approval must be added to `InvoiceOpenHolds` too, and the agreement pin covers those two kinds only (round 4, R4-2: it does not cover FR-20 or unapplied corrections, which carry no review-detail label by design).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (the brief's filters: `ReviewDetail`, `InvoiceAssignFirm`, `InvoiceApproval`, `SubmissionCommitGate`, `InvoiceFirmHold`, `InvoiceProcedureHold`, `ProcedureGap`, `ExternalModule`, `ExternalAccess`, `SupersededSubmissionNote`, `ProcedureResolver`; added `OpenHolds`, `TrackingNumberAllocator`, `BillingSystemPolicy`, `ExternalMultiRootListRead`) | 5649 passed, 0 failed, 3 skipped |
+| Broader unit (`Finance`, `Signals.Billing`, `RecordTableRules`, `ExternalModuleColumnAllowList`) | 7635 passed, 0 failed, 4 skipped |
+| ArchTests, brief filter (`ReviewDetail`, `Redaction`) plus `ExternalInvoiceVisibility`, `ResubmissionOfAppOnlyWriteGuard`, `ADR010`, `InvoiceFirmHold`, `FindingsJson` | 0 failed |
+| ArchTests, broad guard set (`Guard`, `AppOnly`, `Invoice`, `Finance`, `Submission`, `External`, `Allocator`, `Redaction`, `Reader`, `Procedure`, `ADR010`, `Billing`, `Signal`) | 1619 passed, 0 failed |
+| Test attributes added | F1: 11 facts, 3 theories (7 rows); U1-U3: 7 facts, 3 theories (11 rows); P0: 2 facts, 3 theories (7 rows); F2 changes one assertion |
+
+## 082c-2 fix round 4 (adversarial pass on round 3) (2026-11-05)
+
+Branch `task/ebilling-082c-2`, from `0999003007`. One code fix (R4-1), one wording correction (R4-2), and this note.
+
+### R4-1: partners cannot filter or sort invoices on the review detail
+
+**The defect.** `sprk_invoice.sprk_reviewdetail` is partner-readable, and U1 nulls it unless `statuscode` is In Review. The fetch guard still admitted a FetchXML `condition attribute='sprk_reviewdetail'`, a `condition ... valueof='sprk_reviewdetail'` and an `order attribute='sprk_reviewdetail'`, because the column is on the allow-list. A partner could filter on 659490002 and get back exactly the non-In-Review invoices that carry a stale label, the value the read hides.
+
+**The fix.** `EvaluateFetchXmlGuard` (`ExternalModuleDataEndpoints.cs:930`) takes an optional `unfilterableColumns` set (default null: no behaviour change for any caller that does not pass one). `FindColumnViolation` refuses a condition `attribute`, a condition `valueof` and an `order attribute` naming a column in it, case-insensitively, through its existing column-refusal path (verdict `ColumnNotPermitted`, error code `DV_FETCHXML_COLUMN_NOT_PERMITTED`, the same 400 ProblemDetails). The fetch route passes `ExternalInvoiceReviewDetail.UnfilterableColumns(module.RecordEntity)` (`:287-291`), which is the one-name set `{ sprk_reviewdetail }` for `sprk_invoice` (`Applies`) and null for every other entity, so no other module, and no other column, changes behaviour. A plain `<attribute name='sprk_reviewdetail'/>` is still admitted and still projected (nulled outside In Review, U1). This is not generic guard behaviour changing other modules: the parameter is additive and only the invoice module supplies it, so the STOP condition did not apply.
+
+**What exists besides the fetch guard (reported, nothing else to refuse).**
+
+| Path | Finding |
+|---|---|
+| Single record read (`GetScopedRecordCoreAsync`, `GET /record/{entity}/{id}`) | Takes `$select` only. No filter, no order. The `$select` of the detail is allowed and judged on the real status (U1). Nothing to refuse. |
+| OData `$filter` / `$orderby` on this endpoint file | None exist. No route in `ExternalModuleDataEndpoints.cs` reads `$filter`, `$orderby` or any other query option than the record route's `$select`. |
+| Saved queries (`/savedquery/{id}`, `/savedqueries/{entity}`) | They return a registered view's definition, not an executed query the caller shapes; the caller supplies no condition or order. Not changed. |
+
+**Tests** (`ExternalMultiRootListReadTests.cs`, 11 cases in 3 attributes, through the real `ExecuteScopedFetchCoreAsync` over the production invoices module):
+
+- Must fire (7 rows): condition `attribute` (lower case, mixed case `SPRK_ReviewDetail`, with a `<value>` child), condition `valueof` (lower case, mixed case), `order` (lower case, upper case). Each answers 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED` and the read double is never reached.
+- Must not fire (3 rows): the detail as a plain `<attribute>` is returned (null here, as the status is Approved); a filter and an order on `statuscode` still work; a `valueof` column comparison on `statuscode` still works.
+- Another module (1 fact): a documents fetch with a condition and an order on `sprk_documentname` is unaffected; `UnfilterableColumns` is `{ sprk_reviewdetail }` for `sprk_invoice` and null for the other five entities.
+- Guard list: `InvoiceReviewDetailWritersGuardTests.NonWriters` lists `ExternalInvoiceReviewDetail..cctor` (names the column in the set; never writes a row).
+
+**Seed** (`UnfilterableColumns` returns null, i.e. the refusal removed; restored, sha256 identical): 8 of 11 failed. The 7 must-fire rows, plus the another-module fact, which also pins that the invoice set is non-empty. The 3 must-not-fire rows passed, as they should. Restored: 11 of 11 passed.
+
+### R4-2: the approval pin does not cover every hold (wording only)
+
+The claim that any new hold source in approval which the helper lacks would fail one of the eight pin states is false. Approval also refuses on the FR-20 hold (`IsHeldAsync`: a Blocked or Processing linked submission) and on unapplied corrections; `InvoiceOpenHolds` reads neither, and no pin state plants them. Replaced with: "The pin covers the firm and Procedure holds. FR-20 (Blocked/Processing) and unapplied corrections refuse approval but carry no review-detail label by design." Changed in this file (the round 3 F1 paragraph and "Recorded, not changed") and in the `InvoiceOpenHolds` XML doc remark "Not covered" (comment only; that doc did not carry the "fails one of the eight" sentence, which lived only in these notes, so the correct statement was added to it). No code change.
+
+### Accepted known limits
+
+- **K1-a.** Set firm reads the invoice's other linked submissions once (`InvoiceAssignFirmService.cs:~1150`), not row-version conditioned. A native repoint between that read and the commit can leave the label missing a hold, but approval still refuses. Only native repoints create "others" (`InvoiceSubmissionPersister.cs:1853`, `SubmissionCommitGate.cs:430`).
+- **K1-b (pre-existing).** A null `versionnumber` would send the invoice update with `ConcurrencyBehavior.Default` (`InvoiceAssignFirmService.cs:1010-1018`, `:1269`). `versionnumber` is always present on Dataverse rows.
+
+### Owner ruling, 2026-11-05 (via uac-r2's `notes/decisions.md`)
+
+Flagged licensed systemusers read Decision Records and Signals as their Dataverse roles allow. No change.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit, the brief's filter (`ExternalModule`, `ExternalInvoiceReviewDetail`, `ExternalMultiRoot`, `ReviewDetail`) | 625 passed, 0 failed |
+| ArchTests (`ReviewDetail`, `ExternalInvoiceVisibility`, `ExternalModule`) | 16 passed, 0 failed (one failed first: the new `.cctor` was not on the writers guard list; added) |
+
+
+## C19 — chain close (2026-11-05)
+
+Branch `task/ebilling-082-c19`, from `origin/work/ebilling-r1` at `52622ea05c`. Code commit `36819ca13a`. No Dataverse read or write, no deploy.
+
+### The status question (rule 1): the close changes no invoice
+
+The 089e close (`ProcedureAssignmentService.SupersedeBaseFindingsAsync`) goes `SignalClosureService.SupersedeInPassAsync` → `CloseAsync` → `SignalWriter.CloseAsync`, which writes `sprk_signal` only (`UpdateIfRowVersionMatchesAsync("sprk_signal", …)`). It reads invoices (state, status, firm, core lookups) to choose findings and never writes `sprk_invoice`. An invoice keeps its status and its hold reasons. **So the chain close is not a `sprk_reviewdetail` writer** (D-205 writer list item 8 resolves to "not a writer"), and C19 does not wait for 082c-2.
+
+### What changed
+
+- **`CoreRecordChain.ReadChildrenAsync(entities, logger, parentTable, parentId, maxChildren, ct)`** (`CoreRecordChain.cs:144-261`): the reverse read. Candidates are the rows whose typed filing lookup (`TypedFilingColumns`) names the parent, and, on a table whose pair is BFF-managed (a project), the rows whose pair text holds the parent id's first 8 hex digits (the `ListFiledRootsAsync` technique, task 158 r1: every spelling `Guid.TryParse` accepts carries them). **Each candidate is verified by the forward chain** (`ReadAsync`): it is a child only if the parent is one of its distance-1 links. So the reverse read cannot disagree with the chain the resolver judges by; lookalike fragments, a pair of a non-filing type and intermediates drop out there. Returns each child's own chain. A work assignment has no children and reads nothing. No second hop.
+- **`ProcedureResolver`** (`ProcedureResolver.cs:738`, `:860-889`): `IsRuleOverrideFor` (the firm rule: the row's Firm is empty or the invoice's firm) now used by `RulesOn` too, and `RuleOverrideDeciders(overrides, basePolicyId, firmId)` (the rows at the nearest distance decide). `ReadOverridesAsync` is internal, so the close reads a child's rows by the resolver's own read and fault rules.
+- **`ProcedureAssignmentService`** (`ProcedureAssignmentService.cs:755-758`, `:781-782`, `:787-788`, `:793-865`; docs and messages at `:60-61`, `:467-468`, `:721`, `:725`, `:729-743`, `:748-749`): `ChildrensInReviewInvoicesAsync` selects the d1 invoices; `SupersedeBaseFindingsAsync` reads d0 and d1 in full before the one close. `ChangeCloseCompleteMessage` and `ChangeCloseIncompleteMessage` now say the close covers the record and the records directly under it. The catch logs the exception type name.
+
+### Design
+
+- **Bound:** `MaxChildRecords = 100` candidate children. Every candidate query is paged (page size capped at the bound + 1). Past the bound `ReadChildrenAsync` throws `CoreRecordChainUnreadableException` before any candidate's chain is read. The child invoices: one query per child table and 500-id chunk, more than one page throws (as the d0 read).
+- **Fail closed:** any fault in the reverse read, a child's chain (an `Unknown` pair included), a child's override rows (a row the BFF never writes throws `ProcedureResolutionFaultException`), the invoice reads or the bound throws inside the existing `try`. The existing catch answers `PolicyFailures = 1`: **nothing is closed, not even d0**, the change stays 201 with `closeComplete=false` and `ChangeCloseIncompleteMessage`. Never a partial close. *(Superseded for the records under the record by fix round 1 below: a d0 fault still closes nothing; a children fault drops only the children's set.)*
+- **Nearer wins (the resolver's rule, reused):** for each child invoice, the override rows on that child's chain are read with `ReadOverridesAsync`, and the invoice is kept only when THIS record is among `RuleOverrideDeciders(rows, baseRule, invoiceFirm)`. A child with its own row of the rule (for every firm, or for the invoice's firm) decides it nearer (distance 0), so it is skipped. A child's row for another firm does not decide this firm's invoice. A work assignment's second distance-1 parent with its own row decides together with this record (one distance), so the invoice is still this change's.
+- **Identity:** app-only reads through the service's `IGenericEntityService`, as the d0 selection's; the caller-scoped count is unchanged.
+- **FR-05:** a child invoice filed on two core records has no chain and is never closed. (The d0 read is unchanged and does not apply this filter.)
+
+### Component justification (CLAUDE.md §11)
+
+1. **Existing:** `CoreRecordChain.ReadAsync` (forward, d0 + d1); `SecureRootInheritance.ListFiledRootsAsync` (reverse, for access: follows intermediates, which D-172 forbids for billing); the resolver's private override read and nearest rule.
+2. **Extension:** extended in place: the reverse read is a member of `CoreRecordChain` and reuses its forward read for verification; the nearer rule and the override read stay in `ProcedureResolver` and are shared. `ListFiledRootsAsync` cannot be reused because it follows intermediates (the `CoreRecordChainNoMultiHopGuardTests` allow-list forbids it in this file; the guard passes unchanged).
+3. **Cost of doing nothing:** a changed rule's base findings stay open on every In Review invoice of the record's direct children although the resolver no longer runs that rule there, and the reviewer sees stale findings with no close.
+
+No new endpoint, column, privilege, package, DI registration or background work. Placement (§10): BFF, in the files that own the chain, the resolver and the change.
+
+### Tests
+
+`ProcedureAssignmentServiceTests` ("082c C19", 10 cases), `CoreRecordChainTests` ("082c C19 children", 7 cases); `RuleSetServiceTests.Harness` evaluates `Like`.
+
+| Brief case | Test |
+|---|---|
+| d0 still closed; a d1 child invoice closed | must-fire: d0, a work assignment by its lookup, a project by its pair (a line finding) in one close |
+| a d2 grandchild closed | **Deviation: not closed.** must-not-fire, with the sibling (below) |
+| a child with a nearer version in force not closed | nearer wins: own row for every firm and for the invoice's firm not closed; a row for another firm and a Procedure-level Pin closed |
+| a sibling under another parent not closed | must-not-fire |
+| a chain read fault → nothing closed | theory: chain read fault, override-row read fault, a row the BFF never writes |
+| the bound reached → fail closed | past the bound (101): nothing closed, no child chain read; at the bound (100): closed |
+| idempotent re-run closes nothing more | a resolved finding is not targeted; the repeated change is 409 and closes nothing more |
+
+Edge cases added: a firm-scoped change on the children (the firm filter reaches d1); an invoice on two core records (FR-05). Chain level: children of a matter and of a project, lookalike fragment and non-filing type dropped, a work assignment reads nothing, the bound (past and at), an `Unknown` pair and a read fault propagate.
+
+**Fail before:** the base `ProcedureAssignmentService.cs` (with only the `MaxChildRecords` constant added so the tests compile) fails 11 of 94: the 10 C19 cases and the updated 089e message assertion. The chain tests do not compile against the base (`ReadChildrenAsync` is new).
+
+### Seeds (each restored; the file byte-identical afterwards)
+
+Filter `ProcedureAssignmentServiceTests|CoreRecordChainTests`, 126 tests.
+
+| Seed | Result |
+|---|---|
+| S1: nearer-wins skip removed in the service (every child invoice kept) | 1 failed (nearer wins) |
+| S2: nearer-wins removed in the resolver (`RuleOverrideDeciders` returns every distance) | 1 failed (nearer wins) |
+| S3: a children fault swallowed (treated as no children) | 4 failed (the three fault rows and the bound) |
+| S4: the bound removed in `ReadChildrenAsync` | 2 failed (chain bound, service bound) |
+
+### Gates
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit `CoreRecordChain\|Procedure\|Supersed\|AssignmentOverride\|SignalClosure\|RuleSetService\|BillingFactLoader\|InvoiceComplianceEvaluator` | 1398/1398 |
+| ArchTests `CoreRecordChain\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RouteAuthorizationGuard\|ProcedureRolePrivilege\|ProcedureResolver\|FinanceStepZero\|RecordOwnerAssignmentCensus` | 191/191 |
+| ArchTests `Billing\|ExceptionMessage\|Finance\|ADR010\|Signal` | 134/134 |
+| ArchTests `OverriddenCreatedOnWriteGuard` | 7/7 |
+| Publish size (`git archive`, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal`), base `52622ea05c` vs tip `36819ca13a` | 137,597,908 → 137,613,012 B raw (**+15,104 B**); 41,416,760 → 41,424,785 B zip (**+8,025 B**); `Sprk.Bff.Api.dll` +12,800 B; 192 files and 139 dlls each, file lists identical; no package added |
+
+### Deviations
+
+1. **The d2 grandchild is NOT closed** (the brief's closed set says "closed"). D-172 is direct association only: `CoreRecordChain` stops at distance 1, the ArchTest forbids a second hop, and the 082b resolver test "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P" pins it. A grandchild's chain never reaches the record, so the record's change does not decide the rule there; closing its findings would close findings the rule still raises. The test asserts the grandchild stays open. **For the caller to confirm.**
+2. **"Nearer Procedure/version in force" read as the resolver's rule-level nearer row.** In the resolver, rule-level overrides are grouped by base rule and decided by distance; a Procedure-level row (Follow, Pin, Exclude of the Procedure) does not decide a rule-level override. So a child with only a Procedure-level Pin IS closed (tested, to make the reading visible). Skipping it would close less than the resolver excludes. **For the caller (or ontology) to confirm.**
+3. **Fail closed covers d0 too**, as rule 3 says ("closes nothing"): on a matter with more than 100 direct children, or any child read fault, the record's own findings are no longer closed (089e closed them). The answer says so (`closeComplete=false`). *(Superseded by fix round 1, ontology 3: d0 closes when only the children's side fails.)*
+4. **Logs:** the existing catch keeps logging the exception object (the file's idiom); it now also names the exception type. The new exception texts carry table names and ids only (operator text). No reader surface changed beyond the two constant messages.
+
+### Known limits (K) and items for 082d / 114
+
+- **K: a record rule without its Exclude row** on a child is not seen as a nearer row (the close reads Exclude rows only). The BFF never writes that state, and the resolver faults on it for that child's invoices (`RuleOverridesOf`), so those invoices are held by the resolver anyway.
+- ~~**K: the record rule's date window.**~~ **Retired by fix round 1** (owner 2026-11-05): the close now compares every judged date with the record rule's in-force day, at d0 and d1.
+- **K: the pair fragment.** A project whose pair text does not carry the parent id's 8-hex fragment (a hand edit that is not a GUID spelling) is not a candidate; the forward chain would answer `Unknown` for it, and its findings stay open, as before.
+- **082d / 114:** none needed for C19. The ProcedureGap re-check (082c-2) and the 114 Override release are separate writers. If 082d adds a stored snapshot of the deciding rows, the close could read it instead of the override rows.
+- **Observation (not changed):** the repo's lint-staged pre-commit hook backs up the staged state with `git stash` (shared stack, FAILURE-MODES G-18) and drops it on success.
+
+### C19 fix round 1 (2026-11-05)
+
+Branch `task/ebilling-082-c19`, from `d4e755317f`. Code and tests `0895e22dae`; census script `bbc40cbe3d`. No Dataverse write, no deploy; one read-only census run against dev (item 5).
+
+#### 1. The effective date wins (owner, 2026-11-05) — `ProcedureAssignmentService.cs:261`, `:623`, `:654`, `:856-900`; `ProcedureResolver.cs:657`, `:1266`
+
+- **Rule:** a record rule version runs only from its own `sprk_inforcefrom`; `RecordRuleVersionOn` returns null for earlier work dates, so the base rule still runs there. The close therefore closes a base finding only on an invoice where the record rule, not the base rule, runs on **every date the resolver judges the invoice on** (`TakesTheChange`). Applies at d0 and d1 (it was wrong at d0 under 089e).
+- **Invoice-level, not line-level.** All of an invoice's findings close together or not at all: one earlier-dated line keeps even its later lines' findings open. (Accepted: invoice-level for all findings.)
+- **Which dates (reused, not re-derived):** the evaluator's own selection, `InvoiceComplianceEvaluator.cs:223-225`. A line is judged on its work date, else on the invoice date; the invoice subject is judged on the invoice date. In stored form: the line's `sprk_eventdate` as `DateOnly.FromDateTime` (as `InvoiceCorrectionReevaluation.cs:1578` and `InvoiceCorrectionService.cs:582` read it), the invoice's date from `InvoiceAdjustmentService.InvoiceDateOf` (`sprk_invoicedate`, else the UTC day the row was created: the evaluator's received-on fallback). Only Fee and Expense lines are judged (`InvoiceCorrectionReevaluation.cs:1671`), so an adjustment line's date keeps nothing open. **The invoice's own date is part of the test** (the evaluator judges the invoice subject on it, so the base rule still runs on invoice-level findings while the invoice date is earlier). An invoice with no determinable date stays open.
+- **Same comparison as the resolver:** `ProcedureResolution.InForceOn(inForceFrom, date)` is the single expression `Latest` selects by (so `RecordRuleVersionOn` too); the close calls it. The change captures ONE instant (`Clock`, `ProcedureAssignmentService.cs:623`), writes it as the version's `sprk_inforcefrom` (`:1732`) and dates the close by its UTC day through `ProcedureResolver.UtcDate` (the conversion the resolver reads the stored value with). A change is refused when the rule already has a row (`HasRowAsync`, `ProcedureAssignmentService.cs:587`, 409), so the new version is always the first of its episode and `RecordRuleVersionOn(date)` returns it exactly when `InForceOn` holds. On the in-force day itself the record rule runs, so the close agrees with the resolver there (tested at 00:00:00, 14:30:00 and 23:59:59 UTC).
+- **Message:** `ChangeCloseCompleteMessage` no longer says every finding closed; it names the date rule ("work all dated on or after the change") and that earlier-dated invoices stay open.
+- **Retired known limit:** "the record rule's date window" (C19 known limits) is fixed at d0 and d1.
+
+#### 2. Ontology 3: the children's side fails alone — `ProcedureAssignmentService.cs:776-852`
+
+d0 is read first (a d0 fault, or a fault reading d0's lines, closes nothing: the outer catch, `ChangeCloseIncompleteMessage`). d1 is read next inside its own catch; a chain fault, a row fault, a row the BFF never writes, the bound or a fault reading the children's invoice lines drops the d1 set only (all or nothing within d1). d0 still closes; the answer is `closeComplete=false` with the new constant `ChangeCloseChildrenOpenMessage` (the invoices of the records under it stay open for the reviewer; no ids). The bound is logged at Warning with the count the read reached (`CoreRecordChainUnreadableException.CandidateCount`, `CoreRecordChain.cs:283`; "more than 100 ... (101 counted ...)"); any other children fault is logged at Error with the exception type name. Supersedes C19 design "Fail closed" (children side) and deviation 3.
+
+#### 3. Ontology 2: a pinned child keeps a different policy's findings
+
+Test only: a child under a Procedure-level Pin to a version whose rule is a different policy keeps that policy's open findings; the changed rule's own finding on the same invoice closes (a Procedure-level row does not decide a rule-level override, deviation 2).
+
+#### 4. F4: exception type name only — `ProcedureAssignmentService.cs:848`
+
+The close's catch logs `{ExceptionType}` = `ex.GetType().Name`, no exception object. The new children logs do the same. Tests assert that no log entry of a change carries an exception object and that no id of a record or invoice under the record is logged.
+
+#### 5. K3 census — `scripts/ebilling/Get-EbillingChildRecordCounts.ps1`
+
+Read-only (GET, `@odata.nextLink`), counts only unless `-ListFlagged`. Per matter and project it counts the candidates `ReadChildrenAsync` counts against the bound (typed work-assignment filings and BFF-managed project pairs by the 8-hex fragment, inactive rows included, before forward verification) and flags parents at or over 80% of `MaxChildRecords`. Dev run: 65 matters, 30 projects, 19 filed work assignments, 8 projects with pair text; 17 parents have children; **max 4; 0 parents at or over 80; 0 over 100.** (The existing `Get-EbillingLegacyRuleOverlap.ps1` is a rule census and does not fit; this script copies its read-only access pattern.)
+
+#### uac-r2 conditions (K5: the Secure child is closed app-only)
+
+- **(a) Close only — confirmed by reading.** The close is `SignalClosureService.SupersedeInPassAsync` → `CloseAsync` (`SignalClosureService.cs:393`) → `SignalWriter.CloseAsync` (`SignalWriter.cs:952`), whose only write is `UpdateIfRowVersionMatchesAsync("sprk_signal", …)` of status, resolution type, `sprk_resolvedon` and `sprk_lastevaluated` (`:966-977`). It never reopens (a resolved Signal is not targeted), creates, edits a finding's content or deletes, and the reads before it are selections for the close, not shown to the caller. One-line comment at the call (`ProcedureAssignmentService.cs`, "Close only") and a remark paragraph on `SupersedeBaseFindingsAsync`.
+- **(b) Scope is only what the effective-date rule supersedes.** Targets are the base rule's open findings on invoices that pass `TakesTheChange`. The test with a mixed-date invoice that stays open on a record under the record is `Change_OnTheChildren_ClosesTheFullyDatedInvoice_AndKeepsTheMixedDateOneOpen` (it is also the d1 "one earlier line" case of the date table); it asserts the close targeted only the fully-dated invoice's findings.
+- **(c) Audit — NOT satisfiable from the existing close facts; stopped, for a decision.** Today a Superseded close records neither the triggering decision nor an actor: `SignalWriter.CloseAsync` writes status, resolution type, resolved-on and last-evaluated only, and states that `sprk_decisionrecord` and `sprk_resolvedby` are not written (`SignalWriter.cs:944-947`; `SignalClosureService.cs:42-44`). The rule change itself writes no Decision Record (nothing in `Services/Finance/Procedures` names one); its trace is the Exclude row (`sprk_procedureassignment`) and the record rule's version. Recording the decision on the Signal therefore needs a new write: a rule-change Decision Record plus a link entry for Superseded closes (like `LinkConditionClearedRecordAsync`), or `sprk_resolvedby` (which would name the caller as the resolver, against "never as having seen the child", and breaks the writer's FR-16 system-only close). Both are design decisions (a new Decision Record writer call and class in the change path, D-205 writer list, uac-r2/ontology ruling), so none was guessed; no code or test was added for (c).
+  - **uac-r2 ruling (2026-11-05): option (iii), accepted as K.** The close stays system-attributed (`sprk_resolvedby` never the caller). The close's completion log line now carries the triggering rule-change row (`{AssignmentId}`, the Exclude row whose `createdby` and time are the audit), the record rule version and the closed Signal ids (`{ClosedSignalIds}`), so an operator joins "this rule change closed these Signals". Option (i) (a link written on the Superseded close) is NOT filed for 095d-2: ontology ruled (D-205) that a Superseded link would change the shared `SignalWriter` contract (the ConditionCleared link is the D-145b exception) and is an ontology design ask if ever wanted.
+  - **Adjustment lines never reach the evaluator (uac-r2 question, answered):** they are created only by a reviewer after the submission is judged (`InvoiceAdjustmentService.cs:651`); the submission path builds `request.Lines` from the parsed submission's Fee and Expense lines (an invoice-level adjustment total is a header field, `InvoiceSubmissionProcessor.cs:278`, not a line), and the correction re-evaluation keeps Fee and Expense rows only (`InvoiceCorrectionReevaluation.cs:1671`). So skipping an adjustment line's date in the close matches what the evaluator judges.
+  - **The superseding version on the Signal row (ontology condition):** not written today, by 089e's design (`SignalClosureService.cs:125-129`: "the close records no successor version on the Signal (the writer stores the resolution only)"). Since this round the completion log carries it (`{RecordRuleVersionId}`) with the closed Signal ids. **Ontology ruling (2026-11-05, recorded under D-205): no row write is owed.** Every system close except a Do-lane ConditionCleared is record-free (D-145b); the ontology evaluator's own Superseded-on-version-change stores no successor either. The K is "log join plus the version row" (the Signal's Superseded resolution, resolved-on, policy code and subject; the record-rule version row's `sprk_inforcefrom` and `sprk_basedonversion`; this log line), with no follow-up owed. The closed-id list is bounded (`MaxClosedSignalIdsLogged` = 50, then "+N more"; test `ClosedSignalIdsForLog_IsBounded`).
+  - **(d) ruling:** aggregate counts in operator logs are acceptable (not a caller surface; no ids or names); the response stays caller-scoped with constant messages.
+- **(d) Response and logs.** The response carries the caller-scoped count (`AffectedInvoiceCounter.CountVisibleOpenInvoicesAsync` on the closed findings, probed with the caller's token) and constant messages. Log lines touched: the close's completion, no-target, children-unread (Warning/Error) and catch lines carry the changed record (`{CoreTable} {RecordId}`, supplied by the caller), the assignment id (the caller's own Exclude row), aggregate counts and the exception type name only; no child record, invoice, number or name. The counts in the logs are aggregate operator counts (hidden invoices included), not caller-scoped; a caller-scoped log count would need the rights probe per log line. Noticed, not changed: the shared writer logs each closed Signal's id at Information (`SignalWriter.cs:978`); it names no record or number.
+- **(e) K5 recorded:** a Secure child's invoice findings are closed by the BFF identity although the caller may not read the child. Reasoning (D-172): a record's change is a rule of that record that its direct children take by association, so the rule the child's invoices are judged by changes whether or not the caller can see the child; leaving the base findings open there would show a rule the resolver no longer runs. The close only resolves findings (see (a)); it reveals nothing to the caller (counts are caller-scoped, messages are constants). uac-r2 accepted K5 (2026-11-05) with (a)–(e); the audit is the log join in (c) plus the version row; no follow-up owed.
+
+#### Tests
+
+`ProcedureAssignmentServiceTests` 94 → 127 (+33: the date table, 24 rows at d0 and d1; adjustment line; mixed-date child; in-force instants, 3 rows; children fault, 4 rows; d0 fault, 2 rows; bound; pinned different policy; the old fault theory and bound test replaced). `ProcedureResolverTests` +3 rows (the resolver side of the same instants). `CoreRecordChainTests`: the count on the bound exception and its absence on the others. The test world dates every invoice and line on the in-force day by default (the existing C19 cases keep their meaning) and fixes the clock.
+
+| Table (d0 and d1) | Result |
+|---|---|
+| lines on and after the day (the day itself among them) | closed |
+| one October line; a mixed-date invoice; the day before; invoice date before the day | open |
+| line with no work date: invoice date on or after / before | closed / open |
+| no date at all; invoice with no date and dated lines | open |
+| no lines: invoice date on or after / before | closed / open |
+
+#### Seeds (each restored; `cmp` against the backup shows the file byte-identical)
+
+| Seed | Result |
+|---|---|
+| S1: date filter dropped (`TakesTheChange` returns true) | 20 of 127 failed (every "open" row of the table incl. the October line, the in-force instants, the mixed-date child) |
+| S2: a children fault rethrown (the round-0 behaviour) | 5 failed (the 4 children-fault rows and the bound) |
+| S3: a d0 fault swallowed (d0 treated as empty) | 2 failed (the d0 must-not-fire rows) |
+| S4: `InForceOn` `<=` → `<` | 34 of 219 failed (close and resolver sides, the in-force-day rows and the existing resolver date tests) |
+
+#### Gates
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit `ProcedureAssignmentService\|CoreRecordChain\|ProcedureResolver\|RuleSetService\|BillingFactLoader\|InvoiceComplianceEvaluator\|SignalClosure` | 782/782 |
+| ArchTests `CoreRecordChain\|ProcedureResolver\|ExceptionMessage\|Billing\|SignalClosure` | 114/114 |
+| ArchTests `Procedure\|RecordOwnerAssignmentCensus\|FinanceStepZero\|ADR010\|OverriddenCreatedOnWriteGuard` | 94/94 |
+
+Publish-size delta not re-measured this round (a fix to existing files; no package, endpoint, registration or background work added). Round 0 measured +15,104 B raw.
+
+#### Known limits (kept)
+
+K3 census above (nothing near the bound on dev). K4: about 300 sequential reads at the bound (latency, accepted). K5: above. K6: the pair-fragment spelling (a hand-edited pair that is not a GUID spelling is not a candidate).
+
+## 082c-3 implementation (2026-11-05)
+
+Branch `task/ebilling-082c-3` from `origin/work/ebilling-r1` at 767244e003. Contract: `notes/082c-brief.md` (section 5 item 3; section 7 External Access R4 items 3 and 4, uac-r2 conditions (a) to (d), the wording approved 2026-11-04). Client part is the submission-outcome warning only: the grid column and the `INVOICE_COLUMNS` entry moved to R4 (brief section 7, "R4: the grid column moves to R4"). No Dataverse write, no deploy.
+
+### What changed
+
+| Part | Where |
+|---|---|
+| **The 202 pre-check (BFF).** After the external (SPA) route has received the submission, it asks `InvoiceSubmissionService.PrecheckHoldWarningAsync(core, firmId)`. That reads the Procedure resolution (`ProcedureResolver.ReadAsync`, the loader's own call) for the record and firm the route filter decided, and judges TODAY (UTC date, the processor's received date): an applicable Procedure with no version today, i.e. `RulesOn(today).Gaps.Count > 0`. Held gives `SubmissionHoldWarning.ForPrecheck()`; otherwise null. Any fault gives null | `ExternalInvoiceSubmissionEndpoints.SubmitAsync`, `InvoiceSubmissionService.PrecheckHoldWarningAsync` and the seam `ReadProcedureResolutionAsync`, `SubmissionHoldWarning.Precheck` / `ForPrecheck` / `ProcedureGapPrecheckMessage` |
+| **Response shape.** `InvoiceSubmissionAccepted` gains a trailing `Warning` (`SubmissionHoldWarning?`, `JsonIgnore` when null). The 202 body is the four fields as before, plus `warning` only when held | `InvoiceSubmissionEndpoints.cs` (record), `InvoiceSubmissionHttp.ToResult` / `Accepted` |
+| **Client.** `warning?: { code, message } \| null` on `InvoiceSubmissionAccepted` and `InvoiceSubmissionStatusView` (new exported `InvoiceSubmissionWarning`). `InvoiceSubmissionOutcome` takes `submittedWarning` (the wizard passes `accepted.warning`): a caption (`Text` size 200, neutral foreground 3, `role="status"`) under Processing, dropped as soon as a terminal view arrives. A terminal Accepted view with a `warning` shows ONE `intent="warning"` bar, title "Received: on hold for review", the server's message and the tracking sentence, `role="status"`, in place of the green bar. Missing, null or blank renders nothing | `InvoiceSubmission/types.ts`, `InvoiceSubmissionOutcome.tsx`, `InvoiceSubmissionWizard.tsx`, `index.ts` |
+
+### The 202 body
+
+```
+202 Accepted, Location: <statusUrl>
+{ "submissionId": "...", "jobId": "...", "trackingNumber": "INV-1.1", "statusUrl": "/api/v1/external/invoice-submissions/..." }                      // not held, or a fault
+{ ..., "warning": { "code": "ebilling.submission.procedure_gap",
+                    "message": "As of today, no billing terms are set up for the record you chose. If the invoice's work dates are not covered either, it will be held for review, not rejected." } }   // held today
+```
+
+The code is the status view's gap code (`SubmissionReasonCodes.ProcedureGap`); the sentence is the R4 item 5 text the owner approved on 2026-11-04 (it differs from the draft in brief section 3(c), which R4 edited). Internal routes (including from-email) are unchanged: no pre-check, no member.
+
+### uac-r2 conditions (brief section 7)
+
+| Condition | How it holds | Test |
+|---|---|---|
+| (a) only after the submission's own authorization | The call is in the handler after `SubmitAsync` returned Received, which runs after the route filter. A refusal never runs it | `External_RefusedSubmission_NeverRunsThePrecheck` |
+| (b) record and firm from the authorized context | `scope.CoreRecord` and `scope.FirmId`, the values the request itself carries; no form field is read | `External_FormFieldsNamingAnotherRecordOrFirm_AreIgnored` (renamed in the review fixes; extra `firmId`, `coreRecordId`, `matterId`, `coreRecordKind` fields change neither warning nor outcome; the reads are for the filter's matter and firm) |
+| (c) one fixed sentence | The warning is a constant pair; the Procedure's name, dates and rule codes never reach it | `TheWarning_IsAnExactConstantPair_NoNamesDatesOrCodes` (a Procedure named "Secret Counterparty Terms" with rule `SECRET-RATE-CAP` gives the same pair; exact key set `code`, `message`; `ReaderSentinel` clean) |
+| (d) a fault omits the warning, never a distinct answer | `catch (Exception)` returns null; the 202 is unchanged (a read that outlives the 2 s budget is such a fault: the 202 stops waiting for it, F1 below). The log carries the fault's type name only (C16), no exception object. A caller who went away is not a fault: the cancellation propagates and nothing is logged | the four fail-quiet tests below |
+
+**Known limit (uac-r2, recorded):** the warning tells the partner that the record's billing terms for today are incomplete. The owner's rule requires that; it names nothing.
+
+### Decisions and deviations
+
+- **Where the 202 is built.** The brief points at `InvoiceSubmissionEndpoints.cs:1210`, which is only where the `InvoiceSubmissionAccepted` record is declared. The 202 is built in `InvoiceSubmissionHttp.Accepted`, shared by the internal and SPA routes; the SPA handler is `ExternalInvoiceSubmissionEndpoints.SubmitAsync`. The pre-check is in that handler (SPA only), and `ToResult` takes an optional `warning`. Not a disagreement; recorded.
+- **The predicate is not duplicated.** There is no extracted "will be held" predicate: the evaluator turns the resolver's `Gaps` into the hold. The pre-check asks the same resolver (`ProcedureResolution.RulesOn(date).Gaps`) for the single date today. The evaluator's invoice-subject fallback to the latest work date (rule (c)) and the per-line subjects need work dates, which a 202 does not have, so they do not apply; that difference is why the sentence says "if".
+- **Today is the UTC date**, as the processor's received date (`CreatedOnUtc`).
+- **Cost.** One resolver read (about the loader's 7 to 10 sequential Dataverse reads) on every SPA 202. The hold of the same submission reads it again in the job. Accepted: app-only and it fails quiet. The 202 waits at most the 2 s budget (review fix F1, below); the first version had no bound beyond the request's token.
+- **Provisional means provisional.** The caption lives in component state from the 202; a reload (the resume route has no 202) shows the terminal view only.
+- **Not in this slice.** The firm hold's warning bar (#2567): the status view carries no firm warning, so there is nothing to render; it lands when the server adds one. The invoices grid column and `INVOICE_COLUMNS` (R4). Any change to the Outlook add-in (it has its own types and calls the internal routes, which carry no pre-check).
+
+### Tests and seeds
+
+| Suite | Result |
+|---|---|
+| New BFF unit (`InvoiceSubmissionHoldPrecheckTests`) | 14 passed |
+| New BFF contract (`InvoiceSubmissionEndpointsContractTests`, "082c-3") | 6 passed |
+| BFF filter (`InvoiceSubmission`, `ExternalInvoice`, `SupersededSubmissionNote`, `FinanceEndpoints`) | 1645 passed, 0 failed |
+| ArchTests (`Invoice`, `External`, `Procedure`, `Submission`, `Route`, `Bff`, `Tenant`, `Reader`) | 668 passed, 0 failed |
+| Client new (`InvoiceSubmissionOutcome.warning.test.tsx`) | 17 passed; plus 1 added to the wizard test |
+| Client (`InvoiceSubmission` and `CreateInvoiceWizard`) | 8 suites, 135 passed |
+
+Seeds (each restored; the file `cmp`-identical afterwards):
+
+| Seed | Result |
+|---|---|
+| 1. The fault swallow removed (`catch ... when (never)`) | 4 failed: the service fault test, the resolution-fault test, the cancelled-caller test, and the contract test "survives a pre-check fault" |
+| 2. The gap predicate inverted (`Gaps.Count < 0`) | 7 failed (every must-fire test, including the contract test and the real-read test) |
+| 3. The drop-on-terminal removed (the caption shown whatever the status) | 5 failed: the terminal-without-warning test, Rejected and Failed, the held-bar handover and the wizard test |
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` BFF and unit tests | 0 warnings, 0 errors |
+| Client `tsc --noEmit` | 9 errors, all pre-existing and outside this slice (unbuilt sibling packages `@spaarke/auth` and `@spaarke/sdap-client`, and `FileUploadService`); none in `InvoiceSubmission`. `npm run build` is `tsc`, so it fails on the same 9 |
+| `eslint src/components/InvoiceSubmission`, `prettier --check` | clean |
+| Publish size (each side: `git archive` to a short path, `dotnet publish -c Release -r linux-x64 --self-contained false`, 191 files each; zipped with `Compress-Archive`) | origin/master 136,679,929 B raw / 41,103,935 B zip; branch base 767244e003 137,390,285 / 41,333,925; HEAD 137,394,341 / 41,334,771. **This slice: +4,056 B raw, +846 B zip.** HEAD vs master: +714,412 raw, +230,836 zip (the rest is the ebilling-r1 branch work before this slice). Zip total 41.3 MB, under the 55 MB review line; the raw size is pre-existing. No package change |
+
+### Review fixes (adversarial pass 1)
+
+**F1: the pre-check is bounded (pass 1, corrected in pass 2).** The pre-check runs after the submission is saved and queued, with about 8 to 10 sequential Dataverse reads. Bounded only by the request token, throttling could delay the 202 until the client timed out and resubmitted (a duplicate).
+
+- **Pass 1 was not enough.** A `CancelAfter` on a linked token source only takes effect BETWEEN requests: the Dataverse SDK's WCF `Channel.ExecuteAsync(request)` takes no token, so one stalled SOAP request kept the 202 waiting well past 2 s.
+- **Now (pass 2).** `PrecheckHoldWarningAsync` starts the read with the linked budget token (`CancelAfter(PrecheckTimeLimit)` kept, disposed with the method) and awaits it with `read.WaitAsync(PrecheckTimeLimit, ct)`. On a `TimeoutException` it calls `budget.Cancel()` (inside the `using` scope, so never after `Dispose`), attaches an `OnlyOnFaulted` continuation that reads `t.Exception` so a late fault is observed and never reaches `UnobservedTaskException`, and rethrows into the same fail-quiet catch.
+- **What is and is not bounded.** The 202 waits at most the budget. The abandoned read is cancelled at its next check between requests and may still run one in-flight SOAP request in the background until it returns. That request is app-only, read-only and its result is discarded; the bound is on the response, not on the background work.
+- **Timeout value: 2 seconds.** `InvoiceSubmissionService.PrecheckTimeout` is an `internal static readonly TimeSpan`, a code constant, **not** a new option or configuration surface (nothing to deploy or drift; a different value is a code change). `PrecheckTimeLimit` is a `protected internal virtual` property returning it, only so a test need not wait 2 s.
+- **A timeout is fail quiet:** the same catch as any fault. It logs the exception TYPE NAME only (`TimeoutException`, never the message or the object), returns null, and the 202 carries no `warning`.
+- **A real client abort still propagates.** The caller check is against the ORIGINAL `ct` (`ex is OperationCanceledException && ct.IsCancellationRequested`), which `WaitAsync` also observes; it is rethrown and not logged.
+- **Tests:** the read double now IGNORES its token (`new TaskCompletionSource<ProcedureResolution>(RunContinuationsAsynchronously).Task`), as the SDK call does, and every awaited call is bounded by `.WaitAsync(10 s)` so a regression fails red rather than hanging: `Service_AReadThatNeverCompletes_TimesOut_NoWarning_NoThrow`, `Service_ATimeout_CancelsTheAbandonedReadsToken`, `Service_AnAbandonedRead_ThatFaultsLater_RaisesNoUnobservedTaskException` (the read's task is dropped, a GC pass runs, the `UnobservedTaskException` event is watched for the marker exception), the two caller-cancel tests, `TheBudget_IsTwoSeconds_ByDefault`, and the contract test `External_202_HasNoWarning_WhenThePrecheckReadTimesOut`.
+- **Seeds (each restored; `git diff` shows the fix intact).** (1) `WaitAsync(...)` replaced by a plain `await read`: 4 unit tests fail red with the 10 s `TimeoutException` (timeout, token-cancelled, unobserved-fault, caller-abort) and the contract test fails the same way. (2) The `ContinueWith` observation removed: only the unobserved-fault test fails ("found InvalidOperationException: ABANDONED-READ-FAULT-082c3-F1"), so that test is discriminating; it passed three runs in a row with the fix.
+
+**Hygiene.** The pre-check's copy of the core-record-kind mapping is gone: `InvoiceSubmissionProcessor.ToResolutionCore` is now `internal static` and the service calls it, so there is one mapping (including the `_ => WorkAssignment` fall-through). No behaviour change; the existing kind-mapping theory still passes.
+
+**K3.** The existing "another record or firm" contract test added a `firmId` FORM field, which nothing reads (the firm is the `?firmId=` query). It is renamed `..._AreIgnored` and says so. New: `External_QueryNamingAnotherFirm_Is403_AndThePrecheckReadsNothing` (`?firmId=<another firm>`: 403, no `warning`, `PrecheckReads` empty, nothing written).
+
+**K4.** The held-Accepted warning `MessageBar` has `politeness="polite"`. Fluent v9 `@fluentui/react-message-bar` 9.6.20 types it (`politeness?: 'assertive' | 'polite'`), so it is supported and applied. It sits with the explicit `role="status"`.
+
+**K4 (pass 2).** The client treats the wire as untrusted: `nonBlank` now requires `typeof message === 'string'` before `.trim()`, so a numeric or null `message` renders nothing instead of throwing. Two jest cases added (numeric, null).
+
+**K2 (known limit, recorded).** The internal routes' OpenAPI schema (they share the `InvoiceSubmissionAccepted` record) lists a nullable `warning` member that those routes never send (no pre-check, `JsonIgnore` when null). Documentation noise only; not worth a second record type. Revisit if the internal routes ever need a distinct schema.
+
+#### Component justification (CLAUDE.md section 11)
+
+| New surface | 1. Existing | 2. Extension | 3. Cost of doing nothing |
+|---|---|---|---|
+| `InvoiceSubmissionService.PrecheckHoldWarningAsync` | Overlaps the processor's hold evaluation (`BillingFactLoader` reads the same resolution; `SubmissionHoldWarning` is the status view's warning); nothing else answers "is a Procedure without a version today" at intake (grep: `Precheck`, `Gaps.Count` in `Services/Finance`) | The loader and evaluator need work dates and run in the job, after the 202; the service already owns the intake, so the method sits there reusing `ProcedureResolver.ReadAsync` and `ProcedureResolution.RulesOn` | R4 item 4 (owner-approved, 2026-11-04) cannot be met: a partner learns their invoice is held only after polling, with no early notice |
+| `ReadProcedureResolutionAsync` (protected internal virtual) | `ProcedureResolver.ReadAsync` is the real read; no existing test seam at the service (grep: the loader's two calls are in `BillingFactLoader`, none at intake) | A `Func` constructor parameter would change the DI-built constructor for one test need; one overridable method keeps it | Tests could not model a record held for terms, a fault or a read that never completes without a full in-memory Dataverse (only the one `RealRead` test uses that); the F1 timeout would be untestable |
+| exported `InvoiceSubmissionWarning` (TS) | The status view carried a warning shape of its own; the Outlook add-in has separate types (not shared) | Reusing the one named type on both `InvoiceSubmissionAccepted.warning` and `InvoiceSubmissionStatusView.warning` is the extension: one type instead of two copies of `{ code, message }` | Two copies would drift (the 202 and the status view carry the same pair of fields); the `submittedWarning` prop would be untyped |
+| `submittedWarning` prop (`InvoiceSubmissionOutcome`) | `InvoiceSubmissionOutcome` takes the status view only; the 202 body is known to the wizard, not the view | Putting the 202's warning into the status view would invent a server-less fake status; a prop from the wizard (which holds `accepted`) is the minimal path | The provisional caption (R4 item 4) cannot show between the 202 and the first terminal view, the only window the pre-check exists for |
+| `InvoiceSubmissionAccepted.Warning` (the wire field) | The 202 record's four fields; the status view's `SubmissionHoldWarning` (same `{code, message}` pair); nothing else carries a notice at intake (grep: `Warning` in `InvoiceSubmissionEndpoints.cs`) | A separate response type or a header would fork the 202 contract for one optional notice; one trailing member, `JsonIgnore` when null, leaves the body byte-identical when unset | R4 item 4 (a partner learns early that the invoice may be held) has no carrier on the 202; the client would have to poll to find out |
+| `SubmissionHoldWarning.ForPrecheck`, `Precheck` and `ProcedureGapPrecheckMessage` | `SubmissionHoldWarning` already builds the held warning for the status view from the same resolver gaps; the status wording is "is on hold", which is false at 202 time | `Precheck` reuses the type and the code; only the sentence differs (provisional, the owner-approved R4 item 5 text), so a second constant beside the first rather than a second class | Reusing the status sentence would tell a partner their invoice IS held when it only MAY be; a parallel judging helper would drift from the evaluator's gap rule |
+| `PrecheckTimeout` and the `PrecheckTimeLimit` seam | No existing time budget at intake; the request token is the only bound (`ExternalInvoiceSubmissionEndpoints`) | An option or configuration key would be a new deploy surface for a constant; a code constant plus one overridable property (as `ReadProcedureResolutionAsync` is) keeps it local | A stalled Dataverse read holds the 202 past the client's timeout, the client resubmits, a duplicate invoice results (F1); without the seam the timeout tests would each wait 2 s |
+| the `warning` parameter on `InvoiceSubmissionHttp.ToResult` | `ToResult` and `Accepted` already shape the 202 for both routes | An optional trailing parameter extends them; a second `ToResult` overload or a post-hoc body rewrite would duplicate the Location and status handling | The SPA handler could not hand the warning to the shared 202 builder, so the field would never reach the body |
+
+#### Accepted known limits (review of 082c-3)
+
+- **K1: tone.** A green "Accepted" badge sits above the amber held bar. **RESOLVED by 082c-3b** (R4 2026-11-05, below): a held view's badge reads "In Review" in the warning tone.
+- **K1: "held today" is the UTC date; the hold is judged on the invoice and work dates.** After a Procedure's terms end, an invoice for EARLIER work gets a false warning; a hole between past versions (not today) gives a silent miss. The conditional wording ("If the invoice's work dates are not covered either, it will be held") and the drop of the caption on a terminal view contain both. The warning is provisional by construction.
+- **K2:** the 202 reuses `ebilling.submission.procedure_gap` (the brief's "reuse status-view constants"). No consumer branches on the 202's code today.
+- **K4:** `politeness="polite"` is applied (supported by the installed Fluent version, above).
+
+#### Review-fix gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` BFF | 0 warnings, 0 errors |
+| `Sprk.Bff.Api.Tests --filter InvoiceSubmission` | 1283 passed, 0 failed |
+| `Spaarke.ArchTests` (full) | 2041 passed, 0 failed |
+| Client `jest src/components/InvoiceSubmission` | 5 suites, 77 passed |
+| Client `tsc --noEmit` | 9 errors, the same pre-existing ones |
+
+#### 082c-3b (R4 2026-11-05): held badge
+
+Branch `task/ebilling-082c-3b` from `origin/work/ebilling-r1` (d120d64735). Client only, in `InvoiceSubmissionOutcome.tsx`; no BFF, Dataverse or deploy change. R4 decided that an Accepted status view that has a `warning` (the held case, which already shows the single amber "Received: on hold for review" bar) shows its status badge as "In Review" in the `warning` tone, not green "Accepted". "In Review" is the owner's existing label for the invoice's statuscode 1 as partners see it in the Invoices grid (a local `IN_REVIEW_LABEL` constant; the package had none, the add-in's `invoiceSubmissionMessages.ts` is a separate surface). The tone is `StatusBadgeTone` `'warning'`, which already exists, so no new tone. "Held" is decided once (`heldWarning !== null`, i.e. Accepted plus `nonBlank(view.warning)`) and feeds the badge label, the badge tone, the held bar and the green-bar guard, so there is no second condition. An un-held Accepted view and a released one (`outcomeReasonCode` `ebilling.submission.overridden`, where `warning` is null) keep the green "Accepted" badge; the client does not branch on the reason code. Tests (`InvoiceSubmissionOutcome.warning.test.tsx`, asserting through `StatusBadge`'s existing `data-testid="status-badge"` and `data-tone`): held gives "In Review" / warning with one bar and the tracking sentence; overridden, plain Accepted and a blank, numeric or null warning give green "Accepted" and no bar. This resolves the K1 "tone" limit above. Gates: `jest src/components/InvoiceSubmission` 5 suites, 85 passed (6 of them new); `tsc --noEmit` 9 errors, the same pre-existing ones; seed (badge ignores held) failed only the held test, restored.
+
+### For the next slices and the peers
+
+- R4 and the word-add-in notices are in the 082c-3 report (not sent from this slice).
+- 114 and C22 are unchanged.
+
+## 082d implementation (2026-11-08)
+
+Branch `task/ebilling-082d`, cut from `origin/work/ebilling-r1` at `ee0b173288` (contains `d415d37508`). Deviation: the agent worktree's HEAD was master-based, so the branch was created from the project branch instead of merging the project branch into that HEAD. Step 9.5 not run here (the lead runs two adversarial passes).
+
+### What changed
+
+- `InvoiceComplianceEvaluator.cs`: `BillingEvaluationResult.ProcedureBasis` (`BillingProcedureBasis`: the chain, the `ProcedureRulesOnDate` of every subject date the run judged with, and per selected version a `BillingRuleApplication` with the subjects it was applied to, displaced on (Replace) or cap-displaced on (Split)). The precedence loop now records an outright displacement before the handler check; the evaluation result is unchanged.
+- `ProcedureSnapshot.cs` (new): builds the `procedureSnapshot` member from the basis (ids, enums, numbers, distances, override reasons; **no names**), reads it back (`StoredProcedureSnapshot`) and builds the bounded Decision Record summary.
+- `InvoiceSubmissionPersister.cs`: one hunk in `BuildFindingsJson`, `[ProcedureSnapshot.Member] = ProcedureSnapshot.Build(outcome.Evaluation)`, always written (null with no evaluation).
+- `InvoiceSubmissionAfterSteps.cs`: `StoredFindings.ProcedureSnapshot` (read in `Parse`) and the summary in `BuildRejectionDecision` when the row stores a snapshot.
+- `CurrentVersionReaderRatchetTests.cs` (new ArchTest).
+- The 101 B2a golden (`InvoiceSubmissionPersisterTests.MixedInvoiceGoldenJson`) gains the trailing member; every earlier byte is unchanged.
+
+### The ~:247 tension, resolved
+
+The 7.4 basis (chain record ids, parent record ids, override row ids and reasons, Procedure and Procedure Version ids) lives in ONE internal member, `procedureSnapshot`, of the field-secured, app-only `sprk_findingsjson`. No reader projection reads it: the review read model (`InvoiceReviewReadService.ParsedFindings`) projects named members field by field and never names it; the status view and the holds read other members. Reader-facing Procedure data stays what it was: the existing `ForReaders()` gap finding. No reader-facing member was added, so no escalation. Held by tests: `ProcedureSnapshotTests` (U3: every member except `procedureSnapshot` is free of the secrets; control: the internal member carries them) and `InvoiceReviewReadServiceTests.TheReviewResponse_NeverCarriesTheProcedureBasis` (the serialized review DTO of a row that stores the basis holds no override reason, Procedure name, Procedure id, Procedure Version id, row id or chain record id).
+
+### Snapshot shape (`version` 1)
+
+`chain[{table,id,distance}]`; `overrides[]` (every deciding row once, by row id: `rowId, mode, record{table,id,distance}, procedureId, pinnedVersionId, policyId, firmId, reason`); `resolutions[]` (dates with identical content grouped: `dates[], procedures[{procedureId, procedureVersionId, level, distance, firmSpecific, sources, pinned, overrides[]}], rules[{policyId, policyVersionId, procedureId, procedureVersionId, recordRule}], excludedRules[], excludedProcedures[], gaps[]`); `applications[{policyVersionId, source, applied{invoice, lines[]}, displaced?, capDisplaced?}]`. Stored from the run's own resolution, never recomputed (`DatesResolved` unchanged by the build). Names are resolved at read time by whoever reads it (083, 113), never frozen.
+
+Reader compatibility: a row with no member (pre-082d), an unknown version, a member that is not an object, missing `applications`/`resolutions` or an application without an id reads as **no snapshot** (fail closed for 083 and 113). The re-run writes the member through the same builder (`FindingsAfter` copies fresh members), and a re-run without an evaluation writes null over an older snapshot.
+
+### Decision Record summary
+
+`facts.procedureSnapshot = {version, submissionId, member, procedures, appliedRules, displacedRules, gaps}`: counts and the pointer, never the basis. Only a row that stores a snapshot gets it, so a record rebuilt for a pre-082d row keeps its facts and hash. **Fix round 1 (K1):** the summary carries NO `excludedRules` or `excludedProcedures` count (an Exclude row sits on a core record of the chain, possibly a Secure parent; a Decision Record reader who cannot read that parent must learn nothing of the chain from it). `StoredProcedureSnapshot` no longer holds them either. Kept: `procedures`, `appliedRules` and `displacedRules` (outcome counts, not counts of override rows) and `gaps` (a Procedure gap is already a reader-facing finding via `ProcedureGap.ForReaders`). Test: `ProcedureSnapshotTests.DecisionRecordSummary_CarriesNoExcludeCount` (seed: an `excludedRules` key added back fails it and the key-set test).
+
+### K6
+
+The five records and `CoreRecordLink` already print no ids (082b K2, 082c C17). `ProcedureResolution` is a class (prints its type name) and `Chain` is a list; a test pins `ToString`, `string.Join` and interpolation of both, plus the on-date record, the basis, an application and the stored snapshot (counts only).
+
+### Ratchet (model 7.2)
+
+`CurrentVersionReaderRatchetTests`: every `src/server` file whose code names `sprk_currentversion` / `_sprk_currentversion_value` (not `sprk_currentversionid`) calls a `RuleDomains` filter or check, or is in the baseline. Baseline (owner ontology-r1): `OntologyAdminAuthoringService.cs`, `OntologyAdminClassificationService.cs`, `OntologyAdminRulesService.cs`. A baseline entry that stops reading or starts applying `RuleDomains` fails (it only shrinks). Must-fire: 4 planted readers; must-not-fire: 5 (three compliant readers, the document version lookup, a comment); the real readers classified (`BillingFactLoader`, `RuleSetService`, `SignalReevaluationJob` apply; `OntologyAdminRulesService` does not and is listed). Known limit: per file, not per read site.
+
+### NFR-01 and reads
+
+- 150 lines on 150 work dates, two Procedure Versions (11 rule types each) beside 11 legacy types: evaluation plus snapshot 101.4 ms in the first measured run, 83 ms in the gate run; 1,857 findings; snapshot 27,579 characters. Limit p90 ≤ 2 min: no escalation.
+- `BillingFactLoaderProcedureTests.TheReads_AreBounded_On150WorkDates_AndTheSnapshotReadsNothing`: the queried tables for 1 line equal those for 150 lines; building the snapshot adds no read; 2 dates resolved for 1 line, 150 for 150.
+
+### Component justification (CLAUDE.md §11)
+
+- `ProcedureSnapshot` / `BillingProcedureBasis`: existing: `ExtractionProvenance` is the same per-member builder shape; no member holds the Procedure basis. Extension: the basis is the evaluator's, so it is returned on the existing result rather than re-resolved. Cost of doing nothing: 083 cannot name the applied versions and 113 cannot compare a re-run, so model 7.4 fails.
+- No new column, endpoint, DI registration or package.
+
+### Before / after and seeds (each restored from HEAD; tree clean afterwards)
+
+- Before (persister member and Decision Record line removed): 12 of 14 snapshot tests and both re-run tests fail; the 2 that pass are guards that hold either way (pre-082d Decision Record unchanged; not recomputed).
+- Reader-projection seed: the review projection given a pipeline finding carrying the member's raw text; `TheReviewResponse_NeverCarriesTheProcedureBasis` failed on the chain record id.
+- Ratchet seed: `internal const string SeedColumn = "sprk_currentversion";` in `ProcedureSnapshot.cs`; the real-code ratchet failed naming that file.
+
+### Gates
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered unit (`ProcedureResolver|BillingRule|CoreRecordChain|Submission|Finance|InvoiceReview`): 7701 passed, 0 failed, 4 skipped.
+- ArchTests (full): 2143 passed, 0 failed.
+- Publish size (Release, framework-dependent linux-x64, `git archive` trees in the scratchpad, `Compress-Archive -CompressionLevel Optimal`, 191 files each side): task parent `ee0b173288` 41,457,612 B → `2fbb6b2465` 41,464,494 B (**+6,882 B**; `Sprk.Bff.Api.dll` +19,456 B). Against a fresh `origin/master` build (`57748ebf6d`, 41,170,157 B) the branch is +294,337 B, almost all of it the project branch's earlier slices. Total 41.5 MB, under the 55 MB review threshold. No package changed (no CVE delta).
+
+### Known limits
+
+- The ratchet is file-level (above); a column name built at run time, and readers outside `src/server`, are not seen. Two more cases of `SourceScan.CodeText` (fix round 1, K3, no code change): it cuts a line at the first `//` even inside a string literal (so a `"http://..."` literal hides the rest of its line, including a `sprk_currentversion` after it), and it does not strip block comments (`/* ... sprk_currentversion ... */` counts as code, so a block comment can make a file look like a reader, or hide a `RuleDomains` call that is only commented out as a block).
+- A rate rule skipped for currency is listed as applied to its subjects (the evaluator ran it).
+- (Fix round 1, F4: no longer a limit.) The stored snapshot after a correction or an added line is now written by the patch itself, see "Fix round 1" below.
+- The Decision Record summary is added only for rows that store a snapshot, so the same submission's record differs before and after 082d by that one fact.
+
+### Fix round 1 (F4, F3, K1, K2, K3)
+
+**F4: the snapshot after a correction or an added line.** Both paths re-run the evaluator (`afterResult` carries `ProcedureBasis`) and patch the stored findings, but left `procedureSnapshot` as the submission wrote it. Now `ProcedureSnapshot.ForPatchedFindings(beforeResult, afterResult, decided)` sets the member in the same conditional write: `InvoiceCorrectionReevaluation.PatchFindingsAsync` (inside the `original != root` write, so a correction whose patch writes nothing leaves the member byte-identical) and `InvoiceLineAddService` (in the one transaction, right after `AddLineFindings`).
+- **Choice, both paths:** the re-run's whole-invoice snapshot (`Build(afterResult)`) when it describes the stored findings, else JSON `null` (the readers 083 and 113 read it as "no snapshot" and fail closed). A decided line keeps its OLD entries (`PatchFindings` / `PatchPlan` skip it), so the whole-invoice snapshot is wrong exactly when something about a decided line differs between the re-run's two sides: a finding of a decided line (compared as `FindingEntryJson`), or the subjects (decided lines only) a rule version is applied / displaced / cap-displaced on. Then the stored findings mix two bases and the member is `null`. With no decided line, or decided lines the correction or the add does not touch (the usual case: a correction is refused on a decided line and an added line is undecided), the member is the re-run's basis. Same rule on both paths, one helper.
+- Not changed: a correction or add whose re-run carries no basis (a test double) writes `null` (same as the persister with no evaluation).
+- **Tests** (`ProcedureSnapshotPatchTests`, `InvoiceLineAddServiceTests.ProcedureSnapshot.cs`; the evaluator's result is shaped to carry a basis per side): correction must-fire (the member is the re-run's basis), correction with a decided line keeping an old cap finding (member JSON null), correction control with an unaffected decided line (re-run's basis), correction must-not-fire (refused into a Procedure gap: member byte-identical); the same four for Add line.
+- **Seeds** (each restored; tree clean afterwards): (1) delete the `root[ProcedureSnapshot.Member] = ...` line in `InvoiceCorrectionReevaluation.cs`: 3 correction tests fail (must-fire, decided null, decided control). (2) delete it in `InvoiceLineAddService.cs`: 3 add-line tests fail (must-fire, decided null, decided control). (3) `ForPatchedFindings` never answering null (`DecidedLinesDiffer` forced false): the two decided-null tests fail. The must-not-fire controls hold under (1) and (2) by construction (the refusal returns before the write).
+
+**F3.** Each `CurrentVersionReaderRatchetTests` baseline entry now carries a written reason and an ADR citation (tests/CLAUDE.md "Every allowlist / census entry carries a written reason and an ADR citation"): ADR-038 Amendment A1 (`tests/Spaarke.ArchTests/**` as the protected home of structural fitness functions) plus model 7.2 (ontology-r1's amendment of D-14 and the ratchet-with-baseline requirement); no domain ADR governs the rule-version pointer, which the comment says.
+
+**K1.** See "Decision Record summary" above.
+
+**K2.** The `StoredProcedureSnapshot.DisplacedPolicyVersionIds` doc said "displaced on every subject"; the reader code puts a version there when it is applied on no subject and displaced on at least one. The doc now says that; no behaviour change.
+
+**K3.** Ratchet limits added to "Known limits" (the `//` inside a string literal; block comments are not stripped).
+
+### Fix round 2 (F4, F3, K x3)
+
+**F4: a patched snapshot never contradicts the stored findings.** Round 1 wrote `Build(after)` whenever no decided line differed. But both patch paths evaluate before and after under the CURRENT rules, and `InvoiceFindingsDiff.PatchFindings` patches only the before to after difference, so an untouched stored entry keeps the basis it was judged under; `Build(after)` is wrong whenever the stored basis differs from the current one (a Procedure changed since submission). Now `ProcedureSnapshot.ForPatchedFindings(root, before, after, decided)` takes the stored findings and returns `Build(after)` ONLY when all three hold: (a) `Read(root)` is not null (a stored null, a damaged or unknown-version member stay "no snapshot"; null is sticky); (b) the stored member **deep-equals** `Build(before)` (`JsonNode.DeepEquals`, structural, no hand-rolled compare); (c) `!DecidedLinesDiffer`. Otherwise JSON null.
+- **Absent member: left absent.** `SetForPatchedFindings` (the one call both paths make) does nothing when `root` has no `procedureSnapshot` key. Chosen over writing null so "never had a snapshot" (a pre-082d row) stays distinguishable from "had one and it no longer describes the findings" (JSON null); both read as no snapshot, but 113 may want to say which. The round 1 test `ALineAReviewerDecided_KeepsItsFindingsPlanAndStatus_WhenTheDiffReachesIt` (a world with no member) asserted a written null; it now asserts the key is still absent and the stored text byte-identical.
+- The `ForPatchedFindings` doc comment is rewritten (it said the re-run's basis is stored because "the patch rewrote the findings", which was the wrong reason).
+- **Changed (fix round 3): the re-run is the fourth writer and now uses the same cap helper.** `InvoiceSubmissionRerun` (at the findings-size check, was `:561`) serializes `FindingsAfter(input, reset)` through `ProcedureSnapshot.SerializeWithinCap`: when the findings are over `FindingsJsonMaxLength` only because of the snapshot, the `procedureSnapshot` member is set to JSON null and the re-run writes; findings still over the cap without it keep the `InvoiceSubmissionRerunCodes.TooLarge` refusal with nothing written. Two tests in `InvoiceSubmissionRerunTests.ProcedureSnapshot.cs` (over only because of the snapshot: drops and writes; still over without it: `TooLarge`, nothing written); `InvoiceSubmissionProcessorTests.Harness` gained an `EvaluationEdit` hook to pad the result's Procedure basis. Seed: with the line reverted, the first test fails (`Refused`, `ebilling.rerun.too_large`).
+
+**F3: tests.** `ProcedureSnapshotPatchTests` and `InvoiceLineAddServiceTests.ProcedureSnapshot` now use a realistic double: ONE rule load, so both sides carry the same rule version and differ only in subjects (correction: the invoice joins on the after side; add line: the added line joins). The stored member is built with `ProcedureSnapshot.Build` from the before basis, not hand-written. Per path: must-fire (stored equals `Build(before)`: `Build(after)` written, and it differs from the stored one), must-null (stored built from a version the current load no longer carries: JSON null), stored null stays null, absent stays absent, decided line (with (b) holding, so only (c) can make the null) stays null, decided-line control, and the no-write control (kept byte-identical).
+- **Seeds** (each restored; tree clean afterwards): (1) break (b), `JsonNode.DeepEquals(stored, storedBasis)` replaced by `true`: the two must-null tests (correction, add line) fail, 361 others pass. (2) the member written without the (a)/absent guard (`if (false && !root.ContainsKey(Member))`): the two "absent stays absent" tests fail. (3) `SerializeWithinCap` never accepting the dropped form: the correction and the add-line drop tests fail. (4) persister retry disabled (`... ProcedureBasis is null`): the persister drop test fails. (5) `procedures` added back to the Decision Record summary: the summary key-set test and `DecisionRecordSummary_CarriesOnlyThePointerAndGaps` fail.
+
+**K: Decision Record counts.** `DecisionRecordSummary` is now `{version, submissionId, member, gaps}`: the pointer (the snapshot version, the submission id, the member name) and `gaps` (already reader-facing via `ProcedureGap.ForReaders`). `procedures`, `appliedRules` and `displacedRules` are dropped as well as the Exclude counts: a count of the chain's outcome tells a Decision Record reader who cannot read the chain's records about the chain (an Exclude on a Secure parent changes how many Procedures and rules applied). Tests: the key-set assertion in `DecisionRecord_CarriesTheBoundedSummary` and `DecisionRecordSummary_CarriesOnlyThePointerAndGaps` (renamed from `..._CarriesNoExcludeCount`, asserts exactly those four keys and, as a control, that the stored counts it leaves out are non-zero). A pre-082d row still adds no fact, so its hash is unchanged (`DecisionRecord_PreV5Row_HasNoSummary`, kept). The round 1 wording above ("Kept: procedures, appliedRules and displacedRules") is superseded by this.
+
+**K: size.** `sprk_findingsjson` is capped at `InvoiceSubmissionPersister.FindingsJsonMaxLength` (1,048,576). The snapshot is the one member allowed to go ("no snapshot" is a defined state):
+- Persister: when the built JSON is over the cap and the evaluation carries a basis, it logs a warning (lengths only) and rebuilds with `includeProcedureSnapshot: false` (member JSON null), then the existing check refuses (`FindingsTooLargeCode`) if it is still over.
+- Correction and Add line: `ProcedureSnapshot.SerializeWithinCap(root, cap, out dropped)` returns the text if it fits, else the text with the member set to null, else null. Null means the findings alone are over the cap: nothing is written. Correction throws the new `CorrectionFindingsTooLargeException`, answered as 409 status `TooLarge` with the new code `ebilling.correction.findings_too_large` and a fixed sentence (the value is saved, the findings are not patched; the correction stays unapplied and holds approval, as for a Procedure gap; repeating never clears it). Add line returns the new `AddLineStatus.TooLarge`, code `ebilling.line_add.too_large`, 409 (added to the endpoint's 409 list), nothing written. Both log a warning. An absent member and a member that is already null have nothing to drop, so they go straight to the refusal.
+- Tests: persister drop; correction drop; add line drop; correction still-over-cap refusal (no findings write, stored text unchanged); add line still-over-cap refusal (no transaction, stored text unchanged).
+
+**K: notes only.** `ProcedureSnapshot.Read` returns null for BOTH a stored JSON null and an absent member (and for a damaged or unknown-version one); the doc now says so. No `ContainsKey(Member)` helper was added: the only caller that must tell them apart (`SetForPatchedFindings`) calls `root.ContainsKey(Member)` directly. **For 113:** if it must show "never had a snapshot" separately from "snapshot dropped", it should test `ContainsKey(Member)` on the parsed findings itself, or a small helper can be added then. `StoredProcedureSnapshot.ProcedureCount` no longer feeds anything in 082d (kept for 113's comparison).
+
+**Follow-ups (K1, K3, K4).**
+- K1 (round trip, correction and add line): a snapshot the REAL evaluator built at submission (`ProcedureSnapshotPatchKit.SubmissionTimeRequest`, a request built from the stored rows independently of `RequestBasis`, over a Procedure kit with two rules assigned to the matter) is PRESERVED by a normal correction of an undecided line and by a normal add, with no Procedure change: the stored member is not null and deep-equals the real `Build(after)`; the rebuilt "before" side also deep-equals the stored snapshot. Limit: the world stores no submission-time timekeeper resolution, so the submission request uses NotOnRoster and the rebuild reads None; the snapshot does not depend on it (it reads the Procedure chain, overrides, resolutions and applications). Two tests: `ACorrection_OfAnUndecidedLine_WithARealSubmissionSnapshot_PreservesTheSnapshot`, `AddLine_WithARealSubmissionSnapshot_PreservesTheSnapshot`.
+- K3: the `line_add.too_large` detail now ends "Nothing was changed. Contact support." (fixed server text, as the correction's `findings_too_large`); the existing refusal test asserts it.
+- K4: `AddLineStatus.TooLarge` moved to the end of the enum, so every earlier member keeps its numeric value (nothing in the code or the tests relies on the numbers; the endpoint maps by name).

@@ -129,6 +129,9 @@ public sealed class FinanceRollupEndpointsTestFixture : IAsyncLifetime, IDisposa
         builder.Services.AddSingleton(new FinanceRollupService(
             DataverseMock.Object,
             new Mock<IFieldMappingDataverseService>().Object,
+            new BillingDecisionRecorder(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
+                NullLogger<BillingDecisionRecorder>.Instance),
             NullLogger<FinanceRollupService>.Instance));
 
         builder.WebHost.UseTestServer();

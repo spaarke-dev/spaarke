@@ -160,6 +160,63 @@ public static class BillingSystemFindings
     public static BillingFinding CodingUnavailable(BillingSystemPolicyVersion policy) =>
         Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.CodingUnavailable, [], new Dictionary<string, string>(StringComparer.Ordinal));
 
+    /// <summary>
+    /// ebilling-r1 task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm, so no firm-scoped step and no billing rule ran;
+    /// it is held until a reviewer adds the firm (and approval refuses it until then). Invoice level; it cites no value.
+    /// </summary>
+    public static BillingFinding FirmMissing(BillingSystemPolicyVersion policy) =>
+        Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.SubmissionFirmMissing, [], new Dictionary<string, string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief C11, C13; ontology-r1 D-205 item 5): an applicable Procedure has no version in force on <paramref name="workDate"/>
+    /// (its first gapped date), so its rules were not checked there; the invoice is held. Invoice level; one per gapped Procedure. The kind is
+    /// mapped through the closed <see cref="GapKindText"/> (an unmapped kind throws), so the token is never blank or free text.
+    /// </summary>
+    public static BillingFinding ProcedureGap(BillingSystemPolicyVersion policy, string procedureName, DateOnly workDate, ProcedureGapKind kind)
+    {
+        Require(procedureName, nameof(procedureName));
+        return Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.SubmissionProcedureGap, [],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["procedure.name"] = procedureName,
+                ["procedure.workDate"] = workDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                ["procedure.gapKind"] = GapKindText(kind),
+            });
+    }
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief C14, C15): the invoice's Procedures could not be resolved on the final delivery, so no billing rule was checked;
+    /// the invoice is held. Invoice level. The cause is mapped through the closed <see cref="CauseText"/> (an unknown cause throws); never an
+    /// exception message (C16).
+    /// </summary>
+    public static BillingFinding ProceduresUnresolved(BillingSystemPolicyVersion policy, string cause) =>
+        Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.SubmissionProceduresUnresolved, [],
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["procedure.cause"] = CauseText(cause) });
+
+    /// <summary>
+    /// The closed gap-kind map (brief 082c (d); ontology-r1 D-205 item 5): one reviewer text per <see cref="ProcedureGapKind"/>. An unmapped kind
+    /// throws when the finding is built (as <c>RuleDomains.DomainOf</c>), so a new kind cannot reach a reader as a blank or free-text token.
+    /// </summary>
+    public static string GapKindText(ProcedureGapKind kind) => kind switch
+    {
+        ProcedureGapKind.HoleBetweenVersions => "no version in force between versions",
+        ProcedureGapKind.AfterLastVersion => "after the last version ended",
+        ProcedureGapKind.PinnedVersionRetired => "the pinned version is retired",
+        ProcedureGapKind.PinnedVersionNotInForce => "the pinned version is not in force",
+        ProcedureGapKind.ConflictingParents => "parent records choose different versions",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a mapped Procedure gap kind."),
+    };
+
+    /// <summary>
+    /// The closed cause map (brief 082c C15, K3): whether a retry can help. An unknown cause throws, as <see cref="GapKindText"/>.
+    /// </summary>
+    public static string CauseText(string cause) => cause switch
+    {
+        Finance.Submission.SubmissionReasonCodes.CauseChainUnreadable => "the record's parent records could not be read; a retry will not help until they are repaired",
+        Finance.Submission.SubmissionReasonCodes.CauseRowsInconsistent => "the procedure settings are inconsistent; this may clear once a change in progress completes",
+        _ => throw new ArgumentOutOfRangeException(nameof(cause), cause, "Not a mapped Procedure resolution cause."),
+    };
+
     private static BillingFinding Build(
         BillingSystemPolicyVersion policy, BillingSubject subject, string reasonCode, IReadOnlyList<BillingValueRead> values,
         IReadOnlyDictionary<string, string> facts)

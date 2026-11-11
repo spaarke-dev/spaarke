@@ -309,10 +309,25 @@ internal static class SecureChildLineage
         // matter is that matter's child, and its versions are the rule's (solution XML: sprk_policy_matter, sprk_policyversion_policy).
         // A rule with no matter has no lookup value, so it is never reached. sprk_policy.sprk_currentversion is left out: it names
         // the rule's own version, whose only parent is this rule, so it can add no root (only a loop).
+        // ebilling-r1 task 089a (procedure model 5.2, agreed with unified-access-control-r2; ontology F3-e): a rule of a
+        // record-scoped rule set is that set's child (live spaarkedev1 2026-11-03: sprk_policy.sprk_ruleset). A Procedure's or
+        // a legacy set has no record lookup, so it is never reached and its rules stay outside the family.
         T("sprk_policy", "sprk_policies",
-            ("sprk_matter", Matter)),
+            ("sprk_matter", Matter), ("sprk_ruleset", "sprk_ruleset")),
         T("sprk_policyversion", "sprk_policyversions",
             ("sprk_policy", "sprk_policy")),
+        // ebilling-r1 task 089a (procedure model 5.1, 5.2): a Procedure assignment or override is a secure child of the one
+        // record it names (live spaarkedev1 2026-11-03: sprk_matter, sprk_project, sprk_workassignment, one set per row). Its
+        // other lookups cite and file nothing (RecordOwnershipResolver.CitationLookups): the Procedure, the pinned Procedure
+        // Version and the excluded rule.
+        T("sprk_procedureassignment", "sprk_procedureassignments",
+            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
+        // ebilling-r1 task 089a (procedure model 5.2): a record-scoped rule set (sprk_scope Record or Firm record) is a secure
+        // child of its record; one record lookup per core type (live spaarkedev1 2026-11-03), RemoveLink. A Procedure's or a
+        // legacy set has none of them set, so it is never reached. sprk_procedure, sprk_firm and sprk_sourcedocument are not
+        // filing (a Procedure set carries the Procedure; a legacy uploaded set carries its source document, a CitationLookups entry).
+        T("sprk_ruleset", "sprk_rulesets",
+            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         T("sprk_reportcard", "sprk_reportcards",
             Regarding(Matter, Project)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
@@ -337,6 +352,14 @@ internal static class SecureChildLineage
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_snapshot", "sprk_spendsnapshot")),
         T("sprk_spendsnapshot", "sprk_spendsnapshots",
             ("sprk_matter", Matter), ("sprk_project", Project)),
+        // ebilling-r1 task 086 (procedure model 5.2, EB-D-148; lookups and entity set read live, spaarkedev1 2026-10-27): an INVOICE Stored
+        // File is its invoice's child and a leaf (no table names a Stored File as a parent; it is not an ownership parent). ONE lineage
+        // column, sprk_invoice, declared first (uac-r2 194b: declaration order is the order the primary parent is chosen in). Left out on
+        // purpose: sprk_procedureversion and sprk_billingexport (a Procedure-source or export file is not a secure child, model 5.2 / F4-c,
+        // so a row with no sprk_invoice is never reached), and sprk_sourcedocument / sprk_sourcecommunication (no root's walk reaches a
+        // Stored File through its source; they stay in the row's own question as secure-if-any parents after the invoice, uac-r2 194b re-check K).
+        T("sprk_storedfile", "sprk_storedfiles",
+            ("sprk_invoice", "sprk_invoice")),
         T("sprk_todo", "sprk_todos",
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                 "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)),

@@ -1,4 +1,4 @@
-$version = "1.3.20"
+$version = "1.3.21"
 $solutionName = "CommunicationActionsSolution"
 $outputPath = "bin"
 if (-not (Test-Path $outputPath)) { New-Item -ItemType Directory -Path $outputPath | Out-Null }

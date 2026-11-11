@@ -551,11 +551,17 @@ public class SecureBuRoleDepthAssertionTests
             set,
             everyPrivilege);
 
+        // ebilling-r1 (NFR-05 depth list): plus the hard-deny tables' Reads the file does not list yet.
+        var restrictedOnly = SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+            .Where(e => set.Tables.All(t => !string.Equals(t.PrivilegeName, e.PrivilegeName, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
         census.Grants.Select(g => g.PrivilegeName)
-            .Should().BeEquivalentTo(set.Tables.Select(t => t.PrivilegeName), "every privilegeName in the file is guarded");
+            .Should().BeEquivalentTo(set.Tables.Select(t => t.PrivilegeName).Concat(restrictedOnly.Select(e => e.PrivilegeName)),
+                "every privilegeName in the file, and every depth-list privilege, is guarded");
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
-        var children = set.Tables.Where(t => t.Kind != "root").Select(t => t.LogicalName).Order(StringComparer.Ordinal);
+        var children = set.Tables.Where(t => t.Kind != "root").Select(t => t.LogicalName)
+            .Concat(restrictedOnly.Select(e => e.LogicalName)).Order(StringComparer.Ordinal);
         outcome.Findings.Should().HaveCount(SecureBuRoleDepthAssertion.GuardedPrivileges.Count + 1,
                 "one finding per root privilege, and ONE aggregated child-table finding for the role")
             .And.OnlyContain(f => f.Verdict == SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
@@ -1422,7 +1428,7 @@ public class SecureBuRoleDepthAssertionTests
             Array.Empty<CensusUser>(),
             new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
             set,
-            present.Select(t => t.PrivilegeName).ToArray());
+            present.Select(t => t.PrivilegeName).Concat(SecureBuRoleDepthAssertion.RestrictedContentPrivileges.Select(e => e.PrivilegeName)).ToArray());
 
         var gap = census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => !t.ExistsInEnvironment).Subject;
         gap.LogicalName.Should().Be("sprk_memo");
@@ -1433,6 +1439,215 @@ public class SecureBuRoleDepthAssertionTests
         }).Findings.Should().ContainSingle().Subject;
         finding.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
         finding.Message.Should().Contain("prvReadsprk_Memo").And.Contain("no privilege of exactly that name");
+    }
+
+    // ── ebilling-r1 (procedure model 5.1): the NFR-05 depth list of the hard-deny tables ──────────────────────
+
+    /// <summary>
+    /// Pin: the depth list is SEPARATE from <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/> (unchanged, pinned
+    /// above) and covers exactly the hard-deny tables, under their live schema-name casing (spaarkedev1, 2026-11-03).
+    /// </summary>
+    [Fact]
+    public void RestrictedContentPrivileges_CoverTheFiveHardDenyTables_UnderTheirLiveNames()
+    {
+        SecureBuRoleDepthAssertion.RestrictedContentPrivileges.Should().Equal(
+            ("sprk_procedureassignment", "prvReadsprk_procedureassignment"),
+            ("sprk_ruleset", "prvReadsprk_ruleset"),
+            ("sprk_policy", "prvReadsprk_Policy"),
+            ("sprk_policyversion", "prvReadsprk_PolicyVersion"),
+            ("sprk_storedfile", "prvReadsprk_StoredFile"));
+        SecureBuRoleDepthAssertion.RestrictedContentPrivileges.Select(e => e.LogicalName)
+            .Should().BeEquivalentTo(Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.RestrictedContentTables,
+                "the depth list guards the resolver's hard-deny tables, no more and no fewer");
+        SecureBuRoleDepthAssertion.GuardedPrivileges.Should().NotIntersectWith(
+            SecureBuRoleDepthAssertion.RestrictedContentPrivileges.Select(e => e.PrivilegeName));
+        SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded)
+            .Should().Contain(SecureBuRoleDepthAssertion.RestrictedContentPrivileges.Select(e => e.PrivilegeName),
+                "a census reader resolves every depth-list privilege");
+    }
+
+    /// <summary>
+    /// Must-fire: a depth-list table (<c>sprk_storedfile</c>, codified since ebilling-r1 task 086) is graded by clause 1 —
+    /// a non-administrator human holding its Read at Global is the ordinary child-table exposure, naming the table.
+    /// </summary>
+    [Fact]
+    public void Build_WhenAHumanHoldsStoredFileReadAtGlobal_ReportsAChildTableFindingNamingIt()
+    {
+        SecureRecordOwnerRoleSet.Embedded.Tables.Should().Contain(t => t.LogicalName == "sprk_storedfile",
+            "086 added the Stored File to the codified set; the depth list still guards it, graded once");
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            "Spaarke Basic User", "prvReadsprk_StoredFile", PrivilegeDepth.Global, SiblingBu, Guid.NewGuid()));
+
+        outcome.Findings.Should().ContainSingle(outcome.Message).Which.Should().Match<SecureBuFinding>(f =>
+            f.Verdict == SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit
+            && f.Message.Contains("(codified child tables sprk_storedfile)"));
+    }
+
+    /// <summary>Must-not-fire: the same Read at User depth reaches nothing by business unit.</summary>
+    [Fact]
+    public void Build_WhenAHumanHoldsStoredFileReadAtBasic_Passes()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            "Spaarke Basic User", "prvReadsprk_StoredFile", PrivilegeDepth.Basic, RootBu, Guid.NewGuid()));
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
+    }
+
+    /// <summary>
+    /// Must-fire, non-throwing: a depth-list privilege the environment does not return is EXACTLY ONE finding naming it —
+    /// never a throw (the guarded roots throw; this list must not blind clauses 1-4) — whether or not the codified set lists
+    /// it (when it does, clause 5 is the one finding). Since ebilling-r1 task 086 every depth-list entry is codified, so each
+    /// case here is clause 5's; the un-codified case is <see cref="Build_WhenAnUncodifiedDepthListPrivilegeIsNotInTheEnvironment_ReportsItOnce"/>.
+    /// </summary>
+    [Theory]
+    [InlineData("prvReadsprk_StoredFile", "sprk_storedfile", SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege)]
+    [InlineData("prvReadsprk_ruleset", "sprk_ruleset", SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege)]
+    [InlineData("prvReadsprk_procedureassignment", "sprk_procedureassignment", SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege)]
+    public void Build_WhenADepthListPrivilegeIsNotInTheEnvironment_ReportsExactlyOneFindingNamingIt(
+        string missing, string table, SecureBuVerdict verdict)
+    {
+        var ownerRole = Guid.NewGuid();
+        var adminRole = Guid.NewGuid();
+        var returned = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded)
+            .Where(name => name != missing)
+            .ToArray();
+        var depths = returned.ToDictionary(p => (ownerRole, p), _ => PrivilegeDepth.Basic);
+        foreach (var root in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        {
+            depths[(adminRole, root)] = PrivilegeDepth.Global;
+        }
+
+        var build = () => SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole),
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole)
+            },
+            new[] { new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, new[] { adminRole }) },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            SecureRecordOwnerRoleSet.Embedded,
+            returned);
+
+        var census = build.Should().NotThrow().Subject;
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        var finding = outcome.Findings.Should().ContainSingle(outcome.Message).Subject;
+        finding.Verdict.Should().Be(verdict);
+        finding.Message.Should().Contain(missing).And.Contain(table);
+    }
+
+    /// <summary>
+    /// Must-fire, non-throwing: a depth-list privilege the codified set does NOT list (a set of the three roots only, as the
+    /// file was before a hard-deny table was codified) and the environment does not return is exactly one
+    /// <see cref="SecureBuVerdict.RestrictedContentPrivilegeNotResolved"/> finding naming it, while clause 5 grades.
+    /// </summary>
+    [Fact]
+    public void Build_WhenAnUncodifiedDepthListPrivilegeIsNotInTheEnvironment_ReportsItOnce()
+    {
+        const string missing = "prvReadsprk_StoredFile";
+        var set = SecureRecordOwnerRoleSet.Parse("""
+            {"schemaVersion":1,"roleName":"Secure Record Owner","businessUnitName":"Secure Record","access":"Read","depth":"Basic","tables":[
+              {"logicalName":"sprk_project","privilegeName":"prvReadsprk_Project","kind":"root","reason":"x","evidence":"y"},
+              {"logicalName":"sprk_matter","privilegeName":"prvReadsprk_Matter","kind":"root","reason":"x","evidence":"y"},
+              {"logicalName":"sprk_workassignment","privilegeName":"prvReadsprk_WorkAssignment","kind":"root","reason":"x","evidence":"y"}]}
+            """);
+        set.Tables.Should().NotContain(t => t.PrivilegeName == missing, "the control is about a depth-list entry the set does not list");
+
+        var ownerRole = Guid.NewGuid();
+        var adminRole = Guid.NewGuid();
+        var returned = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set).Where(name => name != missing).ToArray();
+        var depths = returned.ToDictionary(p => (ownerRole, p), _ => PrivilegeDepth.Basic);
+        foreach (var root in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        {
+            depths[(adminRole, root)] = PrivilegeDepth.Global;
+        }
+
+        var build = () => SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole),
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole)
+            },
+            new[] { new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, new[] { adminRole }) },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            set,
+            returned);
+
+        var census = build.Should().NotThrow().Subject;
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        var finding = outcome.Findings.Should().ContainSingle(outcome.Message).Subject;
+        finding.Verdict.Should().Be(SecureBuVerdict.RestrictedContentPrivilegeNotResolved);
+        finding.Message.Should().Contain(missing).And.Contain("sprk_storedfile");
+    }
+
+    /// <summary>
+    /// 089a review K6, must-fire: clause 5 returns early when it cannot grade (two owner roles here), so a codified depth-list
+    /// privilege the environment lacks (<c>prvReadsprk_ruleset</c>) would go unnamed. The builder reports it, so the run has
+    /// the role-count finding AND exactly one finding naming the privilege (criterion 148).
+    /// </summary>
+    [Fact]
+    public void Build_WhenClauseFiveCannotGrade_AMissingCodifiedDepthListPrivilegeIsStillNamedOnce()
+    {
+        const string missing = "prvReadsprk_ruleset";
+        var ownerRole = Guid.NewGuid();
+        var secondOwnerRole = Guid.NewGuid();
+        var returned = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded)
+            .Where(name => name != missing)
+            .ToArray();
+
+        var adminRole = Guid.NewGuid();
+        var depths = returned.ToDictionary(p => (ownerRole, p), _ => PrivilegeDepth.Basic);
+        foreach (var root in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        {
+            depths[(adminRole, root)] = PrivilegeDepth.Global;
+        }
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole),
+                new CensusRole(secondOwnerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, secondOwnerRole),
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole)
+            },
+            new[] { new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, new[] { adminRole }) },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            SecureRecordOwnerRoleSet.Embedded,
+            returned);
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(2);
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        outcome.Findings.Should().HaveCount(2, outcome.Message);
+        outcome.Findings.Should().ContainSingle(f =>
+            f.Verdict == SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege && f.Message.Contains("2 role(s)"));
+        outcome.Findings.Should().ContainSingle(f =>
+            f.Verdict == SecureBuVerdict.RestrictedContentPrivilegeNotResolved
+            && f.Message.Contains(missing) && f.Message.Contains("sprk_ruleset"));
+    }
+
+    /// <summary>Must-not-fire: every depth-list privilege resolved and held only by the owner role at Basic — isolated.</summary>
+    [Fact]
+    public void Build_WhenEveryDepthListPrivilegeResolves_ReportsNoDepthListFinding()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            "Spaarke Basic User", "prvReadsprk_Project", PrivilegeDepth.Basic, SiblingBu, Guid.NewGuid()));
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
+        outcome.Findings.Should().NotContain(f => f.Verdict == SecureBuVerdict.RestrictedContentPrivilegeNotResolved);
     }
 
     /// <summary>

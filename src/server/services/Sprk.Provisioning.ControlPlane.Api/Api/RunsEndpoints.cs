@@ -1395,7 +1395,7 @@ public static class RunsEndpoints
         }
 
         // T259 (ISS-010): the customer's display name names its business unit (H10) — H10's own rule and codes.
-        if (CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName)
+        if (CustomerBusinessUnitIntake.Validate(parameters, CustomerBusinessUnitIntake.ReservedBusinessUnitNames)
             is CustomerBusinessUnitIntakeOutcome.Invalid customerName)
         {
             return (customerName.RejectionCode, $"nonSecretParameters: {customerName.Diagnostic}");

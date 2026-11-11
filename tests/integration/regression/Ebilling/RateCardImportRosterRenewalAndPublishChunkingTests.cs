@@ -220,7 +220,7 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
         imported.Kind.Should().Be(RateCardOutcomeKind.Done);
         var newRow = CreatedTimekeepers(h).Single();
 
-        var published = await h.Service().PublishAsync(imported.Value!.RateCardId, default);
+        var published = await h.Service().PublishAsync(imported.Value!.RateCardId, RateCardImportServiceTests.VersionId, default);
 
         published.Kind.Should().Be(RateCardOutcomeKind.Done);
         h.BulkUpdated.Should().ContainSingle().Which.Updates.Select(u => u.id).Should().Equal(newRow.Id);
@@ -272,7 +272,7 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
         var h = new RateCardImportServiceTests.Harness();
         var (cardId, pending) = SeedCardWithPending(h, pendingCount);
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, RateCardImportServiceTests.VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
         outcome.Value!.TimekeepersApproved.Should().Be(pendingCount);
@@ -293,7 +293,7 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
         var h = new RateCardImportServiceTests.Harness();
         var (cardId, pending) = SeedCardWithPending(h, 2500);
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, RateCardImportServiceTests.VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
         outcome.Value!.TimekeepersApproved.Should().Be(2500);
@@ -332,11 +332,11 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
                 return Task.CompletedTask;
             });
 
-        var first = () => h.Service().PublishAsync(cardId, default);
+        var first = () => h.Service().PublishAsync(cardId, RateCardImportServiceTests.VersionId, default);
         await first.Should().ThrowAsync<InvalidOperationException>();
         h.Updated.Should().BeEmpty("the card is not Published while timekeepers are still Pending");
 
-        var retry = await h.Service().PublishAsync(cardId, default);
+        var retry = await h.Service().PublishAsync(cardId, RateCardImportServiceTests.VersionId, default);
 
         retry.Kind.Should().Be(RateCardOutcomeKind.Done);
         retry.Value!.TimekeepersApproved.Should().Be(1500, "the 1,000 approved by the failed run are not approved again");

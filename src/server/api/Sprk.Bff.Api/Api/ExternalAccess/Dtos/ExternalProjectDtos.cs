@@ -143,6 +143,15 @@ public sealed class ExternalDocumentDto
     /// </summary>
     [JsonPropertyName("hasFile")]
     public bool HasFile { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +251,15 @@ public sealed class ExternalTodoDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 /// <summary>
@@ -436,6 +454,15 @@ public sealed class ExternalEventDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 public sealed class CreateExternalEventRequest

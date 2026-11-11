@@ -65,7 +65,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         public int Calls { get; private set; }
 
         public async Task<SubmissionEvaluationOutcome> EvaluateAsync(
-            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, CancellationToken ct = default)
+            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, bool finalDelivery,
+            CancellationToken ct = default)
         {
             Calls++;
             flow.Entered.TrySetResult();
@@ -74,7 +75,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 await gate.Task;
             }
 
-            return flow.LastOutcome = await inner.EvaluateAsync(submission, loadDocument, ct);
+            return flow.LastOutcome = await inner.EvaluateAsync(submission, loadDocument, finalDelivery, ct);
         }
     }
 
@@ -95,6 +96,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         public List<(Guid Signal, Guid Record)> Closes { get; } = [];
         public Dictionary<string, Entity> Signals { get; } = new(StringComparer.Ordinal);
         public List<SubmissionDecidedNotification> Notified { get; } = [];
+        /// <summary>Task 095b: every appnotification (bell) created, as the real notifier wrote it over this Dataverse double.</summary>
+        public List<Entity> Bells { get; } = [];
         public List<int> StatusHistory { get; } = [];
         public Locks Locks { get; } = new();
 
@@ -128,6 +131,12 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity == FinanceBaseValues.SubmissionEntity
                     ? ReadSubmission(columns)
                     : new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" });
+            Entities.Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
+                .Returns((Entity bell, CancellationToken _) =>
+                {
+                    Bells.Add(bell);
+                    return Task.FromResult(Guid.NewGuid());
+                });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
                 {
@@ -240,6 +249,10 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 persister,
                 after,
                 BuildSink(),
+                new SubmissionOutcomeNotifier(
+                    Entities.Object,
+                    new Sprk.Bff.Api.Services.NotificationService(Entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
+                    NullLogger<SubmissionOutcomeNotifier>.Instance),
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
@@ -623,6 +636,145 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Failed]);
     }
 
+    private static ProcessorHarness GappedHarness(InvoiceSubmissionChannel channel = InvoiceSubmissionChannel.Spa)
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return new ProcessorHarness { Procedures = kit.Build(), Channel = channel };
+    }
+
+    [Fact(DisplayName = "082c-2 C11, end to end (SPA): a Procedure gap is persisted Accepted + procedure_gap, the invoice In Review, its lines rules.not_checked with the gap cause; the system policy missing still holds")]
+    public async Task AProcedureGap_Spa_IsAcceptedAndHeld_EndToEnd()
+    {
+        var flow = new Flow(GappedHarness());
+
+        var outcome = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.ProcedureGap);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        var json = flow.Row.GetAttributeValue<string>("sprk_findingsjson");
+        var root = JsonNode.Parse(json)!.AsObject();
+        root["kind"]!.GetValue<string>().Should().Be(nameof(SubmissionEvaluationKind.Accepted));
+        root["pipelineFindings"]!.AsArray().Select(p => p!["reasonCode"]!.GetValue<string>()).Should().Contain(SubmissionReasonCodes.ProcedureGap);
+        var lineFindings = root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray().OfType<JsonObject>()
+            .Where(e => e["code"]!.GetValue<string>() == InvoiceSubmissionPersister.LineFindingRulesNotChecked).ToList();
+        lineFindings.Should().NotBeEmpty().And.OnlyContain(e => e[InvoiceFirmHold.LineFindingCauseMember]!.GetValue<string>() == SubmissionReasonCodes.ProcedureGap);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "the approval hold reads exactly this stored state");
+    }
+
+    [Fact(DisplayName = "082c-2 C11, end to end (Internal): a Procedure gap is Blocked: the submission Rejected + blocked, the invoice In Review")]
+    public async Task AProcedureGap_Internal_IsBlocked_EndToEnd()
+    {
+        var flow = new Flow(GappedHarness(InvoiceSubmissionChannel.Internal));
+        flow.Row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+
+        var outcome = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.LastOutcome!.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.Blocked);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap]);
+    }
+
+    [Fact(DisplayName = "082c-2 C14 (1), end to end: the first delivery's resolver fault persists nothing; the retry succeeds Accepted with no hold and no unresolved finding")]
+    public async Task AResolverFault_FirstDelivery_ThenRetrySucceeds_NoHold()
+    {
+        var harness = new ProcessorHarness { EvaluationFault = new ProcedureResolutionFaultException("two versions in force") };
+        var flow = new Flow(harness);
+
+        var first = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed, "retry");
+        flow.Created.Should().BeEmpty("no persist on a delivery that is not the final one");
+        flow.Transactions.Should().BeEmpty();
+        flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing]);
+
+        harness.EvaluationFault = null;
+        var second = await flow.BuildHandler().ProcessAsync(Job(attempt: 2), CancellationToken.None);
+
+        second.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().BeNull();
+        flow.Row.GetAttributeValue<string>("sprk_findingsjson").Should().NotContain(SubmissionReasonCodes.ProceduresUnresolved);
+    }
+
+    [Theory(DisplayName = "082c-2 C14 (2), end to end: a resolver fault on the final delivery is held with its cause, both channels; every line rules.not_checked; no rule finding")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task AResolverFault_FinalDelivery_IsHeld_EndToEnd(InvoiceSubmissionChannel channel)
+    {
+        // 082c-2 fix round 2 (F3, uac-r2): the fault's message is the operator text the resolver writes, which names ids of rows and a record
+        // rule's BRR- code. It is planted here and must reach no reader surface and no stored column.
+        var plantedId = Guid.NewGuid();
+        var planted = "chain unreadable: Procedure row " + plantedId.ToString("D") + " names "
+            + Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCode(Guid.NewGuid());
+        var flow = new Flow(new ProcessorHarness { EvaluationFault = new CoreRecordChainUnreadableException(planted), Channel = channel });
+        flow.Row["sprk_channel"] = new OptionSetValue((int)channel);
+
+        var outcome = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be(channel == InvoiceSubmissionChannel.Spa ? (int)InvoiceSubmissionStatus.Accepted : (int)InvoiceSubmissionStatus.Rejected);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(
+            channel == InvoiceSubmissionChannel.Spa ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.Blocked);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        var root = JsonNode.Parse(flow.Row.GetAttributeValue<string>("sprk_findingsjson"))!.AsObject();
+        root["findings"]!.AsArray().Should().BeEmpty("no rule finding at all");
+        root["signalPlan"]!.AsArray().Should().BeEmpty();
+        var unresolved = root["pipelineFindings"]!.AsArray().OfType<JsonObject>()
+            .Single(p => p["reasonCode"]!.GetValue<string>() == SubmissionReasonCodes.ProceduresUnresolved);
+        unresolved["values"]![SubmissionReasonCodes.ProcedureCauseValue]!.GetValue<string>().Should().Be(SubmissionReasonCodes.CauseChainUnreadable);
+        var lines = flow.LastOutcome!.Read!.Lines.Count;
+        root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray().OfType<JsonObject>()
+            .Where(e => e["code"]!.GetValue<string>() == InvoiceSubmissionPersister.LineFindingRulesNotChecked
+                && e[InvoiceFirmHold.LineFindingCauseMember]!.GetValue<string>() == SubmissionReasonCodes.ProceduresUnresolved)
+            .Should().HaveCount(lines);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProceduresUnresolved]);
+
+        // ── The sentinel, end to end through the handler's real persist path (F3) ──
+        var invoice = flow.CreatedOf("sprk_invoice").Single();
+        var view = InvoiceSubmissionService.ToView(flow.Row);
+        // The row's OWN ids (the submission, its invoice, its firm, document and core record) are links the answer is about, not a planted one:
+        // they are taken out of each surface so the scan reads the rest. The planted id and the BRR- code are not among them.
+        var ownIds = new Guid?[] { flow.Row.Id, invoice.Id, view.SubmissionId, view.FirmId, view.DocumentId, view.CoreRecord?.RecordId, Matter }
+            .OfType<Guid>().Distinct().ToList();
+        string WithoutOwnIds(string text) => ownIds.Aggregate(text, (t, id) => t.Replace(id.ToString("D"), string.Empty).Replace(id.ToString("N"), string.Empty));
+
+        var readerSurfaces = new Dictionary<string, string>
+        {
+            ["findings: pipelineFindings"] = root["pipelineFindings"]!.ToJsonString(),
+            ["findings: lineFindings"] = root[InvoiceSubmissionPersister.LineFindingsMember]!.ToJsonString(),
+            ["sprk_adminattention"] = flow.Row.GetAttributeValue<string>("sprk_adminattention") ?? string.Empty,
+            ["the created invoice's text attributes"] = WithoutOwnIds(string.Join("\n", invoice.Attributes.Values.OfType<string>())),
+            ["the status view"] = WithoutOwnIds(JsonSerializer.Serialize(view, new JsonSerializerOptions(JsonSerializerDefaults.Web))),
+        };
+        readerSurfaces["findings: pipelineFindings"].Should().Contain(SubmissionReasonCodes.ProceduresUnresolved, "control: the scan reads the hold's finding");
+        readerSurfaces["the status view"].Should().Contain(channel == InvoiceSubmissionChannel.Spa ? "warning" : SubmissionReasonCodes.Blocked,
+            "control: the scan reads the status view's hold warning (SPA) or its blocked outcome (Internal)");
+        foreach (var (surface, text) in readerSurfaces)
+        {
+            ReaderSentinel.Scan(text).Should().BeEmpty($"{surface} is a reader surface and holds no id and no BRR- code");
+        }
+
+        // The planted text is nowhere in the whole submission row (every column, whatever its type), nor in what the Signals and the invoice hold.
+        static string Flat(Entity e) => string.Join("\n", e.Attributes.Select(a => a.Value switch
+        {
+            EntityReference r => r.LogicalName + " " + r.Id.ToString("D") + " " + r.Name,
+            OptionSetValue o => o.Value.ToString(),
+            null => string.Empty,
+            var other => other.ToString(),
+        }));
+        foreach (var (what, text) in new[] { ("the submission row", Flat(flow.Row)), ("the invoice", Flat(invoice)), ("the Signals", string.Join("\n", flow.Signals.Values.Select(Flat))) })
+        {
+            text.Should().NotContain(plantedId.ToString("D")).And.NotContain(plantedId.ToString("N")).And.NotContain("Procedure row")
+                .And.NotContain("chain unreadable").And.NotContain(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCodePrefix, $"{what} holds nothing of the fault's message");
+        }
+    }
+
     [Fact(DisplayName = "049 E criterion (reason codes): Ebilling:Enabled false is Failed ebilling.disabled and Poisoned; nothing is read")]
     public async Task FlagOff_IsFailed_EbillingDisabled()
     {
@@ -747,5 +899,72 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.RecordCreates.Should().Be(1, "exactly one record call");
         flow.Notified.Should().ContainSingle();
         flow.Locks.Held.Should().BeEmpty("the owner released the lock");
+    }
+
+    // ── 095b: the submitter's bell, end to end over the REAL after-steps ──
+
+    [Fact(DisplayName = "095b: Accepted - one bell for the submitter after the terminal status is written, linking to the invoice; a redelivery and a replay add none")]
+    public async Task Accepted_TellsTheSubmitterOnce_ARedeliveryAddsNone()
+    {
+        var flow = new Flow(Aged((int)BillingConsequence.Flag));
+        var job = Job();
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        var bell = flow.Bells.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Submitter);
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 accepted");
+        System.Text.Json.JsonDocument.Parse(bell.GetAttributeValue<string>("data")!).RootElement.GetProperty("actionUrl").GetString()
+            .Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        flow.Bells.Should().ContainSingle("the redelivery and the replay find Accepted at step 0");
+    }
+
+    [Fact(DisplayName = "095b: a crash before the terminal status tells nobody; the resume that writes it tells the submitter once, and a later delivery adds none")]
+    public async Task ResumeThatWritesTheTerminal_TellsOnce()
+    {
+        var flow = AgedLineRejecting();
+        flow.CrashAtSignalWrite = 0;
+        var job = Job();
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Bells.Should().BeEmpty("the submission is not final yet");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        flow.Bells.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+
+        flow.Bells.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095b: Failed after the last delivery - one bell with no invoice link; a replay of the dead-lettered message adds none")]
+    public async Task FailedAfterTheLastDelivery_TellsOnce_TheReplayAddsNone()
+    {
+        var flow = new Flow
+        {
+            TransactionFault = new DataverseTransactionException("line refused", failedRequestIndex: 1, outcomeUnknown: false, null),
+        };
+
+        var early = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+        early.Status.Should().Be(JobStatus.Failed);
+        flow.Bells.Should().BeEmpty("the broker redelivers; the submission is not final");
+
+        var last = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+        last.Status.Should().Be(JobStatus.Poisoned);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        var bell = flow.Bells.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        System.Text.Json.JsonDocument.Parse(bell.GetAttributeValue<string>("data")!).RootElement.GetProperty("actionUrl").GetString()
+            .Should().Contain("etn=sprk_invoicesubmission").And.NotContain("etn=sprk_invoice&");
+
+        var replay = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        replay.Status.Should().Be(JobStatus.Completed, "a Failed submission is a no-op on replay");
+        flow.Bells.Should().ContainSingle();
     }
 }

@@ -217,8 +217,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "a nonexistent to-do denies cleanly rather than erroring unhandled");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a nonexistent to-do is refused exactly as a to-do outside the caller's set (one uniform refusal)");
         _fixture.Data.UpdateCallCount.Should().Be(0);
     }
 
@@ -2018,6 +2018,13 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LiveParentChecks++;
             return Task.FromResult(LiveParents);
         }
+
+        /// <summary>ebilling-r1 task 130-0 fix round 2 (F1): the PATCH reads the to-do's invoice links through the delete-own row read;
+        /// here the to-do links to no invoice (the invoice rule's own tests are <c>ExternalInvoiceLinkedWriteTests</c>).</summary>
+        public override Task<ExternalDataService.DeleteTarget?> GetDeleteTargetAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CancellationToken ct = default) =>
+            Task.FromResult<ExternalDataService.DeleteTarget?>(new ExternalDataService.DeleteTarget(
+                null, null, Array.Empty<ExternalDataService.DeleteTargetParent>(), InvoiceLinks: Array.Empty<Guid>()));
 
         public int UpdateCallCount { get; private set; }
         public Guid? LastUpdatedTodoId { get; private set; }

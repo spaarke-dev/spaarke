@@ -14,6 +14,10 @@ Changes 2026-11-01 (097f, EB-D-180, for word-add-in-r1's agreement): the submiss
 
 Changes 2026-10-31 (192, owner-approved 2026-10-31, asked for by word-add-in-r1 after the first dev UAT): the from-email 409 `document_core_record_mismatch` for "the communication is filed under another core record" gets the optional top-level `filedUnder { entityType, entityId, name }` (section 6), named only when the caller can open the record. The step-A "held under a secure record" 409 and every other route and reason are unchanged.
 
+Changes 2026-11-03 (095c-2, owner direction 2026-11-03, agreed with word-add-in-r1): `firmId` may be null or absent (section 2): mode New without a firm is accepted once the environment numbers submissions without a firm, and before that is 400 `ebilling.submission.firm_invalid` "A firm is required." with nothing written; a Correction keeps the replaced invoice's firm, so a no-firm invoice is corrected only without one (otherwise 409 `different_firm`). A null or absent firm binds the `X-Idempotency-Key` cache as an empty value (section 4). The correction prefill's `firm` is null for a no-firm invoice (section 10). The submission outcome for a no-firm submission (section 9, 095c-3) and what a no-firm invoice cannot do until it has a firm (section 12, 095c-4) complete it.
+
+Changes 2026-11-03 (095c-4, for word-add-in-r1's acknowledgement; additive, no request or response shape changes): section 9 lists the transient codes a submission can store as `Failed` on its last processing attempt when its core record, its firm or its row kept changing (`ebilling.submission.core_record_changed`, existing; `ebilling.submission.firm_changed`, `ebilling.submission.changed` and `ebilling.submission.row_version_missing`, new). New section 12 names the reviewer-side refusals of an invoice that needs a firm (approve, Return to Firm, AP export, corrections, rule-citing adjustments). None of them is answered on a route the add-in calls; they are pinned so the pane's "Submitted without a firm" text stays true.
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -69,7 +73,7 @@ Header `X-Idempotency-Key`: optional (section 4). Body (camelCase):
 
 | Field | Type | Required | Rule | Refusal |
 |---|---|---|---|---|
-| `firmId` | GUID (`sprk_organization` id) | yes | Must be linked to `targetEntity` (D-106). For `Correction` it must equal the old invoice's firm. | A firm id that does not exist: 403 reasonCode `sdap.access.deny.insufficient_rights` (the Finance filter's AppendTo check on the firm runs first; Changed 2026-10-28). 400 `ebilling.submission.firm_invalid`: the empty GUID, or an inactive firm (Changed 2026-10-28). 403 `ebilling.submission.firm_not_linked`; Correction mismatch: 409 `correction_not_allowed` reason `different_firm` |
+| `firmId` | GUID (`sprk_organization` id) or null | no (Changed 2026-11-03, 095c-2) | A firm that is sent must be linked to `targetEntity` (D-106). Null or absent means no firm: accepted only once the environment numbers submissions without a firm, otherwise 400 `ebilling.submission.firm_invalid` "A firm is required." before anything is written or filed. For `Correction` it must equal the old invoice's firm: null only when the old invoice has none, and a firm on one side only is `different_firm`. | A firm id that does not exist: 403 reasonCode `sdap.access.deny.insufficient_rights` (the Finance filter's AppendTo check on the firm runs first; Changed 2026-10-28). 400 `ebilling.submission.firm_invalid`: the empty GUID, or an inactive firm (Changed 2026-10-28). 403 `ebilling.submission.firm_not_linked`; Correction mismatch: 409 `correction_not_allowed` reason `different_firm` |
 | `firmInvoiceNumber` | string, trimmed, 1-100 | yes | Typed by the user (D-91); the tracking number is `{firmInvoiceNumber}.{n}` (D-87). A different number read from the PDF holds the invoice for review, never refuses it. | 400 `ebilling.submission.firm_invoice_number_required` |
 | `poNumber` | string or null | no | Trimmed; blank (empty or whitespace) is stored as null (Changed 2026-10-28). Over 100 characters after trimming: the body-shape 400. | none |
 
@@ -94,7 +98,7 @@ The firm fields are **not** part of the idempotency key K (section 4; Changed 20
 
 - **K** is the §9.1 key: the RFC Message-ID (`OfficeEmailEnricher.ResolveRfcMessageId`, :603); the core record (kind, id); `mode`; `invoiceId` (empty for New); and every mark as (`fileName`, `size`, `contentType`, `mark`), sorted ordinal by fileName, then size, contentType, mark (OP-3). Changed 2026-10-28 (095 review F2): `firmId` and `firmInvoiceNumber` are no longer in K, so another firm or number cannot make a second invoice for one email (section 5). K has no caller (OP-5).
 - **Ids:** submission id = `IdOf("ebilling-from-email-submission-" + K)` and job id = `IdOf("ebilling-from-email-job-" + K)` (InvoiceSubmissionPersister.cs:199). This is the 050a scheme (InvoiceSubmissionService.cs:204-207): one row per key, race-safe through the allocator's `AlreadyCreated`.
-- **`X-Idempotency-Key`:** the existing header (IdempotencyFilter.cs:112; the add-in sends it, `useSaveFlow.ts:1229`), opaque and optional. It names only the per-user 24 h response cache (:108, :181-207), bound to K plus `firmId` and the trimmed `firmInvoiceNumber` as in OfficeEndpoints.cs:384-386, so a reused header on another body (including another firm or number) is never replayed (Changed 2026-10-28). Send one value per user action; reuse it on retries. Never compared with K.
+- **`X-Idempotency-Key`:** the existing header (IdempotencyFilter.cs:112; the add-in sends it, `useSaveFlow.ts:1229`), opaque and optional. It names only the per-user 24 h response cache (:108, :181-207), bound to K plus `firmId` (empty when null or absent, so the two are one request; Changed 2026-11-03, 095c-2) and the trimmed `firmInvoiceNumber` as in OfficeEndpoints.cs:384-386, so a reused header on another body (including another firm or number) is never replayed (Changed 2026-10-28). Send one value per user action; reuse it on retries. Never compared with K.
 - A body `idempotencyKey` is not accepted (it is ignored).
 
 ## 5. Duplicate replay
@@ -221,7 +225,12 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `ebilling.submission.document_core_record_mismatch` | Added 2026-10-28 (094 step 3): the saved `.eml` is filed under or held by another record at commit |
 | Failed | `ebilling.submission.document_not_found` | Added 2026-10-28 (094 step 3): the saved `.eml` was deleted before the commit |
 | Failed | `ebilling.submission.source_changed` | Added 2026-10-28 (094): the saved `.eml` no longer belongs to the communication its marked files were read from (Failed at once), or it kept changing until the processing attempts ran out. A re-attempt is allowed (EB-D-160) |
+| Failed | `ebilling.submission.core_record_changed` | Added to this list 2026-11-03 (095c-4; the code is older, 072). Retried, then stored on the last attempt: the submission's core record kept changing while it was processed. A re-attempt is allowed (EB-D-160) |
+| Failed | `ebilling.submission.firm_changed` | Added 2026-11-03 (095c-4). Retried, then stored on the last attempt: the submission's firm was set or cleared while it was processed, so the result was not saved. A re-attempt is allowed (EB-D-160) |
+| Failed | `ebilling.submission.changed` | Added 2026-11-03 (095c-4). Retried, then stored on the last attempt: the submission row kept changing between its last read and the save (the save is conditional on the row version). A re-attempt is allowed (EB-D-160) |
+| Failed | `ebilling.submission.row_version_missing` | Added 2026-11-03 (095c-4). Retried, then stored on the last attempt: the submission's row version could not be read, so the conditional save was not sent. A re-attempt is allowed (EB-D-160) |
 | Failed | `ebilling.submission.processing_failed` | Any other processing failure |
+| Accepted | `ebilling.submission.firm_missing` | Added 2026-11-03 (095c-3). The submission was accepted without a firm: the invoice is In Review with no firm and is held until a reviewer adds the firm; it cannot be approved until then. The pane shows "Submitted without a firm. A reviewer will add the firm before approval." Stored, not derived. Only an internal from-email submission (mode New, or a Correction of a no-firm invoice) gets it. (As a `Failed` code it keeps its old meaning: a submission whose firm is the empty id, or an SPA submission with none.) |
 | Accepted | `ebilling.submission.replaced_by_correction` | Added 2026-11-01 (097f, EB-D-180). The submission was accepted and its invoice has since been replaced by a correction (the invoice is Superseded). **This is not a hold**: a client that treats any code on an Accepted submission as "held for review" must treat this one as a plain Accepted. Derived when the status is read, never stored |
 | Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
 | Rejected | `ebilling.submission.returned` | Returned to the firm |
@@ -265,7 +274,72 @@ Added 2026-10-28 (094): after `Failed` with `ebilling.submission.source_check_fa
 }
 ```
 
+- `firm` is **always present** and is null when the invoice has no firm (Changed 2026-11-03, 095c-2): still 200, never 404 or 500; the intake corrects such an invoice only without a firm. Section 8 (the firms route) is unchanged.
 - `coreRecord.entityType` is the intake vocabulary (the invoice's `sprk_matter`, `sprk_project` or `sprk_regardingworkassignment`), never a logical name. `invoiceStatus` is the `InvoiceLifecycleStatus` name, a closed set, and null for a status code this lifecycle does not know (as the intake leaves it absent). `trackingNumber` and `firmInvoiceNumber` are those of the invoice's own submission (the one whose `sprk_invoice` is this invoice and whose id derives it); `trackingNumber` is null when it has none, and `firmInvoiceNumber` is `""` when the invoice has no submission. No date, total or currency.
 - `canCorrect` is the Correction intake's own guard (`InvoiceSubmissionService.JudgeCorrectionAsync`, the code `CheckCorrectionAsync` runs), asked of the same rows with the invoice's own firm, record and number, so a request the add-in builds from this body is judged by the same code. `reason` is null when `canCorrect` is true; otherwise it is the reason the intake would refuse with, in the intake's order: `invoice_status` (not In Review, or inactive), `no_submission`, `submission_in_progress`. The intake's `different_firm`, `different_core_record` and `different_invoice_number` cannot arise from the invoice's own values; if the invoice and its submission still disagree, the answer is `canCorrect: false`, `reason: "no_submission"`.
 - `replacedBy` is **always present** and is null unless `invoiceStatus` is `Superseded` and the caller has **Read** on the replacement invoice (checked as the caller, through the same Finance authorization seam as the gate). The replacement is the invoice of the submission whose `sprk_resubmissionof` is this invoice's own submission, the direct one only (no chain is followed). If several submissions name it, the one whose invoice is not itself Superseded; if that is still not exactly one, null. `name` is the replacement invoice's primary name (`sprk_name`). It is null, never an error, when the caller cannot read the replacement or the read of it fails (a Warning is logged), so the answer never names an invoice the caller cannot open and a fault there does not make the call a 503.
 - A read fault anywhere else (the invoice, its submission, the firm's or the record's name) is **503** `ebilling.submission.record_unavailable`; never a partial answer.
+
+## 11. Submission by email (built in 095a)
+
+`GET /api/finance/invoice-submissions?internetMessageId=<RFC Message-ID>`, in the /api/finance group with step 0 (internal callers only), behind the eBilling kill switch (503 `ebilling.disabled`). For the add-in's "already submitted" banner. The only input is the Message-ID, as Outlook gives it: with or without the angle brackets, in any case.
+
+- **Gate.** The Finance filter, in its fail-closed mode (`FinanceDenial.UniformNotFoundFailClosed`, 095a review F1): step 0, the shape check of the Message-ID and the caller's table-level Read on submissions (the credited check). Only a **genuine denial** is the uniform 404 there (an external caller or one with no systemuser row at step 0, no table-level Read, a malformed Message-ID); any **system failure** is the 503 below (a step-0 flag or lookup read fault, a table-privilege read that has no complete answer, a target declaration or check that threw, a missing probe or caller resolver). The table-level Read is asked through `CallerRecordAccessProbe.CallerPrivilegeAnswerAsync` (Held / NotHeld / Faulted), because the older `CallerHoldsPrivilegeAsync` maps a fault to `false`. The handler then puts the **.eml document** and **every candidate submission** to the caller's own Read (`finance.read` on `sprk_documents` and on `sprk_invoicesubmissions`, as the caller, per record).
+- **How the attempts are found.** The `.eml` Documents (`sprk_isemailarchive`) whose `sprk_emailmessageid` is the Message-ID in either spelling, then the submissions whose `sprk_sourceemaildocument` is one of the readable ones (the link written at create for every from-email attempt; task 095a, owner choice B), newest `createdon` first, then `sprk_invoicesubmissionid` descending (a tie-break, so two attempts created in the same instant are always ordered the same way). The newest attempt the caller can read answers; an unreadable newer attempt is skipped and never named. Attempts written before the column carry no link until the backfill script is run, and are not found.
+- **200** is the `GET /invoice-submissions/{id}` body (same names, same omissions, `replacedBy` included) plus:
+
+```json
+{
+  "submissionId": "guid", "trackingNumber": "string", "status": "Received | Processing | Accepted | Rejected | Failed",
+  "outcomeReasonCode": "string (absent when none)", "invoiceId": "guid (absent unless the attempt has one)",
+  "submittedOn": "2026-11-03T10:00:00Z",
+  "submittedBy": { "name": "string" },
+  "isCorrection": false
+}
+```
+
+  `submittedOn` is the row's `createdon` (UTC, ISO 8601 with Z). `submittedBy` is the name of the person recorded in `sprk_createdbyperson` (never `createdby`, which is the service identity); it is **null** when no person is recorded, the person no longer exists or has no name, and it never carries an id or an address. `isCorrection` is true when the attempt names a submission it replaces (`sprk_resubmissionof`). The source-email link is never returned. A latest attempt that Failed is answered as Failed with its `outcomeReasonCode`; a running attempt is answered with its status so the pane resumes polling by `submissionId`.
+- **404** reasonCode `sdap.access.deny.record_unavailable` (the uniform answer, section 8): no .eml for the Message-ID, an .eml with no attempt, an .eml the caller cannot read, no attempt the caller can read, an empty, repeated or malformed Message-ID (an Exchange item id such as `AAMk...` included), a step-0 refusal (an external caller, or one with no systemuser row; a step-0 read fault is the 503) and no table-level Read (a privilege read that faulted is the 503). All have the same body (apart from the correlation id) and reveal nothing about whether an email or an attempt exists.
+- **503** `ebilling.submission.record_unavailable` for **any** read fault: the .eml or attempt query, the caller's rights read on either (thrown, or a snapshot that carries no Read and is flagged Faulted), the submitter's name read, the filter's own reads (the step-0 flag or lookup read, the table-privilege read: OBO exchange, WhoAmI, privilege query), or more than 50 candidates that cannot be decided. The route never answers "not submitted" when it could not decide. This replaces the 095a POML's "a rights-read fault is a 404" (uac-r2, 2026-11-03), and, since the 095a review F1, also covers the faults the filter used to render as the 404.
+
+**Known limits (K2: a rare edge that already fails closed; both stated here so a client or a reviewer does not read them as defects).**
+
+- **K2, timing.** The no-match answers cost different work: no `.eml` is one query and no rights call; an `.eml` the caller cannot read adds one rights read per `.eml` and no attempt query; unreadable attempts add the attempt query and one rights read per attempt. The body, status and headers are identical (apart from the correlation id), but a caller who times the answers could tell "nothing exists" from "something exists that I cannot read". The route does not equalise the work (the authorization gates of task 064 do, because they answer for a record id; here the key is a Message-ID). Accepted: the caller must hold the table-level Read on submissions and must supply a valid RFC Message-ID, which is not guessable (high entropy chosen by the sender's mail system), the signal is one bit about an email the caller already holds the ID of, and it fails closed (nothing about the record is returned).
+- **K2, cap.** More than 50 `.eml` Documents for one Message-ID, or more than 50 attempts of which none is readable, is the 503, not the 404. That is a count oracle of one bit ("at least 51 candidates exist") for a caller who can read none of them. Accepted: 51 savers of one message, or 51 attempts of one email, is outside normal use, the answer is the safe one (it never says "not submitted"), and the cap exists so one request cannot trigger an unbounded number of per-record rights reads. The two caps are constants (`MaxEmlCandidates`, `MaxAttemptCandidates`), each pinned by a contract test at 50 (decided) and 51 (503).
+
+## 12. An invoice that needs a firm (095c-4; 095c-5)
+
+Added 2026-11-03 (095c-4); updated 2026-11-04 (095c-5 and the 095c-4 review fixes). An invoice **needs a firm** for one of two reasons
+(`InvoiceFirmNeed`):
+
+- **No firm** (`NoFirm`): `sprk_invoice.sprk_vendororg` is empty.
+- **Held** (`Held`): the invoice shows a firm, but it is held for one. Either its own hold `sprk_invoice.sprk_firmhold` is set (095c-5: field-secured,
+  read app-only, written by the persister with the held outcome), or a submission of it stores the `firm_missing` hold (`InvoiceFirmHold`): the
+  outcome reason `ebilling.submission.firm_missing`, a pipeline finding with that reason, or a line finding `rules.not_checked` with
+  `cause: "ebilling.submission.firm_missing"`. An unreadable findings document counts as held.
+
+The stored hold decides. A firm set on the invoice or the submission by a direct write does **not** lift it (uac-r2, 2026-11-03), and neither does
+unlinking, repointing or deleting the submission (095c-5, uac-r2 2026-11-04). It is lifted only by the submission pipeline (095d's assign-firm, which
+clears `sprk_firmhold` through its typed writer). A `rules.not_checked` line of a firm invoice (a rule that could not run, EB-D-175) carries no `cause`
+and does not hold.
+
+These are reviewer-side (internal) routes; none is called by the add-in. Every refusal writes nothing, with one exception: "Correct a value, the
+firm cleared after the check" saves the corrected value and does not re-run its rules (the row says so).
+
+| Route | Answer | reasonCode | Sentence a reviewer reads: no firm | Sentence: held (a firm is shown) |
+|---|---|---|---|---|
+| Approve (`POST .../invoices/{id}/approve`) | 409 | `ebilling.approve.firm_missing` | This invoice has no firm. A reviewer must add the firm before it can be approved. | This invoice is waiting for its firm to be assigned. It can be approved once the firm is assigned. |
+| Approval state (`GET .../invoices/{id}/approval`) | 200 | `canApprove: false`, `firmNeeded: true` (additive) | (none; the reviewer pane shows the approve refusal's sentence) | (same) |
+| Return to Firm | 409 | `ebilling.invoice.firm_missing` | This invoice has no firm to return it to. Add the firm first, or reject the invoice. | This invoice is waiting for its firm to be assigned, so it cannot be returned to a firm yet. Reject it, or return it once the firm is assigned. |
+| Reject | allowed | | (Reject needs no firm) | |
+| AP export, candidates (`GET .../export-batches/candidates`) | 200 | | An invoice that needs a firm is not listed. | (same) |
+| AP export, selection | 400 `SelectionRefused`, per invoice `invoice_firm_missing` (both reasons) | `ebilling.export.selection_refused` (as before) | Every invoice refused for its firm: "An invoice in the selection has no firm, or is waiting for one: a reviewer must add the firm first. Nothing was exported." Mixed with other reasons: "Only Approved invoices that have a firm and are not yet in an export batch can be exported. Nothing was exported." No firm reason: the sentence as before. The AP Export page shows "No firm, or waiting for one: a reviewer must add the firm first." per invoice. | (same) |
+| AP export, the re-check before Sent to AP | 409 | `ebilling.export.firm_missing` | An invoice in the selection has no firm. Nothing was exported. A reviewer must add the firm first. | An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first. |
+| Correct a line or header value | 409 | `ebilling.correction.firm_missing` | This invoice has no firm. Add the firm before correcting its values; nothing was changed. | This invoice is waiting for its firm to be assigned. Its values can be corrected once the firm is assigned; nothing was changed. |
+| Correct a value, the firm cleared after the check | 409 | `ebilling.correction.firm_missing` | This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction. The value **is** saved; the correction stays unapplied, so approval stays held (CorrectionsPending). | (not reached: only a cleared firm gets here) |
+| Adjustment rule options, or an adjustment citing a rule | 409 | `ebilling.adjustment.firm_missing` | This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule. | (no firm only; see 095c-4 section 14.6) |
+| Adjustment without a rule | allowed | | | |
+
+A read fault while deciding "needs a firm", including an environment where `sprk_firmhold` does not exist yet (its script has not run), is the
+route's existing 503 (fail closed), never an approval or an export. The reasonCodes are unchanged; only the sentences are chosen by the reason
+(additive for word-add-in-r1, which calls none of these routes).

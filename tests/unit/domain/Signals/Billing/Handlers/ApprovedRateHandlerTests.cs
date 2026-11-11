@@ -222,9 +222,24 @@ public class ApprovedRateHandlerTests
             new FieldRef(4, BillingFieldNames.Amount));
         finding.Value("approvedRate").IsExtracted.Should().BeFalse();
         finding.Value("approvedRate.basis").Value.Should().Be("Timekeeper");
-        finding.Value("approvedRate.scope").Value.Should().Be("Firm");
+        finding.Value("approvedRate.rank").Value.Should().Be("Firm/d0/firmSpecific", "085: the rank of the Procedure whose card decided replaces the card scope");
+        finding.ValuesRead.Select(v => v.Name).Should().NotContain("approvedRate.scope", "the card scope no longer exists (D-120)");
+        finding.Value("approvedRate.rank").IsExtracted.Should().BeFalse();
         finding.Value("rateCard.id").Value.Should().Be("07100000-0000-4000-8000-0000000000c1");
         finding.FactValues.Keys.Should().BeEquivalentTo(BillingRuleCatalogue.TemplateFactFields(RuleType.ApprovedRate));
+    }
+
+    [Fact]
+    public void TheRankReference_NamesNoIdNameOrRecord_OnlyLevelDistanceAndFirmSpecific()
+    {
+        var withRank = Facts(Line(700m, index: 1) with
+        {
+            ApprovedRate = BillingHandlerKit.Rate(500m) with { Rank = new ProcedureRank(ProcedureLevel.ManualParent, 1, FirmSpecific: false) },
+        });
+
+        var finding = Run(RateRule("5"), withRank).Single();
+
+        finding.Value("approvedRate.rank").Value.Should().Be("ManualParent/d1");
     }
 
     [Fact]

@@ -1,5 +1,7 @@
 # Task 092 — Invoice submission on the Finance file store
 
+> **⚠ Merge / deploy precondition**: 091 (storage account, containers, role) and 079 (the `Finance:FileStore` settings) must be live before 092 is deployed to any environment. Without them every upload answers **422 `storage_not_configured`** (SPA and internal channels alike).
+
 > Project: ebilling-r1 (model `procedure-and-file-model.md` §4.1–4.3, 9.1, 9.2, 12; EB-D-148). Branch `task/ebill-092-submission-files` from `work/ebilling-r1` @ `786d1ea17a`. Rigor FULL, opus @ high, directional steps. Built and tested only: **no deploy, no live Dataverse or Azure write.** `StoredFileReconcileJob` stays disabled everywhere; no environment config gained file-store settings.
 
 ## 1. What was built
@@ -12,7 +14,7 @@
 | Job read | `Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs` | An upload's bytes come from `OpenStagedForProcessingAsync`: Pending → transient (Failure, retried); Malicious → Failed `file_malicious`, Poisoned; Missing / hash mismatch → Failed `document_unavailable`, Poisoned. Bytes go inline to the extractor as before. The SPE branch remains only for 050a existing-document submissions. `FileUnservable` with a linked invoice (persister or resume) marks the submission Failed — the one exception to "a linked submission is never Failed". |
 | Persister | `InvoiceSubmissionPersister.cs` | Before the transaction: `GetStagedAsync` (no usable blob → Refused `file_unservable`, nothing written). In the one `ExecuteTransaction`: `BuildRow` (Invoice PDF, Not yet servable, owner = the invoice's ForParents resolution, creator person = the submitter; none for a contact, K6). Right after the commit and before the totals: `FlipUploadFileAsync` (Concurrency retried once; Definitive → Refused `file_unservable` **with** the invoice id, no totals, no after-step, the row stays Not yet servable for 090's detector; a fault throws). The upload path links no document. |
 | Resume | `InvoiceSubmissionAfterSteps.cs` | `ResumeAsync` runs the flip gate **first** when the submission has no `sprk_document`, before totals and every after-step (see §4 D1). The indexing after-step is skipped for an upload (§5 K1). |
-| Reason codes | `SubmissionReasonCodes.cs` | `FileUnservable = "ebilling.submission.file_unservable"`, `FileMalicious = "ebilling.submission.file_malicious"`. `DocumentMissing` is no longer written (kept so stored values still read). |
+| Reason codes | `SubmissionReasonCodes.cs` | `FileUnservable = "ebilling.submission.file_unservable"`, `FileMalicious = "ebilling.submission.file_malicious"`, `FileScanTimeout = "ebilling.submission.file_scan_timeout"` (review F1, §4a). `DocumentMissing` is no longer written (kept so stored values still read). |
 | Review read model | `Services/Finance/InvoiceReviewReadService.cs` | `InvoiceReviewDto.InvoicePdfFileId` (nullable): the newest Servable Invoice PDF Stored File of the invoice, one app-only query (`TopCount 1`, ids only) after the route's checks. The page (110) loads the bytes through `GET /api/finance/files/{fileId}/content`. |
 | 090 primitives | `Services/Finance/Files/StoredFileService.cs` | `OpenStagedForProcessingAsync`, `GetStagedAsync`, `DeleteStagedAsync` (§4 E4). |
 | 028 retirement | `FinanceOptions.cs`, `FinanceOptionsValidator.cs`, `GraphModule.cs` (`StampContainerSettingKeys`), `RecordContainerResolver.DocumentPointer.cs` (declared unfiled homes), `FileIndexingService.cs` (skip), `FinanceModule.cs` (comment), `appsettings.template.json` | **`Finance:EbillingOutputContainerId` only** is retired. `Finance:ProcedureLibraryContainerId` stays (escalation §6). A value left under the retired key admits nothing (must-not-fire tests). |
@@ -28,6 +30,8 @@
 | `StoredFileService.GetStagedAsync` | `StageAsync` returns a `StagedBlob`, but in the intake process | Reads the same facts back by name | The persister runs in another process than the intake; without the staged facts it cannot call `BuildRow`. |
 | `StoredFileService.DeleteStagedAsync` | `StoredFileBlobs.DeleteStagedBlobAsync` (blob only) | Adds the "no row exists" check before the delete | A failed intake would leave an orphan blob until the reconcile job — which is disabled and must stay so. |
 | `InvoiceSubmissionAfterSteps` `makeUploadServable` seam | The existing test-seam constructor (`refileDocument`) | One more optional delegate, production default = `FlipUploadFileAsync` | The resume gate could not be tested without a real file store. |
+
+| `FileScanTimeout` reason code, `ScanWaits` / `ScanWaitBudget` / `ScanDelay` on the job handler (review F1) | The handler's transient path (`TransientAsync`) and its reason codes | Extended in place; `ScanDelay` is an `init` test seam defaulting to `Task.Delay` | A fresh upload fails `processing_failed` in seconds on every scanning-on environment (review F1). |
 
 No new service, route, DI registration, package or Dataverse column.
 
@@ -49,11 +53,28 @@ No new service, route, DI registration, package or Dataverse column.
 - **E4 — 090 API gap (escalation 4 of the POML).** 090's API had no read of a staged file before its row exists, no read-back of staged facts, and no row-guarded delete. The three primitives were added **inside `StoredFileService`** (no direct blob writes from this task; all names still go through `StoredFileBlobs.RequireOwnBlob`). **090's owner should accept or revert them**; if reverted, 092 needs an equivalent API.
 - **Firm-visible**: Yes for the SPA channel, No for internal (`spec.FirmVisible = channel == Spa`).
 
+## 4a. Review fixes (adversarial review of `bbf9cd04e8`)
+
+- **F1 — a Pending scan no longer burns every delivery in seconds.** Before: Pending threw a transient failure, the processor abandoned the message with no delay, and the 5th delivery (`JobContract.MaxDeliveryCount`) failed the submission `processing_failed` within ~3–10 s, long before Defender could tag a fresh upload. Now `LoadUploadAsync` polls the scan within the delivery with backoff (`InvoiceSubmissionProcessingJobHandler.ScanWaits`: 5, 10, 15, 20 s then 30 s ×6 = **3 min 50 s**, `ScanWaitBudget`), inside the 10-minute message-lock renewal and the 20-minute submission lock. Still Pending after the budget: transient with **`ebilling.submission.file_scan_timeout`**; on the final delivery the submission is Failed with that code (≈19 minutes of scan patience in all). A verdict that arrives during the wait is read on the same delivery. `ScanDelay` is a test seam (`Task.Delay` in production).
+- **K6 hardening.** `StoredFileService.OpenStagedForProcessingAsync`: when a row already exists under the id, its purpose and parent must equal the request's, or the read is Missing (fail closed, no bytes read). A test now proves the PRODUCTION `InvoiceSubmissionAfterSteps` constructor wires the resume gate to `FlipUploadFileAsync` over the real file store.
+
+### Outcome codes this task adds (contract for 051 / 095 / word-add-in-r1)
+
+| Code | When | Submission | Invoice |
+|---|---|---|---|
+| `ebilling.submission.file_malicious` | Defender tagged the staged PDF Malicious | Failed (permanent, first delivery) | none |
+| `ebilling.submission.file_scan_timeout` | no scan verdict after every delivery's wait (~19 min) | Failed on the final delivery | none |
+| `ebilling.submission.file_unservable` | before commit: staged blob gone/unusable; after commit: definitive flip failure | Failed | none before commit; **kept** after commit (K2) |
+| `ebilling.submission.document_unavailable` (widened) | staged blob missing / hash mismatch; or a `sprk_document` that is not a 050a confirm | Failed | none |
+| `storage_not_configured` (HTTP 422, existing 044 error code) | file store not configured at intake | not created | none |
+
 ## 5. Known limits
 
 - **K1 — Uploaded invoices are not indexed.** `InvoiceIndexingJobHandler` is keyed by a `sprk_document`; an upload has none, so the after-step skips indexing (logged). Per D-44 (second half) the indexing step takes no bytes from a Stored File. Filed as DEF-047 (provisional id) / #2351. 050a confirms are still indexed.
-- **K2 — D-44: invoice PDFs leave the core record's Documents and the files index by design.** A firm or internal user no longer sees the uploaded invoice PDF in the matter's Documents grid or in document search; the invoice review page is its surface (110).
-- **K3 — After a definitive post-commit flip failure the invoice stays committed** (In Review or Rejected) with no totals, no Signals and no Decision Record, and the submission is Failed `file_unservable`. Recovery is an admin action (re-submit); the row stays Not yet servable for the detector.
+- **K2 — D-44: invoice PDFs leave the core record's Documents and the files index by design.** An internal user no longer sees the uploaded invoice PDF in the matter's Documents grid or in document search; the invoice review page is its surface (110). **The firm also loses its uploaded PDF from the SPA document list until 093's firm file route ships** (review K5).
+- **K3 — DEVIATION from model §9.1 step 5: a definitive post-commit flip failure keeps the invoice.** The contract says undo; 092 does not implement the undo. The invoice stays committed (In Review or Rejected) with no totals, Signals or Decision Record, the submission is Failed `file_unservable`, and the row stays Not yet servable for the detector. **Task 094 implements the §9.1 undo and has been told to apply it to the upload channel too.** Until then two consumers assume a Failed submission has no invoice and are wrong for this case:
+  - `src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs:969` answers "nothing to decide" for the Failed submission although its invoice exists;
+  - `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs:512` leaves Failed submissions out of the duplicate priors, so the kept invoice is not a prior for later duplicate checks.
 - **K4 — A staged blob with no row** (e.g. Malicious, or a job that was never processed) stays until `StoredFileReconcileJob` runs, which is disabled and stays disabled (hard rule).
 - **K5 — A Stored File create under a Secure core record is refused by Dataverse until 086's role row is live**; 079 deploys both.
 
@@ -79,11 +100,56 @@ Seeding proofs (each defect applied, the unit project rebuilt, the guarding test
 
 Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false`, deflate-compressed): master `1243eee69a` 36.86 MB; base `786d1ea17a` 37.68 MB; tip 37.68 MB (**+4.7 KB vs base**; +0.82 MB vs master is the rest of ebilling-r1). No package added.
 
+Review round (F1 / K6): new tests `Upload_PendingOnEveryDelivery_WaitsEachDelivery_ThenFailsFileScanTimeout` (all `MaxDeliveryCount` deliveries Pending), `Upload_ScanArrivesDuringTheWait_IsReadOnTheSameDelivery`, `Upload_AlreadyScanned_DoesNotWait`, `Upload_PendingScan_IsTransient` (tightened: full wait, `file_scan_timeout`), `OpenStaged_RowWithAnotherParentOrPurpose_IsMissing`, `OpenStaged_MatchingRow_ReturnsBytes`, `ProductionConstructor_WiresTheFlipGateToTheFileStore`. Seeding proofs: (SF1) the pre-fix behaviour restored (no wait, `processing_failed`) → 3 F1 tests fail, including the all-deliveries test; (SK6a) the purpose/parent check removed → the must-fire fails; (SK6b) the production constructor passes no gate → the wiring test fails. 5 failures, green after the revert. Gate: 5 test projects build; ArchTests 1553/1553; broad filter + StoredFile + job processor 9471 passed / 7 skipped / 0 failed.
+
 ## 9. Coordination
 
 - **095 (from-email, in progress on `task/ebill-095-from-email`)**: no textual conflict (merge-tree clean), but `SubmissionSnapshot.Read` now refuses any `sprk_document` that is not a 050a confirm with `document_unavailable`. If 095's submissions set `sprk_document` (e.g. the `.eml`), 095 must stage its marked PDF under the file store and leave `sprk_document` empty, or extend the snapshot rule.
 - **098** edits `InvoiceSubmissionContracts.cs` and `InvoiceSubmissionService.cs` (status view `InvoiceId`): merge-tree clean.
 - `work/ebilling-r1` has moved since the base (master merge, 118a): merge-tree clean.
+
+## 10. Port of the review fix onto work (2026-11-04, branch `task/ebilling-092` from `work/ebilling-r1` @ `dfcc9b7355`)
+
+**Why.** The 092 build (`7db7517c17`) reached `work/ebilling-r1` and master through 094 (which depends on it). Its review fix `3add11454c` (on `task/ebill-092-submission-files`) did not: its merge was held on the 086 ordinary-owner rule. So on `dfcc9b7355` the BFF never emitted `ebilling.submission.file_scan_timeout`, although `095-from-email-contract.md` §9 and word-add-in-r1's message map (`invoiceSubmissionMessages.ts:311`) promise it, and a Pending scan still burned every delivery in seconds (F1).
+
+**State of each acceptance criterion on this tip:**
+
+| AC | State | Where |
+|---|---|---|
+| 1 Intake stages once under ForUpload; no SPE, no document; compensation; a refusal stages nothing | Met (since `7db7517c17`) | `InvoiceSubmissionServiceTests` |
+| 2 One Stored File create in the commit transaction | Met. The owner is now EB-D-168a's (`InvoiceSubmissionPersister.StoredFileOwnerContext`: `ForRow(sprk_storedfile, core record)`), not the invoice's ForParents answer as in §1. The firm hold (095c-5) is set on the invoice in the same transaction. | `InvoiceSubmissionPersisterTests` |
+| 3 Flip before the first after-step; fault throws, resume flips first; definitive failure Failed `file_unservable` | Met, now through 094's `SubmissionCommitGate` (persister after the commit; `InvoiceSubmissionAfterSteps.ResumeAsync` first). **K3 above is superseded**: a definitive failure now undoes the commit (`Undone` / `UndoHeld`), so a Failed submission links no invoice and the `SubmissionOverrideService` / `BillingFactLoader` assumption holds. | `InvoiceSubmissionAfterStepsTests`, `InvoiceSubmissionPersisterTests` |
+| 4 Extraction reads the staged bytes; Pending retries; Malicious / Missing | Met; **this port adds the scan wait and `file_scan_timeout`** (F1) | `InvoiceSubmissionProcessingJobHandlerTests` |
+| 5 `/review` returns `invoicePdfFileId` / null | Met (since `7db7517c17`) | `InvoiceReviewReadServiceTests` |
+| 6 028 keys | `Finance:EbillingOutputContainerId` retired. `Finance:ProcedureLibraryContainerId` and its three readers stay: the §6 escalation was answered by the owner as **EB-D-163 → task 124** (after 116), so no new 🔔 is raised. | `FinanceContainerIdOptionsTests`, `SpeAppOnlyContainerIsolationTests`, `RefileFileRelocationTests` |
+
+**What the port changes** (cherry-pick of `3add11454c`, three conflicts resolved):
+
+- `InvoiceSubmissionProcessingJobHandler.cs`: `ScanWaits` / `ScanWaitBudget` / `ScanDelay` and the wait loop in `LoadUploadAsync`; still Pending after the budget → transient `file_scan_timeout`, Failed with it on the final delivery (`TransientAsync`, unchanged). Class remarks: kept 094's text, with the Pending sentence updated. Verified unchanged on this tip: `JobContract.MaxDeliveryCount = 5`, `ServiceBusJobProcessor` `MaxAutoLockRenewalDuration = 10 min`, `LockDuration = 20 min`.
+- `SubmissionReasonCodes.cs`: `FileScanTimeout`.
+- `StoredFileService.cs`: K6, `OpenStagedForProcessingAsync` answers Missing when a row under the id has another purpose or parent.
+- Tests: the handler rig records `ScanDelay` (merged next to 094's `Gate` argument); 4 handler tests and 2 `StoredFileServiceTests`.
+- **Not ported: `ProductionConstructor_WiresTheFlipGateToTheFileStore`.** 094 replaced the optional `makeUploadServable` seam with a required `SubmissionCommitGate` constructor argument, and `Constructor_WithoutACommitGate_Throws` (094 fix round K6) already proves that no constructor defaults the gate to passed. The test's constructor shape no longer exists. The §2 row for the `makeUploadServable` seam is historical for the same reason.
+- No `InvoiceSubmissionPersister.cs` hunk (082 and 095d edit it in parallel). `Ebilling:StoredFileReconcileEnabled` untouched (stays `false`).
+
+**Known limit (K2, fails safe; corrected after the adversarial review, 2026-11-04).** The scan wait (up to 3 min 50 s) shares the 10-minute message-lock renewal with the extraction, whose own ceiling is `ContentUnderstanding:OperationTimeoutSeconds` (default 600 s). A delivery that runs past the renewal plus the 5-minute queue lock loses its message lock, and the broker redelivers. The redelivery carries the same `JobId`, and `IdempotencyService` lets the same owner take back a submission lock older than 1 minute (`OwnerTakeoverAge`). `ProcessMessageEventArgs.CancellationToken` is not cancelled on lock loss (SDK 7.20.2), so the first run keeps going while the redelivery runs: a second extraction (double AI spend), and after-steps (`ResumeAsync`) running alongside the first run's `RunAsync` after-steps. There is no double commit: the invoice id is deterministic (`InvoiceIdFor`) and the submission update is `IfRowVersionMatches` inside one transaction (`InvoiceSubmissionPersister.cs` ~:697-714). The after-steps and the sink are idempotent. One delivery is spent. When the first run finishes, its `finally` releases the shared-owner lock.
+
+**Class check (step 9.5 rule 6).** `StoredFileProcessingOutcome.Pending` has one consumer in production (`LoadUploadAsync`); `OpenStagedForProcessingAsync` / `OpenForProcessingAsync` have no other caller. The from-email path DOES reach the wait: its Invoice part is staged under `StoredFileIds.ForUpload` (`FromEmailSubmissionContracts.cs` ~:359-361) with no document id, so `FileSource` is `Upload` (`SubmissionEvaluationOutcome.cs` ~:212) and it goes through `LoadUploadAsync`; that is why word-add-in maps the code (correction K4, adversarial review 2026-11-04). The Submit Invoice path does not read a scan verdict in the job.
+
+**Further known limits (adversarial review, 2026-11-04; no F).**
+- **K1, shared processor slot.** The poll holds a `ServiceBusJobProcessor` slot for up to 3 min 50 s per delivery. Every `IJobHandler` shares one queue (`MaxConcurrentCalls` 5 by default), so five slow scans can delay all other jobs by up to ~4 min per round. It is worse when Defender is off on the storage account while `MalwareScanningEnabled=true`. Later option: abandon with a scheduled redelivery instead of polling in the handler.
+- **K3, a scan that never gives a verdict.** "Error", "Not scanned" and SAM-code tags classify as `Pending`, so they poll for the full budget and end Failed `file_scan_timeout`. This fails closed (it never proceeds without Clean). Optional: log the raw tag on the final delivery.
+
+**Fail-before proof.** With `StoredFileService.cs` at `dfcc9b7355` and the wait loop and code reverted in the handler (seam kept so the tests compile): 4 of the 6 new or tightened tests fail (`Upload_PendingOnEveryDelivery…`, `Upload_ScanArrivesDuringTheWait…`, `Upload_PendingScan_IsTransient`, `OpenStaged_RowWithAnotherParentOrPurpose_IsMissing`); the 2 must-not-fire tests pass. All 6 pass after the restore.
+
+**Gate (tip `ad1b634365`).**
+- BFF and test projects build with 0 warnings.
+- ArchTests: 2003/2003.
+- Touched areas (StoredFile, InvoiceSubmissionProcessing, InvoiceSubmissionPersister, AfterSteps, InvoiceSubmissionService, InvoiceReviewReadService, FinanceContainerIdOptions, FileIndexingService): 999/999.
+- Full unit project (`Category!=Flaky`): 39,613 passed / 533 failed / 28 skipped (2 h 40 m) under heavy machine load from concurrent sessions' test runs. 531 of the failures were TestServer `TaskCanceledException` / "client aborted the request" timeouts (3–7 min each) in HTTP contract and seam classes. The other two were `ComposeFidelityGateHarnessTests` (`alternate-content-duplicate-paraid.docx`) and `ContainerCreationStampContractTests.ProvisioningCreate_WhenTheBindTimesOut…`.
+- Every failing class (189, run in 5 batches) re-run in isolation on this tip: 8,467 passed / 0 failed, including both non-timeout ones (86/86 on their own). None of them reference the changed files.
+
+**Publish size.** `dotnet publish -c Release -r linux-x64 --self-contained false`, deflate-compressed: fresh master `0d4aa87ee0` 38.326 MB; base `dfcc9b7355` 38.420 MB; tip 38.424 MB. That is **+3.8 KB vs base** (`Sprk.Bff.Api.dll` +2.5 KB), and +0.098 MB vs master, which is the rest of ebilling-r1. No package added.
 
 ## 8. Live steps (none done here)
 

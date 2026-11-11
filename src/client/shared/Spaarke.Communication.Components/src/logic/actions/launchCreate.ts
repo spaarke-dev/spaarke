@@ -1,8 +1,12 @@
 /**
  * launchCreate — the SINGLE launch seam for the "create from this email" actions
- * (Create Event / Create To Do / Link Invoice) on the CommunicationActions bar.
+ * (Create Event / Create To Do) on the CommunicationActions bar.
  *
- * UAT R3 C11-3 (owner decision): these three actions previously navigated to a new
+ * ebilling-r1 task 118: the 'invoice' kind is GONE. It opened the standard sprk_invoice form, a client-side create
+ * that ADR-002 forbids (no Stored File, no all-or-nothing steps, no submission record). "Submit Invoice" replaces it
+ * and runs the shared `SubmitInvoiceFromEmail` flow, which calls the BFF's from-document route.
+ *
+ * UAT R3 C11-3 (owner decision): these actions previously navigated to a new
  * page / quick-create pane. They must now open as a MODAL. Per
  * `docs/standards/MODAL-DECISION-CRITERIA.md` (Two-Layout Standard, Layout 1) the
  * sanctioned default for opening a Dataverse record/create form as a modal from a
@@ -26,8 +30,8 @@ import { getXrm } from '@spaarke/ui-components';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type XrmNavigateTo = (pageInput: any, navigationOptions: any) => Promise<unknown>;
 
-/** The three "create from this email" flows the action bar exposes. */
-export type CreateKind = 'event' | 'todo' | 'invoice';
+/** The "create from this email" flows the action bar exposes. */
+export type CreateKind = 'event' | 'todo';
 
 export interface CreateLaunchTarget {
   /** Dataverse entity logical name of the create form to open. */
@@ -38,13 +42,12 @@ export interface CreateLaunchTarget {
 
 /**
  * kind → target-entity + dialog title. Mirrors the entity mapping the prior
- * navigation used (event → sprk_event, todo → sprk_todo, invoice → sprk_invoice),
- * so the record/context target is preserved through the modal launch.
+ * navigation used (event → sprk_event, todo → sprk_todo), so the record/context
+ * target is preserved through the modal launch.
  */
 export const CREATE_LAUNCH_TARGETS: Record<CreateKind, CreateLaunchTarget> = {
   event: { entityName: 'sprk_event', title: 'Create Event' },
   todo: { entityName: 'sprk_todo', title: 'Create To Do' },
-  invoice: { entityName: 'sprk_invoice', title: 'Link Invoice' },
 };
 
 export interface LaunchCreateOptions {

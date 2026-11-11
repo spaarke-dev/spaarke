@@ -193,8 +193,15 @@ public class RecordTableRulesTests
     {
         // Task 014 (ebilling-r1's review of 013, item 3): InvoiceFamilyCoreRecordGuard.CoreRecordLookups on work/ebilling-r1
         // (TypedMatterProjectPlusRegardingWorkAssignment) — a row names exactly ONE core record, the caller's.
-        RecordTableRules.Get(table).MappingProtectedColumns
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+        // ebilling-r1 082c-2 (uac-r2 2026-11-04): sprk_invoice also protects its review detail, which only typed BFF writers derive.
+        string[] expected = table == "sprk_invoice"
+            ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail",
+                // ebilling-r1 task 166 fix round (EB-D-200): the billed total and the five derived totals, written only by typed finance writers.
+                "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+                // ebilling-r1 task 165d (EB-D-207): the AP export claim, set and cleared only by AP export.
+                "sprk_billingexport"]
+            : ["sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
+        RecordTableRules.Get(table).MappingProtectedColumns.Should().BeEquivalentTo(expected);
         RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");
     }
 
@@ -218,7 +225,9 @@ public class RecordTableRulesTests
                 // #2515: the event's platform number (EVT-{SEQNUM:6}).
                 "sprk_event",
                 // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
-                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
+                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
+                // ebilling-r1 DEF-061: the Procedure Version's publish stamp, written only by ProcedureService.
+                "sprk_procedureversion");
     }
 
     // ── Task 017 (coordinator item 8): every invoice-family table's core lookups are mapping-protected ───────────────
@@ -303,6 +312,24 @@ public class RecordTableRulesTests
     {
         RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
             .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+    }
+
+    [Fact]
+    public void GenericCreateRefused_IsTheWriterOnlyTables_PlusTheInvoiceLine_WhoseCreateAloneIsRefused()
+    {
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create is refused; its update and delete are not.
+        // ebilling-r1 DEF-061: and a Procedure Version, which only ProcedureService creates (registered for its writer-only publish stamp).
+        RecordTableRules.All.Where(r => r.GenericCreateOnlyRefused).Select(r => r.Table).Should().Equal("sprk_billingevent", "sprk_procedureversion");
+        RecordTableRules.All.Where(r => r.GenericCreateRefused).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_billingevent", "sprk_procedureversion");
+
+        var line = RecordTableRules.Get("sprk_billingevent");
+        line.CreatedOnlyByItsWriter.Should().BeFalse("the update and delete refusals read this flag alone");
+        RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull("D-96 updates a line generically");
+        RecordTableRules.RefuseWriterOnlyTableDelete("sprk_billingevent").Should().BeNull("delete is unchanged");
+        // The rest of the line's entry is as before.
+        line.PreWriteRules.Should().NotBeEmpty();
+        line.MappingApplies.Should().BeTrue();
     }
 
     [Theory]

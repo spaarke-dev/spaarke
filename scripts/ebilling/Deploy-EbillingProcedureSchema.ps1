@@ -163,6 +163,8 @@ $DryRun = [bool]$WhatIfPreference
 $DevUrl = 'https://spaarkedev1.crm.dynamics.com'
 # `pwsh -File` passes a comma list as ONE string: split it.
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Keeps the ontology writer's business unit's default team out of the reader profile (ebilling-r1; the helper is customer-provisioning-orchestration-r1 task 267's).
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 
 # ---------------------------------------------------------------------------------------------------------------
 # Constants
@@ -736,8 +738,14 @@ function Get-ProfileByName([string]$Name) {
 # Preconditions of the profile pair. A failure stops the script (escalation) in every mode: nothing is written.
 function Test-ProfilePreconditions {
     $problems = [System.Collections.Generic.List[string]]::new()
-    $defaultTeams = @((Invoke-Dv "teams?`$select=teamid,name&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value |
-            Where-Object { -not $_.businessunitid.isdisabled })
+    $allDefaultTeams = @((Invoke-Dv "teams?`$select=teamid,name,_businessunitid_value&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value)
+    # The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is never added to or expected on the reader profile.
+    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $State.ApiBase -Headers $dvHeaders -DefaultTeams $allDefaultTeams
+    $writerUnitTeams = @($split.WriterUnitTeams)
+    $defaultTeams = @($split.ReaderTeams | Where-Object { -not $_.businessunitid.isdisabled })
+    $leftOut = if ($writerUnitTeams.Count) { (($writerUnitTeams | ForEach-Object { "'$($_.name)'" }) -join ', ') } else { 'none' }
+    Write-Report 'INFO' "ontology writer business unit: default team left out of the reader profile: $leftOut"
     if ($defaultTeams.Count -eq 0) { $problems.Add('no business-unit default team was read - the query is wrong') }
 
     $readers = Get-ProfileByName $ReaderProfileName
@@ -745,12 +753,15 @@ function Test-ProfilePreconditions {
     elseif ($readers.Count -eq 1) {
         $script:ReaderId = $readers[0].fieldsecurityprofileid
         $onReader = @((Invoke-Dv "fieldsecurityprofiles($($script:ReaderId))/teamprofiles_association?`$select=teamid,name").value | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
+        foreach ($w in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $State.ApiBase -Headers $dvHeaders -ProfileId $script:ReaderId -WriterUnitTeams $writerUnitTeams)) {
+            $problems.Add("the ontology writer business unit's default team '$($w.name)' holds '$ReaderProfileName' - it must hold no field-security profile. Removing it is a team change (the owner's); this script never removes a member from a profile")
+        }
         foreach ($t in $defaultTeams) {
             if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Write-Report 'OK' "reader profile '$ReaderProfileName' is on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
             else { $problems.Add("default team '$($t.name)' (BU '$($t.businessunitid.name)') is NOT on '$ReaderProfileName': its users would read the P9 columns EMPTY. Adding a team is a team change (the owner's / uac-r2's); this script never adds a member to an existing profile") }
         }
     }
-    elseif ($CreateProfiles) { $script:ProfilesToCreate.Add($ReaderProfileName); Write-Report 'WOULD' "create reader profile '$ReaderProfileName' and add every business unit default team ($($defaultTeams.Count))" }
+    elseif ($CreateProfiles) { $script:ProfilesToCreate.Add($ReaderProfileName); Write-Report 'WOULD' "create reader profile '$ReaderProfileName' and add every business unit default team ($($defaultTeams.Count): $((($defaultTeams | ForEach-Object { "'$($_.name)'" }) -join ', '))); left out (ontology writer business unit): $leftOut" }
     else { $problems.Add("reader profile '$ReaderProfileName' does not exist (uac-r2 creates it). Pass -CreateProfiles to create it here") }
 
     $bffUsers = @()
