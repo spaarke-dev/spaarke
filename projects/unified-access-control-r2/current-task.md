@@ -32,6 +32,12 @@
 - **ontology 177 (#2666): APPROVED at `8382047421`** (F-177-R2-1 fixed: on-demand embed feeds verified `linkedDocument` ids into the narrowing). R1 known limit (environment without the access columns) + deploy-note line in the PR body. Ontology merges on green after merge-tree.
 - **provisioning #2618 (task 267):** my `SecureFlagFieldSecurityAssertion.cs` clause 2 would flag the new memberless "Spaarke Ontology Writer" BU team. Provisioning is fixing it IN THEIR BRANCH per my 5 points (exempt that one team; reverse finding WRITER UNIT READS; exactly one such unit; 4 Evaluate tests; comment). Review their commit when sent.
 - **ebilling batch: APPROVED** at `017a965312` (130-0, 130-0b, 130a/b, 130c, 130d, F3b; the `WorkforceRoleCeilingGate.cs` union is right; housekeeping OK; nit: `ExternalGrantLifecycle.cs:444` spacing, which will fail the Tier 1 format check). Ships WITHOUT 116. Path: ebilling opens a PR to master → merge on green → **I** coordinate the dev deploy with mcp-r1 (dev runs the spike `755987b385`, which master lacks) and ask the owner for the go here.
+- **ebilling 116, condition 1 REVISED:** the draft owner team "Restricted Content Owners" is memberless by contract, so a per-row Write check could never pass.
+  - **Replacement (accepted):** reject-equivalent rights, checked as the caller: `DecideRule()` + Read on the set (404) + Write on the Procedure, for every distinct set or Procedure involved. All of it before any read or write; then the deactivation runs app-only.
+  - **Tests I asked for:** one with a realistic double where row Write is refused, plus the three negative tests.
+  - **Withdrawn:** my additions 1 and 2. Addition 3 stands (a failed queue returns 503, and a retry is proven).
+  - Local-depth Write is still rejected.
+  - ebilling puts it to the owner as a refinement of EB-D-216, then runs round 5. I review round 5 after its re-check.
 - **ebilling 116:** the owner chose (c) = **EB-D-216**, with my five conditions binding. Round 3 (`cf323d251f`) fixed the four round-2 items. Round 4 (`task/ebilling-116-c`) is running: it removes the round-2 table-level Delete checks. When round 4's re-check is done, ebilling sends me the 116 diff for rounds 2–4, plus the condition-5 role-depth finding privately. My checks on that diff: a redraft is all or nothing, with a per-row Write check as the user; and a test that an inactive draft is hidden from `/draft` and refused by publish.
 - **Still to review:** ebilling 116 fix round 2; the DEF-060 build diff; R4's #2269 and FR reviews. Waiting on ontology's 176 smoke (needs the owner to send one Budget inquiry).
 - **ontology 176 (D-216): DONE.** Rounds 2 (`73b7bb7787..3e89e7e8e3`) and 3 (`..bbeb1cfcd3`: R3-1 test, R3-2 Console reply puts the primary first so the footer signs the inquiry) approved. Merged to master as #2660 `26d135bc8f`; on dev in `755987b385`. Ontology runs the 176 smoke and sends the triple. Ks: K5, K8 (DI-147), K9.
@@ -40,7 +46,15 @@
 - **R4 (spa-r4):** #2270/#2278 moved to me; owner decision already (a) customer-BU column. R4 routes #2269 and FR-08/18/24/28/31 reviews + BFF deploys through me.
 - **fm outbound Direct create routing:** the owner's decision in fm's session; I review it.
 
+## WRAP-UP (owner 2026-11-11: "please proceed so we can wrap this up")
+- **Merged:** 198b as `c398d2cecd` (#2677), and #2669 as `a7d7aad31f` (#2679). Worktrees `C:\wt198b` and `C:\wt188t` were removed. #2678 was filed.
+- **Audit of the open tasks:** every code item is merged and on dev, except the 198 chain. What is left is owner UAT, owner decisions, and 090.
+- **Owner table:** `notes/wrap-up-uat-and-decisions-2026-11-11.md` (D-1..D-12, U-1..U-11). Waiting on the owner's answers. Private item P-1 (dev app user named "...-prod" holding System Administrator in the root BU) was raised in chat only.
+- **Deploy order (D-2):** master now carries 198, so 054b must come before any dev deploy from master. I asked fm to confirm, and whether 054b is ready.
+- **Next:** on the owner's D-1, run 090 through task-execute: reconcile the index, defer disposition, test-diet, H-8a, docs for 058/082/087/089, lessons learned, README Complete.
+
 ## Open owner items
+- **Owner (2026-11-11):** a full code review of unified access control runs AFTER this project completes, i.e. after 090. Tell the owner when 090 closes.
 - Private: one dev identity-hygiene question (in the handoff).
 - To report: the 130-0 F1-2 trade-off (known limit).
 - #2270/#2278 design (customer-BU column).
