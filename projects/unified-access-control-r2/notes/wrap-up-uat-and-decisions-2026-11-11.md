@@ -21,6 +21,13 @@ The steps for each test are in [`owner-hands-on-checklist-2026-10-08.md`](owner-
 | D-11 | 166 (f): a non-admin without Create | (a) a live test with such a user; (b) accept the tests as proof | **(b).** Server tests cover it, and it is a UI-only negative |
 | D-12 | ebilling task 116, condition 1, revised: a redraft uses the same rights a reject needs, checked as the user; then the app writes. No role or team change | (a) accept; (b) give admins Local-depth Write on the rule tables | **(a).** (b) widens Write to published rule versions across the unit through the form. ebilling is putting this to you |
 
+**Added 2026-11-11 by task 090, after "Accept all": D-13 and D-14 are NOT covered by that answer. Both await the owner's answer; nothing below is decided.**
+
+| # | Decision | Options | Recommendation |
+|---|---|---|---|
+| D-13 | #2179 / task 191: flagged-external systemusers reach internal-only records through direct Dataverse access | (a) build it in uac-r2 now (design study first; reverses the round-77 accepted gap); (b) carry it to uac-secure-project-r3, with the round-77 gap staying recorded as accepted until then | **(b)**, because it is a Dataverse role and field-security redesign, not a fix, and the gap is documented and accepted. **Awaiting the owner's answer** |
+| D-14 | #2338 / task 193: Manage Access gets one "Add person" entry and a server-side share-or-grant decision | (a) build it in uac-r2; (b) carry it to the follow-on | **(b)**, because it is a usability feature with no exposure. **Awaiting the owner's answer** |
+
 ## B. Owner tests (UAT)
 
 | # | Area (task) | What to check | Where |
@@ -36,6 +43,7 @@ The steps for each test are in [`owner-hands-on-checklist-2026-10-08.md`](owner-
 | U-9 | Workforce sign-in binding (141 G-7/G-8, 013) | First sign-in with a home-directory account, then registration; a second sign-in binds to the same contact; no email-based hijack | `task-141-identity-binding.md:346-347` |
 | U-10 | Remaining form checks (162, 163, 164, 166, 171 J1, 137, 157, 105, 067, 173, 175, 180, 185, 187) | As listed per task | CL §2, §4, §6, §8–§13 |
 | U-11 | Direct 1:1 messages (198, after the D-2 deploy) | Send a 1:1 message: both people see it, nobody else does. File it on a record: both keep access. File it on a secure record: Secure rules apply. Unfile: back to the pair only | — (198 notes §7) |
+| U-12 | Workforce contact intake and licensed-user sign-in (186 checks 3 and 6; added by task 090) | Check 3: a workforce contact submits an intake, which is accepted. Check 6: a licensed user signs in to the SPA through the stored link and still resolves as a systemuser | `batch7-live-gates-2026-10-17.md` §"Task 186 live gate (2026-10-20)" |
 
 ## C. Agent work left (no owner input needed)
 

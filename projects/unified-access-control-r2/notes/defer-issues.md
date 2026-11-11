@@ -1550,8 +1550,8 @@ its own.
 
 The project-close reconciliation of this register against the labelled GitHub issues is
 [`defer-disposition-2026-11-11.md`](defer-disposition-2026-11-11.md): one row per labelled issue (open and
-closed), the hand-off list the owner confirms in one batch, close candidates, and the issues that stay with
-tasks 186, 191, 193 and 194. Entries below this line and above are superseded by that table where they differ.
+closed), the hand-off list the owner confirms in one batch, the two close candidates (#1830 and #1014, both closed 2026-11-11), and the issues that stay with
+tasks 191, 193 and 194 (186 closed under round 90; #2393 stays open for the Workforce role export). Entries below this line and above are superseded by that table where they differ.
 
 - **#1304** (DEF-004, task 089) was closed 2026-10-16 as "not planned" — folded into #1303 (see the FUTURE
   table above). Deliberate; not reopened. Task 089 stays deferred under #1303.

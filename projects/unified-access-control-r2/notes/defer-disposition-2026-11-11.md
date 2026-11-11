@@ -12,6 +12,8 @@ Rule applied (owner, 2026-09-15): an entry leaves this project only if it is not
 | #2203 | **Commented** (D-7, roadmap), kept open. No `roadmap` label exists in the repo, so none was added |
 | #2245 | **Commented** (D-4, follow-on; design: bind readers to the locked copies), kept open |
 | #2270, #2278 | **Commented** (D-6, follow-on secure-family project), kept open. Both are labelled for SPA-r3, not this project |
+| #1830, #1014 | **Closed** with a one-line comment after the main session's ruling (#1830: fixed by task 192, deployed, gate passed; #1014: ADR-038 now has a single A2). They were close candidates in section 3 |
+| #2329 | **Commented** with two findings: `ExternalCallerContext` appears to have no production consumer (likely dead code), and the Contact `Entity.xml` description still names the deleted `ExternalCallerAuthorizationFilter`. Neither is changed here |
 | #1304 | **Not reopened.** Closed 2026-10-16 as "not planned" with the comment "Folded into #1303. Attestation tests and docs belong with replay itself." The register's 2026-10-16 FUTURE table records the same ("#1303 (absorbs #1304)"). Task 089 stays `[deferred]`; its tracking issue is now #1303 |
 
 Fix-now decisions: #2033 (D-3: refuse the send for a user disabled in Dataverse; the issue has no project label, so it is not in the tables below) and #2250 (D-5, in section 1). Both fixes run outside 090.
@@ -36,21 +38,21 @@ Fix-now decisions: #2033 (D-3: refuse the send for a user disabled in Dataverse;
 | #2397 | Core User linking ratchet misses data-driven @odata.bind targets | open | Carry: Core User linking ratchet misses runtime-built @odata.bind targets (guard gap) | uac follow-on |
 | #2396 | Report Card wizard cannot save for a Spaarke Core User | open | Carry: Report Card wizard cannot save for a Core User (role privilege) | uac follow-on (roles) |
 | #2395 | Child-record refusal detail names the privilege | open | Carry: child-record refusal detail names the privilege (cosmetic) | uac follow-on |
-| #2393 | Role 'Spaarke Internal Contact User (Workforce)' exists on dev with no role XML in the repo | open | Open with task 186: the Workforce role exists on dev with no role XML in the repo | uac-r2 task 186 (not in D-1; owner disposition needed) |
+| #2393 | Role 'Spaarke Internal Contact User (Workforce)' exists on dev with no role XML in the repo | open | Open with task 186: the Workforce role exists on dev with no role XML in the repo | uac-r2 task 186 closed under round 90; the role export into SpaarkeMaster is a follow-up (section 4) |
 | #2389 | UAC: guard that every caller-scoped Dataverse read stamps the caller, and confirm it live wi... | open | Carry: guard that every caller-scoped Dataverse read stamps the caller | uac follow-on |
 | #2381 | K4: An undetermined Signal or Decision Record blocks its root's Unsecure. | open | Known limit (194b K4): an undetermined Signal or Decision Record blocks its root's Unsecure; fails closed | uac follow-on |
 | #2380 | K-c: `RecordCreationService` Repair has no live caller. | open | Hand-off (194b K-c): RecordCreationService Repair has no live caller; field-mapping decides | field-mapping-server-write-path-r1 |
 | #2379 | K-b: The ordinary-moves time slice does not bound a single root's walk. | open | Known limit (194b K-b): the ordinary-moves time slice does not bound one root's walk | uac follow-on |
 | #2378 | K-a: Undetermined rows from bad data block their own root's Unsecure. | open | Known limit (194b K-a): undetermined rows from bad data block their own root's Unsecure; fails closed | uac follow-on |
-| #2377 | /invite-and-grant: an internal user's email with no active contact still gets a CIAM invite | open | Open with task 193 (review finding): an internal user's email with no active contact still gets a CIAM invite | uac-r2 task 193 (not in D-1; owner disposition needed) |
+| #2377 | /invite-and-grant: an internal user's email with no active contact still gets a CIAM invite | open | Open with task 193 (review finding): an internal user's email with no active contact still gets a CIAM invite | uac-r2 task 193 (D-14, awaiting the owner) |
 | #2371 | Granting access to an inactive contact: /grant writes a dormant row, the contact-side route ... | open | Carry: owner to choose one rule for granting to an inactive contact (/grant vs contact-side route) | uac follow-on (owner decision) |
-| #2369 | read_query and semantic search: base completeness and labels on the caller-visible result se... | open | Open with task 191: read_query and semantic search completeness on the caller-visible set | uac-r2 task 191 (not in D-1; owner disposition needed) |
-| #2368 | Unsecure and ordinary creates fail on tables no default team can read (stored file, procedur... | open | Open with task 194 (194b built fix option (a)); verify against 194b and close or carry | uac-r2 task 194 (not in D-1; owner disposition needed) |
+| #2369 | read_query and semantic search: base completeness and labels on the caller-visible result se... | open | Open with task 191: read_query and semantic search completeness on the caller-visible set | uac-r2 task 191 (D-13, awaiting the owner) |
+| #2368 | Unsecure and ordinary creates fail on tables no default team can read (stored file, procedur... | open | Open with task 194 (194b built fix option (a)); verify against 194b and close or carry | uac-r2 task 194 (open for its post-194b report-only gate) |
 | #2362 | Record family entity (sprk_securefamily): deferred to roadmap, with triggers and build-later... | open | Roadmap (owner round 130): sprk_securefamily not built now; issue tracks triggers | roadmap |
 | #2348 | sprk_invoicelineitem: add to the Secure family (lineage + role set) when the table is deployed | open | Carry: add sprk_invoicelineitem to the Secure family when the table is deployed (trigger) | uac follow-on, with ebilling-r1 |
 | #2343 | Legacy sprk_securitybu: a matter created from a business unit's Matters view cannot be made ... | open | Carry: legacy sprk_securitybu system attribute map blocks Make Secure on matters created from a BU view | uac follow-on (proposed: uac-secure-project-r3) |
-| #2341 | Grant rows do not follow an ordinary record moved to another business unit | open | Open with task 194: grant rows do not follow an ordinary record moved to another BU | uac-r2 task 194 (not in D-1; owner disposition needed) |
-| #2338 | Manage Access: one 'add person' entry; the server shares with a contact's internal user inst... | open | Open with task 193 (its tracking issue): one Add person entry in Manage Access | uac-r2 task 193 (not in D-1; owner disposition needed) |
+| #2341 | Grant rows do not follow an ordinary record moved to another business unit | open | Open with task 194: grant rows do not follow an ordinary record moved to another BU | uac-r2 task 194 (open for its post-194b report-only gate) |
+| #2338 | Manage Access: one 'add person' entry; the server shares with a contact's internal user inst... | open | Open with task 193 (its tracking issue): one Add person entry in Manage Access | uac-r2 task 193 (D-14, awaiting the owner) |
 | #2337 | Close matter and close work assignment: end every grant, as close-project does for projects | open | Carry: close matter and close work assignment should end every grant, as close-project does | uac follow-on |
 | #2332 | BFF application user: reduce the System Administrator role to least privilege | open | Carry: BFF application user holds System Administrator; reduce to least privilege | uac follow-on or spaarke-auth (owner to confirm) |
 | #2329 | Stale UAC code comments: grant-table Create privilege, organization standing grant | open | Carry: two stale UAC code comments (comment-only) | uac follow-on |
@@ -74,16 +76,16 @@ Fix-now decisions: #2033 (D-3: refuse the send for a user disabled in Dataverse;
 | #2204 | uac-r2 #2159 residual: a late-committing re-point after a definite refusal can leave the row... | open | Known limit: late re-point after a definite refusal; fails closed (404) | uac follow-on |
 | #2203 | [uac-r2] sprk_agreement becomes a core record (root, or child of a matter/project): UAC mode... | open | Roadmap (owner D-7); commented 2026-11-11; kept open (no roadmap label exists) | roadmap |
 | #2202 | [uac-r2] Relocation pointer write is not row-version conditional: a checkout landing between... | open | Known limit: relocation pointer write not row-version conditional; narrow race toward a refused stale pointer | uac follow-on |
-| #2201 | [uac-r2] Office edit-open gives a flagged-external caller writer on the whole secure contain... | open | Open with task 191: Office edit-open gives a flagged-external caller writer on the whole secure container | uac-r2 task 191 (not in D-1; owner disposition needed) |
+| #2201 | [uac-r2] Office edit-open gives a flagged-external caller writer on the whole secure contain... | open | Open with task 191: Office edit-open gives a flagged-external caller writer on the whole secure container | uac-r2 task 191 (D-13, awaiting the owner) |
 | #2196 | uac-r2 operator check: who holds Data Owner on the sdap-jobs Service Bus namespace | open | Operator question: who holds Data Owner on the sdap-jobs Service Bus namespace (not code) | platform operator |
 | #2195 | uac-r2 K2: a crash between the re-file write and the F3 release record/enqueue loses the rel... | open | Known limit (K2): crash between re-file write and F3 release record; record stays held | uac follow-on |
 | #2194 | uac-r2 K2: relocation copies kept after a pointer write of unknown outcome are only logged | open | Known limit (K2): relocation copies kept after an unknown-outcome pointer write are only logged; unreachable | uac follow-on |
 | #2193 | uac-r2 K1: queued F3 release retry does not re-check the release permission at run time | open | Known limit (K1): queued F3 release retry does not re-check permission; runs only after a permitted re-file | uac follow-on |
-| #2125 | [ISS-014] spaarke.grid_overview lists internal-only and Private-thread communications to cal... | open | Open with task 191: grid_overview lists internal-only communications to flagged-external callers | uac-r2 task 191 (not in D-1; owner disposition needed) |
+| #2125 | [ISS-014] spaarke.grid_overview lists internal-only and Private-thread communications to cal... | open | Open with task 191: grid_overview lists internal-only communications to flagged-external callers | uac-r2 task 191 (D-13, awaiting the owner) |
 | #2047 | Invoice-line storage: read sprk_invoice as a carrier before any upload route accepts invoice... | open | Carry (latent): invoice-line storage must read sprk_invoice as a carrier before any upload route accepts lines (trigger) | uac follow-on, with ebilling-r1 |
 | #2028 | Shared Graph handler retries every non-idempotent POST on 5xx/408/transport faults (duplicat... | open | Known limit: shared Graph handler retries non-idempotent POSTs; SPE create opted out (#2024); none is an access decision | BFF platform (no confirmed project) |
-| #1864 | [ISS-010] Internal Only is enforced by BFF reads, not by Dataverse security (licensed users ... | open | Open with task 191 (expected real fix): Internal Only enforced by BFF reads, not Dataverse security | uac-r2 task 191 (not in D-1; owner disposition needed) |
-| #1830 | [ISS-006] Dev: SPE JIT-grant revocation sweep fails every 5 min (Graph 'Invalid hostname for... | open | Done by task 192 (#2268, deployed 1fa0cf5cb8 2026-10-23, server gate PASS); issue still open | close candidate (owner confirm) |
+| #1864 | [ISS-010] Internal Only is enforced by BFF reads, not by Dataverse security (licensed users ... | open | Open with task 191 (expected real fix): Internal Only enforced by BFF reads, not Dataverse security | uac-r2 task 191 (D-13, awaiting the owner) |
+| #1830 | [ISS-006] Dev: SPE JIT-grant revocation sweep fails every 5 min (Graph 'Invalid hostname for... | open | Done by task 192 (#2268, deployed 1fa0cf5cb8 2026-10-23, server gate PASS) | **closed 2026-11-11** (section 0) |
 | #1735 | SPE container create: a caller cancel during the create POST can strand a live, unbound, unm... | open | Create-POST site closed by #2024; orphan sweep FUTURE with #1313 | uac follow-on (orphan sweep); SpeAdmin site to sdap-SPE-admin-app-r2 |
 | #1574 | [ISS-017] BFF auth pipeline hardening: agent filter checks no audience; one Admin role unloc... | open | Hand-off (register 2026-10-16): BFF auth pipeline hardening | spaarke-auth-system-of-record-r1 |
 | #1564 | [ISS-009] sprk_isexternal has no write path, and Set-ExternalFlagForB2BGuests.ps1 would mark... | open | Hand-off: sprk_isexternal has no write path (routed to uac-r2 plus a future user-admin app); related to task 191 | future user-admin app / uac follow-on (owner to confirm) |
@@ -94,7 +96,7 @@ Fix-now decisions: #2033 (D-3: refuse the send for a user disabled in Dataverse;
 | #1305 | [uac-r2 deferred] 094 — Upload collision: ask before the bytes move (pre-flight probe) + "Us... | open | Deferred to a new project (owner round 59): task 094 | new project (unassigned) |
 | #1303 | [uac-r2 deferred] 088 — Evaluator versioning + point-in-time access replay (FR-32 read half) | open | Deferred to a new project (owner round 59): tasks 088 + 089 (absorbs #1304); FR-32 replay known gap | new project (unassigned) |
 | #1072 | [uac-r2 deferred] 056 — Contacts cannot see a matter's or work assignment's events, communic... | open | Hand-off (register 2026-10-16): 056 remainder; FR-27 acceptance met | spaarke-SPA-external-access-platform-r3 |
-| #1014 | ADR-038 amendment numbering: two different "Amendment A2" sections are about to collide | open | Resolved on master: ADR-038 now has one Amendment A2 (and A3); issue still open | close candidate (owner confirm) |
+| #1014 | ADR-038 amendment numbering: two different "Amendment A2" sections are about to collide | open | Resolved on master: ADR-038 now has one Amendment A2 (and A3) | **closed 2026-11-11** (section 0) |
 | #993 | [ISS-016] SpeAdmin: DataverseWebApiClient receives the container's singleton TokenCredential... | open | Hand-off (register 2026-10-16): SpeAdmin DataverseWebApiClient takes the singleton TokenCredential | sdap-SPE-admin-app-r2 |
 | #992 | [ISS-015] Front-end lockfiles: @xmldom/xmldom 0.8.13 (8 HIGH, via mammoth) and dompurify 3.4... | open | FUTURE (register): xmldom / dompurify HIGH CVEs in front-end lockfiles; pre-existing, not access control. Needs an owner soon | front-end dependency hygiene (no confirmed owner) |
 | #991 | [ISS-014] Compose: @tiptap/core 2.x carries GHSA-cp6q-959q-f8rh (fixed only in 3.30.4) | open | Hand-off (register): TipTap 2.x advisory; Compose owns the editor | spaarkeai-compose (next round) |
@@ -179,9 +181,9 @@ One batch. For each row, confirm the owner project (or name another). "uac follo
 | #971 | Singleton ServiceClient: failed calls throw the client-wide LastException, so concurrent req... | BFF platform (no confirmed owner) |
 | #962 | [ISS-001] PrivilegeGroupResolver double-counts the first page of Graph group memberships | AI line (no confirmed owner) |
 
-## 3. Close candidates for owner confirmation (2)
+## 3. Close candidates (2): both closed 2026-11-11
 
-Evidence says done; 090 did not close them because the brief limits closures to the D-1 set.
+Evidence says done. 090 first left them open because its brief limited closures to the D-1 set; the main session then ruled to close both, and they were closed with a one-line comment (section 0).
 
 | Issue | Title | Evidence |
 |---|---|---|
@@ -190,7 +192,11 @@ Evidence says done; 090 did not close them because the brief limits closures to 
 
 ## 4. Issues open under tasks outside the D-1 set
 
-Tasks **186, 191, 193 and 194** are still `in-progress` / `pending` in their POMLs and TASK-INDEX and were not in D-1. Their issues (#2393; #2369, #2201, #2125, #1864; #2377, #2338; #2368, #2341) stay with those tasks until the owner disposes of the tasks (close under round 90, or carry).
+Updated after the main session's rulings (2026-11-11):
+
+- **186** closed under round 90 (merged #2061, deployed, server gate 2026-10-20 checks 1, 2, 4, 5, 7). Its NOT-RUN checks 3 and 6 are owner UAT **U-12**. #2393 (the Workforce role has no role XML in the repo) stays open: including the role in SpaarkeMaster needs the role exported into the solution, so its `package-scope.json` exclusion stays until then (follow-up).
+- **191** (#2369, #2201, #2125, #1864) and **193** (#2377, #2338) stay open until the owner answers **D-13** and **D-14** in `wrap-up-uat-and-decisions-2026-11-11.md` (recommendation for both: carry to the follow-on).
+- **194** (#2368, #2341): open for its post-194b report-only gate (uac-r2 session, after the D-2 deploy); `OrdinaryMovesWritesEnabled` stays off until an owner go.
 
 ## 5. Closed issues (78)
 

@@ -32,7 +32,7 @@ batch live-gate notes and the wrap-up decision table.
    callers, one full adversarial pass per task (two for security), and keep fixing until no F-class finding remains.
 9. **Close tasks as they land.** Twelve tasks sat `[wip]`/`[open]` for weeks after merge and gate, waiting on browser
    checks, and had to be closed in one batch at wrap-up (D-1). The drift check catches POML/index disagreement, but not a
-   row with no ASCII token (186, 191, 193, 194 still use emoji only).
+   row with no ASCII token (191, 193 and 194 still use emoji only; 186 did until its close).
 10. **Task numbers collide across projects.** About 24 "task 093" comments existed repo-wide, only three of them ours.
     Never sweep by task number; cite the project with the number.
 11. **A live gate must exercise the user's path.** Form scripts failed silently on dev for days because the gates called
