@@ -346,7 +346,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// lookup, nobody otherwise (or when the thread could not be read) — so the grant never re-reads a type or lookup the
     /// thread's owner can rewrite in between.</para>
     /// <para>Task 054: this join stamps no Direct participant; its one production caller moves an email into a record's
-    /// default thread. A message joining a Direct thread goes through <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken)"/>.</para>
+    /// default thread. A message joining a Direct thread goes through <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken, Access.ExpectedDirectPair?)"/>.</para>
     /// </summary>
     internal static Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
         IGenericEntityService entityService,
@@ -397,6 +397,11 @@ public sealed class ThreadResolver : IThreadResolver
     /// <para>Task 054: when the join finds a Direct thread, <paramref name="assign"/> is handed the message's two participants
     /// (<see cref="Access.DirectMessageRecipient"/>) to write in the SAME update as the thread lookup; every other join hands it
     /// no column. <paramref name="recordShares"/> <c>null</c> stamps nothing.</para>
+    /// <para>Task 054a piece 2b: <paramref name="expected"/>, when given, is the pair the caller routed the message to. The
+    /// join then files the message only into a thread that, as its one read of the thread shows, is typed Direct, carries no
+    /// typed regarding and is confirmed Open, and whose filing columns are exactly that sender and that recipient. Otherwise it
+    /// writes nothing and throws <see cref="Access.DirectPairFilingRefusedException"/> before any write, so the caller grants
+    /// nothing and files the message by its unrouted path. <c>null</c>: the join as before.</para>
     /// </remarks>
     internal static Task<ThreadAssignment> JoinThreadAsync(
         IGenericEntityService entityService,
@@ -407,13 +412,14 @@ public sealed class ThreadResolver : IThreadResolver
         Guid communicationId,
         Guid threadId,
         Func<IReadOnlyDictionary<string, object>, CancellationToken, Task> assign,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        Access.ExpectedDirectPair? expected = null) =>
         JoinThreadAsync(
             entityService, ownership, scopeFactory, logger, recordShares, senderChatIdentity: null, communicationId, threadId,
-            assign, EveryJoinRunsTheStep, ct);
+            assign, EveryJoinRunsTheStep, ct, expected);
 
     /// <summary>
-    /// <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken)"/>,
+    /// <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Sprk.Bff.Api.Services.Access.IDataverseRecordShareService?, Guid, Guid, Func{IReadOnlyDictionary{string, object}, CancellationToken, Task}, CancellationToken, Access.ExpectedDirectPair?)"/>,
     /// running the step only when <paramref name="runsStepFor"/> answers <c>true</c> for the record the join files the message
     /// under (#2110). A join it answers <c>false</c> for opens no scope, reads nothing and runs no step — as
     /// <see cref="AssignToThreadReconcilingOwnerAsync"/>. <paramref name="senderChatIdentity"/>: an inbound message's sender
@@ -430,7 +436,8 @@ public sealed class ThreadResolver : IThreadResolver
         Guid threadId,
         Func<IReadOnlyDictionary<string, object>, CancellationToken, Task> assign,
         Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> runsStepFor,
-        CancellationToken ct)
+        CancellationToken ct,
+        Access.ExpectedDirectPair? expected = null)
     {
         IServiceScope? scope = null;
         try
@@ -441,7 +448,7 @@ public sealed class ThreadResolver : IThreadResolver
             var (assignment, refiled) = await JoinCoreAsync(
                 entityService, ownership, communicationId, threadId, assign,
                 directFilingColumns: (joined, token) => DirectFilingColumnsAsync(
-                    entityService, recordShares, communicationId, joined, senderChatIdentity, logger, token),
+                    entityService, recordShares, communicationId, joined, senderChatIdentity, logger, token, expected),
                 beforeRefileWrite: async (filedUnder, token) =>
                 {
                     if (!runsStepFor(filedUnder))
@@ -457,7 +464,8 @@ public sealed class ThreadResolver : IThreadResolver
                     }
                 },
                 secureExitCaller: null,
-                ct).ConfigureAwait(false);
+                ct,
+                expected).ConfigureAwait(false);
 
             if (!refiled || !runsStep)
                 return assignment;
@@ -504,10 +512,22 @@ public sealed class ThreadResolver : IThreadResolver
         Func<ThreadAssignment, CancellationToken, Task<IReadOnlyDictionary<string, object>>>? directFilingColumns,
         Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, CancellationToken, Task>? beforeRefileWrite,
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
-        CancellationToken ct)
+        CancellationToken ct,
+        Access.ExpectedDirectPair? expected = null)
     {
-        var threadRow = await entityService.RetrieveAsync(
-            "sprk_communicationthread", threadId, ThreadRegardingColumns.Append("sprk_threadtype").ToArray(), ct);
+        var threadColumns = ThreadRegardingColumns.Append("sprk_threadtype");
+        if (expected is not null)
+            threadColumns = threadColumns.Append(CommunicationInternalOnlyFloor.ThreadPrivacyField);
+        Entity? threadRow;
+        try
+        {
+            threadRow = await entityService.RetrieveAsync("sprk_communicationthread", threadId, threadColumns.ToArray(), ct);
+        }
+        catch (Exception ex) when (expected is not null && IsRoutedReadFault(ex, ct))
+        {
+            throw new Access.DirectPairFilingRefusedException(threadId, Access.DirectPairFilingRefusedException.ReadFault, ex);
+        }
+
         var anchor = threadRow is null ? null : ReadTypedRegardingAnchorFromThread(threadRow);
         // #1629 F1: the typed anchor wins over sprk_threadtype. A thread carrying a typed lookup files the message under
         // that anchor (the reparent below), so its audience is the anchor's members — never the thread owner's sharees,
@@ -519,6 +539,32 @@ public sealed class ThreadResolver : IThreadResolver
               ?? (threadRow.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value == ThreadTypeDirect
                   ? ThreadAssignment.Direct(threadId)
                   : ThreadAssignment.NoGrant(threadId));
+
+        if (expected is not null)
+        {
+            // Task 054a piece 2b, fix round 2: a routed filing is decided before any write, from this one read of the thread
+            // (and the filing columns): a strict Direct thread of exactly the routed pair, or nothing is written. A fault of any
+            // read before the write (F-2b-1) is a refusal too: nothing is written yet, so the caller's fallback is safe.
+            var refusal = RoutedDirectFilingRefusal(threadRow, assignment);
+            IReadOnlyDictionary<string, object> alongside;
+            try
+            {
+                alongside = refusal is null && directFilingColumns is not null
+                    ? await directFilingColumns(assignment, ct)
+                    : Access.DirectMessageRecipient.None;
+            }
+            catch (Exception ex) when (IsRoutedReadFault(ex, ct))
+            {
+                throw new Access.DirectPairFilingRefusedException(threadId, Access.DirectPairFilingRefusedException.ReadFault, ex);
+            }
+
+            refusal ??= IsExactlyThePair(alongside, expected.Value) ? null : Access.DirectPairFilingRefusedException.NotThePair;
+            if (refusal is not null)
+                throw new Access.DirectPairFilingRefusedException(threadId, refusal);
+
+            await assign(alongside, ct);
+            return (assignment, false);
+        }
 
         if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
@@ -571,6 +617,48 @@ public sealed class ThreadResolver : IThreadResolver
 
         return (assignment, wrote && !reparent.ParentsUnchanged);
     }
+
+    /// <summary>
+    /// A fault of a read the routed join makes before its write (task 054a piece 2b, F-2b-1): anything but the caller's
+    /// cancellation, and not the join's own refusal.
+    /// </summary>
+    private static bool IsRoutedReadFault(Exception ex, CancellationToken ct) =>
+        ex is not Access.DirectPairFilingRefusedException
+        && !(ex is OperationCanceledException && ct.IsCancellationRequested);
+
+    /// <summary>
+    /// Why a routed filing (task 054a piece 2b) may not go into the thread the join read, or <c>null</c> when it may: the row
+    /// exists and is typed Direct with a Direct audience (else <c>not_direct</c>), carries no typed regarding lookup (else
+    /// <c>typed_regarding</c>), and its privacy is confirmed Open (else <c>not_open</c>). The same three tests as the Direct-pair
+    /// shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>), on the join's own read.
+    /// </summary>
+    private static string? RoutedDirectFilingRefusal(Entity? threadRow, ThreadAssignment assignment)
+    {
+        if (threadRow is null)
+            return Access.DirectPairShapeReason.NotDirect;
+        if (Access.DirectMessageRecipient.CarriesATypedRegarding(threadRow))
+            return Access.DirectPairShapeReason.TypedRegarding;
+        if (threadRow.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value != ThreadTypeDirect
+            || assignment.Audience != ThreadGrantAudience.DirectParticipants)
+        {
+            return Access.DirectPairShapeReason.NotDirect;
+        }
+
+        return CommunicationInternalOnlyFloor.IsConfirmedOpen(threadRow) ? null : Access.DirectPairShapeReason.NotOpen;
+    }
+
+    /// <summary>
+    /// <c>true</c> when a routed filing's columns are exactly the routed pair: the recipient is
+    /// <see cref="Access.ExpectedDirectPair.Recipient"/>, a sender column (written only when the row has none) is
+    /// <see cref="Access.ExpectedDirectPair.Sender"/>, and there is no other column. The row's own sender was checked against the
+    /// pair when the columns were computed.
+    /// </summary>
+    private static bool IsExactlyThePair(IReadOnlyDictionary<string, object> alongside, Access.ExpectedDirectPair pair) =>
+        alongside.TryGetValue(Access.DirectMessageRecipient.RecipientColumn, out var recipient)
+        && recipient is EntityReference r && r.Id == pair.Recipient
+        && alongside.All(c =>
+            c.Key == Access.DirectMessageRecipient.RecipientColumn
+            || (c.Key == Access.DirectMessageRecipient.SenderColumn && c.Value is EntityReference s && s.Id == pair.Sender));
 
     /// <summary>
     /// FR-09 auto-threading ladder — invoked only on the Tier-1 miss (the former SKIP→null path). Guarantees
@@ -1944,11 +2032,12 @@ public sealed class ThreadResolver : IThreadResolver
         ThreadAssignment assignment,
         string? senderChatIdentity,
         ILogger logger,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        Access.ExpectedDirectPair? expected = null) =>
         recordShares is null
             ? Task.FromResult(Access.DirectMessageRecipient.None)
             : Access.DirectMessageRecipient.ColumnsForDirectFilingAsync(
-                entityService, recordShares, communicationId, assignment, senderChatIdentity, logger, ct);
+                entityService, recordShares, communicationId, assignment, senderChatIdentity, logger, ct, expected);
 
     private static string BuildTopic(ThreadResolutionRequest request, RegardingAnchor? anchor)
     {

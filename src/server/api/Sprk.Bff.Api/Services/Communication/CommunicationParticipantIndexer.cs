@@ -231,7 +231,13 @@ public sealed class CommunicationParticipantIndexer
     }
 
     private static (int, string) NormalizeKey(int role, string address)
-        => (role, address.Trim().ToLowerInvariant());
+        => (role, NormalizeAddress(address));
+
+    /// <summary>
+    /// The one comparison form of a message address: trimmed, lower-cased (invariant). The participant index dedupes on it, and
+    /// the outbound Direct pair routing counts a send's addresses with it (task 054a piece 2b).
+    /// </summary>
+    internal static string NormalizeAddress(string address) => address.Trim().ToLowerInvariant();
 
     private static bool LooksLikeEmail(string address)
         => address.Contains('@');

@@ -55,6 +55,7 @@ public partial class DirectMessageRecipientStampTests
     private const int ThreadTypeRecordAnchored = 100000000;
 
     private const string SenderOid = "11111111-1111-1111-1111-111111111111";
+    private const string OtherOid = "12121212-1212-1212-1212-121212121212";
     private const string SenderChatId = "8:acs:sender-identity";
     private const string AcsThreadId = "19:acs:thread_direct@thread.v2";
 
@@ -75,6 +76,9 @@ public partial class DirectMessageRecipientStampTests
     private readonly Mock<IDataverseRecordShareService> _shares = new();
     private readonly RecordingLogger<ThreadResolver> _resolverLog = new();
     private readonly RecordingLogger<CommunicationService> _serviceLog = new();
+
+    /// <summary>The thread resolver's ownership double, so a test can see every reparent the join asked for.</summary>
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _resolverOwnership = new();
     private readonly List<Entity> _created = new();
 
     /// <summary>Every update the message received that landed.</summary>
@@ -437,10 +441,16 @@ public partial class DirectMessageRecipientStampTests
     private static StubStrategy Join(Guid threadId) => new(ThreadKeyResolution.Join(threadId));
 
     private ThreadResolver Resolver(IThreadKeyStrategy strategy) =>
-        new(new[] { strategy }, _entities.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+        new(new[] { strategy }, _entities.Object, _resolverOwnership,
             _resolverLog, _directAccess.Object, recordShares: _shares.Object);
 
-    private CommunicationService Service(IThreadKeyStrategy? resolver)
+    /// <param name="identities">The internal-user email read the outbound Direct pair routing maps with (task 054a piece 2b);
+    /// <c>null</c> routes nothing.</param>
+    /// <param name="directAccess"><c>false</c> composes the service without the Direct thread access service.</param>
+    private CommunicationService Service(
+        IThreadKeyStrategy? resolver,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? identities = null,
+        bool directAccess = true)
     {
         var options = new CommunicationOptions { ApprovedSenders = Array.Empty<ApprovedSenderConfig>(), DefaultMailbox = "noreply@contoso.com" };
         var senderValidator = new ApprovedSenderValidator(
@@ -455,6 +465,7 @@ public partial class DirectMessageRecipientStampTests
             new ICommunicationArchiver[] { new EmailArchiver(new EmlGenerationService(NullLogger<EmlGenerationService>.Instance)) });
         var comm = new Mock<ICommunicationDataverseService>();
         comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>())).ReturnsAsync(Sender);
+        comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(OtherOid, It.IsAny<CancellationToken>())).ReturnsAsync(Other);
 
         return new CommunicationService(
             dispatcher,
@@ -471,8 +482,9 @@ public partial class DirectMessageRecipientStampTests
             _serviceLog,
             resolver is null ? null : Resolver(resolver),
             scopeFactory: null,
-            directThreadAccess: _directAccess.Object,
-            recordShares: _shares.Object);
+            directThreadAccess: directAccess ? _directAccess.Object : null,
+            recordShares: _shares.Object,
+            contactIdentities: identities);
     }
 
     private IncomingMessagingJobHandler InboundHandler(IThreadKeyStrategy strategy)
@@ -497,10 +509,12 @@ public partial class DirectMessageRecipientStampTests
         CommunicationType = CommunicationType.Message,
     };
 
-    private static HttpContext Caller() => new DefaultHttpContext
+    private static HttpContext Caller() => Caller(SenderOid, "sender@contoso.com");
+
+    private static HttpContext Caller(string oid, string username) => new DefaultHttpContext
     {
         User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim("oid", SenderOid), new Claim("preferred_username", "sender@contoso.com") }, "test")),
+            new[] { new Claim("oid", oid), new Claim("preferred_username", username) }, "test")),
     };
 
     private static Entity MessageRow(
