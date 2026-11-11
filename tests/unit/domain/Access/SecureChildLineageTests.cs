@@ -370,7 +370,8 @@ public class SecureChildLineageTests
         RecordOwnershipContext.ParentsOf(procedureSet).Should().BeEmpty("a Procedure rule set is not a secure child (model 5.2)");
 
         // 089a review K7: a LEGACY uploaded set carries the document it was read from (RuleSetService). sprk_document is an
-        // ownership parent, so without the citation the set would be filed under the document.
+        // ownership parent, so without the citation the set would be filed under the document. ebilling-r1 task 116: these cases pin
+        // the entry until the column's -Delete run; they go in the same change that removes the entry.
         var legacySourceDocument = Guid.NewGuid();
         var legacySet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
         {

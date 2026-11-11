@@ -1,14 +1,12 @@
 using System.Globalization;
 using System.Net.Mail;
-using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -16,14 +14,15 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <summary>
 /// What the caller asked to import (ebilling-r1 085, model 7.2): the card is created under <see cref="ProcedureVersionId"/> (a Draft version of a
 /// Rate card Procedure) and takes its firm from that Procedure. <see cref="FirmId"/> is optional; when given it must be that firm. Server-derived
-/// fields (<see cref="CallerObjectId"/>) never come from the request body.
+/// fields (<see cref="CallerObjectId"/>, <see cref="Caller"/> and <see cref="CallerBearerToken"/>) never come from the request body; the last two
+/// are what the file store asks step 0 and the caller's own Write on the version with (task 116).
 /// </summary>
 public sealed record RateCardImportRequest(
-    Guid? FirmId, string Name, Guid ProcedureVersionId, Guid? CallerObjectId);
+    Guid? FirmId, string Name, Guid ProcedureVersionId, Guid? CallerObjectId, ClaimsPrincipal Caller, string? CallerBearerToken);
 
-/// <summary>A successful import: the Draft card and what was written.</summary>
+/// <summary>A successful import: the Draft card, the version's source file now holding the workbook (task 116), and what was written.</summary>
 public sealed record RateCardImportResult(
-    Guid RateCardId, Guid SourceDocumentId, string Status, int RateCount, int TimekeepersCreated, int TimekeepersReused);
+    Guid RateCardId, Guid SourceFileId, string Status, int RateCount, int TimekeepersCreated, int TimekeepersReused);
 
 /// <summary>A successful publish: the card is Published and these timekeepers moved from Pending to Approved.</summary>
 public sealed record RateCardPublishResult(Guid RateCardId, string Status, int TimekeepersApproved);
@@ -41,6 +40,12 @@ public enum RateCardOutcomeKind
 
     /// <summary>No owner team could be resolved for the new rows (<see cref="RateCardOutcome{T}.OwnerRefusal"/>): HTTP 409, nothing written.</summary>
     OwnerRefused,
+
+    /// <summary>
+    /// Task 116: the file store refused the workbook (<see cref="RateCardOutcome{T}.FileRefusal"/>, mapped by the route as the other file
+    /// routes map a refused caller write); the rows this import created were removed.
+    /// </summary>
+    FileRefused,
 }
 
 /// <summary>The result of an import or publish, mapped to HTTP by <c>RateCardImportEndpoints</c>.</summary>
@@ -55,6 +60,7 @@ public sealed class RateCardOutcome<T> where T : class
     public int StatusCode { get; private init; }
     public string? Detail { get; private init; }
     public RecordOwnerResolution? OwnerRefusal { get; private init; }
+    public StoredFileCreateResult? FileRefusal { get; private init; }
 
     internal static RateCardOutcome<T> Done(T value) => new() { Kind = RateCardOutcomeKind.Done, Value = value };
 
@@ -66,6 +72,9 @@ public sealed class RateCardOutcome<T> where T : class
 
     internal static RateCardOutcome<T> OwnerRefused(RecordOwnerResolution resolution) =>
         new() { Kind = RateCardOutcomeKind.OwnerRefused, OwnerRefusal = resolution };
+
+    internal static RateCardOutcome<T> FileRefused(StoredFileCreateResult refusal) =>
+        new() { Kind = RateCardOutcomeKind.FileRefused, FileRefusal = refusal };
 }
 
 /// <summary>
@@ -76,9 +85,10 @@ public sealed class RateCardOutcome<T> where T : class
 /// <remarks>
 /// <para><b>Server-side owner (ADR-002).</b> Manual edits on the model-driven forms bypass the BFF, so publish re-checks the effective-date
 /// overlap rule against the rows as they are now; publish is the one place that sets <c>Published</c>. Nothing is in force before it.</para>
-/// <para><b>Source workbook.</b> Stored only through <see cref="SpeFileStore"/> in the Procedure Library container
-/// (<c>Finance:ProcedureLibraryContainerId</c>, D-55, internal only) and linked as the card's source document. Its <c>sprk_document</c> row
-/// is created UNLINKED: no matter, project or work assignment lookup (DEF-015, owner 2026-10-15).</para>
+/// <para><b>Source workbook (task 116, model 7.2 and 12).</b> Stored as the Procedure Version's source file through
+/// <see cref="StoredFileService.ReplaceForCallerAsync"/> (step 0, the caller's own Write on the version, the owner, then the earlier source file
+/// Removed), AFTER the card, its rates and the timekeepers. A refused or failed file write removes the rows this import created. The card
+/// has no source-document lookup; its workbook is the version's file.</para>
 /// <para><b>Keyed to a Procedure Version (085, EB-D-148, D-120).</b> A card belongs to a Procedure Version, not to a core record: the import
 /// takes <c>procedureVersionId</c>, requires that version to be a Draft of a Rate card Procedure (400
 /// <c>ratecard.procedure_version_invalid</c>), and sets <c>sprk_procedureversion</c> and <c>sprk_firm</c> from it. The card has no core-record
@@ -95,7 +105,6 @@ public class RateCardImportService
     internal const string RateCardEntity = "sprk_ratecard";
     internal const string RateEntity = "sprk_ratecardrate";
     internal const string TimekeeperEntity = "sprk_timekeeper";
-    internal const string DocumentEntity = "sprk_document";
     internal const string FirmEntity = "sprk_organization";
 
     internal const int CardDraft = 1;
@@ -105,7 +114,6 @@ public class RateCardImportService
 
     // Stable error codes (ADR-019).
     internal const string CodeInvalid = "ratecard.import_invalid";
-    internal const string CodeContainerNotConfigured = "ratecard.container_not_configured";
     internal const string CodeNotFound = "ratecard.not_found";
     internal const string CodeNotDraft = "ratecard.not_draft";
     internal const string CodeVersionChanged = "ratecard.version_changed";
@@ -113,6 +121,8 @@ public class RateCardImportService
     internal const string CodeImportFailed = "ratecard.import_failed";
     internal const string CodeProcedureVersionInvalid = "ratecard.procedure_version_invalid";
     internal const string CodeResultTruncated = "ratecard.result_truncated";
+
+    private const string XlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     private const decimal MaxRate = 1_000_000_000m;
 
@@ -124,25 +134,19 @@ public class RateCardImportService
     internal const int MaxInValues = 500;
 
     private readonly IGenericEntityService _entities;
-    private readonly IDocumentDataverseService _documents;
-    private readonly SpeFileStore _spe;
+    private readonly StoredFileService _files;
     private readonly IRecordOwnershipResolver _ownership;
-    private readonly IOptionsMonitor<FinanceOptions> _finance;
     private readonly ILogger<RateCardImportService> _logger;
 
     public RateCardImportService(
         IGenericEntityService entities,
-        IDocumentDataverseService documents,
-        SpeFileStore spe,
+        StoredFileService files,
         IRecordOwnershipResolver ownership,
-        IOptionsMonitor<FinanceOptions> finance,
         ILogger<RateCardImportService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
-        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
-        _spe = spe ?? throw new ArgumentNullException(nameof(spe));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
-        _finance = finance ?? throw new ArgumentNullException(nameof(finance));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -154,9 +158,9 @@ public class RateCardImportService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Validates <paramref name="workbook"/> and, when every row is valid, stores it in the Procedure Library and creates the Draft card,
-    /// its rates and the Pending timekeepers. Any invalid row returns <see cref="RateCardOutcomeKind.Invalid"/> with every problem and
-    /// writes nothing (no record, no file).
+    /// Validates <paramref name="workbook"/> and, when every row is valid, creates the Draft card, its rates and the Pending timekeepers, then
+    /// stores the workbook as the version's source file. Any invalid row returns <see cref="RateCardOutcomeKind.Invalid"/> with every problem and
+    /// writes nothing (no record, no file). A file store that cannot take a file now refuses 503 before anything is written.
     /// </summary>
     public virtual async Task<RateCardOutcome<RateCardImportResult>> ImportAsync(
         RateCardImportRequest request, byte[] workbook, CancellationToken ct)
@@ -164,12 +168,24 @@ public class RateCardImportService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(workbook);
 
-        var driveId = _finance.CurrentValue.ProcedureLibraryContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
+        // The read-only pre-check the file store offers, so a store that cannot stage refuses before the first row is written.
+        bool storeReady;
+        try
+        {
+            storeReady = await _files.CanStageAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Rate card import: the file store's environment could not be confirmed ({Fault})", ex.GetType().Name);
+            return RateCardOutcome<RateCardImportResult>.Refused(
+                StatusCodes.Status503ServiceUnavailable, CodeImportFailed, "The rate card could not be imported right now. Nothing was saved; try again shortly.");
+        }
+
+        if (!storeReady)
         {
             return RateCardOutcome<RateCardImportResult>.Refused(
-                StatusCodes.Status503ServiceUnavailable, CodeContainerNotConfigured,
-                "The Procedure Library container is not configured in this environment, so a rate card cannot be imported.");
+                StatusCodes.Status503ServiceUnavailable, StoredFileRefusal.NotConfigured,
+                "The file store is not configured in this environment, so a rate card cannot be imported.");
         }
 
         // Reads only from here to the ownership resolution: nothing is written until every row is valid.
@@ -210,58 +226,26 @@ public class RateCardImportService
         }
 
         // UAC 194b R3b-2: the card's question through the one builder. A card is reusable, not a core record's child, so it is asked with NO
-        // parents (085; model 5.2 lists no rate-card lineage edge). The source document it also names is created by this import with this same
-        // owner, so it cannot change the answer; the timekeepers and rates hold no ownership parent and take the card's owner.
+        // parents (085; model 5.2 lists no rate-card lineage edge). The timekeepers and rates hold no ownership parent and take the card's owner.
+        // The workbook is the version's file: the file store asks that file's own owner question.
         var owner = await _ownership.ResolveOwnerAsync(CardOwnerContext(request.CallerObjectId), ct);
         if (!owner.IsOwned)
         {
             return RateCardOutcome<RateCardImportResult>.OwnerRefused(owner);
         }
 
-        return await WriteAsync(request, firmId, workbook, driveId, validated, lookups, owner, ct);
+        return await WriteAsync(request, firmId, workbook, validated, lookups, owner, ct);
     }
 
     private async Task<RateCardOutcome<RateCardImportResult>> WriteAsync(
-        RateCardImportRequest request, Guid firmId, byte[] workbook, string driveId, ValidatedWorkbook validated,
+        RateCardImportRequest request, Guid firmId, byte[] workbook, ValidatedWorkbook validated,
         ImportLookups lookups, RecordOwnerResolution owner, CancellationToken ct)
     {
         var created = new List<(string Entity, Guid Id)>();
-        string? uploadedItemId = null;
 
         try
         {
-            // 1. The workbook, in the internal-only container, then its unlinked document row.
-            var uploadPath = SpeUploadPath.SanitizeFileName(SourceFileName(request.Name));
-            var file = await _spe.UploadSmallAsync(driveId, uploadPath, new MemoryStream(workbook, writable: false), ConflictBehavior.Rename, ct)
-                ?? throw new InvalidOperationException("The Procedure Library upload returned no file.");
-            uploadedItemId = file.Id;
-
-            var documentId = Guid.Parse(await _documents.CreateDocumentAsync(
-                new CreateDocumentRequest
-                {
-                    Name = file.Name,
-                    ContainerId = driveId,
-                    OwningTeamId = owner.OwningTeamId,
-                    CreatedByPersonId = owner.CreatedByPerson,
-                },
-                ct));
-            created.Add((DocumentEntity, documentId));
-
-            await _documents.UpdateDocumentAsync(
-                documentId.ToString(),
-                new UpdateDocumentRequest
-                {
-                    GraphDriveId = driveId,
-                    GraphItemId = file.Id,
-                    FileName = file.Name,
-                    FileSize = file.Size ?? workbook.LongLength,
-                    MimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    HasFile = true,
-                    FilePath = file.WebUrl,
-                },
-                ct);
-
-            // 2. Timekeepers (Pending). A name already on the firm's roster is reused, not duplicated.
+            // 1. Timekeepers (Pending). A name already on the firm's roster is reused, not duplicated.
             var timekeeperIds = new Dictionary<string, Guid>(lookups.Roster, StringComparer.Ordinal);
             var createdTimekeepers = 0;
             foreach (var tk in validated.Timekeepers)
@@ -298,13 +282,12 @@ public class RateCardImportService
                 createdTimekeepers++;
             }
 
-            // 3. The Draft card, then its rates (children: deleting the card deletes them).
+            // 2. The Draft card, then its rates (children: deleting the card deletes them).
             var card = new Entity(RateCardEntity)
             {
                 ["sprk_name"] = request.Name,
                 ["sprk_firm"] = new EntityReference(FirmEntity, firmId),
                 ["sprk_procedureversion"] = new EntityReference(ProcedureEntity.VersionEntity, request.ProcedureVersionId),
-                ["sprk_sourcedocument"] = new EntityReference(DocumentEntity, documentId),
                 ["sprk_effectivefrom"] = ToDate(validated.Rates.Min(r => r.From)),
                 ["statecode"] = new OptionSetValue(0),
                 ["statuscode"] = new OptionSetValue(CardDraft),
@@ -347,26 +330,50 @@ public class RateCardImportService
                 created.Add((RateEntity, await _entities.CreateAsync(row, ct)));
             }
 
+            // 3. The workbook, as the version's source file (task 116), last: a refusal or a fault removes the rows above. The replace makes
+            // it Servable before the version's earlier source file is set Removed. Fix round 1: once Servable, the version is re-read (the
+            // version-file route's re-check, through the same method); a version no longer a Draft withdraws the new file and refuses, and
+            // the refusal removes the rows above. After the file is Servable nothing here observes the request token, so a cancelled request
+            // cannot leave the rows removed and the file Servable (or the reverse).
+            StoredFileCreateResult stored;
+            using (var content = new MemoryStream(workbook, writable: false))
+            {
+                var versionId = request.ProcedureVersionId;
+                stored = await _files.ReplaceForCallerAsync(
+                    request.Caller, request.CallerBearerToken, StoredFilePurpose.ProcedureSource,
+                    new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId), SourceFileName(request.Name),
+                    XlsxMimeType, content, ct,
+                    parentStillAccepts: token => ProcedureService.RecheckDraftAfterNewFileAsync(_entities, versionId, _logger, token));
+            }
+
+            if (!stored.IsCreated)
+            {
+                _logger.LogWarning("Rate card import: the file store refused the workbook ({Code}); removing the {Written} rows it created",
+                    stored.RefusalCode, created.Count);
+                await CompensateAsync(created);
+                return RateCardOutcome<RateCardImportResult>.FileRefused(stored);
+            }
+
             _logger.LogInformation(
-                "Rate card {RateCardId} imported as Draft: {Rates} rates, {Created} timekeepers created, {Reused} reused",
-                cardId, validated.Rates.Count, createdTimekeepers, validated.Timekeepers.Count - createdTimekeepers);
+                "Rate card {RateCardId} imported as Draft: {Rates} rates, {Created} timekeepers created, {Reused} reused, source file {FileId}",
+                cardId, validated.Rates.Count, createdTimekeepers, validated.Timekeepers.Count - createdTimekeepers, stored.FileId);
 
             return RateCardOutcome<RateCardImportResult>.Done(new RateCardImportResult(
-                cardId, documentId, "Draft", validated.Rates.Count, createdTimekeepers, validated.Timekeepers.Count - createdTimekeepers));
+                cardId, stored.FileId!.Value, "Draft", validated.Rates.Count, createdTimekeepers, validated.Timekeepers.Count - createdTimekeepers));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // The client went away mid-import: the half-written rows and the uploaded file must not outlive the request.
-            // (A Graph or HTTP timeout surfaces as an OperationCanceledException too, with the token NOT cancelled: it falls to the
-            // catch below, which also cleans up and answers ratecard.import_failed.)
+            // The client went away mid-import: the half-written rows must not outlive the request. (A timeout surfaces as an
+            // OperationCanceledException too, with the token NOT cancelled: it falls to the catch below, which also cleans up and answers
+            // ratecard.import_failed.) The file store withdraws its own file when its write does not complete.
             _logger.LogWarning("Rate card import cancelled after {Written} writes; removing what it created", created.Count);
-            await CompensateAsync(created, driveId, uploadedItemId);
+            await CompensateAsync(created);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Rate card import failed after {Written} writes; removing what it created", created.Count);
-            await CompensateAsync(created, driveId, uploadedItemId);
+            await CompensateAsync(created);
             return RateCardOutcome<RateCardImportResult>.Refused(
                 StatusCodes.Status500InternalServerError, CodeImportFailed,
                 "The rate card could not be imported and nothing was saved. Try again; if it keeps failing, contact support.");
@@ -374,7 +381,7 @@ public class RateCardImportService
     }
 
     /// <summary>Best effort, reverse order, own token: a failed compensation is logged and never masks the original failure.</summary>
-    private async Task CompensateAsync(List<(string Entity, Guid Id)> created, string driveId, string? itemId)
+    private async Task CompensateAsync(List<(string Entity, Guid Id)> created)
     {
         for (var i = created.Count - 1; i >= 0; i--)
         {
@@ -386,18 +393,6 @@ public class RateCardImportService
             {
                 _logger.LogError(ex, "Rate card import cleanup could not delete {Entity} {Id}; it is a Draft row and in force nowhere",
                     created[i].Entity, created[i].Id);
-            }
-        }
-
-        if (itemId is not null)
-        {
-            try
-            {
-                await _spe.DeleteFileAsync(driveId, itemId, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Rate card import cleanup could not delete the uploaded workbook {ItemId}", itemId);
             }
         }
     }

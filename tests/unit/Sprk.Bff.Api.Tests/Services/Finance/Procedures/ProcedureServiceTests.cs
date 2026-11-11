@@ -757,7 +757,7 @@ public sealed class ProcedureServiceTests
         copy.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(1, "a Draft: in force nowhere until published");
         copy.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
         copy.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
-        copy.Contains("sprk_sourcedocument").Should().BeFalse("the copy has no source document");
+        copy.Attributes.Keys.Should().NotContain(k => k.StartsWith("sprk_source", StringComparison.Ordinal), "the copy has no source lookup (task 116)");
         var rateCopy = w.H.Rows["sprk_ratecardrate"].Where(r => r.GetAttributeValue<EntityReference>("sprk_ratecard").Id == copy.Id).ToList()
             .Should().ContainSingle().Subject;
         rateCopy.GetAttributeValue<Money>("sprk_approvedrate").Value.Should().Be(500m);
@@ -1794,5 +1794,47 @@ public sealed class ProcedureServiceTests
     {
         ProcedureService.Overlaps(DateOnly.Parse(aFrom), aTo is null ? null : DateOnly.Parse(aTo), DateOnly.Parse(bFrom),
             bTo is null ? null : DateOnly.Parse(bTo)).Should().Be(expected);
+    }
+
+    // Task 116: the version-file route's target (model 3.2, 4.2). Reads only; the file store does the write.
+    [Theory(DisplayName = "116: the file route's target is a Draft version of THIS live Procedure; anything else is refused and nothing is written")]
+    [InlineData("draft", null)]
+    [InlineData("active", "procedure_version.not_draft")]
+    [InlineData("retiredVersion", "procedure_version.not_draft")]
+    [InlineData("missingStatus", "procedure_version.not_draft")]
+    [InlineData("retiredProcedure", "procedure.retired")]
+    [InlineData("anotherProcedure", "procedure.version_not_found")]
+    [InlineData("unknownVersion", "procedure.version_not_found")]
+    public async Task GetDraftVersionForFile_AcceptsOnlyADraftVersionOfThisLiveProcedure(string scenario, string? expectedCode)
+    {
+        var w = new World();
+        var p = w.Procedure(status: scenario == "retiredProcedure" ? ProcedureEntity.StatusRetired : ProcedureEntity.StatusActive);
+        w.RuleSetOf(p);
+        var owner = scenario == "anotherProcedure" ? w.Procedure() : p;
+        var v = w.Version(owner, 1, scenario switch
+        {
+            "active" => ProcedureEntity.VersionStatusActive,
+            "retiredVersion" => ProcedureEntity.VersionStatusRetired,
+            _ => ProcedureEntity.VersionStatusDraft,
+        });
+        if (scenario == "missingStatus")
+        {
+            w.H.Row("sprk_procedureversion", v).Attributes.Remove("sprk_status");
+        }
+
+        var outcome = await w.Service().GetDraftVersionForFileAsync(p, scenario == "unknownVersion" ? Guid.NewGuid() : v, default);
+
+        if (expectedCode is null)
+        {
+            outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+            outcome.Value!.Id.Should().Be(v);
+        }
+        else
+        {
+            outcome.ErrorCode.Should().Be(expectedCode);
+        }
+
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
     }
 }
