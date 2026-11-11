@@ -152,18 +152,53 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// Record and a Budget Revision are created only by their writers, so this tool refuses them outright, with the
     /// <c>sprk_document</c> block's mechanism and shape (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call,
     /// in both <see cref="ValidateChat"/> and <see cref="ExecuteChatAsync"/>). The set is the registry's own flag
-    /// (<see cref="RecordTableRule.CreatedOnlyByItsWriter"/>), which <see cref="RecordCreationService"/> also refuses, so the two
-    /// cannot drift apart.
+    /// (<see cref="RecordTableRule.GenericCreateRefused"/>), which <see cref="RecordCreationService"/> also refuses, so the two
+    /// cannot drift apart. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line too — its generic create alone is refused
+    /// (<see cref="RecordTableRule.GenericCreateOnlyRefused"/>); its update and delete are as before.
     /// </summary>
     internal static bool IsCreatedOnlyByItsWriter(string tablename) =>
-        RecordTableRules.Find(tablename) is { CreatedOnlyByItsWriter: true };
+        RecordTableRules.Find(tablename) is { GenericCreateRefused: true };
+
+    /// <summary>ebilling-r1 task 164a-1: the invoice line, whose generic create alone is refused (its own refusal words).</summary>
+    internal const string InvoiceLineTable = "sprk_billingevent";
+
+    /// <summary>ebilling-r1 DEF-061 fix round 1: the Procedure Version, created and published only by <c>ProcedureService</c> (its own refusal words).</summary>
+    internal const string ProcedureVersionTable = "sprk_procedureversion";
+
+    /// <summary>ebilling-r1 task 096b (EB-D-201): the invoice, created only by the submission operation (the Create Invoice wizard).</summary>
+    internal const string InvoiceTable = "sprk_invoice";
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): this tool never creates an invoice — an invoice is created only by submission. The block is
+    /// in this handler alone (the <c>sprk_document</c> mechanism, both <see cref="ValidateChat"/> and <see cref="ExecuteChatAsync"/>),
+    /// not the registry's <see cref="RecordTableRule.GenericCreateOnlyRefused"/> flag, which would also refuse the Office quick create
+    /// and the service-level seams that still create an invoice as the caller.
+    /// </summary>
+    internal static bool IsInvoiceCreate(string tablename) => string.Equals(tablename, InvoiceTable, StringComparison.Ordinal);
+
+    /// <summary>The single rejection message for an <see cref="IsInvoiceCreate"/> create (user- and model-facing).</summary>
+    internal static string InvoiceCreateBlockedMessage(string tablename) =>
+        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. An invoice is " +
+        "created only when it is submitted. " +
+        $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+        "valid; open the Create Invoice wizard from the matter, project or work assignment and submit the invoice there.";
 
     /// <summary>The single rejection message for an <see cref="IsCreatedOnlyByItsWriter"/> create (user- and model-facing).</summary>
     internal static string CreatedOnlyByItsWriterCreateBlockedMessage(string tablename) =>
-        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
-        "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
-        $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +
-        "change makes it valid; work from the signal or its decision instead.";
+        string.Equals(tablename, InvoiceLineTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. Invoice " +
+              "lines are created only by Spaarke's e-billing services, when an invoice is read or a line is added in its review. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; add the line from the invoice's review instead."
+            : string.Equals(tablename, ProcedureVersionTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. Procedure " +
+              "versions are created and published only from the Procedure's versions page. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; create the version from the Procedure's versions page instead."
+            : $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
+              $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +
+              "change makes it valid; work from the signal or its decision instead.";
 
     /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
     internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
@@ -301,11 +336,16 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
             return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
+        // ebilling-r1 task 096b (EB-D-201): an invoice is created only by submission, the same hard block.
+        if (IsInvoiceCreate(tablename))
+            return ToolValidationResult.Failure(InvoiceCreateBlockedMessage(tablename));
+
         // ebilling-r1 review of f758480f3c (2026-10-30): server-written e-billing rows, the same hard block.
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
             return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
 
-        // Task 042c fix round 4 (owner decision D-204): created only by their writers, the same hard block.
+        // Task 042c fix round 4 (owner decision D-204): created only by their writers, the same hard block (and, task 164a-1, an
+        // invoice line, whose generic create alone is refused).
         if (IsCreatedOnlyByItsWriter(tablename))
             return ToolValidationResult.Failure(CreatedOnlyByItsWriterCreateBlockedMessage(tablename));
 
@@ -400,6 +440,14 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                 stopwatch);
         }
 
+        // ebilling-r1 task 096b (EB-D-201; defense in depth — ValidateChat already rejects): an invoice is created only by submission.
+        if (IsInvoiceCreate(tablename))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, InvoiceCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
+        }
+
         // ebilling-r1 review of f758480f3c (defense in depth — ValidateChat already rejects): server-written e-billing rows.
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
         {
@@ -408,7 +456,8 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                 stopwatch);
         }
 
-        // Task 042c fix round 4 (defense in depth — ValidateChat already rejects): created only by their writers.
+        // Task 042c fix round 4 (defense in depth — ValidateChat already rejects): created only by their writers (and, task
+        // 164a-1, an invoice line).
         if (IsCreatedOnlyByItsWriter(tablename))
         {
             return LogOutcome(context, tablename,

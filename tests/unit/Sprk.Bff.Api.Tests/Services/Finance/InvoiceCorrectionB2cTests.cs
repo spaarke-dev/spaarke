@@ -170,6 +170,29 @@ public sealed class InvoiceCorrectionB2cTests
         change["before"]!["timekeeperId"].Should().BeNull("the line had no roster match before");
     }
 
+    [Fact(DisplayName = "085: a core record with NO Procedures resolves to no rate card (not a fault); the timekeeper correction still applies and writes the match without a rate")]
+    public async Task TimekeeperCorrection_OnACoreRecordWithNoProcedures_AppliesWithNoRate_NotAFault()
+    {
+        var world = new CorrectionWorld();
+        var lee = world.AddPerson("Alexandra Lee");
+        world.AddRate(lee.Id, 80m);       // a Published card exists, but belongs to no Procedure the resolver can choose
+        world.Procedures.Clear();
+        world.ProcedureVersions.Clear();
+        var root = Root();
+        root["findings"] = new JsonArray(
+            Finding(0, Atk, RuleType.ApprovedTimekeeper, FeeIndex, BillingReasonCodes.TimekeeperNotOnRoster),
+            Finding(1, Rate, RuleType.ApprovedRate, FeeIndex, BillingReasonCodes.RateTimekeeperUnmatched));
+        Store(world, root);
+
+        var result = await Service(world, null, Atk, Rate).CorrectAsync(Line("TimekeeperAsBilled", lee.Id.ToString("D")), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue("an empty Procedure set is no card, not a resolver fault");
+        world.ResolveInputs.Should().ContainSingle();
+        var row = world.Line();
+        row.GetAttributeValue<EntityReference>("sprk_resolvedtimekeeper").Id.Should().Be(lee.Id, "the roster match is still written");
+        row.GetAttributeValue<Money>("sprk_approvedrate").Should().BeNull("no card, so no approved rate (the column is cleared, not set)");
+    }
+
     [Theory(DisplayName = "101 B2c SEEDED: a roster entry the resolution does not match for the line is 400 timekeeper_mismatch and nothing is written")]
     [InlineData("pending")]
     [InlineData("same-name-twice")]

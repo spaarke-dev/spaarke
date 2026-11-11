@@ -47,6 +47,12 @@ export interface IEmailReadingAttachmentsProps {
    * Fires with `0` when the record has no attachments or on load failure.
    */
   onCountChange?: (count: number) => void;
+  /**
+   * ebilling-r1 task 118: opens the Submit Invoice flow with this attachment's document pre-marked Invoice. When
+   * supplied, an attachment whose document the profile typed as Invoice (`sprk_documenttype`) shows a "Submit as
+   * invoice" action beside its "Invoice" badge. Omitted: the badge still shows, there is no action.
+   */
+  onSubmitAsInvoice?: (documentId: string) => void;
 }
 
 /** Minimal `retrieveMultipleRecords` surface this view consumes. */

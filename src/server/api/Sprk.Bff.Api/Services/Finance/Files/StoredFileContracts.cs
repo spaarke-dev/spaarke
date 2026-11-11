@@ -1,4 +1,5 @@
 using System.Globalization;
+using Azure;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance.Files;
@@ -114,6 +115,9 @@ public static class StoredFileSchema
     /// <summary>The source document's table and set (the copy rule reads it).</summary>
     public const string DocumentTable = "sprk_document";
     public const string DocumentEntitySet = "sprk_documents";
+
+    /// <summary>The source document's display name (read only for the invoice file list, ebilling-r1 task 151e).</summary>
+    public const string DocumentName = "sprk_documentname";
     public const string CommunicationTable = "sprk_communication";
 
     /// <summary>Every parent lookup column, in a fixed order.</summary>
@@ -122,7 +126,7 @@ public static class StoredFileSchema
     /// <summary>The columns a read of a row asks for (every column the store's rules look at).</summary>
     public static readonly string[] ReadColumns =
     [
-        IdColumn, Purpose, FirmVisible, Status, SourceDocument, SourceCommunication, Sha256, ContentType, SizeBytes, BlobPath,
+        IdColumn, Name, Purpose, FirmVisible, Status, SourceDocument, SourceCommunication, Sha256, ContentType, SizeBytes, BlobPath,
         ProcedureVersionTable, InvoiceTable, BillingExportTable, VersionNumber, CreatedOn,
     ];
 
@@ -483,13 +487,20 @@ public sealed record StoredFileRowSpec
 /// <param name="BlobPath">The blob name (also <c>sprk_blobpath</c>).</param>
 /// <param name="Sha256">Lower-case hex SHA-256 of the bytes.</param>
 /// <param name="SizeBytes">The length in bytes (already checked to fit the column).</param>
-/// <param name="Reused">True when the same bytes were already stored under the id (a retry).</param>
-public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused);
+/// <param name="Reused">True when the same bytes were already stored under the id (a retry). A reuse REWRITES the blob with those same
+/// bytes (DEF-044, owner option B), so its ETag and Last-Modified move and Defender scans it again.</param>
+/// <param name="ETag">The blob's ETag as this stage left it: the create's, or the rewrite's on a reuse (DEF-044). A cleanup delete of a
+/// blob this stage wrote is pinned to it, so a delete that lost a race with a later reuse is refused. <c>null</c> where the facts were
+/// read back (<see cref="StoredFileService.GetStagedAsync"/>, <see cref="StoredFileService.ReadStagedSourceAsync"/>) rather than written.</param>
+public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused, ETag? ETag = null);
 
 /// <summary>
 /// ebilling-r1 task 094 (from-email): what a from-email Invoice part's stage records beside its own source facts: the ordinals of the
 /// Supporting parts staged with it (each under <c>StoredFileIds.ForAttachment(submission, "eml-part-{n}")</c>) and the part's file
 /// extension. Nothing else of the email (no name, no subject) is recorded.
+/// <para>Task 118b-2: the from-document intake's supporting parts use it too. The first part's <paramref name="SupportingOrdinals"/> are
+/// the numbers of every part of the attempt (1 to N, each under <c>StoredFileIds.ForAttachment(submission, "document-part-{n}")</c>); every
+/// part records its own extension.</para>
 /// </summary>
 internal sealed record StagedSourceManifest(IReadOnlyList<int> SupportingOrdinals, string? Extension);
 
@@ -540,13 +551,23 @@ public enum StoredFileFlipOutcome
 public sealed record StoredFileFlipResult(StoredFileFlipOutcome Outcome, string? RefusalCode = null);
 
 /// <summary>The answer of a create (caller upload or app create): the Servable file, or a refusal.</summary>
-public sealed record StoredFileCreateResult(Guid? FileId, string? RefusalCode)
+/// <param name="FileId">The created file's id; <c>null</c> for a refusal.</param>
+/// <param name="RefusalCode">The file store's own <see cref="StoredFileRefusal"/> code; <c>null</c> for a created file.</param>
+/// <param name="OwnerRefusalCode">
+/// Set only with <see cref="StoredFileRefusal.OwnerUnresolved"/>: the owner resolver's own refusal code
+/// (<c>Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal</c>), carried through unchanged so a caller can tell a refusal that a retry cannot change
+/// (the acting user's business unit cannot own the file) from a fault, without a second copy of the owner rule.
+/// </param>
+/// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="RefusalCode"/> names the refusal but drops WHY the owner was refused.
+/// (2) Extension — one optional field on this record, no new type. (3) Cost of doing nothing — the AP export read every owner refusal as a retryable
+/// file fault, so a user in the root business unit was told "Try again" for a refusal that can never succeed (dev incident 2026-11-03).</remarks>
+public sealed record StoredFileCreateResult(Guid? FileId, string? RefusalCode, string? OwnerRefusalCode = null)
 {
     public bool IsCreated => FileId is not null;
 
     public static StoredFileCreateResult Created(Guid fileId) => new(fileId, null);
 
-    public static StoredFileCreateResult Refused(string code) => new(null, code);
+    public static StoredFileCreateResult Refused(string code, string? ownerRefusalCode = null) => new(null, code, ownerRefusalCode);
 }
 
 /// <summary>What <c>OpenForProcessingAsync</c> found.</summary>
@@ -567,3 +588,21 @@ public enum StoredFileProcessingOutcome
 
 /// <summary>A job's read of a Stored File's bytes.</summary>
 public sealed record StoredFileProcessingRead(StoredFileProcessingOutcome Outcome, BinaryData? Content = null, string? ContentType = null);
+
+/// <summary>
+/// One row of <c>GET /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 151e): an OUTBOUND response record (it lives outside
+/// <c>Api/**</c> so the inbound-body guard does not mistake it for a request body).
+/// </summary>
+/// <param name="FileId">The Stored File id: the content route's <c>{fileId}</c>.</param>
+/// <param name="Name">The file's display name.</param>
+/// <param name="Purpose"><c>InvoicePdf</c> or <c>Supporting</c>.</param>
+/// <param name="SizeBytes">The size, when recorded.</param>
+/// <param name="ContentType">The stored media type.</param>
+/// <param name="AddedOn">When the row was created (UTC).</param>
+/// <param name="ScanState"><c>Ready</c> (Open serves it) or <c>Pending</c> (its malware scan has no verdict yet).</param>
+/// <param name="SourceEmail">The email Document the file is a copy of, when the caller may read it (always, for a listed copy); otherwise <c>null</c>.</param>
+public sealed record InvoiceFileListItem(
+    Guid FileId, string Name, string Purpose, int? SizeBytes, string? ContentType, DateTime? AddedOn, string ScanState, InvoiceFileSourceEmail? SourceEmail);
+
+/// <summary>The email Document a file was copied from (outbound; see <see cref="InvoiceFileListItem"/>).</summary>
+public sealed record InvoiceFileSourceEmail(Guid DocumentId, string? Name);

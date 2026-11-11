@@ -33,7 +33,7 @@ public sealed class RuleSetServiceNoMatterScopeGuardTests
             .ToList();
     }
 
-    // Remove this guard only together with the routing change that ends the Pending census waiver for RuleSetService.
+    // Remove this guard only together with the routing change that ends the census waiver for RuleSetService (089a: Procedure rule sets only).
     [Fact(DisplayName = "ebilling-r1: RuleSetService never writes a matter onto sprk_policy or sprk_policyversion (waiver condition 1)")]
     public void RuleSetServiceNeverWritesAMatter()
     {

@@ -116,10 +116,26 @@ public class AccessTableAppOnlyWriterTests
 
         // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
         // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
+        // ebilling-r1 task 095c: + its tracking scope (typed writer: the allocator), which pairs with the number in the scope key.
+        // ebilling-r1 task 095c-4 (uac-r2): + its outcome reason (typed writers: the pipeline), which stores the firm_missing and Blocked holds.
+        // ebilling-r1 task 095d-1a: + its sequence and previous sequence (typed writer: the allocator), the numbers a tracking number is built from.
+        // ebilling-r1 task 095d-1b (uac-r2, binding): + its firm invoice number (typed writers: the allocator; the commit gate's undo clears it).
+        // ebilling-r1 task 095d-1c (uac-r2 final review F4-1): + its stored findings, whose assignFirm member decides the Decision Record.
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
-            "sprk_invoice", "sprk_trackingnumber",
+            "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope", "sprk_outcomereasoncode",
+            "sprk_submissionsequence", "sprk_previoussequence", "sprk_firminvoicenumber", "sprk_findingsjson",
+        ],
+
+        // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
+        // access; both decide whether the invoice can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
+        // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): + its review detail, derived from the open hold reasons; typed writers only.
+        // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): + its billed total and five derived totals, field-secured and typed-writer only.
+        ["sprk_invoice"] =
+        [
+            "sprk_firmhold", "sprk_vendororg", "sprk_reviewdetail",
+            "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
         ],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
@@ -626,6 +642,18 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
@@ -724,6 +752,384 @@ public class AccessTableAppOnlyWriterTests
         CallerCode(submission, "sprk_invoice").Should().BeNull("the caller's own privileges decide");
     }
 
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheSubmissionsTrackingScope_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095c: the scope pairs with the tracking number in the scope key; its only writer is the allocator (at create).
+        // Re-pointed, a row's number would leave its real sequence and a later submission could take it again.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, " SPRK_TrackingScope ", "sprk_TRACKINGSCOPE",
+                 })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = "none" },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "none" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access and the allocator writes it (the access columns' text would be wrong).
+        var reason = InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_trackingscope"])!.Reason;
+        reason.Should().Contain("decides no access").And.Contain("only the tracking number allocator writes it").And.NotContain("who may see");
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_trackingnumber"])!.Reason
+            .Should().Contain("who may see what", "the other access columns keep their text");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", "sprk_trackingscope").Should().BeNull("only the submission carries the scope");
+        Code(submission, "sprk_trackingscopes").Should().BeNull("a neighbouring name");
+        CallerCode(submission, "sprk_trackingscope").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Theory(DisplayName = "095d-1a: an app-only write of the submission's sequence or previous sequence is refused by the output mapping and the Update Record node; the allocator's own write still goes through")]
+    [InlineData("sprk_submissionsequence", " SPRK_SubmissionSequence ")]
+    [InlineData("sprk_previoussequence", "sprk_PREVIOUSSEQUENCE")]
+    public async Task AnAppOnlyWriteOfAnAllocatorOwnedSequenceColumn_IsRefused_ButTheAllocatorsOwnRenumberWriteGoesThrough(string column, string otherForm)
+    {
+        // ebilling-r1 task 095d-1a (uac-r2, replaces the "passed to uac-r2" note): the sequence and the none-scope sequence a renumber gives up are
+        // what a tracking number is built from and what the none scope's next-number read counts. A generic write that lowers or clears either
+        // lets a number be issued twice. The allocator writes them on its own client, in the one renumber transaction; no generic writer does.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { column, otherForm })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = 1 },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "1" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access and the allocator writes it.
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, [column])!.Reason
+            .Should().Contain("decides no access").And.Contain("only the tracking number allocator writes it").And.NotContain("who may see");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", column).Should().BeNull("only the submission carries it");
+        Code(submission, column + "s").Should().BeNull("a neighbouring name");
+        CallerCode(submission, column).Should().BeNull("the caller's own privileges decide");
+
+        // Must not fire (the allocator's own write): the real allocator renumbers a no-firm row with 3 in the none scope, on its own client,
+        // and the one submission update it sends carries the column. Nothing in that path asks InheritedAccessPermission.
+        var firm = Guid.Parse("22530000-0000-0000-0000-00000000f001");
+        var held = new Microsoft.Xrm.Sdk.Entity(submission, Row)
+        {
+            ["versionnumber"] = 1L,
+            ["sprk_trackingscope"] = "none",
+            ["sprk_firminvoicenumber"] = "INV-7",
+            ["sprk_submissionsequence"] = 3,
+            ["sprk_trackingnumber"] = "INV-7.3",
+        };
+        var sent = new List<Microsoft.Xrm.Sdk.OrganizationRequest>();
+        var entities = new Mock<Spaarke.Dataverse.IGenericEntityService>();
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                new Microsoft.Xrm.Sdk.EntityCollection(q.ColumnSet.Columns.Contains("versionnumber") ? [held] : []));
+        entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback((IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest> r, CancellationToken _) => sent.AddRange(r))
+            .Returns(Task.CompletedTask);
+        var allocator = new Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator(
+            entities.Object,
+            _ => Task.FromResult<Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhase?>(
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhase.P2ScopeKeyActive),
+            new Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhaseCache(TimeProvider.System),
+            NullLogger<Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator>.Instance);
+
+        var result = await allocator.RenumberSubmissionAsync(
+            Row, "1", firm, "INV-7",
+            _ => new Sprk.Bff.Api.Services.Finance.Submission.RenumberApply(null, []));
+
+        result.Outcome.Should().Be(Sprk.Bff.Api.Services.Finance.Submission.RenumberOutcome.Renumbered);
+        var update = sent.Should().ContainSingle().Which.Should().BeOfType<Microsoft.Xrm.Sdk.Messages.UpdateRequest>().Subject.Target;
+        update.Contains(column).Should().BeTrue($"the allocator's own renumber writes {column}");
+        update.GetAttributeValue<int?>(column).Should().Be(column == "sprk_previoussequence" ? 3 : 1, "the gave-up none sequence, or the firm scope's first number");
+    }
+
+    [Fact(DisplayName = "095d-1b: an app-only write of the submission's firm invoice number is refused by the output mapping and the Update Record node")]
+    public async Task AnAppOnlyWriteOfTheSubmissionsFirmInvoiceNumber_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095d-1b (uac-r2, binding): the firm invoice number is the stem of every tracking number of the row ({number}.{n}).
+        // Its writers are typed: the allocator sets it at create (a renumber keeps it) and SubmissionCommitGate's undo clears it; a generic
+        // write would re-stem the next number. (The undo still clears it after the listing: InvoiceSubmissionPersisterTests.)
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn, " SPRK_FirmInvoiceNumber " })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = "INV-OTHER" },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "INV-OTHER" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access and the allocator sets it.
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_firminvoicenumber"])!.Reason
+            .Should().Contain("decides no access").And.Contain("only the tracking number allocator sets it").And.NotContain("who may see");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", "sprk_firminvoicenumber").Should().BeNull("only the submission's firm invoice number is listed");
+        Code(submission, "sprk_firminvoicenumbers").Should().BeNull("a neighbouring name");
+        CallerCode(submission, "sprk_firminvoicenumber").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact(DisplayName = "095d-1c F4-1: an app-only write of the submission's stored findings is refused by the output mapping and the Update Record node")]
+    public async Task AnAppOnlyWriteOfTheSubmissionsFindingsJson_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095d-1c (uac-r2 final review F4-1): since 1c the stored assignFirm member decides the immutable Decision Record
+        // (decider, note, date). Its writers are typed (the submission persister, InvoiceCorrectionReevaluation, SubmissionOverrideService, Set
+        // firm); none uses these paths. Must not fire (the typed writers): they go through IGenericEntityService and never ask this refusal;
+        // InvoiceAssignFirmServiceTests (the renumber write of the member, the repeat and legacy branches) is the evidence that they still write.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson, " SPRK_FindingsJson ", "sprk_FINDINGSJSON",
+                 })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = "{}" },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "{}" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access, and it names the typed writers.
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_findingsjson"])!.Reason
+            .Should().Contain("decides no access").And.Contain("only typed writers write it")
+            .And.Contain("InvoiceCorrectionReevaluation").And.Contain("SubmissionOverrideService").And.Contain("InvoiceAssignFirmService")
+            .And.NotContain("who may see");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", "sprk_findingsjson").Should().BeNull("only the submission carries the findings");
+        Code(submission, "sprk_findingsjsons").Should().BeNull("a neighbouring name");
+        CallerCode(submission, "sprk_findingsjson").Should().BeNull("the caller's own privileges (field security) decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheSubmissionsOutcomeReason_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095c-4 (uac-r2 2026-11-03): the outcome reason stores the firm_missing hold (InvoiceFirmHold) and the FR-20 Blocked hold.
+        // A generic write that clears it would let an invoice with no firm be approved and exported; only the pipeline's typed writers set it.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode, " SPRK_OutcomeReasonCode " })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_outcomereasoncode"])!.Reason
+            .Should().Contain("holds the invoice from approval and export").And.NotContain("who may see");
+
+        // Must not fire: the status (an ordinary column), the same name on another table, and the caller's own write.
+        Code(submission, "sprk_processingstatus").Should().BeNull("an ordinary column");
+        Code("sprk_invoice", "sprk_outcomereasoncode").Should().BeNull("only the submission carries the hold");
+        CallerCode(submission, "sprk_outcomereasoncode").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheInvoicesFirmOrFirmHold_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 095c-4 review fix and task 095c-5 (uac-r2 2026-11-04): the invoice's own firm hold (field-secured) and its firm decide whether it
+        // can be approved and exported (InvoiceFirmHold). A generic write that clears the hold, or sets a firm no pipeline resolved, is refused per
+        // column; only the persister (and 095d's assign-firm) write them.
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn, " SPRK_FirmHold ",
+                     Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg, "sprk_VendorOrg@odata.bind", "_sprk_vendororg_value",
+                 })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_firmhold"])!.Reason
+            .Should().Contain("decides whether the invoice can be approved and exported").And.NotContain("who may see");
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_vendororg"])!.Reason.Should().NotContain("who may see");
+
+        // Must not fire: an ordinary invoice column, the same names on other tables, a neighbouring name, and the caller's own write.
+        Code(invoice, "sprk_description").Should().BeNull("an ordinary column");
+        Code("sprk_billingevent", "sprk_vendororg").Should().BeNull("a line's firm is not the invoice's hold");
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, "sprk_firmhold").Should().BeNull("only the invoice carries the column");
+        Code(invoice, "sprk_firmholds").Should().BeNull("a neighbouring name");
+        CallerCode(invoice, "sprk_firmhold").Should().BeNull("the caller's own privileges (and field security) decide");
+        CallerCode(invoice, "sprk_vendororg").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheInvoicesReviewDetail_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): the review detail is derived from the open hold reasons by its typed writers (ontology D-205).
+        // A generic write could show a label no hold backs, or leave one on a closed invoice, so it is refused per column.
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column, " SPRK_ReviewDetail " })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_reviewdetail"])!.Reason
+            .Should().Contain("decides no access").And.Contain("only its typed writers derive it").And.NotContain("who may see");
+
+        // Must not fire: the same name on other tables, a neighbouring name, and the caller's own write.
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, "sprk_reviewdetail").Should().BeNull("only the invoice carries the column");
+        Code("sprk_billingevent", "sprk_reviewdetail").Should().BeNull("a line carries no review detail");
+        Code(invoice, "sprk_reviewdetails").Should().BeNull("a neighbouring name");
+        CallerCode(invoice, "sprk_reviewdetail").Should().BeNull("the caller's own privileges decide");
+    }
+
+    /// <summary>The six invoice amount columns field security does not protect from the app identity (EB-D-200, adversarial review F1).</summary>
+    public static TheoryData<string> InvoiceMoneyColumns() => new()
+    {
+        Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
+    };
+
+    [Theory]
+    [MemberData(nameof(InvoiceMoneyColumns))]
+    public async Task AnAppOnlyWriteOfAnInvoiceAmount_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode(string column)
+    {
+        // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): the billed total and the five derived totals are field-secured, but the BFF
+        // application user is a member of the Writers profile, so field security does not stop its generic writers. This refusal does. Their writers are
+        // typed (InvoiceTotalsService, the persister, InvoiceCorrectionService; InvoiceMoneyColumnsAppOnlyWriteGuardTests).
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[] { column, $" {column.ToUpperInvariant()} ", $"{column}@odata.bind", $"_{column}_value" })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "1" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The ask Repair's per-rule gate makes (RecordCreationService.DocumentServerOwnedRefusal) is this same call over the one column.
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, [column])!.Reason
+            .Should().StartWith($"{column} of a {invoice} ").And.Contain("decides no access").And.Contain("only typed writers derive it").And.NotContain("who may see");
+
+        // Must not fire: the same name on other tables, a neighbouring name, an ordinary invoice column, and the caller's own write.
+        Code("sprk_billingexport", column).Should().BeNull("only the invoice carries the amount columns here");
+        Code("sprk_billingevent", column).Should().BeNull("a line is not the invoice");
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, column).Should().BeNull("the submission is not the invoice");
+        Code(invoice, column + "s").Should().BeNull("a neighbouring name");
+        Code(invoice, "sprk_description").Should().BeNull("an ordinary column");
+        CallerCode(invoice, column).Should().BeNull("the caller's own privileges (and field security) decide");
+    }
+
     [Theory]
     [InlineData("contact", "firstname")]
     [InlineData("contact", "emailaddress1")]
@@ -778,8 +1184,10 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
     [InlineData("sprk_invoicesubmission", "sprk_submitter")]
     [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
-    // Since #2294 (0bba46c1ba) no vendor org decides a Duplicate: a number-only finding is always withheld, so the invoice's sprk_vendororg decides no access.
-    [InlineData("sprk_invoice", "sprk_vendororg")]
+    // Since #2294 (0bba46c1ba) no vendor org decides a Duplicate. The invoice's sprk_vendororg is refused since the 095c-4 review fix (it holds the
+    // invoice, not access: AnAppOnlyWriteOfTheInvoicesFirmOrFirmHold_IsRefused); its lines' firm is not.
+    [InlineData("sprk_billingevent", "sprk_vendororg")]
+    [InlineData("sprk_invoice", "sprk_name")]
     [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
     [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>

@@ -171,18 +171,23 @@ public class InvoiceComplianceEvaluatorFeeKindTests
             ? throw new BillingRuleRefusedException(BillingRuleRefusedException.ParameterMissing, rule.RuleType, "test")
             : BillingRuleHandlers.Evaluate(rule, origin, facts);
 
-    [Fact]
-    public void ARefusedFirmCap_WhoseClientDefaultCapsTheSameFeeKind_LeavesNoSubjectUnchecked_F2()
+    [Fact(DisplayName = "082c C8: a refused firm cap is not covered by the lower-ranked client default cap on the same fee kind; a client default cap the firm's displaces is never run, so never refused")]
+    public void ARefusedFirmCap_IsNotCoveredByTheLowerRankedClientDefault_ADisplacedClientDefaultIsNeverRun_C8()
     {
         var clientLate = Cap("CD-LATE", "lateFee", "E120", RuleSetScope.ClientDefault);
         var firmLate = Cap("FIRM-LATE", "lateFee", "E120", RuleSetScope.Firm);
 
-        var result = Evaluator(handlers: RefusingHandlerFor("FIRM-LATE")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmLate));
+        var firmRefused = Evaluator(handlers: RefusingHandlerFor("FIRM-LATE")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmLate));
+        var defaultRefused = Evaluator(handlers: RefusingHandlerFor("CD-LATE")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmLate));
 
-        OverCapPolicies(result).Should().Equal("CD-LATE");
-        var scope = result.RefusalScopes.Should().ContainSingle().Which;
-        scope.AppliesToInvoice.Should().BeFalse();
-        scope.LineIndexes.Should().BeEmpty();
+        OverCapPolicies(firmRefused).Should().Equal("CD-LATE");
+        var scope = firmRefused.RefusalScopes.Should().ContainSingle().Which;
+        scope.AppliesToInvoice.Should().BeTrue("the firm's own cap, which outranks the default's, was not checked");
+        scope.LineIndexes.Should().Equal(0, 1, 2);
+
+        OverCapPolicies(defaultRefused).Should().Equal("FIRM-LATE");
+        defaultRefused.Refusals.Should().BeEmpty("a Replace version below the top valid rank is displaced before its handler runs");
+        defaultRefused.RefusalScopes.Should().BeEmpty();
     }
 
     [Fact]

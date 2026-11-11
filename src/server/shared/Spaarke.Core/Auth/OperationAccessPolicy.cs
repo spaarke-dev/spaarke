@@ -205,7 +205,8 @@ public static class OperationAccessPolicy
         // .../lines/accept-clean (ebilling-r1 task 100, FR-31, D-77: any user with Write on the invoice decides its lines, not only the
         // eligible approvers). Deciding a line changes the invoice's lines and totals, which is a Write on the invoice (the
         // "finance.confirm" reasoning); a Read-only viewer cannot decide. Tasks 101-104 (corrections, adjustments, approval, reject /
-        // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
+        // return) reuse this one key for their invoice-level writes, and so does Add line (task 164,
+        // POST /api/finance/invoices/{invoiceId}/lines, EB-D-188). A separate key from "finance.confirm" (which names a DOCUMENT) so a
         // deny log names the act.
         ["ebilling.invoice.decide"] = AccessRights.Write,
         // "ebilling.submission.decide" — Read AND Write on the SUBMISSION (sprk_invoicesubmissions) named by the route of
@@ -215,6 +216,19 @@ public static class OperationAccessPolicy
         // this (no privilege); Override needs this AND the "eBilling Override" table privilege, which the service asks of the caller
         // separately (EbillingOverridePrivilege). A separate key so deny logs name the act.
         ["ebilling.submission.decide"] = AccessRights.Read | AccessRights.Write,
+        // "ebilling.record.override" — Write AND AppendTo on the CORE RECORD (sprk_matters / sprk_projects / sprk_workassignments) named by
+        // the route of /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude
+        // (ebilling-r1 task 089b, procedure model 5.1 F1-c, 6.2, 6.3). Assigning, pinning or excluding a Procedure, or excluding a rule,
+        // changes how that record's invoices are checked (Write on the record), and the application then creates a row whose lookup
+        // attaches it TO the record (AppendTo, the "finance.submit_invoice" reasoning). Task 089c's change-rule and remove routes reuse it.
+        // A separate key so deny logs name the act.
+        ["ebilling.record.override"] = AccessRights.Write | AccessRights.AppendTo,
+        // "ebilling.invoice.assign_firm" — Write on the INVOICE (sprk_invoices, route invoiceId) of POST /api/finance/invoices/{invoiceId}/firm
+        // (ebilling-r1 task 095d-1b, notes/095c-from-email-firm-optional.md 16.4): Set firm on a held no-firm invoice. The application then
+        // writes the invoice's firm, tracking number and hold, and renames its lines, approval and files, so the caller must be able to
+        // change the invoice (the "ebilling.invoice.decide" reasoning). The firm in the body is asked separately ("read" and
+        // "finance.attach_invoice"). Write is an existing right: no new privilege or role. A separate key so deny logs name the act.
+        ["ebilling.invoice.assign_firm"] = AccessRights.Write,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the

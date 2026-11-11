@@ -1,0 +1,1282 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "production-key",
+ "id": "RS-06-PK",
+ "rule_set_id": "RS-06",
+ "meta": {
+  "generator_id": "production_key.py",
+  "label_method": "generator",
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
+ },
+ "production_rules": {
+  "RS-06-R01": [
+   {
+    "type": "ApprovedTimekeeper"
+   }
+  ],
+  "RS-06-R02": [
+   {
+    "type": "ApprovedRate",
+    "tolerancePercent": 0
+   }
+  ],
+  "RS-06-R03": [
+   {
+    "type": "ExpenseRule",
+    "nonReimbursableCodes": [
+     "E103",
+     "E104",
+     "E106"
+    ]
+   }
+  ],
+  "RS-06-R04": {
+   "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+  },
+  "RS-06-R05": {
+   "rules": [
+    {
+     "type": "CoreRecordWindow",
+     "graceDays": 0
+    }
+   ],
+   "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+  },
+  "RS-06-R06": {
+   "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+  },
+  "RS-06-R07": [
+   {
+    "type": "DailyHoursCap",
+    "maxHoursPerDay": 10
+   }
+  ],
+  "RS-06-R08": [
+   {
+    "type": "TimeIncrement",
+    "incrementHours": 0.1
+   }
+  ],
+  "RS-06-R09": [
+   {
+    "type": "Duplicate",
+    "matchFields": [
+     "timekeeper",
+     "lineDate",
+     "hours",
+     "narrative"
+    ]
+   }
+  ],
+  "RS-06-R10": [
+   {
+    "type": "RequiredData",
+    "fields": [
+     "taskCode",
+     "activityCode"
+    ]
+   }
+  ],
+  "RS-06-R11": [
+   {
+    "type": "AiObservation",
+    "observation": "vagueDescription",
+    "minConfidence": 0.7
+   }
+  ]
+ },
+ "production_consequences": {
+  "RS-06-R01": "Flag",
+  "RS-06-R02": "SuggestAdjustment",
+  "RS-06-R03": "Flag",
+  "RS-06-R05": "Flag",
+  "RS-06-R07": "Flag",
+  "RS-06-R08": "Flag",
+  "RS-06-R09": "Flag",
+  "RS-06-R10": "Reject",
+  "RS-06-R11": "Flag"
+ },
+ "invoices": [
+  {
+   "id": "F-0018",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R09",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      8
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R09",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0024",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R05",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R05",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0060",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-06-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      18
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      5
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R07",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0126",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0156",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R08",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R08",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0162",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      5
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0168",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      4
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0174",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R03",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      14
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      3
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R03",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      14
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0180",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      15
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-06-R10",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R10",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0204",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0216",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R08",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R08",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0246",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R11",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0258",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R03",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      18
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      14
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      12
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      5
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R10",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-06-R03",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      18
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R09",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R10",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0270",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-06-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0276",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-06-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-06-R05",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-06-R07",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      3
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-06-R07",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0354",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0396",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0408",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0426",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0510",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  }
+ ]
+}

@@ -88,7 +88,7 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01'
 }
 
 // ============================================================================
-// CONTAINERS -- private, no immutability policy (model 4.2: write-once is enforced by the BFF)
+// CONTAINERS -- private, no immutability policy (model 4.2: write-once per content is enforced by the BFF; the same verified bytes may be rewritten on reuse, DEF-044, owner 2026-11-05)
 // ============================================================================
 
 resource fileStoreContainers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = [for name in containerNames: {

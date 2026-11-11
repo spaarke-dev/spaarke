@@ -568,6 +568,39 @@ public class RecordShareExpiryTests
     }
 
     /// <summary>
+    /// Fix round 3g, must fire: a share that came back WITHOUT one of its lookup columns cannot be judged (is it also linked to
+    /// another record? whose is it? who issued it?). The whole request is refused as the share without an id is.
+    /// </summary>
+    [Theory]
+    [InlineData("_sprk_project_value")]
+    [InlineData("_sprk_organization_value")]
+    [InlineData("_sprk_grantedbycontact_value")]
+    public async Task SetShareExpiry_WhenAShareDidNotCarryALookupColumn_Refuses500AndWritesNothing(string omitted)
+    {
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId);
+        _table.SeedShareReadWithout(OtherContactId, MatterId, omitted);
+
+        var result = await Send(NewExpiry);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.ShareUnidentifiableReasonCode);
+        _bulkUpdates.Should().BeEmpty();
+    }
+
+    /// <summary>Fix round 3g, must not fire: the same share with every column returned (explicit nulls) is changed.</summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenAShareCarriesEveryLookupColumnAsAnExplicitNull_IsChanged()
+    {
+        _table.SeedShareReadWithout(OtherContactId, MatterId, omit: null);
+
+        var result = await Send(NewExpiry);
+
+        result.Should().BeOfType<Ok<SetRecordShareExpiryResponse>>();
+        _bulkUpdates.Should().NotBeEmpty();
+    }
+
+    /// <summary>
     /// More shares than one transaction may carry is refused outright. Updating the first page and reporting
     /// success would leave the rest at their OLD date — for a shortening, access that outlives the new one.
     /// </summary>
@@ -674,6 +707,31 @@ public class RecordShareExpiryTests
             Guid organizationId, ExternalGrantRootType rootType, Guid rootId, DateOnly? expires = null)
             => Seed(null, organizationId, rootType, rootId, expires, stateCode: 0);
 
+        /// <summary>
+        /// Fix round 3g: an active contact share on a matter as the Web API returns it, from JSON. Every lookup is an explicit null except
+        /// the contact and the matter root; <paramref name="omit"/> names the one column the read did NOT return (null: all returned).
+        /// </summary>
+        public ExternalGrantRow SeedShareReadWithout(Guid contactId, Guid matterId, string? omit)
+        {
+            var columns = new Dictionary<string, string>
+            {
+                ["_sprk_contact_value"] = $"\"{contactId}\"",
+                ["_sprk_organization_value"] = "null",
+                ["_sprk_project_value"] = "null",
+                ["_sprk_matter_value"] = $"\"{matterId}\"",
+                ["_sprk_workassignment_value"] = "null",
+                ["_sprk_grantedby_value"] = "null",
+                ["_sprk_grantedbycontact_value"] = "null",
+            };
+            if (omit is not null) columns.Remove(omit);
+            var json = "{\"sprk_externalrecordaccessid\":\"" + Guid.Parse($"bbbbbbbb-0000-0000-0000-{++_seq:D12}") + "\",\"statecode\":0," +
+                       string.Join(",", columns.Select(kv => $"\"{kv.Key}\":{kv.Value}")) + "}";
+            var row = System.Text.Json.JsonSerializer.Deserialize<ExternalGrantRow>(
+                json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            _rows.Add(row);
+            return row;
+        }
+
         public void SeedMembership(Guid organizationId, Guid contactId, int stateCode = 0)
             => _memberships.Add((organizationId, contactId, stateCode));
 
@@ -695,6 +753,11 @@ public class RecordShareExpiryTests
                 Id = Guid.Parse($"aaaaaaaa-0000-0000-0000-{++_seq:D12}"),
                 ContactId = contactId,
                 OrganizationId = organizationId,
+                ProjectId = null,
+                MatterId = null,
+                WorkAssignmentId = null,
+                GrantedBySystemUserId = null,
+                GrantedByContactId = null,
                 AccessLevel = 1,
                 ExpiresDate = expires,
                 StateCode = stateCode

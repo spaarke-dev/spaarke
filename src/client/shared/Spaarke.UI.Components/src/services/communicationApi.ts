@@ -138,7 +138,10 @@ export interface SendCommunicationOptions {
    * attachments, 35 MB total (enforced server-side).
    */
   attachmentDocumentIds?: string[];
-  /** Whether to archive the outbound email as a `.eml` in SPE. Default `false`. */
+  /**
+   * Whether to archive the outbound email as a `.eml` in SPE. Default `false`. The BFF archives an email filed to a record
+   * whatever this says (D-217); the flag opts a record-less send in.
+   */
   archiveToSpe?: boolean;
   /** Entity associations to link onto the generated `sprk_communication`. */
   associations?: ICommunicationAssociation[];

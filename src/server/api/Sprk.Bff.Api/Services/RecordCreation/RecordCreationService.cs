@@ -178,9 +178,10 @@ internal sealed partial class RecordCreationService
 
         // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table whose rows are created only by its own writer
         // is refused here, with the words of a table this service does not create, before anything is read, mapped, checked or
-        // written, whoever asks (the caller or the system principal).
+        // written, whoever asks (the caller or the system principal). ebilling-r1 task 164a-1: and a table whose generic create
+        // alone is refused (GenericCreateRefused covers both; an invoice line's update and delete are not refused).
         var rule = TableRules(table);
-        if (rule is null or { CreatedOnlyByItsWriter: true })
+        if (rule is null or { GenericCreateRefused: true })
         {
             return trace.Refused(new RecordCreationRefusal(RecordCreationRefusalKind.Invalid,
                 RecordCreationRefusal.TableUnsupportedCode, $"'{request.Table}' records are not created here."));
@@ -421,6 +422,11 @@ internal sealed partial class RecordCreationService
                 return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
                     RecordCreationRefusal.BlockedColumnCode, $"Column '{systemTableColumn}' of a {noun} is set by Spaarke — omit it."));
             }
+
+            // ebilling-r1 task 165d fix round (EB-D-207): and a column only the table's typed writer sets (RecordTableRule.WriterOnlyColumns:
+            // the invoice's AP export claim) - an invoice must not be created already claimed. Asked here as it is for a caller (below).
+            if (RecordTableRules.RefuseWriterOnlyColumns(table, item.Columns) is { } systemWriterOnly)
+                return Decision.Refuse(WriterOnlyColumnRefusal(noun, systemWriterOnly));
 
             if (InheritedAccessPermission.RefuseAppOnlyWrite(table, item.Columns) is
                 { RefusalCode: InheritedAccessPermission.AppOnlyDocumentWriteReasonCode } appOnlyRefusal)
@@ -2080,8 +2086,17 @@ internal sealed partial class RecordCreationService
                 $"Column '{bffColumn}' is set by the server on a record the application creates for you — omit it.");
         }
 
-        return null;
+        // ebilling-r1 task 165d fix round (EB-D-207): and a column only the table's typed writer sets (RecordTableRule.WriterOnlyColumns:
+        // the invoice's AP export claim): a create naming it would make an invoice that is already claimed.
+        return RecordTableRules.RefuseWriterOnlyColumns(rule.Table, named) is { } writerOnly
+            ? WriterOnlyColumnRefusal(noun, writerOnly)
+            : null;
     }
+
+    /// <summary>The create-side refusal of a <see cref="RecordTableRule.WriterOnlyColumns"/> column: blocked (403 / access denied), with the
+    /// column refusal's own code (it extends the <c>changed_only_by_its_writer</c> marker) and its reason.</summary>
+    private static RecordCreationRefusal WriterOnlyColumnRefusal(string noun, RecordOwnerResolution refused) =>
+        new(RecordCreationRefusalKind.BlockedColumn, refused.RefusalCode!, $"The {noun} was not created: {refused.Reason}.");
 
     /// <summary>The table's autonumber column (<see cref="RecordTableRule.AutonumberColumn"/>), which the platform fills.</summary>
     private static bool IsNumberColumn(RecordTableRule rule, string column) =>

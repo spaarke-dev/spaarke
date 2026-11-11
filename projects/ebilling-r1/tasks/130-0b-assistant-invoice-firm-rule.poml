@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130-0b" project="ebilling-r1">
+  <metadata>
+    <title>Assistant tools' seam: apply the external invoice firm rule</title>
+    <phase>5 Partner surfaces; same batch as 130-0, before that batch reaches dev</phase>
+    <gate>Branch from origin/task/ebilling-130-0 (after its fix rounds)</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant isolation on the assistant tools' invoice-family hiding for external callers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation rule with a shared-definition refactor; fail-closed identity states.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <deps>130-0</deps>
+    <tags>bff, external-access, tenant-isolation, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Apply design.md:414 / D-70 (a partner sees only invoices of its own firms) on the assistant tools' invoice-family seam (AppOnlyInvoiceFamilyHiding) for external systemusers, with the same three caller states and hide-reason order as 130-0.</prompt>
+
+  <goal>search_data, read_query and describe hide every invoice-family row whose invoice firm is not one of the external caller's firms, using one firm definition shared with the contact plane, and fail closed on any identity or firm read fault.</goal>
+
+  <context>
+    <background>Agreed with unified-access-control-r2 on 2026-11-08 (option (i)). The caller's contact comes from task 141's resolution: IIdentityNormalizationService.ResolveAsync(systemUserId) → PersonIdentity.ContactId (sprk_primarycontact, else the contact bound by oid; never email; cached 2 minutes, never on a faulted sub-read). Do not hand-read sprk_primarycontact; do not use PersonIdentity.OrganizationIds or AccountId (they are not the conferring memberships that define a caller's firms).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionAuthorizationFilter.cs (split ReadCallerFirmsAsync :386 into a contact-keyed core ReadContactFirmsAsync; the CallerPrincipal overload becomes a two-line delegate)</file>
+      <file role="modify">the AppOnlyInvoiceFamilyHiding seam and its registration (locate with Grep)</file>
+      <file role="modify">tests for DataverseSearchDataHandler, DataverseReadQueryHandler, DataverseDescribeHandler and the seam</file>
+      <file role="modify">projects/ebilling-r1/notes/130-0-external-invoice-firm-rule.md (a 130-0b section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2 2026-11-08">One firm definition: the assistant seam calls ReadContactFirmsAsync with the resolved contact; no second firm source.</constraint>
+    <constraint source="uac-r2 2026-11-08">States: PersonIdentity.Faults has SystemUser or ContactBinding → unknown → ReadFailed, all hidden; ContactId null with no fault → known no firm → all hidden as firm_not_callers; ContactId set → that contact's firms.</constraint>
+    <constraint source="uac-r2 2026-11-08">Resolve once per tool call, after the existing external-systemuser check; internal systemusers never reach it.</constraint>
+    <constraint source="130-0">Hide order: the firm hold first (firm_missing), then firm_not_callers.</constraint>
+    <constraint source="public repository">Code, comments, notes, commits and test names describe the rule only; no identity or role names.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each of search_data, read_query and describe: another firm's invoice-family rows are hidden; the caller's own firm's are shown; a caller with no linked contact sees none; a ContactBinding fault hides all; an inactive linked contact hides all.</criterion>
+    <criterion testable="true">An internal systemuser's results are unchanged and trigger no identity or firm read.</criterion>
+    <criterion testable="true">The contact plane (130-0 and the submission routes) behaves exactly as before the refactor (existing tests unchanged and green).</criterion>
+    <criterion testable="true">One seeding proof for the assistant-side rule.</criterion>
+    <criterion testable="true">Two adversarial verifier passes and uac-r2's review of the diff before merge.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A tool path that serves invoice-family rows without going through the seam, or a need for a firm source other than ReadContactFirmsAsync: STOP and report.</trigger>
+  </escalation>
+</task>

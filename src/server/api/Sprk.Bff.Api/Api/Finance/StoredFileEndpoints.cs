@@ -56,7 +56,155 @@ public static class StoredFileEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // GET /api/finance/invoices/{invoiceId}/files (ebilling-r1 task 151e): the invoice form's Files section. Authorized on the invoice
+        // as the caller (finance.read), every denial the uniform 404; then the kill switch. The per-file decision is the content route's
+        // (StoredFileAccessFilter.DecideRowAsync), so the list shows exactly the files whose Open would be served or is waiting for a scan.
+        group.MapGet("/invoices/{invoiceId:guid}/files", ListInvoiceFiles)
+            .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId", FinanceDenial.UniformNotFound)
+            .RequireEbillingEnabled()
+            .WithName("ListInvoiceFiles")
+            .WithSummary("List an invoice's servable files (internal callers)")
+            .WithDescription(
+                "Lists the invoice's Invoice PDF first, then its supporting files, that GET /api/finance/files/{fileId}/content would serve to " +
+                "this caller (or serve once its malware scan finishes: scanState Pending). The same decision, not a second copy. Each file " +
+                "carries its source email Document (id and name) when it is a copy of one. 404 for an unknown invoice and for one the caller " +
+                "may not read; 503 when any read faults (never a partial list).")
+            .Produces<IReadOnlyList<InvoiceFileListItem>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return app;
+    }
+
+    /// <summary>The most files one invoice lists. The submission commit refuses an invoice with more (<c>SubmissionCommitGate.MaxFiles</c>), so more rows are a fault, never a truncated list.</summary>
+    internal const int MaxListedFiles = 50;
+
+    /// <summary>The <c>scanState</c> of a file the content route serves.</summary>
+    public const string ScanStateReady = "Ready";
+
+    /// <summary>The <c>scanState</c> of a file the content route would answer 409 <c>file_scan_pending</c>.</summary>
+    public const string ScanStatePending = "Pending";
+
+    private static async Task<IResult> ListInvoiceFiles(
+        Guid invoiceId, HttpContext httpContext, StoredFileService service, ILoggerFactory loggerFactory, CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger(typeof(StoredFileEndpoints).FullName!);
+        try
+        {
+            // Step 0 again, for the caller's systemuser id (the authorization filter already refused anyone it refuses; fail closed anyway).
+            var stepZero = await FinanceAuthorizationFilter.EvaluateStepZeroAsync(httpContext.User, httpContext.RequestServices, logger, ct);
+            if (!stepZero.IsInternal || stepZero.SystemUserId is not { } callerSystemUserId)
+            {
+                // A fault in step 0 here (the authorization filter just admitted this caller) is a read fault: 503, never a "not found".
+                // Only a real refusal (flagged external, no active row) is the uniform 404.
+                return stepZero.RefusalReasonCode == FinanceAuthorizationFilter.SystemFailureReasonCode
+                    ? StoredFileAccessFilter.Unavailable(httpContext)
+                    : ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            }
+
+            var rows = await service.ReadRowsForInvoiceAsync(invoiceId, MaxListedFiles + 1, ct);
+            if (rows.Count > MaxListedFiles)
+            {
+                logger.LogError("Invoice {InvoiceId}: more than {Max} stored files; refusing a truncated list (503)", invoiceId, MaxListedFiles);
+                return StoredFileAccessFilter.Unavailable(httpContext);
+            }
+
+            // Only this invoice's own invoice files (a row whose parent is anything else is never this list's).
+            var ownRows = rows
+                .Where(r => r.Parent is { Kind: StoredFileParentKind.Invoice } parent && parent.Id == invoiceId)
+                .ToList();
+
+            var probe = httpContext.RequestServices.GetRequiredService<CallerRecordAccessProbe>();
+            var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+            var rights = new CallerRightsMemo(probe, callerToken);
+            if (ownRows.Count > 0)
+            {
+                // Ask the caller's rights ONCE for the invoice and every distinct source document, keeping "Dataverse said no" apart from
+                // "Dataverse said nothing". The gate variant answers None for a 429, a 5xx, an OBO failure or a WhoAmI failure, which
+                // DecideRowAsync would read as "cannot read" and silently drop the file: a partial list or "No files". An unknown answer
+                // is a read fault here: 503, never a partial or empty list. The ids come from the file store, never from the caller, so
+                // there is no unknown-vs-denied oracle to equalize and this variant needs no timing equalization (the invoice itself was
+                // already authorized by the route's filter on the equalized path).
+                var targets = new List<(string EntitySet, Guid RecordId)> { (StoredFileSchema.InvoiceEntitySet, invoiceId) };
+                targets.AddRange(ownRows
+                    .Where(r => r.SourceDocumentId is not null)
+                    .Select(r => r.SourceDocumentId!.Value)
+                    .Distinct()
+                    .Select(id => (StoredFileSchema.DocumentEntitySet, id)));
+
+                var answers = await probe.GetCallerRightsForRecordsOrUnknownAsync(callerToken, targets, ct);
+                if (answers is null || answers.Count != targets.Count || answers.Any(a => a is null))
+                {
+                    logger.LogError("Invoice {InvoiceId}: the caller's rights on {Count} record(s) could not be established; refusing a partial list (503)", invoiceId, targets.Count);
+                    return StoredFileAccessFilter.Unavailable(httpContext);
+                }
+
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    rights.Seed(targets[i].EntitySet, targets[i].RecordId, answers[i]!.Value);
+                }
+            }
+
+            var listed = new List<(StoredFileRow Row, string ScanState)>();
+            foreach (var row in ownRows)
+            {
+                var decision = await StoredFileAccessFilter.DecideRowAsync(service, row, callerSystemUserId, rights, logger, ct);
+                switch (decision.Outcome)
+                {
+                    case StoredFileDownloadOutcome.Serve:
+                        listed.Add((row, ScanStateReady));
+                        break;
+                    case StoredFileDownloadOutcome.ScanPending:
+                        listed.Add((row, ScanStatePending));
+                        break;
+                    case StoredFileDownloadOutcome.Unavailable:
+                    case StoredFileDownloadOutcome.Forbidden:
+                        return StoredFileAccessFilter.Unavailable(httpContext);
+                    default:
+                        break; // NotFound: what the content route would 404 is not listed.
+                }
+            }
+
+            var names = new Dictionary<Guid, string?>();
+            var items = new List<InvoiceFileListItem>(listed.Count);
+            foreach (var (row, scanState) in listed
+                .OrderBy(x => x.Row.Purpose == StoredFilePurpose.InvoicePdf ? 0 : 1)
+                .ThenBy(x => x.Row.CreatedOn ?? DateTime.MaxValue)
+                .ThenBy(x => x.Row.FileId))
+            {
+                // The copy rule already proved the caller's Read on the source document (DecideRowAsync), so its name may be shown.
+                InvoiceFileSourceEmail? source = null;
+                if (row.SourceDocumentId is { } documentId)
+                {
+                    if (!names.TryGetValue(documentId, out var documentName))
+                    {
+                        documentName = await service.ReadDocumentNameAsync(documentId, ct);
+                        names[documentId] = documentName;
+                    }
+
+                    source = new InvoiceFileSourceEmail(documentId, documentName);
+                }
+
+                items.Add(new InvoiceFileListItem(
+                    row.FileId,
+                    row.Name ?? string.Empty,
+                    row.Purpose == StoredFilePurpose.InvoicePdf ? "InvoicePdf" : "Supporting",
+                    row.SizeBytes,
+                    row.ContentType,
+                    row.CreatedOn is { } created ? DateTime.SpecifyKind(created, DateTimeKind.Utc) : null,
+                    scanState,
+                    source));
+            }
+
+            return TypedResults.Ok(items);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Any read fault (row query, rights, storage, document name): no partial list, a 503 the client can retry.
+            logger.LogError(ex, "Invoice {InvoiceId}: listing its files faulted (503)", invoiceId);
+            return StoredFileAccessFilter.Unavailable(httpContext);
+        }
     }
 
     private static async Task<IResult> GetContent(
@@ -266,18 +414,38 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
         // (2) the app-only row read (a fault throws: 503 above).
         var service = services.GetRequiredService<StoredFileService>();
         var row = await service.ReadRowAsync(fileId, ct);
-        if (row?.Parent is not { } parent)
+        if (row is null)
         {
             return StoredFileDownloadDecision.NotFound;
         }
 
-        // (3) and (4): the CALLER's own Read, never the application's. Resolved as required: StoredFileService (resolved above and
+        // The CALLER's own Read, never the application's. Resolved as required: StoredFileService (resolved above and
         // as the handler's parameter, which binds before this filter runs) cannot exist without it, so no "not registered" branch
         // could be reached here; a missing registration fails the request before anything is served.
-        var probe = services.GetRequiredService<CallerRecordAccessProbe>();
+        var rights = new CallerRightsMemo(services.GetRequiredService<CallerRecordAccessProbe>(), TokenHelper.ExtractBearerTokenOrNull(httpContext));
+        return await DecideRowAsync(service, row, callerSystemUserId, rights, logger, ct);
+    }
 
-        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        var parentRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, parent.EntitySet, parent.Id, ct);
+    /// <summary>
+    /// Steps (2b)-(5) of the download rule for a row already read, in order: a row with no single valid parent is not found; (3) the
+    /// caller's own Read on the parent, gate variant (<see cref="CallerRightsMemo"/> asks
+    /// <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>: no access, unknown and a fault all answer
+    /// <see cref="AccessRights.None"/> on one schedule) → else 404; (4) when the row has a source document, the caller's own Read on it
+    /// (the copy rule) → else 404; (5) <see cref="StoredFileService.JudgeServableAsync"/>: Servable, own path, scan verdict. The ONE
+    /// copy of this rule: the content route runs it for one file and <c>GET /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1
+    /// task 151e) for each file of an invoice, so the list shows exactly what Open would serve (Serve) or serve after its scan
+    /// (ScanPending). A fault throws.
+    /// </summary>
+    internal static async Task<StoredFileDownloadDecision> DecideRowAsync(
+        StoredFileService service, StoredFileRow row, Guid callerSystemUserId, CallerRightsMemo rights, ILogger? logger, CancellationToken ct)
+    {
+        if (row.Parent is not { } parent)
+        {
+            return StoredFileDownloadDecision.NotFound;
+        }
+
+        // (3) and (4): the CALLER's own Read, never the application's.
+        var parentRights = await rights.GetAsync(parent.EntitySet, parent.Id, ct);
         if (!parentRights.HasFlag(AccessRights.Read))
         {
             return StoredFileDownloadDecision.NotFound;
@@ -287,13 +455,13 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
         // shape): refused, never served on the parent's Read alone.
         if (row.SourceCommunicationId is not null && row.SourceDocumentId is null)
         {
-            logger?.LogWarning("Stored file {FileId}: a source communication without a source document; refusing (copy rule)", fileId);
+            logger?.LogWarning("Stored file {FileId}: a source communication without a source document; refusing (copy rule)", row.FileId);
             return StoredFileDownloadDecision.NotFound;
         }
 
         if (row.SourceDocumentId is { } sourceDocument)
         {
-            var sourceRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, StoredFileSchema.DocumentEntitySet, sourceDocument, ct);
+            var sourceRights = await rights.GetAsync(StoredFileSchema.DocumentEntitySet, sourceDocument, ct);
             if (!sourceRights.HasFlag(AccessRights.Read))
             {
                 return StoredFileDownloadDecision.NotFound;
@@ -327,4 +495,27 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
                 ["errorCode"] = StoredFileEndpoints.StoreUnavailableErrorCode,
                 ["correlationId"] = httpContext.TraceIdentifier,
             });
+}
+
+/// <summary>
+/// The caller's own rights on records, asked through the timing-equalized gate variant ONLY and at most once per record for one
+/// request (a list of one invoice's files asks the invoice and the source email once, not once per file).
+/// </summary>
+internal sealed class CallerRightsMemo(CallerRecordAccessProbe probe, string? callerToken)
+{
+    private readonly Dictionary<(string Set, Guid Id), AccessRights> _asked = new();
+
+    /// <summary>Records an answer already obtained (a list's one prefetch of the invoice and its source documents), so <see cref="GetAsync"/> does not ask again.</summary>
+    public void Seed(string entitySet, Guid recordId, AccessRights rights) => _asked[(entitySet, recordId)] = rights;
+
+    public async Task<AccessRights> GetAsync(string entitySet, Guid recordId, CancellationToken ct)
+    {
+        if (!_asked.TryGetValue((entitySet, recordId), out var rights))
+        {
+            rights = await probe.GetCallerRightsForAuthorizationGateAsync(callerToken, entitySet, recordId, ct);
+            _asked[(entitySet, recordId)] = rights;
+        }
+
+        return rights;
+    }
 }

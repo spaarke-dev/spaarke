@@ -111,6 +111,52 @@ public class DocumentAssociationCreateStagingTests
         UpdateColumnsOf(update).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Ontology task 177 A3 (uac-r2 Option A): the raw-row companion writes exactly what the create's stager writes for the same
+    /// spelling — same column, same verified target, same id — and nothing else, so the map stays the one choice of both.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EverySupportedSpelling))]
+    public void RawRowCompanion_WritesExactlyWhatTheCreateStagerWrites(string spelling)
+    {
+        var request = NewRequest();
+        DocumentAssociationMap.TryApply(request, spelling, RecordId).Should().BeTrue();
+        var staged = new Entity("sprk_document");
+        DataverseServiceClientImpl.StageDocumentAssociation(staged, request);
+
+        var raw = new Entity("sprk_document") { ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", Guid.NewGuid()) };
+        DocumentAssociationMap.TryApply(raw, spelling, RecordId).Should().BeTrue();
+
+        var (column, value) = staged.Attributes.Should().ContainSingle().Subject;
+        raw.Attributes.Should().HaveCount(2, "the companion adds the link and touches nothing else");
+        var lookup = raw[column].Should().BeOfType<EntityReference>().Subject;
+        lookup.LogicalName.Should().Be(((EntityReference)value).LogicalName);
+        lookup.Id.Should().Be(RecordId);
+        raw.Contains("sprk_relatedcommunication").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("account", "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData("sprk_servicerequest", "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData(null, "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData("matter", "00000000-0000-0000-0000-000000000000")]
+    public void RawRowCompanion_RefusesWhatTheRequestOverloadRefuses_AndSetsNothing(string? spelling, string id)
+    {
+        var raw = new Entity("sprk_document");
+
+        DocumentAssociationMap.TryApply(raw, spelling, Guid.Parse(id)).Should().BeFalse();
+        DocumentAssociationMap.TryApply(NewRequest(), spelling, Guid.Parse(id)).Should().BeFalse();
+        raw.Attributes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RawRowCompanion_RefusesARowThatIsNotADocument()
+    {
+        var act = () => DocumentAssociationMap.TryApply(new Entity("sprk_communication"), "matter", RecordId);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
     /// <summary>The association columns an update request writes: the owner question's columns, and the contact link.</summary>
     private static IReadOnlyList<string> UpdateColumnsOf(UpdateDocumentRequest update)
     {

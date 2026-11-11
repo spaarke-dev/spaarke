@@ -45,7 +45,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     private readonly AppOnlyDocumentWorld _appOnly = new();
 
     /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
-    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.ChildTablesShown;
 
     public DataverseReadQueryHandlerTests()
     {
@@ -975,6 +975,693 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         Names(result).Should().Equal("Spa");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b: a partner sees only invoices of its own firms (the seam as AddExternalAccess registers it)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130-0b read_query must fire: another firm's invoice row is hidden; the caller's own firm's row is shown; one firm read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsInvoiceRowIsHidden_TheCallersOwnIsShown()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "F3b read_query must fire: a caller whose firms cannot be read (a contact-binding fault) gets a tool error and no data")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithUnknownFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_F3b_ACallerWithUnknownFirms_FailsTheCall(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (own, "Own")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeFalse("firms that cannot be read fail the call; they are not 'no firm'");
+        result.Data.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "130-0b read_query must fire: a caller who is a member of no firm (no linked contact, an inactive contact) gets no invoice row")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.CallersWithNoFirm), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld))]
+    public async Task ExecuteChatAsync_Task130_0b_ACallerWithNoUsableFirm_GetsNoInvoiceRow(string caller)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        firms.CallerIs(caller);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().BeEmpty();
+        firms.World.Urls.Should().BeEmpty("no row is read for a caller with no usable firm");
+        firms.World.InvoiceReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0b read_query must fire: another firm's submission is hidden even when its invoice is visible; the caller's own firm's submission is shown")]
+    public async Task ExecuteChatAsync_Task130_0b_AnotherFirmsSubmissionOfAVisibleInvoice_IsHidden_TheCallersOwnIsShown()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.SubmissionOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.SubmissionOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (own, "Own"), (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b read_query: an internal systemuser's rows are unchanged, and no identity or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_AnInternalCaller_IsUnchanged_AndReadsNoFirm()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (other, "Other")));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Other");
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only read");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b step 2: a CHILD row is decided by the invoices it links to (InvoiceLinks)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid LinkedOpenThread = Guid.Parse("71000000-0000-4000-8000-0000000130b2");
+
+    /// <summary>
+    /// The user's read of <paramref name="linked"/>'s table returns <paramref name="rows"/>, and every other guard on that table passes:
+    /// a document is visible to the document predicate (app-only), an analysis has no source document, a communication is shareable on an
+    /// Open thread.
+    /// </summary>
+    private void ArrangeLinkedTable(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase linked, params (Guid Id, string Name)[] rows)
+    {
+        var communication = linked.Table == "sprk_communication";
+        SetupFamilyTable(linked.Table, linked.EntitySet, linked.IdColumn, "sprk_name");
+        UserReadReturns(linked.EntitySet, "{ \"value\": [ " + string.Join(", ", rows.Select(r =>
+            "{ \"" + linked.IdColumn + "\": \"" + r.Id.ToString("D") + "\", \"sprk_name\": \"" + r.Name + "\""
+            + (communication
+                ? ", \"sprk_isinternalonly\": false, \"_sprk_communicationthread_value\": \"" + LinkedOpenThread.ToString("D") + "\""
+                : string.Empty)
+            // Fix round 3d: the analysis source-link read selects these columns; the Web API answers an unset one as an explicit null.
+            + (linked.Table == "sprk_analysis"
+                ? ", \"_sprk_documentid_value\": null, \"_sprk_outputfileid_value\": null, \"_sprk_regardingdocument_value\": null"
+                : string.Empty)
+            + " }")) + " ] }");
+        if (linked.Table == "sprk_document")
+        {
+            foreach (var (id, _) in rows)
+                _appOnly.Document(id);
+        }
+
+        if (communication)
+        {
+            CaptureThreadReads("{ \"value\": [ { \"sprk_communicationthreadid\": \"" + LinkedOpenThread.ToString("D")
+                + "\", \"sprk_privacystate\": 100000000 } ] }");
+        }
+    }
+
+    private Task<ToolResult> ReadLinkedAsync(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase linked) =>
+        ReadAsync($"SELECT sprk_name FROM {linked.Table}");
+
+    [Theory(DisplayName = "130-0b step 2 read_query must fire: a child row linked to another firm's invoice is hidden")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildRowOfAnotherFirmsInvoice_IsHidden(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeLinkedTable(linked, (row, "Other"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().BeEmpty();
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query must not fire: a child row linked to the caller's own firm's invoice is shown")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildRowOfTheCallersOwnInvoice_IsShown(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        ArrangeLinkedTable(linked, (row, "Own"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query must not fire: a child row with no invoice link is shown, and no firm is read")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AChildRowWithNoInvoiceLink_IsShown(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.UnlinkedRow(linked);
+        ArrangeLinkedTable(linked, (row, "Unlinked"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Unlinked");
+        firms.FirmReads.Should().Be(0, "no row links to an invoice, so no firm is needed");
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query fault: a failed link read hides every row of the table; a failed decision hides every invoice-linked row")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.KeysAndFaults), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AFault_HidesEveryInvoiceLinkedRow(string key, string fault)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        var unlinked = firms.UnlinkedRow(linked);
+        ArrangeLinkedTable(linked, (own, "Own"), (unlinked, "Unlinked"));
+        firms.Fail(linked, fault);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(fault == "decision"
+            ? new[] { "Unlinked" }
+            : Array.Empty<string>(), "a link read that fails cannot tell an unlinked row from a linked one (fail closed)");
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 service request parity, read_query: a request linked to another firm's invoice is hidden; one linked to the caller's own firm's invoice, or to none, is shown (the REST plane: ExternalRecordDocumentRoutesTests.ServiceRequestParity_RestPlane)")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Kinds), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase))]
+    public async Task ExecuteChatAsync_F3b_ServiceRequestParity(string kind)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.ServiceRequest;
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.InvoiceFor(firms.World, kind) is { } invoice
+            ? firms.LinkedRow(linked, invoice)
+            : firms.UnlinkedRow(linked);
+        ArrangeLinkedTable(linked, (row, "Request"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(Sprk.Bff.Api.Tests.Api.ExternalAccess.ServiceRequestParityCase.Hidden(kind)
+            ? Array.Empty<string>()
+            : new[] { "Request" });
+    }
+
+    // ── F3b fix round 1, step 2 (F1): a row whose own link is null follows the invoice of the row it is filed under ──
+
+    [Theory(DisplayName = "F3b fix round 1 read_query (must fire / must not fire): a row whose own invoice link is null is hidden when the row it is filed under links to another firm's invoice; shown when that row links to the caller's own firm's invoice or to none")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase))]
+    public async Task ExecuteChatAsync_F3b_F1_ARowFollowsTheInvoiceOfTheRowAbove(string key)
+    {
+        var (child, _, _) = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.Of(key);
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var underOther = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        var underOwn = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(
+            firms.World, key, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm));
+        var underUnlinked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.ChildUnder(firms.World, key, invoice: null);
+        ArrangeLinkedTable(child, (underOther, "Other"), (underOwn, "Own"), (underUnlinked, "Unlinked"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(child);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Own", "Unlinked");
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 read_query (bound): a to-do under a chain of events as long as the bound is decided by the top; one hop past the bound is hidden, even for the caller's own firm's invoice")]
+    [InlineData(0, true, false)]
+    [InlineData(0, false, true)]
+    [InlineData(1, false, false)]
+    public async Task ExecuteChatAsync_F3b_F1_TheChainIsBounded(int pastTheBound, bool topIsOtherFirms, bool shown)
+    {
+        var todo = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(topIsOtherFirms
+            ? Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm
+            : Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var chained = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.TodoUnderEventChain(
+            firms.World, Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.WalkBound + pastTheBound, invoice);
+        var plain = firms.UnlinkedRow(todo);
+        ArrangeLinkedTable(todo, (chained, "Chained"), (plain, "Plain"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(todo);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(shown ? new[] { "Chained", "Plain" } : new[] { "Plain" });
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 C2 pin (read_query): a to-do under a chain of events as long as the bound, the top one filed under a matter, with no invoice anywhere, is decided 'no invoice' and shown - the matter is not a hop")]
+    public async Task ExecuteChatAsync_F3b_C2_ACoreRecordAboveTheChain_IsNotAHop()
+    {
+        var todo = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var chained = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.TodoUnderEventChain(
+            firms.World, Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedFamilyCase.WalkBound, topInvoice: null);
+        // Every event on the chain (and the to-do) also names a matter, as filed events do.
+        foreach (var read in new[] { ("sprk_events", "sprk_eventid"), ("sprk_todos", "sprk_todoid") })
+        {
+            foreach (var id in firms.World.Ids(read.Item1, read.Item2))
+                firms.World.SetRow(read.Item1, read.Item2, id, "_sprk_regardingmatter_value", Guid.NewGuid().ToString());
+        }
+
+        ArrangeLinkedTable(todo, (chained, "Chained"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(todo);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Chained");
+        firms.World.Urls.Should().NotContain(u => u.Contains("/sprk_matters", StringComparison.Ordinal), "a core record is never read by the walk");
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query must fire: a link that cannot be decided (not a GUID, or a row the app-only read does not return) hides the row")]
+    [InlineData("not-a-guid")]
+    [InlineData("not-returned")]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AnUnreadableLink_HidesTheRow(string kind)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("todo");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = kind == "not-a-guid" ? firms.LinkedRow(linked, "not-a-guid") : Guid.NewGuid();
+        var unlinked = firms.UnlinkedRow(linked);
+        ArrangeLinkedTable(linked, (row, "Unreadable"), (unlinked, "Unlinked"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Unlinked");
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query must fire: a document linked to one visible and one hidden invoice is hidden")]
+    [InlineData("hidden-related")]
+    [InlineData("hidden-invoice")]
+    public async Task ExecuteChatAsync_Task130_0b_S2_ADocumentWithOneVisibleAndOneHiddenInvoice_IsHidden(string which)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("document-invoice");
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var own = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var other = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var mixed = which == "hidden-related"
+            ? firms.World.LinkedChildRow("sprk_document", ("sprk_invoice", own), ("sprk_relatedinvoice", other))
+            : firms.World.LinkedChildRow("sprk_document", ("sprk_invoice", other), ("sprk_relatedinvoice", own));
+        var both = firms.World.LinkedChildRow("sprk_document", ("sprk_invoice", own), ("sprk_relatedinvoice", own));
+        ArrangeLinkedTable(linked, (mixed, "Mixed"), (both, "Both own"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Both own");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 130-0b step 3: a ROOT row is kept; every form of its invoice link is blanked when that invoice is not visible
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private const string RootQuery =
+        "SELECT sprk_name, sprk_regardinginvoice, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, "
+        + "sprk_regardingrecordnumber, sprk_regardingrecordtype FROM sprk_workassignment";
+
+    /// <summary>Every form of the work assignment's invoice link a read_query row can carry (the lookup is mapped back to its logical name).</summary>
+    private static readonly string[] RootLinkForms =
+    {
+        "sprk_regardinginvoice",
+        "_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue",
+        "_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname",
+        "_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.associatednavigationproperty",
+        "sprk_regardingrecordid",
+        "sprk_regardingrecordname",
+        "sprk_regardingrecordurl",
+        // Fix round 1 F1: the number (the invoice number for an invoice target) and K2: the record type, with its annotation.
+        "sprk_regardingrecordnumber",
+        "sprk_regardingrecordtype",
+        "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue",
+    };
+
+    /// <summary>
+    /// The user's read of the work assignment returns <paramref name="root"/> linked to <paramref name="invoice"/> (when not null) in every
+    /// form, with the regarding id/name/URL naming <paramref name="regardingTarget"/> (the invoice by default; null leaves them out).
+    /// </summary>
+    private void ArrangeRootRow(Guid root, Guid? invoice, Guid? regardingTarget = null, bool regardingIsInvoice = true)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_workassignment')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"EntitySetName\": \"sprk_workassignments\", \"PrimaryIdAttribute\": \"sprk_workassignmentid\", \"Attributes\": [ "
+                + "{ \"LogicalName\": \"sprk_name\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardinginvoice\", \"AttributeType\": \"Lookup\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordid\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordname\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordurl\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordnumber\", \"AttributeType\": \"String\" }, "
+                + "{ \"LogicalName\": \"sprk_regardingrecordtype\", \"AttributeType\": \"Lookup\" } ] }")));
+        var target = regardingIsInvoice ? invoice : regardingTarget;
+        var link = invoice is { } id
+            ? "\"_sprk_regardinginvoice_value\": \"" + id.ToString("D") + "\", "
+              + "\"_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue\": \"INV-0042\", "
+              + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.lookuplogicalname\": \"sprk_invoice\", "
+              + "\"_sprk_regardinginvoice_value@Microsoft.Dynamics.CRM.associatednavigationproperty\": \"sprk_RegardingInvoice\", "
+            : "\"_sprk_regardinginvoice_value\": null, ";
+        var regarding = target is { } t
+            ? "\"sprk_regardingrecordid\": \"" + t.ToString("D") + "\", \"sprk_regardingrecordname\": \"" + (regardingIsInvoice ? "INV-0042" : "Matter A")
+              + "\", \"sprk_regardingrecordurl\": \"https://org.test/main.aspx?id=" + t.ToString("D") + "\", "
+              + "\"sprk_regardingrecordnumber\": \"" + (regardingIsInvoice ? "INV-0042" : "M-0001") + "\", "
+              + "\"_sprk_regardingrecordtype_value\": \"" + (regardingIsInvoice ? InvoiceRecordType : MatterRecordType).ToString("D") + "\", "
+              + "\"_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue\": \"" + (regardingIsInvoice ? "Invoice" : "Matter") + "\", "
+            : string.Empty;
+        UserReadReturns("sprk_workassignments", "{ \"value\": [ { \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", "
+            + link + regarding + "\"sprk_name\": \"Root\" } ] }");
+    }
+
+    private static readonly Guid InvoiceRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000001");
+    private static readonly Guid MatterRecordType = Guid.Parse("0f1e2d3c-0000-4000-8000-000000000002");
+
+    private static JsonElement OnlyRow(ToolResult result)
+    {
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal(new[] { "Root" }, "a root row is never hidden by its invoice link");
+        return result.Data!.Value.GetProperty("rows").EnumerateArray().Single();
+    }
+
+    private static void ShouldBeBlank(JsonElement row, params string[] forms)
+    {
+        foreach (var form in forms)
+        {
+            row.TryGetProperty(form, out var value).Should().BeTrue($"{form} is still returned (blank)");
+            value.ValueKind.Should().Be(JsonValueKind.Null, $"{form} carries the invoice link");
+        }
+    }
+
+    [Fact(DisplayName = "130-0b step 3 read_query must fire: a root row linked to another firm's invoice is shown with every link form blank")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootRowOfAnotherFirmsInvoice_IsShownWithEveryLinkFormBlank()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync(RootQuery);
+
+        ShouldBeBlank(OnlyRow(result), RootLinkForms);
+        result.Data!.Value.GetRawText().Should().NotContain(invoice.ToString("D")).And.NotContain("INV-0042");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "130-0b step 3 read_query must not fire: a root row linked to the caller's own firm's invoice shows the link")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootRowOfTheCallersOwnInvoice_ShowsTheLink()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(RootQuery));
+
+        row.GetProperty("sprk_regardinginvoice").GetString().Should().Be(invoice.ToString("D"));
+        row.GetProperty("_sprk_regardinginvoice_value@OData.Community.Display.V1.FormattedValue").GetString().Should().Be("INV-0042");
+        row.GetProperty("sprk_regardingrecordid").GetString().Should().Be(invoice.ToString("D"));
+        row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("INV-0042");
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("INV-0042", "fix round 1 F1: kept when the invoice is visible");
+        row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(InvoiceRecordType.ToString("D"), "fix round 1 K2: kept when the invoice is visible");
+        firms.FirmReads.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "130-0b step 3 read_query fault: a failed link read or a failed decision shows the root row with every link form blank")]
+    [InlineData("link-read")]
+    [InlineData("decision")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AFault_ShowsTheRootRowWithTheLinkBlank(string fault)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        firms.Fail(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, fault);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldBeBlank(OnlyRow(await ReadAsync(RootQuery)), RootLinkForms);
+    }
+
+    [Theory(DisplayName = "130-0b step 3 read_query must fire: a root link that cannot be decided (not a GUID, or not returned by the app-only read) is blank")]
+    [InlineData("not-a-guid")]
+    [InlineData("not-returned")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnUnreadableLink_IsBlank(string kind)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = kind == "not-a-guid"
+            ? firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, "not-a-guid")
+            : Guid.NewGuid();
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        ShouldBeBlank(OnlyRow(await ReadAsync(RootQuery)), RootLinkForms);
+    }
+
+    [Fact(DisplayName = "130-0b step 3 read_query must not fire: a root row with no invoice link is unchanged, and no firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_ARootRowWithNoInvoiceLink_IsUnchanged()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var root = firms.UnlinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root);
+        var matter = Guid.NewGuid();
+        ArrangeRootRow(root, invoice: null, regardingTarget: matter, regardingIsInvoice: false);
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(RootQuery));
+
+        row.GetProperty("sprk_regardingrecordid").GetString().Should().Be(matter.ToString("D"));
+        row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Matter A");
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("M-0001");
+        row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(MatterRecordType.ToString("D"));
+        firms.FirmReads.Should().Be(0, "the root links to no invoice, so no firm is needed");
+    }
+
+    [Theory(DisplayName = "130-0b step 3 read_query: the regarding id/name/URL are kept when they name another target, and blanked when they name the invoice or cannot be told apart")]
+    [InlineData("another-target", false)]
+    [InlineData("no-regarding-id", true)]
+    public async Task ExecuteChatAsync_Task130_0b_S3_TheRegardingColumns_AreBlankedOnlyForTheInvoice(string kind, bool blank)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice, regardingTarget: Guid.NewGuid(), regardingIsInvoice: false);
+        if (kind == "no-regarding-id")
+        {
+            // The query names neither the regarding id nor the invoice link, so the row cannot tell which target the name holds.
+            UserReadReturns("sprk_workassignments", "{ \"value\": [ { \"sprk_workassignmentid\": \"" + root.ToString("D") + "\", "
+                + "\"sprk_regardingrecordname\": \"INV-0042\", \"sprk_regardingrecordurl\": \"https://org.test/main.aspx\", "
+                + "\"sprk_regardingrecordnumber\": \"INV-0042\", \"_sprk_regardingrecordtype_value\": \"" + InvoiceRecordType.ToString("D") + "\", "
+                + "\"sprk_name\": \"Root\" } ] }");
+        }
+
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(kind == "another-target"
+            ? RootQuery
+            : "SELECT sprk_name, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber, sprk_regardingrecordtype FROM sprk_workassignment"));
+
+        if (blank)
+        {
+            ShouldBeBlank(row, "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_regardingrecordtype");
+        }
+        else
+        {
+            ShouldBeBlank(row, RootLinkForms.Take(4).ToArray());
+            row.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Matter A");
+            row.GetProperty("sprk_regardingrecordurl").GetString().Should().NotBeNullOrEmpty();
+            row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("M-0001", "fix round 1 F1: another target's number is kept");
+            row.GetProperty("sprk_regardingrecordtype").GetString().Should().Be(MatterRecordType.ToString("D"), "fix round 1 K2: another target's type is kept");
+        }
+    }
+
+    // -- Fix round 1 F1-2: an external WHERE or ORDER BY on a root's redaction set is refused before any read --
+
+    /// <summary>Every column of the work assignment's redaction set a model can name, by each predicate or sort shape.</summary>
+    public static TheoryData<string, string> RootLinkPredicates
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            var columns = new[]
+            {
+                "sprk_regardinginvoice", "sprk_regardinginvoicename", "sprk_regardingrecordid", "sprk_regardingrecordname",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_regardingrecordtype",
+            };
+            foreach (var column in columns)
+            {
+                data.Add(column, $"WHERE {column} = '6f9619ff-8b86-d011-b42d-00c04fc964ff'");
+                data.Add(column, $"WHERE {column} LIKE 'INV%'");
+                data.Add(column, $"WHERE {column} < 'M'");
+                data.Add(column, $"WHERE {column} > 'M'");
+                data.Add(column, $"ORDER BY {column} DESC");
+                data.Add(column, $"WHERE {column} IS NOT NULL");
+                data.Add(column, $"WHERE sprk_name = 'x' OR ({column} = 'y')");
+                data.Add(column, $"WHERE {column.ToUpperInvariant()} = 'y'");
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "130-0b fix round 1 F1-2 read_query must fire: an external WHERE or ORDER BY on any column of a root's redaction set is refused before any read")]
+    [MemberData(nameof(RootLinkPredicates))]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_APredicateOnTheRootLink_IsRefusedBeforeAnyRead(string column, string clause)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync($"SELECT sprk_name FROM sprk_workassignment {clause}");
+
+        result.Success.Should().BeFalse(column);
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Be(DataverseReadQueryHandler.RootInvoiceLinkPredicateRefusal);
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(), "refused before any read");
+        firms.World.Urls.Should().BeEmpty();
+        firms.FirmReads.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: a WHERE or ORDER BY on a column outside the set (or a literal that spells one) is served")]
+    [InlineData("WHERE sprk_name = 'x'")]
+    [InlineData("WHERE sprk_name = 'sprk_regardingrecordnumber'")]
+    [InlineData("ORDER BY sprk_name ASC")]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_APredicateOutsideTheSet_IsServed(string clause)
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Firm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        OnlyRow(await ReadAsync($"{RootQuery} {clause}"));
+    }
+
+    [Fact(DisplayName = "130-0b R1: an external caller on a root (no seam that leaves rows out) keeps the raw row-cap rule and gets no note")]
+    public async Task ExecuteChatAsync_R1_ExternalRoot_KeepsTheRawRule_AndNoNote()
+    {
+        AsExternalCaller();
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadAsync(RootQuery.Replace("SELECT ", "SELECT TOP 1 ", StringComparison.Ordinal));
+
+        OnlyRow(result);
+        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"), "a root row is never left out, so the raw page decides");
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: an internal caller's WHERE and ORDER BY on the root link are served")]
+    public async Task ExecuteChatAsync_Task130_0b_F1_2_AnInternalCaller_IsServed()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(
+            $"{RootQuery} WHERE sprk_regardingrecordnumber LIKE 'INV%' AND sprk_regardinginvoice = '{invoice:D}' ORDER BY sprk_regardingrecordtype ASC"));
+
+        row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("INV-0042");
+        firms.FirmReads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130-0b step 3 read_query: an internal systemuser's root row is unchanged, and no link or firm is read")]
+    public async Task ExecuteChatAsync_Task130_0b_S3_AnInternalCaller_IsUnchanged_AndReadsNothing()
+    {
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var invoice = firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm);
+        var root = firms.LinkedRow(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Root, invoice);
+        ArrangeRootRow(root, invoice);
+        _hideInvoiceFamily = firms.Seam;
+
+        var row = OnlyRow(await ReadAsync(RootQuery));
+
+        row.GetProperty("sprk_regardinginvoice").GetString().Should().Be(invoice.ToString("D"));
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only link read");
+    }
+
+    [Theory(DisplayName = "130-0b step 2 read_query: an internal systemuser's child rows are unchanged, and no link or firm is read")]
+    [MemberData(nameof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Keys), MemberType = typeof(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase))]
+    public async Task ExecuteChatAsync_Task130_0b_S2_AnInternalCaller_IsUnchanged_AndReadsNoLinkOrFirm(string key)
+    {
+        var linked = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of(key);
+        await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
+        var row = firms.LinkedRow(linked, firms.InvoiceOfFirm(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld.OtherFirm));
+        ArrangeLinkedTable(linked, (row, "Other"));
+        _hideInvoiceFamily = firms.Seam;
+
+        var result = await ReadLinkedAsync(linked);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Other");
+        firms.FirmReads.Should().Be(0);
+        firms.MembershipReads.Should().Be(0);
+        firms.World.Urls.Should().BeEmpty("an internal caller costs no app-only link read");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_NeverReachesThePredicate()
     {
@@ -1080,39 +1767,81 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         AssertTelemetryRespectsAdr015($"Doc {DocInternal:N}");
     }
 
-    /// <summary>
-    /// Task 188 round 4a (F1-5): the row-cap warning is measured on the RAW page Dataverse returned, not on what is left after
-    /// the narrowing hid rows. A page of <paramref name="returned"/> rows under TOP 50, 3 of them hidden: the model must still be
-    /// told the result hit the cap when the raw page did.
-    /// </summary>
-    [Theory(DisplayName = "Task 188 r4a F1-5: the row-cap warning counts the raw page, before hidden rows are removed")]
-    [InlineData(50, true)]
-    [InlineData(49, false)]
-    public async Task ExecuteChatAsync_ExternalCaller_RowCapWarning_IsMeasuredBeforeTheNarrowing(int returned, bool capped)
+    // =============================================================================
+    // 130-0b R1 (owning project ruling; supersedes task 188 round 4a F1-5): with a hiding seam active for the call, the row cap is
+    // measured on the VISIBLE rows and the result carries one fixed note; a call with no active seam keeps the raw rule.
+    // =============================================================================
+
+    /// <summary>A document query: <paramref name="returned"/> rows under <paramref name="top"/>, the first <paramref name="hidden"/> own-Restricted.</summary>
+    private async Task<ToolResult> ReadDocumentsAsync(int top, int returned, int hidden, bool external = true)
     {
-        AsExternalCaller();
+        if (external)
+            AsExternalCaller();
         SetupDocumentMetadata();
         var ids = Enumerable.Range(0, returned).Select(_ => Guid.NewGuid()).ToList();
         foreach (var (id, i) in ids.Select((id, i) => (id, i)))
         {
-            _appOnly.Document(id, permission: i < 3 ? 100000002 : null);
+            _appOnly.Document(id, permission: i < hidden ? 100000002 : null);
         }
         CaptureDocumentQueries(DocRows(ids.Select(id => DocRow(id)).ToArray()));
 
-        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT TOP 50 sprk_documentname FROM sprk_document"));
-        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+        return await ReadAsync($"SELECT TOP {top} sprk_documentname FROM sprk_document");
+    }
+
+    [Theory(DisplayName = "130-0b R1: with a hiding seam active, the row-cap warning fires if and only if the VISIBLE rows reach TOP")]
+    [InlineData(50, 0, true)]
+    [InlineData(50, 3, false)]
+    [InlineData(49, 0, false)]
+    public async Task ExecuteChatAsync_R1_HidingSeamActive_RowCapWarning_CountsTheVisibleRows(int returned, int hidden, bool capped)
+    {
+        var result = await ReadDocumentsAsync(top: 50, returned, hidden);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        RowIds(result).Should().HaveCount(returned - 3, "the three own-Restricted rows are hidden");
+        RowIds(result).Should().HaveCount(returned - hidden);
         if (capped)
-        {
-            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"),
-                "the raw page hit TOP: hiding 3 rows must not make a capped result look complete");
-        }
+            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"), "the visible rows reached TOP");
         else
-        {
-            result.Warnings.Should().NotContain(w => w.Contains("row cap"), "the raw page was under TOP");
-        }
+            result.Warnings.Should().NotContain(w => w.Contains("row cap"), "the visible rows are under TOP");
+        result.Warnings.Should().ContainSingle(w => w == DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b R1: TOP 1 whose only match is hidden returns zero rows, no cap warning, and the fixed note")]
+    public async Task ExecuteChatAsync_R1_Top1_OnlyAHiddenMatch_NoCapWarning_TheNote()
+    {
+        var result = await ReadDocumentsAsync(top: 1, returned: 1, hidden: 1);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        RowIds(result).Should().BeEmpty();
+        result.Warnings.Should().NotContain(w => w.Contains("row cap"));
+        result.Warnings.Should().ContainSingle(w => w == DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Fact(DisplayName = "130-0b R1: the note and every warning are byte-identical whether or not a row was hidden")]
+    public async Task ExecuteChatAsync_R1_TheNote_IsIdenticalWithAndWithoutHiding()
+    {
+        var withHiding = await ReadDocumentsAsync(top: 50, returned: 10, hidden: 3);
+        var withoutHiding = await ReadDocumentsAsync(top: 50, returned: 10, hidden: 0);
+
+        RowIds(withHiding).Should().HaveCount(7);
+        RowIds(withoutHiding).Should().HaveCount(10);
+        withHiding.Warnings.Should().Equal(withoutHiding.Warnings, "nothing in the warnings tells whether a row was left out");
+        withHiding.Warnings.Should().Contain(DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Theory(DisplayName = "130-0b R1: an internal caller (no active seam) keeps the raw rule and gets no note")]
+    [InlineData(50, true)]
+    [InlineData(49, false)]
+    public async Task ExecuteChatAsync_R1_NoActiveSeam_KeepsTheRawRule_AndNoNote(int returned, bool capped)
+    {
+        var result = await ReadDocumentsAsync(top: 50, returned, hidden: 0, external: false);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        RowIds(result).Should().HaveCount(returned);
+        if (capped)
+            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"));
+        else
+            result.Warnings.Should().NotContain(w => w.Contains("row cap"));
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
     }
 
     [Fact]

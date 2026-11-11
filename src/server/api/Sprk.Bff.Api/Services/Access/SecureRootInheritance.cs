@@ -309,6 +309,36 @@ public sealed record FiledRootRef(string Table, Guid Id, string? Name, bool Flag
 public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool DepthBoundReached);
 
 /// <summary>
+/// ebilling-r1 task 082 (uac-r2 review item 8; round 2 items 082.1 / 082.2): what a row's ADR-024 pair names on its own
+/// (<see cref="SecureRootInheritance.NamePairParentAsync"/>). A closed set of four answers: the base constructor is private, so no type outside it can derive. A record also has a protected copy constructor, so code in this assembly could still derive; the callers' `default` arms (here and in billing's CoreRecordChain) guard that.
+/// </summary>
+internal abstract record PairParentAnswer
+{
+    private PairParentAnswer()
+    {
+    }
+
+    /// <summary>No pair, or a pair that repeats one of the row's typed lookups (it names nothing separate).</summary>
+    internal sealed record None : PairParentAnswer
+    {
+        internal static readonly None Instance = new();
+    }
+
+    /// <summary>The pair files the row under this matter or project (only where the pair is BFF-managed: a project).</summary>
+    internal sealed record Parent(string Table, Guid Id) : PairParentAnswer;
+
+    /// <summary>The pair names a readable type that is not a parent, so it files the row under nothing; or (<paramref name="Unrepeated"/>
+    /// set, #1616) a matter or project on a table whose pair does not file on its own and that no typed lookup repeats.</summary>
+    internal sealed record NotAFilingParent(string? Unrepeated) : PairParentAnswer;
+
+    /// <summary>What the pair names cannot be told (an id that is not a record id, no type, a type naming no table, a type read that
+    /// faulted). Never "no parent": every caller fails closed. <paramref name="Transient"/> (ebilling-r1 082c-2 fix round 1, K1; additive):
+    /// true only where the type READ faulted (the <c>faultedTypes</c> repeat and the read's catch), so a caller that can retry may tell an
+    /// outage from stored data that is wrong. It decides nothing here: an Unknown is an Unknown to every access decision, whatever the flag.</summary>
+    internal sealed record Unknown(string Reason, bool Transient = false) : PairParentAnswer;
+}
+
+/// <summary>
 /// unified-access-control-r2 task 158 — a <c>sprk_workassignment</c> or <c>sprk_project</c> FILED UNDER a secure
 /// <c>sprk_matter</c> or <c>sprk_project</c> is itself secure (owner round 6), secured through
 /// <see cref="ProvisionProjectEndpoint.ProvisionInheritedAsync"/> — provisioning's own steps, for the person who created it —
@@ -501,6 +531,75 @@ public sealed partial class SecureRootInheritance
         return $"its {PairIdColumn} names a {pairTable} that none of its filing lookups ({string.Join(", ", columns)}) names; " +
                $"a {(string.Equals(table, Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment")} is " +
                "filed under a matter or project only through those lookups (the pair repeats one)";
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 082 (uac-r2 review item 8; round 2 items 082.1 / 082.2): what a row's ADR-024 pair names on its own, as the closed
+    /// <see cref="PairParentAnswer"/>. This is the pair rule of <see cref="NameParentsAsync"/>, extracted with no logic change; that method
+    /// calls it. Billing's <c>CoreRecordChain</c> resolves a project's pair only through it (never a parse of its own, never
+    /// <see cref="NameParentsAsync"/>, which also follows intermediates).
+    /// </summary>
+    /// <param name="table">The row's table: a parent-typed pair names a parent only where the pair is BFF-managed
+    /// (<see cref="PairNamesAParentOnItsOwn"/>); elsewhere it files under nothing on its own (#1616).</param>
+    /// <param name="pairId">The pair's <see cref="PairIdColumn"/> text.</param>
+    /// <param name="pairType">The pair's <see cref="PairTypeColumn"/> (a <c>sprk_recordtype_ref</c> id).</param>
+    /// <param name="recordTypes">The record-type cache of this call (<see cref="ReadRecordTypeAsync"/>).</param>
+    /// <param name="repeatedIds">The ids the row's typed parent and intermediate lookups hold: a pair repeating one agrees by identity and
+    /// names nothing separate (#1630). <c>null</c>: none.</param>
+    /// <param name="faultedTypes">The batched walk's set of record types whose read already faulted in this call (#1410 F3); a new fault
+    /// is added. <c>null</c>: every call reads.</param>
+    /// <returns><see cref="PairParentAnswer.None"/> (no pair, or a repeat); <see cref="PairParentAnswer.Parent"/> (a matter or project, on a
+    /// table whose pair files on its own); <see cref="PairParentAnswer.NotAFilingParent"/> (a readable type that is not a parent, or a
+    /// parent-typed pair on a table whose pair does not file on its own, with the reason in <c>Unrepeated</c>);
+    /// <see cref="PairParentAnswer.Unknown"/> (an id that is not a record id, no type, a type naming no table, or a type read that
+    /// faulted). A type read fault is logged and answered Unknown, never thrown, as before.</returns>
+    internal static async Task<PairParentAnswer> NamePairParentAsync(
+        IGenericEntityService dataverse, ILogger logger, string table, string? pairId, Guid? pairType,
+        ConcurrentDictionary<Guid, string?> recordTypes, CancellationToken ct,
+        IReadOnlySet<Guid>? repeatedIds = null, HashSet<Guid>? faultedTypes = null)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(recordTypes);
+        if (string.IsNullOrWhiteSpace(pairId))
+            return PairParentAnswer.None.Instance;
+
+        if (!Guid.TryParse(pairId.Trim(), out var id) || id == Guid.Empty)
+            return new PairParentAnswer.Unknown($"its {PairIdColumn} does not hold a record identifier");
+
+        // (#1630: a pair repeating a typed intermediate lookup agrees by identity, as one repeating a typed parent does — the typed
+        // lookup, not the pair's label, says what the record is.)
+        if (repeatedIds is not null && repeatedIds.Contains(id))
+            return PairParentAnswer.None.Instance;
+
+        if (pairType is not { } typeRef)
+            return new PairParentAnswer.Unknown($"it names a record in {PairIdColumn} without that record's type");
+
+        if (faultedTypes is not null && faultedTypes.Contains(typeRef))
+            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read", Transient: true);
+
+        try
+        {
+            var pairTable = await ReadRecordTypeAsync(dataverse, recordTypes, typeRef, ct).ConfigureAwait(false);
+            if (pairTable is null)
+                return new PairParentAnswer.Unknown("the type of the record it is filed under could not be determined");
+
+            if (IsParent(pairTable) && PairNamesAParentOnItsOwn(table))
+                return new PairParentAnswer.Parent(pairTable, id);
+
+            // #1616: the pair is text any user with Write can set through the Web API, bypassing the AppendTo check a lookup costs. On a
+            // table whose pair is not BFF-managed it files the row under nothing on its own — undetermined, so nothing is shared or
+            // un-secured from it (fail closed); a typed parent that is readably secure still secures it (SecureParentsAnswer.WallsDecidable).
+            return IsParent(pairTable)
+                ? new PairParentAnswer.NotAFilingParent(PairWithoutTypedLookupReason(table, pairTable))
+                : new PairParentAnswer.NotAFilingParent(null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} could not be read.", typeRef);
+            faultedTypes?.Add(typeRef);
+            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read", Transient: true);
+        }
     }
 
     /// <summary>
@@ -3972,50 +4071,31 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(facts.PairId))
+        // ebilling-r1 task 082 (uac-r2 review item 8; round 2 items 082.1 / 082.2): the pair rule is NamePairParentAsync, extracted from
+        // here with no logic change, so billing's CoreRecordChain reads a project's pair by the same rule and never copies it. A pair that
+        // repeats a typed parent or intermediate lookup agrees by identity (#1630) and names nothing separate.
+        var pair = await NamePairParentAsync(
+                dataverse, logger, facts.Table, facts.PairId, facts.PairType, recordTypes, ct,
+                direct.Select(n => n.Id).Concat(filedIntermediates.Select(i => i.Id)).ToHashSet(), faultedTypes)
+            .ConfigureAwait(false);
+        switch (pair)
         {
-            if (!Guid.TryParse(facts.PairId.Trim(), out var pairId) || pairId == Guid.Empty)
-            {
-                unknown ??= $"its {PairIdColumn} does not hold a record identifier";
-            }
-            else if (!direct.Any(n => n.Id == pairId) && !filedIntermediates.Any(i => i.Id == pairId))
-            {
-                // (#1630: a pair repeating a typed intermediate lookup agrees by identity, as one repeating a typed parent does —
-                // the typed lookup, not the pair's label, says what the record is.)
-                if (facts.PairType is not { } typeRef)
-                {
-                    unknown ??= $"it names a record in {PairIdColumn} without that record's type";
-                }
-                else if (faultedTypes is not null && faultedTypes.Contains(typeRef))
-                {
-                    unknown ??= "the type of the record it is filed under could not be read";
-                }
-                else
-                {
-                    try
-                    {
-                        var pairTable = await ReadRecordTypeAsync(dataverse, recordTypes, typeRef, ct).ConfigureAwait(false);
-                        if (pairTable is null)
-                            unknown ??= "the type of the record it is filed under could not be determined";
-                        else if (IsParent(pairTable) && PairNamesAParentOnItsOwn(facts.Table))
-                            named.Add((pairTable, pairId));
-                        else if (IsParent(pairTable))
-                        {
-                            // #1616: the pair is text any user with Write can set through the Web API, bypassing the AppendTo
-                            // check a lookup costs. On a table whose pair is not BFF-managed it files the row under nothing on
-                            // its own — undetermined, so nothing is shared or un-secured from it (fail closed); a typed parent
-                            // that is readably secure still secures it (SecureParentsAnswer.WallsDecidable).
-                            unrepeated ??= PairWithoutTypedLookupReason(facts.Table, pairTable);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-                    {
-                        logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} could not be read.", typeRef);
-                        faultedTypes?.Add(typeRef);
-                        unknown ??= "the type of the record it is filed under could not be read";
-                    }
-                }
-            }
+            case PairParentAnswer.Parent parent:
+                named.Add((parent.Table, parent.Id));
+                break;
+            case PairParentAnswer.NotAFilingParent { Unrepeated: { } reason }:
+                unrepeated ??= reason;
+                break;
+            case PairParentAnswer.Unknown why:
+                unknown ??= why.Reason;
+                break;
+            case PairParentAnswer.None:
+            case PairParentAnswer.NotAFilingParent:
+                break; // no pair, a repeat, or a readable type that is not a parent (reason-less): names nothing
+            default:
+                // A closed set of four; a fifth must be decided here on purpose, never dropped as "names nothing".
+                throw new System.Diagnostics.UnreachableException(
+                    $"Unexpected pair answer {pair.GetType().Name} for {facts.Table}; NameParentsAsync must handle it explicitly.");
         }
 
         return new NamedParents(named, unknown, unrepeated, viaIntermediate)
@@ -4269,7 +4349,8 @@ public sealed partial class SecureRootInheritance
         var at = name.IndexOf('@');
         if (at >= 0)
             name = name[..at];
-        if (name.StartsWith('_') && name.EndsWith("_value", StringComparison.OrdinalIgnoreCase))
+        // 165d fix round: a key of exactly "_value" has no column inside it, and slicing it threw.
+        if (name.Length > "_value".Length && name.StartsWith('_') && name.EndsWith("_value", StringComparison.OrdinalIgnoreCase))
             name = name[1..^"_value".Length];
         return name.ToLowerInvariant();
     }

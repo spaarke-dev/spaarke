@@ -1,0 +1,29 @@
+{
+  "basis": "oracle arithmetic, seeded weights",
+  "rows": [
+    {
+      "field": "fee.hours",
+      "values": 1496,
+      "reach_analyzer_only": 0.0,
+      "reach_with_oracle_arithmetic": 0.2,
+      "wrong_trusted_analyzer_only": 0,
+      "wrong_trusted_with_oracle_arithmetic": 0
+    },
+    {
+      "field": "fee.rate",
+      "values": 839,
+      "reach_analyzer_only": 2.1,
+      "reach_with_oracle_arithmetic": 7.2,
+      "wrong_trusted_analyzer_only": 0,
+      "wrong_trusted_with_oracle_arithmetic": 0
+    },
+    {
+      "field": "fee.amount",
+      "values": 1356,
+      "reach_analyzer_only": 1.5,
+      "reach_with_oracle_arithmetic": 16.8,
+      "wrong_trusted_analyzer_only": 0,
+      "wrong_trusted_with_oracle_arithmetic": 0
+    }
+  ]
+}
