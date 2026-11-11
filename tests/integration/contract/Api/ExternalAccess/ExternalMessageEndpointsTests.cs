@@ -1282,6 +1282,9 @@ public class ExternalMessageEndpointsTests
         var persisted = harness.Communication();
         persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue("the send's own flag, not one this test sets");
         var inquiry = PersistedRow(persisted, "2026-11-02T09:00:00Z");
+        // The send files the email under its service request as well as the matter. In Dataverse that record exists, so the row's
+        // parent walk reads it back (its selected links unset, explicit nulls); seed it the way the constructor seeds the Open thread.
+        _roots.AddFilingRow("sprk_servicerequest", persisted.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_regardingservicerequest")!.Id);
         var other = Guid.NewGuid();
         var otherRow = MessageRow(other, "sprk_regardingmatter", matter, internalOnly: false, "2026-11-01T09:00:00Z");
 
