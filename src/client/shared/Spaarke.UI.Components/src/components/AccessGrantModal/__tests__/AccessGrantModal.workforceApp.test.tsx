@@ -188,9 +188,7 @@ const REASON_GROUPS: Array<{ group: string; codes: string[]; sentence: string }>
   {
     group: 'their contact already holds more',
     codes: ['sdap.access.grant.would_lower_existing'],
-    sentence:
-      'Their contact already holds a higher workforce app grant on this record, which is left as it is. If that ' +
-      'grant has expired, someone with access at that level can renew it.',
+    sentence: 'Their contact already holds higher workforce app access to this record, which is left as it is.',
   },
   {
     group: 'any other or no reason',

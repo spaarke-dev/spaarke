@@ -311,7 +311,7 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
-                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
+                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling, today,
                 dataverseClient, participations, accessibleRecords, binder.Store, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -460,7 +460,8 @@ public static class InviteAndGrantExternalUserEndpoint
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
                 dataverseClient, participations, accessibleRecords, binder.Store, ownership, ownerPrivileges, logger, ct,
-                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
+                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId,
+                auditLoggers: GrantExternalAccessEndpoint.AuditLoggersOf(httpContext));
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is

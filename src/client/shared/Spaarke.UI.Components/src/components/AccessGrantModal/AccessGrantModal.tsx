@@ -1369,17 +1369,15 @@ const WORKFORCE_APP_REASON_GROUPS: ReadonlyArray<{ codes: readonly string[]; bec
   { codes: ['sdap.access.grant.grantee_denied'], because: "because their contact is on this record's No Access List." },
 ];
 
-/** Task 193 G3b: the grant core's never-lower refusal: their contact already holds a HIGHER workforce-app grant. Owner
- * round 80: a lapsed higher grant counts too (it is never lowered), so the sentence never claims the access is live. */
+/** Task 193 G3b: the grant core's never-lower refusal: their contact already holds MORE workforce-app access. Owner
+ * 2026-11-11 (B-F5, "expired doesn't block"): only a grant that still gives access refuses — a lapsed one is restored at
+ * the new level instead — so "already holds" is true whenever this code is answered. */
 const WORKFORCE_APP_WOULD_LOWER_REASON_CODE = 'sdap.access.grant.would_lower_existing';
 
 /** Task 193 G3b: the sentence for a share that gave no workforce-app access (`workforceApp.visible` false). */
 export function workforceAppNotShownSentence(reason: string | undefined): string {
   if (reason === WORKFORCE_APP_WOULD_LOWER_REASON_CODE) {
-    return (
-      'Their contact already holds a higher workforce app grant on this record, which is left as it is. If that ' +
-      'grant has expired, someone with access at that level can renew it.'
-    );
+    return 'Their contact already holds higher workforce app access to this record, which is left as it is.';
   }
   const group = reason ? WORKFORCE_APP_REASON_GROUPS.find(g => g.codes.includes(reason)) : undefined;
   return `${WORKFORCE_APP_NOT_SHOWN_LEAD} ${group ? group.because : 'because that access could not be given.'}`;

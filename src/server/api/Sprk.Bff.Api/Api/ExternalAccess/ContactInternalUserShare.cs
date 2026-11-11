@@ -393,7 +393,8 @@ public sealed class ContactInternalUserShare
                     GrantExternalAccessEndpoint.ResolveCallerSystemUserId(httpContext),
                     dataverseClient, participations, accessibleRecords, _identities, _ownership, _ownerPrivileges, logger, ct,
                     reAddRestoresLapsed: true,
-                    pairing: new GrantPairing(systemUserId, pairings.ByRow))
+                    pairing: new GrantPairing(systemUserId, pairings.ByRow),
+                    auditLoggers: GrantExternalAccessEndpoint.AuditLoggersOf(httpContext))
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)

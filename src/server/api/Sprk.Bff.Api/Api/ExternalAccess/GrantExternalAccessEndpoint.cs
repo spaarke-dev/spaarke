@@ -40,6 +40,25 @@ public static class GrantExternalAccessEndpoint
     /// <summary>The grant table's logical name: the table whose Read an owner team must hold (task 099b review round 2).</summary>
     internal const string EntityLogicalName = "sprk_externalrecordaccess";
 
+    /// <summary>
+    /// Owner 2026-11-11 (task 193 B-F5): a lapsed grant restored below its earlier level. Written under
+    /// <see cref="ExternalAccessAudit.Category"/> through <see cref="ExternalAccessAudit.Write"/>; ids, levels and dates only.
+    /// </summary>
+    internal static readonly EventId LapsedGrantLoweredAuditEvent = new(9824, "ExternalAccessLapsedGrantLowered");
+
+    /// <summary>
+    /// The request's logger factory, for the external-access audit; <c>null</c> when the context carries no services (the audit
+    /// then falls back to the caller's logger). Read through the feature, never <see cref="HttpContext.RequestServices"/>,
+    /// which throws on a context that was never initialised.
+    /// </summary>
+    internal static ILoggerFactory? AuditLoggersOf(HttpContext httpContext) =>
+        httpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IServiceProvidersFeature>()?.RequestServices?
+            .GetService<ILoggerFactory>();
+
+    /// <summary>A date as the audit writes it: ISO, culture-independent; "none" for an unbounded row.</summary>
+    private static string AuditDate(DateOnly? date) =>
+        date?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "none";
+
     // Cache invalidation (task 137): through ExternalParticipationService.InvalidateGrantSetsAsync — the ONE
     // routine every grant-write path calls. It owns the key (resource + version), removes under every tenant a
     // grant set can be cached under (the CIAM one included), and expands an organization grant to its members.
@@ -194,7 +213,7 @@ public static class GrantExternalAccessEndpoint
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
                 dataverseClient, participations, accessibleRecords, invites.IdentityStore, ownership, ownerPrivileges, logger, ct,
-                reAddRestoresLapsed: true);
+                reAddRestoresLapsed: true, auditLoggers: AuditLoggersOf(httpContext));
         }
         catch (Exception ex)
         {
@@ -412,7 +431,8 @@ public static class GrantExternalAccessEndpoint
         ContactGrantIssuer? contactIssuer = null,
         bool reAddRestoresLapsed = false,
         Guid? resolvedOwnerTeamId = null,
-        GrantPairing? pairing = null)
+        GrantPairing? pairing = null,
+        ILoggerFactory? auditLoggers = null)
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
@@ -439,7 +459,7 @@ public static class GrantExternalAccessEndpoint
         // The grantee comes from the SAME key the upsert writes, so the checks judge exactly the row that would be
         // written (an OrganizationId beside a ContactId is the contact's firm — a deny subject, not the grantee).
         var check = await CheckGrantAsync(
-            GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling,
+            GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling, today,
             dataverseClient, participations, accessibleRecords, identityStore, logger, ct, contactIssuer);
         if (check.Refusal is { } refusal)
             return GrantUpsertOutcome.Refused(refusal);
@@ -664,6 +684,18 @@ public static class GrantExternalAccessEndpoint
                     key, survivor.Id,
                     survivor.AccessLevel, levelChanged ? requestedLevel : survivor.AccessLevel,
                     survivor.ExpiresDate, expiryChanged ? expiryToWrite : survivor.ExpiresDate, pairWrite);
+
+                // Owner 2026-11-11 (task 193 B-F5): a LAPSED grant restored BELOW its stored level loses that level from the
+                // row, so the earlier level is kept in the external-access audit (ids, levels and dates only).
+                if (!survivorConfers && levelChanged && requestedLevel < (survivor.AccessLevel ?? 0))
+                {
+                    var auditLogger = auditLoggers?.CreateLogger(ExternalAccessAudit.Category) ?? logger;
+                    ExternalAccessAudit.Write(auditLogger, audit => audit.LogInformation(LapsedGrantLoweredAuditEvent,
+                        "[EXT-GRANT-AUDIT] Lapsed grant {AccessRecordId} on {RootType} {RootId} restored below its earlier level: " +
+                        "level {EarlierLevel} → {RestoredLevel}, expiry {EarlierExpiry} → {RestoredExpiry}, by caller {CallerId}.",
+                        survivor.Id, rootType, rootId, survivor.AccessLevel, requestedLevel,
+                        AuditDate(survivor.ExpiresDate), AuditDate(effectiveExpiry), callerOid ?? "(system)"));
+                }
             }
             else
             {
@@ -848,8 +880,9 @@ public static class GrantExternalAccessEndpoint
     /// <para><b>Order.</b> (1) The record's access policy (task 138) — first, so a caller learns nothing more about a
     /// record whose policy refuses this grantee kind. (2) The ceiling: none → 403; otherwise the request is capped
     /// (NARROW, not refuse — owner Q1). (3) Never-lower: when the cap narrowed the request and an active row on the
-    /// key holds a HIGHER level (a lapsed row too, owner round 80: never a quiet downgrade), refuse 409 — an explicit request
-    /// for a lower level (not narrowed) is a deliberate
+    /// key that still gives access on <paramref name="today"/> holds a HIGHER level, refuse 409 (owner round 80: never a quiet
+    /// downgrade; owner 2026-11-11, task 193 B-F5: a lapsed row confers nothing and does not block, so it is restored at the
+    /// granted level) — an explicit request for a lower level (not narrowed) is a deliberate
     /// downgrade by a Write-holder and is allowed, as before. (4) The No Access list, through the read path's own
     /// veto code (<see cref="IAccessibleRecordSetService.CheckGranteeNoAccessAsync"/>): an entry refuses 422
     /// (<see cref="GrantPolicyDecision.GranteeDenied"/>); a check that could not be completed refuses 503
@@ -863,6 +896,7 @@ public static class GrantExternalAccessEndpoint
         ExternalGrantRootType rootType,
         Guid rootId,
         GrantCeiling ceiling,
+        DateOnly today,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
@@ -957,10 +991,13 @@ public static class GrantExternalAccessEndpoint
                 return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
             }
         }
-        // Owner round 80 (task 113, live gate G2 2026-10-08): a LAPSED higher row also counts. The ceiling bounds a restore; it
-        // never becomes a quiet downgrade of the stored level. (Task 193 G4a had excluded lapsed rows; reverted at the master
-        // merge because it overturned this owner-gated rule; the Add person case is an owner question in the PR.)
-        else if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
+        // Owner round 80 (task 113, live gate G2 2026-10-08), narrowed by owner 2026-11-11 (task 193 B-F5, "expired doesn't
+        // block"): only a higher row that still GIVES access refuses. A lapsed higher row confers nothing, so a narrowed re-add
+        // over it lowers no one's access: it is restored at the granted level with the new date (the upsert below), and the
+        // earlier level is recorded in the external-access audit. A live higher row still refuses: never a quiet downgrade of
+        // access someone holds. The rows were read above; a failed read threw, so nothing is ever restored on a fault.
+        else if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted
+                                                 && ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today)))
         {
             logger.LogWarning(
                 "[EXT-GRANT] Refused: {Key} already holds a level above {Granted}, and the request was narrowed to it " +

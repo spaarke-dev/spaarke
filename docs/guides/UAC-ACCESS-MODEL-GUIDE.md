@@ -234,8 +234,8 @@ exception is **Update Access** (`/assigned-access/sync`, which re-runs the Assig
 ### Adding an internal colleague: the share and the paired workforce-app grant
 
 The share is written first. Only after it is confirmed does the BFF write the paired grant, through the same grant core
-as `/grant` (grantor ceiling, never lower, the No Access list, a lapsed row restored unless the request was narrowed below
-it: a lapsed higher grant is never lowered, round 80). The grant row names the colleague
+as `/grant` (grantor ceiling, never lower, the No Access list, a lapsed row restored, at the narrowed level when the caller's
+ceiling is lower: an expired grant does not block, owner 2026-11-11 B-F5). The grant row names the colleague
 in `sprk_pairedsystemuser`. The contact gets **no invite and no notification**.
 
 | | The share | The paired grant |
@@ -257,7 +257,7 @@ show in their workforce app because …", with one plain reason per group:
 | workforce app access is not set up in this environment yet | `sdap.access.share.workforce_pairing_column_missing` (see the deploy note below) |
 | that access could not be set up just now; adding them again retries it | a read or write that failed: `…workforce_pairing_unreadable`, `…workforce_grant_failed`, `…workforce_link_unreadable`, and the grant core's `caller_rights_unreadable`, `policy_unreadable`, `owner_unreadable`, `no_access_unverifiable` |
 | their contact is on this record's No Access List | `sdap.access.grant.grantee_denied` |
-| (a sentence of its own) "Their contact already holds a higher workforce app grant on this record, which is left as it is. If that grant has expired, someone with access at that level can renew it." (A lapsed higher grant counts too, so the sentence never claims the access is live.) | `sdap.access.grant.would_lower_existing` |
+| (a sentence of its own) "Their contact already holds higher workforce app access to this record, which is left as it is." (Only a live higher grant answers this; a lapsed one is restored at the new level, owner 2026-11-11 B-F5.) | `sdap.access.grant.would_lower_existing` |
 | that access could not be given | any other code |
 
 The modal never shows the codes. If the No Access flags cannot be read, the share itself is refused and nothing is
@@ -439,8 +439,10 @@ platform Share button. Dataverse still caps what a share can do by the person's 
   A request above the ceiling is **narrowed** (the response says `narrowed`), not refused. A share is also capped at the
   caller's own rights.
 - **Never lower by accident.** If a request was narrowed and the person already holds more, the write is refused (409
-  `would_lower_existing`). A lapsed grant at a higher level counts too (owner round 80): a narrowed re-add never quietly
-  lowers the stored level. An explicit downgrade is allowed.
+  `would_lower_existing`). Only a grant that still gives access counts (owner 2026-11-11, B-F5: "expired doesn't block",
+  narrowing round 80 to live grants): a lapsed higher grant gives nothing, so a narrowed re-add restores it at the narrowed
+  level with the new date, and the earlier level and date go to the external-access audit (event 9824). An explicit
+  downgrade is allowed.
 - **Expiry.** Default today + 90 days (Date Only, UTC). The Manage Access **Expiration** command sets one date on every
   active external grant of the record at once. Re-adding over a lapsed grant restores it with today + 90 days. An
   undated grant (written outside Spaarke) confers nothing until the daily reconciliation dates it.
