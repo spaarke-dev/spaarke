@@ -80,8 +80,11 @@ public sealed class ProcedureEndpointsTests
         BillingAdminAuthorization.WriteRuleSetPrivilege, BillingAdminAuthorization.CreatePolicyVersionPrivilege,
         BillingAdminAuthorization.WritePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyPrivilege,
         BillingAdminAuthorization.CreatePolicyPrivilege, // task 116: the /draft route (DraftRules)
-        BillingAdminAuthorization.DeletePolicyPrivilege, BillingAdminAuthorization.DeletePolicyVersionPrivilege, // 116 fix round 2: /draft removes earlier drafts
     };
+
+    /// <summary>Fix round 4 (EB-D-216): the table Delete privileges /draft asked in round 2, and asks no more.</summary>
+    private const string DeletePolicyPrivilege = "prvDeletesprk_Policy";
+    private const string DeletePolicyVersionPrivilege = "prvDeletesprk_PolicyVersion";
 
     internal sealed class Host : IAsyncDisposable
     {
@@ -139,6 +142,9 @@ public sealed class ProcedureEndpointsTests
                 o.Enabled = ebillingEnabled;
                 o.MaxSubmissionFileSizeMb = maxFileMb;
             });
+            // Fix round 4 (EB-D-216): by default a /draft supersedes nothing (a first draft: no per-row check, no deactivation).
+            host.RuleSets.Setup(r => r.PlanRedraftAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(RuleSetOutcome<RedraftPlan>.Done(new RedraftPlan(Array.Empty<SupersededDraft>())));
             builder.Services.AddSingleton(host.RuleSets.Object);
             builder.Services.AddSingleton(host.Jobs.Object);
             builder.Services.AddSingleton(host.Files.Service);
@@ -644,12 +650,10 @@ public sealed class ProcedureEndpointsTests
     private static StoredFileStatus Status(Host host, Guid id) =>
         (StoredFileStatus)host.Files.Dataverse.Rows[id].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value;
 
-    [Theory(DisplayName = "116 must-fire: /draft needs every DraftRules privilege (the rule set marker and Create on both policy tables) and, fix round 2, Delete on both policy tables")]
+    [Theory(DisplayName = "116 must-fire: /draft needs every DraftRules privilege (the rule set marker and Create on both policy tables)")]
     [InlineData(BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData(BillingAdminAuthorization.CreatePolicyPrivilege)]
     [InlineData(BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
-    [InlineData(BillingAdminAuthorization.DeletePolicyPrivilege)]
-    [InlineData(BillingAdminAuthorization.DeletePolicyVersionPrivilege)]
     public async Task Draft_WithoutADraftRulesPrivilege_Is403_AndReachesNothing(string missing)
     {
         await using var host = await Host.StartAsync();
@@ -661,10 +665,12 @@ public sealed class ProcedureEndpointsTests
         host.VerifyNothingReached(); // nothing read, nothing removed, nothing queued
     }
 
-    [Fact(DisplayName = "116 fix 2 must-fire: /draft asks Delete on both policy tables as the caller, right after the Create checks")]
-    public async Task Draft_AsksDeleteOnBothPolicyTables_AsTheCaller_AfterTheCreateChecks()
+    [Fact(DisplayName = "116 fix 4 (EB-D-216) must-fire: /draft asks no Delete privilege; without either table Delete it still queues (202)")]
+    public async Task Draft_AsksNoDeletePrivilege()
     {
         await using var host = await Host.StartAsync();
+        host.Probe.Release(DeletePolicyPrivilege);
+        host.Probe.Release(DeletePolicyVersionPrivilege);
         host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
         host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
@@ -672,11 +678,8 @@ public sealed class ProcedureEndpointsTests
 
         var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "with Create and Delete on both tables the route proceeds");
-        var asked = host.Probe.Calls.Where(c => c.HasToken).Select(c => c.Privilege).ToList();
-        asked.Should().ContainInOrder(
-            BillingAdminAuthorization.CreatePolicyPrivilege, BillingAdminAuthorization.CreatePolicyVersionPrivilege,
-            BillingAdminAuthorization.DeletePolicyPrivilege, BillingAdminAuthorization.DeletePolicyVersionPrivilege);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "a redraft deactivates, so no table Delete is needed");
+        host.Probe.Calls.Select(c => c.Privilege).Should().NotContain(new[] { DeletePolicyPrivilege, DeletePolicyVersionPrivilege });
     }
 
     [Fact(DisplayName = "116 must-not-fire: /draft with Write on the Procedure and the DraftRules privileges queues the version's job (202, Location = the rule set read)")]

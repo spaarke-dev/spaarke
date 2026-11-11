@@ -288,11 +288,13 @@ public static class ProcedureEndpoints
         // Fix round 2: the rights are asked for every id, an unknown one too, before the version is read, so both answers take the same path.
         // Fix round 3: the probe answers no rights for an unknown id too, so its no-Read 404 is returned before the version is read: an
         // unknown id and an unreadable version make the same reads. Only Read without Write (403) waits for the version read below, so a
-        // version under another Procedure still answers 404; a probe fault keeps that order too.
-        var denied = await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct);
-        if (denied is IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound })
+        // version under another Procedure still answers 404.
+        // Fix round 4 (K1): a probe FAULT is returned now too (403 system_failure), before the version is read, so during a fault every id,
+        // known or not, gets the same answer from the same reads. Only Read without Write (a real answer) waits for the version read.
+        var (denied, answerNow) = await CallerVersionRightsAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct);
+        if (answerNow)
         {
-            return denied;
+            return denied!;
         }
 
         var found = await ruleSets.GetDraftSourceAsync(procedureId, versionId, ct);
@@ -317,6 +319,30 @@ public static class ProcedureEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict, detail: "Rules have already been drafted for this Procedure Version.",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = RuleSetService.CodeAlreadyDrafted });
+        }
+
+        // Fix round 4 (EB-D-216): a redraft deactivates the drafts it supersedes, never deletes them. The rows are planned first; the caller's own
+        // Write on EVERY one of them is asked as the user before any write (none denied, none unanswered, or nothing changes); then the
+        // application deactivates them all or none (re-checked as Drafts first; a draft published in between is a 409). A first draft plans
+        // nothing and asks nothing.
+        var plan = await ruleSets.PlanRedraftAsync(versionId, source.FileId, ct);
+        if (plan.Kind != RuleSetOutcomeKind.Done)
+        {
+            return Map(plan, http);
+        }
+
+        if (plan.Value!.Drafts.Count > 0)
+        {
+            if (await CallerWriteOnEveryRowRefusalAsync(files, plan.Value, versionId, http, logger, ct) is { } refused)
+            {
+                return refused;
+            }
+
+            var deactivated = await ruleSets.DeactivateSupersededDraftsAsync(versionId, plan.Value, ct);
+            if (deactivated.Kind != RuleSetOutcomeKind.Done)
+            {
+                return Map(deactivated, http);
+            }
         }
 
         var jobId = Guid.NewGuid();
@@ -501,6 +527,14 @@ public static class ProcedureEndpoints
     /// name="notFoundDetail"/> is the route's own unknown-id text); Read without Write is 403; a fault is 403 <c>system_failure</c>. Null: go on.
     /// </summary>
     internal static async Task<IResult?> CallerVersionRefusalAsync(
+        StoredFileService files, Guid versionId, string notFoundDetail, HttpContext http, ILogger logger, CancellationToken ct) =>
+        (await CallerVersionRightsAsync(files, versionId, notFoundDetail, http, logger, ct)).Refusal;
+
+    /// <summary>
+    /// <see cref="CallerVersionRefusalAsync"/>, and whether the refusal answers for every id alike (fix round 4, K1): no Read (the unknown-id 404)
+    /// and a probe fault (403 <c>system_failure</c>) do; Read without Write (403) depends on the version, so a caller may still read it first.
+    /// </summary>
+    internal static async Task<(IResult? Refusal, bool AnswerNow)> CallerVersionRightsAsync(
         StoredFileService files, Guid versionId, string notFoundDetail, HttpContext http, ILogger logger, CancellationToken ct)
     {
         AccessRights rights;
@@ -512,19 +546,70 @@ public static class ProcedureEndpoints
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Procedure Version route: the caller's rights could not be read ({ExceptionType})", ex.GetType().Name);
-            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return (ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier), true);
         }
 
         if (!rights.HasFlag(AccessRights.Read))
         {
-            return VersionNotFound(notFoundDetail, http);
+            return (VersionNotFound(notFoundDetail, http), true);
         }
 
         return rights.HasFlag(AccessRights.Write)
-            ? null
-            : ProblemDetailsHelper.Forbidden(
-                FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier);
+            ? (null, false)
+            : (ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier), false);
     }
+
+    /// <summary>Fix round 4 (EB-D-216): the answer when the caller's rights on a superseded draft could not be read (nothing changed).</summary>
+    internal const string CodeRedraftUnverified = "ruleset.redraft_unverified";
+
+    /// <summary>
+    /// Fix round 4 (EB-D-216, condition 1): the caller's own Write, asked as the user in ONE question, on every row <paramref name="plan"/> names
+    /// (each superseded policy version, then each policy). Null: every row is writable. Any row without Write is 403 <c>insufficient_rights</c>;
+    /// any row Dataverse gave no answer for, or a fault, is 503 <see cref="CodeRedraftUnverified"/>. Either way the redraft stops before any write.
+    /// </summary>
+    internal static async Task<IResult?> CallerWriteOnEveryRowRefusalAsync(
+        StoredFileService files, RedraftPlan plan, Guid versionId, HttpContext http, ILogger logger, CancellationToken ct)
+    {
+        var rows = plan.Rows
+            .Select(r => (r.Table == RuleSetService.PolicyEntity ? PolicyEntitySet : PolicyVersionEntitySet, r.Id))
+            .ToList();
+        IReadOnlyList<AccessRights?> answers;
+        try
+        {
+            answers = await files.GetCallerRightsOnRowsOrUnknownAsync(TokenHelper.ExtractBearerTokenOrNull(http), rows, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Procedure Version {ProcedureVersionId}: the caller's rights on the superseded drafts could not be read ({ExceptionType}); nothing changed",
+                versionId, ex.GetType().Name);
+            return RedraftUnverified();
+        }
+
+        if (answers.Count != rows.Count || answers.Any(a => a is null))
+        {
+            logger.LogWarning("Procedure Version {ProcedureVersionId}: Dataverse gave no answer for the caller's rights on a superseded draft; nothing changed", versionId);
+            return RedraftUnverified();
+        }
+
+        if (answers.Any(a => !a!.Value.HasFlag(AccessRights.Write)))
+        {
+            logger.LogWarning("Procedure Version {ProcedureVersionId}: the caller lacks Write on a superseded draft; nothing changed", versionId);
+            return ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                detail: "You need Write on every earlier draft of this version that drafting again replaces.", traceId: http.TraceIdentifier);
+        }
+
+        return null;
+    }
+
+    private static IResult RedraftUnverified() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Your rights on the earlier drafts could not be checked. Nothing was changed; try again shortly.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = CodeRedraftUnverified });
+
+    internal const string PolicyEntitySet = "sprk_policies";
+    internal const string PolicyVersionEntitySet = "sprk_policyversions";
 
     /// <summary>The unknown-version 404 (<c>procedure.version_not_found</c>) with the route's own text; the same body as no Read on it.</summary>
     internal static IResult VersionNotFound(string detail, HttpContext http) =>

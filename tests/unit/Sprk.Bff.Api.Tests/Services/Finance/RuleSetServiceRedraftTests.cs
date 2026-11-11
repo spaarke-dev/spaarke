@@ -269,15 +269,22 @@ public sealed class RuleSetServiceRedraftTests
         found.Value!.AlreadyDrafted.Should().BeFalse("the reset makes the version draftable again");
         found.Value.FileId.Should().Be(replacement, "the redraft reads the new file");
 
+        // Fix round 4 (EB-D-216): the /draft request plans the superseded drafts and deactivates them (the route's per-row checks are its own).
+        var plan = await service.PlanRedraftAsync(d.Version, replacement, CancellationToken.None);
+        plan.Value!.Drafts.Select(x => x.PolicyId).Should().HaveCount(3).And.Contain(new[] { edited, accepted }).And.NotContain(published);
+        (await service.DeactivateSupersededDraftsAsync(d.Version, plan.Value, CancellationToken.None)).Value.Should().Be(new DraftsCompensated(3, 0));
+
         var compensated = await service.RemoveUntouchedDraftsAsync(d.Version, replacement, CancellationToken.None);
-        compensated.Value.Should().Be(new DraftsCompensated(Removed: 3, Kept: 1));
+        compensated.Value.Should().Be(new DraftsCompensated(Removed: 0, Kept: 1), "the deactivated drafts are not read; only the copy-forward is active");
         var redraft = await service.AddDraftsAsync(d.Version, replacement, new[] { Increment(), Cap(12) }, None, CallerOid, CancellationToken.None);
 
         redraft.Kind.Should().Be(RuleSetOutcomeKind.Done);
         redraft.Value!.Stored.Should().Be(2);
-        h.Rows["sprk_policy"].Select(p => p.Id).Should().Contain(published).And.NotContain(new[] { edited, accepted });
-        h.Rows["sprk_policy"].Should().HaveCount(3, "the new run's two drafts and the copy-forward; nothing of the earlier file's run");
-        h.Rows["sprk_policyversion"].Select(v => v.Id).Should().Contain(new[] { copy, publishedV1 });
+        bool Active(Entity row) => (row.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0) == 0;
+        h.Rows["sprk_policy"].Select(p => p.Id).Should().Contain(new[] { published, edited, accepted }, "a redraft never deletes");
+        h.Rows["sprk_policy"].Where(Active).Should().HaveCount(3, "the new run's two drafts and the copy-forward; nothing of the earlier file's run is active");
+        h.Rows["sprk_policy"].Where(p => !Active(p)).Select(p => p.Id).Should().Contain(new[] { edited, accepted });
+        h.Rows["sprk_policyversion"].Where(Active).Select(v => v.Id).Should().Contain(new[] { copy, publishedV1 });
         Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
     }
 

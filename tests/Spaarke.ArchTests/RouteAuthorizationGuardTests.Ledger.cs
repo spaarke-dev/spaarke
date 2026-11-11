@@ -363,7 +363,9 @@ public partial class RouteAuthorizationGuardTests
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
             + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. Task 116 adds two routes in this file (the count of endpoint "
             + "files is unchanged): POST .../versions/{versionId}/draft -- BillingAdminAuthorization.DraftProcedureVersion: Write on the Procedure "
-            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion); PUT .../versions/{versionId}/file "
+            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion), no Delete check (EB-D-216); then, "
+            + "in the handler, the caller's own Write as the user on EACH superseded draft row a redraft deactivates (every sprk_policyversion and its "
+            + "sprk_policy; any denied 403, any unanswered 503, nothing written), and the application deactivates them all or none; PUT .../versions/{versionId}/file "
             + "-- WriteProcedure, then the file store's own step 0 and the caller's Write on the version (UploadForCallerAsync). On both, a version of "
             + "another Procedure is the unknown-id 404. The eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,

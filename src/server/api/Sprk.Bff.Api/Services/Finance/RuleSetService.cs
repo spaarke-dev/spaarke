@@ -119,6 +119,25 @@ public sealed record DraftsAdded(int Stored, int AlreadyPresent, IReadOnlyList<N
 /// <summary>The result of the retry compensation (task 075): earlier untouched drafts removed, and rules of the rule set that were kept.</summary>
 public sealed record DraftsCompensated(int Removed, int Kept);
 
+/// <summary>
+/// Task 116 fix round 4 (EB-D-216): one rule a redraft supersedes: its policy and every version of it, each with the row version it was read at.
+/// The redraft deactivates the policy and all these versions together, or none of them.
+/// </summary>
+public sealed record SupersededDraft(Guid PolicyId, IReadOnlyList<Guid> VersionIds);
+
+/// <summary>
+/// Task 116 fix round 4 (EB-D-216): the drafts a redraft of a Procedure Version will deactivate, decided before anything is written. The route
+/// checks the caller's own Write on every row named here, as the user, then hands the same plan to
+/// <see cref="RuleSetService.DeactivateSupersededDraftsAsync"/>. Empty for a first draft.
+/// </summary>
+public sealed record RedraftPlan(IReadOnlyList<SupersededDraft> Drafts)
+{
+    /// <summary>Every row the redraft writes, versions first: the per-row Write checks ask exactly these.</summary>
+    public IEnumerable<(string Table, Guid Id)> Rows =>
+        Drafts.SelectMany(d => d.VersionIds.Select(v => (RuleSetService.VersionEntity, v)))
+            .Concat(Drafts.Select(d => (RuleSetService.PolicyEntity, d.PolicyId)));
+}
+
 /// <summary>One problem with one field of one rule (or of the request when <see cref="PolicyId"/> is null).</summary>
 public sealed record RuleSetError(Guid? PolicyId, string? RuleName, string Field, string Message, string? Reason);
 
@@ -270,6 +289,26 @@ public class RuleSetService
 
     /// <summary>Fix round 1: the version's source file was replaced while a run drafted from the earlier one (the job retries).</summary>
     internal const string CodeSourceChanged = "ruleset.source_changed";
+
+    /// <summary>
+    /// Fix round 4 (EB-D-216): a draft the redraft would deactivate is no longer a Draft (published, put in force, given a new version, moved)
+    /// between the plan and the write. Nothing is deactivated (409).
+    /// </summary>
+    internal const string CodeDraftChanged = "ruleset.draft_changed";
+
+    /// <summary>
+    /// Fix round 4 (EB-D-216): the job found drafts of an earlier source file that a reviewer worked on and no <c>/draft</c> request has
+    /// deactivated. The job does not deactivate them (only a request, after its per-row Write checks, does), so it drafts nothing (409); the
+    /// administrator starts drafting again.
+    /// </summary>
+    internal const string CodeSupersededDraftsRemain = "ruleset.superseded_drafts_remain";
+
+    /// <summary>Fix round 4 (EB-D-216): a rule of the set that a redraft deactivated, asked for by id (an edit, accept or reject): 409.</summary>
+    internal const string CodeDraftInactive = "ruleset.draft_inactive";
+
+    /// <summary>Fix round 4 (EB-D-216): <c>statecode</c> / <c>statuscode</c> of a deactivated policy or policy version (Inactive, its default status).</summary>
+    internal const int StateInactive = 1;
+    internal const int StatusInactive = 2;
 
     /// <summary>Task 116 (model 7.2, O-24): drafting runs only for a Draft Procedure Version (409).</summary>
     internal const string CodeVersionNotDraft = "procedure_version.not_draft";
@@ -844,13 +883,13 @@ public class RuleSetService
 
     /// <summary>
     /// <see cref="RemoveUntouchedDraftsAsync(Guid, CancellationToken)"/>, for a run that drafts from the Stored File <paramref name="sourceFileId"/>.
-    /// Fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): a draft of this version made from an EARLIER source file is removed
-    /// too, even when an administrator edited, accepted or rejected it, so a redraft after a replaced file produces no duplicates. Such a draft
-    /// is one whose policy and every version were created by this service's identity BEFORE the current source file was created, with the
-    /// drafted code prefix, no current version (never published, so never a copy-forward draft), every version a Draft
-    /// (<c>sprk_publishstate</c>) under THIS Procedure Version and never in force. A published policy, a copy-forward draft, a rule of another
-    /// version and a rule an administrator created are never removed. When the source file's creation time cannot be read, only untouched
-    /// drafts are removed (fail closed: reviewed work is kept).
+    /// Fix round 4 (EB-D-216): the job removes only UNTOUCHED drafts (its own output, never modified; task 075's retry compensation). Drafts of
+    /// this version made from an EARLIER source file that a reviewer worked on are superseded by a redraft, and a redraft deactivates them in
+    /// the <c>/draft</c> request (<see cref="PlanRedraftAsync"/>, the caller's per-row Write checks, <see cref="DeactivateSupersededDraftsAsync"/>),
+    /// never here: the job has no user to check. If such an active draft is still there (no request deactivated it: a retry that drafts a file
+    /// the administrator never asked to draft), the run refuses 409 <see cref="CodeSupersededDraftsRemain"/> and removes nothing. A deactivated
+    /// row is never read here (both reads name <c>statecode</c>), so it is never deleted. When the source file's creation time cannot be read,
+    /// only untouched drafts are considered.
     /// </summary>
     public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid procedureVersionId, Guid sourceFileId, CancellationToken ct)
     {
@@ -866,23 +905,236 @@ public class RuleSetService
                 StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this Procedure Version.");
         }
 
-        DateTime? sourceCreatedOn = null;
-        if (sourceFileId != Guid.Empty)
+        var created = await SourceCreatedOnOrRefusalAsync<DraftsCompensated>(procedureVersionId, sourceFileId, ct);
+        if (created.Refusal is { } unread)
         {
-            try
-            {
-                sourceCreatedOn = await SourceFileCreatedOnAsync(sourceFileId, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the source file's creation time could not be read; nothing was cleared", procedureVersionId);
-                return RuleSetOutcome<DraftsCompensated>.Refused(
-                    StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be cleared. Try again; if it keeps failing, contact support.");
-            }
+            return unread;
         }
 
-        return await RemoveDraftsAsync(target.RuleSet!.Id, procedureVersionId, sourceCreatedOn, ct);
+        return await RemoveDraftsAsync(target.RuleSet!.Id, procedureVersionId, created.CreatedOn, ct);
     }
+
+    /// <summary>The current source file's <c>createdon</c> (null for <see cref="Guid.Empty"/> or a file not found), or the 500 a read fault answers.</summary>
+    private async Task<(DateTime? CreatedOn, RuleSetOutcome<T>? Refusal)> SourceCreatedOnOrRefusalAsync<T>(Guid procedureVersionId, Guid sourceFileId, CancellationToken ct)
+        where T : class
+    {
+        if (sourceFileId == Guid.Empty)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            return (await SourceFileCreatedOnAsync(sourceFileId, ct), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the source file's creation time could not be read; nothing was cleared", procedureVersionId);
+            return (null, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be cleared. Try again; if it keeps failing, contact support."));
+        }
+    }
+
+    /// <summary>
+    /// Fix round 4 (EB-D-216): the drafts a redraft of <paramref name="procedureVersionId"/> from the Stored File <paramref name="sourceFileId"/>
+    /// supersedes, decided before anything is written. Exactly the set the delete path removed before this round: the version's UNTOUCHED drafts
+    /// (<see cref="IsUntouchedDraft"/>) and its drafts made from a source file created before the current one (<see cref="IsSupersededDraft"/>),
+    /// each as a whole rule (the policy and every version of it). Only active rows are read. A first draft plans nothing. The version, Procedure
+    /// and set checks are <see cref="GetDraftSourceAsync"/>'s; a drafted version is 409 already-drafted; a read fault is 500.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<RedraftPlan>> PlanRedraftAsync(Guid procedureVersionId, Guid sourceFileId, CancellationToken ct)
+    {
+        var target = await LoadDraftTargetAsync<RedraftPlan>(procedureVersionId, ct);
+        if (target.Refusal is { } refusal)
+        {
+            return refusal;
+        }
+
+        if (target.AlreadyDrafted)
+        {
+            return RuleSetOutcome<RedraftPlan>.Refused(
+                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this Procedure Version.");
+        }
+
+        var created = await SourceCreatedOnOrRefusalAsync<RedraftPlan>(procedureVersionId, sourceFileId, ct);
+        if (created.Refusal is { } unread)
+        {
+            return unread;
+        }
+
+        try
+        {
+            var found = await FindDraftsAsync(target.RuleSet!.Id, procedureVersionId, created.CreatedOn, ct);
+            if (found.Truncated)
+            {
+                return RuleSetOutcome<RedraftPlan>.Refused(
+                    StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
+            }
+
+            return RuleSetOutcome<RedraftPlan>.Done(new RedraftPlan(found.Untouched.Concat(found.Superseded)
+                .Select(d => new SupersededDraft(d.Policy.Id, d.Versions.Select(v => v.Id).ToList()))
+                .ToList()));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the drafts a redraft supersedes could not be read; nothing was changed", procedureVersionId);
+            return RuleSetOutcome<RedraftPlan>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be read. Try again; if it keeps failing, contact support.");
+        }
+    }
+
+    /// <summary>
+    /// Fix round 4 (EB-D-216): deactivates (<c>statecode</c> Inactive, <c>statuscode</c> its default) every row of <paramref name="plan"/>, as the
+    /// application, after the route has checked the caller's own Write on each of them. All or nothing, in this order:
+    /// <list type="number">
+    /// <item>every planned row is read again (no <c>statecode</c> filter, so a row already deactivated is seen, and skipped);</item>
+    /// <item>every rule must still be what the plan saw: the policy has no current version, its versions are exactly the planned ones, and each
+    /// active one is still a Draft (<c>sprk_publishstate</c>) under THIS Procedure Version and never in force. Any other answer (a version
+    /// published, put in force, moved, added or removed in between) refuses 409 <see cref="CodeDraftChanged"/> and NOTHING is written: no row
+    /// is written until every row is re-checked;</item>
+    /// <item>one transaction deactivates every version, then its policy, each conditioned on the row version just read, so a publish that
+    /// lands between the re-read and the write rolls the whole transaction back (also 409, nothing written).</item>
+    /// </list>
+    /// A published version, a copy-forward draft and a rule outside the plan are therefore never deactivated. A deactivated row is never
+    /// deleted; a finding, Signal or Decision Record that cites it still resolves it by id. Faults answer 500 <c>ruleset.write_failed</c> with
+    /// nothing applied (the transaction rolls back).
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftsCompensated>> DeactivateSupersededDraftsAsync(Guid procedureVersionId, RedraftPlan plan, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.Drafts.Count == 0)
+        {
+            return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(0, 0));
+        }
+
+        try
+        {
+            var policyIds = plan.Drafts.Select(d => (object)d.PolicyId).Distinct().ToArray();
+            var policies = new Dictionary<Guid, Entity>();
+            var versionsByPolicy = new Dictionary<Guid, List<Entity>>();
+            foreach (var batch in policyIds.Chunk(MaxInValues))
+            {
+                // By id: a deactivated policy must be seen here (skipped), so no statecode condition.
+                var policyQuery = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet(PolicyColumns) };
+                policyQuery.ColumnSet.AddColumns("statecode");
+                policyQuery.Criteria.AddCondition("sprk_policyid", ConditionOperator.In, batch);
+                foreach (var p in (await _entities.RetrieveMultipleAsync(policyQuery, ct)).Entities)
+                {
+                    policies[p.Id] = p;
+                }
+
+                // all versions: every version of a planned rule, active or not, so a version added since the plan is seen (409).
+                var versionQuery = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
+                versionQuery.ColumnSet.AddColumns("statecode");
+                versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+                var versions = await _entities.RetrieveMultipleAsync(versionQuery, ct);
+                if (versions.MoreRecords)
+                {
+                    return RuleSetOutcome<DraftsCompensated>.Refused(
+                        StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
+                }
+
+                foreach (var v in versions.Entities)
+                {
+                    if (v.GetAttributeValue<EntityReference>("sprk_policy")?.Id is { } pid)
+                    {
+                        if (!versionsByPolicy.TryGetValue(pid, out var list))
+                        {
+                            versionsByPolicy[pid] = list = new List<Entity>();
+                        }
+
+                        list.Add(v);
+                    }
+                }
+            }
+
+            var requests = new List<OrganizationRequest>();
+            var deactivated = 0;
+            foreach (var draft in plan.Drafts)
+            {
+                if (!policies.TryGetValue(draft.PolicyId, out var policy))
+                {
+                    return DraftChanged(procedureVersionId, draft.PolicyId, "the rule is gone");
+                }
+
+                var versions = versionsByPolicy.GetValueOrDefault(draft.PolicyId) ?? new List<Entity>();
+                if (policy.GetAttributeValue<EntityReference>("sprk_currentversion") is not null
+                    || !versions.Select(v => v.Id).ToHashSet().SetEquals(draft.VersionIds))
+                {
+                    return DraftChanged(procedureVersionId, draft.PolicyId, "the rule was published or its versions changed");
+                }
+
+                foreach (var version in versions.Where(IsActive))
+                {
+                    if (version.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value != PublishStateDraft
+                        || version.GetAttributeValue<DateTime?>("sprk_inforceto") is not null
+                        || version.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id != procedureVersionId)
+                    {
+                        return DraftChanged(procedureVersionId, draft.PolicyId, "a version is no longer a Draft of this Procedure Version");
+                    }
+
+                    requests.Add(DeactivateRequest(VersionEntity, version));
+                }
+
+                if (IsActive(policy))
+                {
+                    requests.Add(DeactivateRequest(PolicyEntity, policy));
+                    deactivated++;
+                }
+            }
+
+            if (requests.Count > 0)
+            {
+                await _entities.ExecuteTransactionAsync(requests, ct);
+            }
+
+            _logger.LogInformation(
+                "Procedure Version {ProcedureVersionId}: a redraft deactivated {Deactivated} superseded draft(s) ({Rows} row(s))",
+                procedureVersionId, deactivated, requests.Count);
+            return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(deactivated, 0));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is System.Data.DBConcurrencyException || DataverseServiceClientImpl.IsRowVersionMismatch(ex))
+        {
+            return DraftChanged(procedureVersionId, Guid.Empty, "a row changed between the re-read and the write");
+        }
+        catch (Exception ex)
+        {
+            // The transaction rolls back: nothing was deactivated.
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the superseded drafts could not be deactivated; nothing was changed", procedureVersionId);
+            return RuleSetOutcome<DraftsCompensated>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be deactivated. Try again; if it keeps failing, contact support.");
+        }
+    }
+
+    private RuleSetOutcome<DraftsCompensated> DraftChanged(Guid procedureVersionId, Guid policyId, string why)
+    {
+        _logger.LogWarning("Procedure Version {ProcedureVersionId}: a superseded draft changed before the redraft ({Why}, policy {PolicyId}); nothing was deactivated",
+            procedureVersionId, why, policyId);
+        return RuleSetOutcome<DraftsCompensated>.Refused(
+            StatusCodes.Status409Conflict, CodeDraftChanged,
+            "An earlier draft of this version changed (it may have been published) while the redraft started. Nothing was changed; reload and try again.");
+    }
+
+    private static bool IsActive(Entity row) => (row.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0) == 0;
+
+    private static UpdateRequest DeactivateRequest(string table, Entity read) => new()
+    {
+        Target = new Entity(table, read.Id)
+        {
+            RowVersion = read.GetAttributeValue<long?>(RowVersionColumn)?.ToString(CultureInfo.InvariantCulture),
+            ["statecode"] = new OptionSetValue(StateInactive),
+            ["statuscode"] = new OptionSetValue(StatusInactive),
+        },
+        ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
+    };
 
     /// <summary>When the Stored File <paramref name="fileId"/> was created (Dataverse's own <c>createdon</c>), or null when it cannot be found.</summary>
     private async Task<DateTime?> SourceFileCreatedOnAsync(Guid fileId, CancellationToken ct)
@@ -892,88 +1144,130 @@ public class RuleSetService
         return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(f => f.Id == fileId)?.GetAttributeValue<DateTime?>("createdon");
     }
 
+    /// <summary>One active rule (policy and its active versions) the compensation or a redraft plan considered.</summary>
+    private sealed record FoundDraft(Entity Policy, IReadOnlyList<Entity> Versions);
+
+    /// <summary>The active rules of the set: the version's untouched drafts, its superseded (earlier-file, reviewed) drafts, and the total count.</summary>
+    private sealed record FoundDrafts(IReadOnlyList<FoundDraft> Untouched, IReadOnlyList<FoundDraft> Superseded, int Total, bool Truncated);
+
     /// <summary>
-    /// The compensation itself (task 075 F1; task 116): removes this version's untouched drafts and, when <paramref name="supersededBefore"/> is
-    /// given, its drafts made from a source file created before that time (<see cref="IsSupersededDraft"/>). Faults answer 500.
+    /// Fix round 4: the one read and decision behind both the job's compensation and a redraft's plan. ACTIVE rows only (the policy read is
+    /// <see cref="PolicyQuery"/>, the version read names <c>statecode</c>), so a deactivated draft is never planned, removed or counted. Untouched
+    /// drafts are <see cref="IsUntouchedDraft"/>; when <paramref name="supersededBefore"/> is given, the other drafts made from a source file
+    /// created before that time are <see cref="IsSupersededDraft"/>. A fault throws.
+    /// </summary>
+    private async Task<FoundDrafts> FindDraftsAsync(Guid ruleSetId, Guid procedureVersionId, DateTime? supersededBefore, CancellationToken ct)
+    {
+        var identity = await _entities.GetCurrentIdentityIdAsync(ct);
+        if (identity == Guid.Empty)
+        {
+            throw new InvalidOperationException("The identity the drafted rules were written as is unknown.");
+        }
+
+        var none = new FoundDrafts(Array.Empty<FoundDraft>(), Array.Empty<FoundDraft>(), 0, true);
+        var policyQuery = PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId });
+        policyQuery.ColumnSet.AddColumns(AuditColumns);
+        var policies = await _entities.RetrieveMultipleAsync(policyQuery, ct);
+        if (policies.MoreRecords)
+        {
+            return none;
+        }
+
+        var rows = policies.Entities
+            .Where(p => RuleDomains.IsBillingRow(p) && p.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId)
+            .ToList();
+
+        var versionsByPolicy = new Dictionary<Guid, List<Entity>>();
+        foreach (var batch in rows.Select(p => (object)p.Id).Chunk(MaxInValues))
+        {
+            var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
+            query.ColumnSet.AddColumns(AuditColumns);
+            query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // fix round 4: a deactivated draft is not a draft
+            var versions = await _entities.RetrieveMultipleAsync(query, ct);
+            if (versions.MoreRecords)
+            {
+                return none;
+            }
+
+            foreach (var v in versions.Entities)
+            {
+                if (v.GetAttributeValue<EntityReference>("sprk_policy")?.Id is { } policyId)
+                {
+                    if (!versionsByPolicy.TryGetValue(policyId, out var list))
+                    {
+                        versionsByPolicy[policyId] = list = new List<Entity>();
+                    }
+
+                    list.Add(v);
+                }
+            }
+        }
+
+        var codePrefix = $"{DraftCodePrefix}{ruleSetId:N}-";
+        var untouched = new List<FoundDraft>();
+        var superseded = new List<FoundDraft>();
+        foreach (var p in rows)
+        {
+            var versions = versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>();
+            if (IsUntouchedDraft(p, versions, identity, codePrefix, procedureVersionId))
+            {
+                untouched.Add(new FoundDraft(p, versions));
+            }
+            else if (supersededBefore is { } before && IsSupersededDraft(p, versions, identity, codePrefix, procedureVersionId, before))
+            {
+                superseded.Add(new FoundDraft(p, versions));
+            }
+        }
+
+        return new FoundDrafts(untouched, superseded, rows.Count, false);
+    }
+
+    /// <summary>
+    /// The job's compensation (task 075 F1; task 116; fix round 4): removes this version's untouched drafts (the job's own output, never
+    /// modified). When <paramref name="supersededBefore"/> is given and a superseded draft a reviewer worked on is still active, nothing is
+    /// removed and the run refuses 409 <see cref="CodeSupersededDraftsRemain"/>: only a <c>/draft</c> request deactivates those, after its
+    /// per-row Write checks (EB-D-216). Faults answer 500.
     /// </summary>
     private async Task<RuleSetOutcome<DraftsCompensated>> RemoveDraftsAsync(
         Guid ruleSetId, Guid procedureVersionId, DateTime? supersededBefore, CancellationToken ct)
     {
         try
         {
-            var identity = await _entities.GetCurrentIdentityIdAsync(ct);
-            if (identity == Guid.Empty)
-            {
-                throw new InvalidOperationException("The identity the drafted rules were written as is unknown.");
-            }
-
-            var policyQuery = PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId });
-            policyQuery.ColumnSet.AddColumns(AuditColumns);
-            var policies = await _entities.RetrieveMultipleAsync(policyQuery, ct);
-            if (policies.MoreRecords)
+            var found = await FindDraftsAsync(ruleSetId, procedureVersionId, supersededBefore, ct);
+            if (found.Truncated)
             {
                 return RuleSetOutcome<DraftsCompensated>.Refused(
                     StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
             }
 
-            var rows = policies.Entities
-                .Where(p => RuleDomains.IsBillingRow(p) && p.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId)
-                .ToList();
-
-            var versionsByPolicy = new Dictionary<Guid, List<Entity>>();
-            foreach (var batch in rows.Select(p => (object)p.Id).Chunk(MaxInValues))
+            if (found.Superseded.Count > 0)
             {
-                var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
-                query.ColumnSet.AddColumns(AuditColumns);
-                query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
-                var versions = await _entities.RetrieveMultipleAsync(query, ct);
-                if (versions.MoreRecords)
-                {
-                    return RuleSetOutcome<DraftsCompensated>.Refused(
-                        StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
-                }
-
-                foreach (var v in versions.Entities)
-                {
-                    if (v.GetAttributeValue<EntityReference>("sprk_policy")?.Id is { } policyId)
-                    {
-                        if (!versionsByPolicy.TryGetValue(policyId, out var list))
-                        {
-                            versionsByPolicy[policyId] = list = new List<Entity>();
-                        }
-
-                        list.Add(v);
-                    }
-                }
+                _logger.LogWarning(
+                    "Procedure Version {ProcedureVersionId}: {Count} reviewed draft(s) of an earlier source file are still active and no request deactivated them; nothing drafted",
+                    procedureVersionId, found.Superseded.Count);
+                return RuleSetOutcome<DraftsCompensated>.Refused(
+                    StatusCodes.Status409Conflict, CodeSupersededDraftsRemain,
+                    "Drafts of an earlier source file are still active. Start drafting again from the Procedure Version.");
             }
 
-            var codePrefix = $"{DraftCodePrefix}{ruleSetId:N}-";
-            var removable = rows
-                .Where(p =>
-                {
-                    var versions = versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>();
-                    return IsUntouchedDraft(p, versions, identity, codePrefix, procedureVersionId)
-                        || (supersededBefore is { } before && IsSupersededDraft(p, versions, identity, codePrefix, procedureVersionId, before));
-                })
-                .ToList();
-
             var removed = 0;
-            foreach (var policy in removable)
+            foreach (var draft in found.Untouched)
             {
                 ct.ThrowIfCancellationRequested();
-                foreach (var version in versionsByPolicy.GetValueOrDefault(policy.Id) ?? new List<Entity>())
+                foreach (var version in draft.Versions)
                 {
                     await DeleteIfPresentAsync(VersionEntity, version.Id, ct);
                 }
 
-                await DeleteIfPresentAsync(PolicyEntity, policy.Id, ct);
+                await DeleteIfPresentAsync(PolicyEntity, draft.Policy.Id, ct);
                 removed++;
             }
 
             _logger.LogInformation(
                 "Rule set {RuleSetId}, Procedure Version {ProcedureVersionId}: retry compensation removed {Removed} untouched draft(s) of an earlier run and kept {Kept} other rule(s)",
-                ruleSetId, procedureVersionId, removed, rows.Count - removed);
-            return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(removed, rows.Count - removed));
+                ruleSetId, procedureVersionId, removed, found.Total - removed);
+            return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(removed, found.Total - removed));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1336,6 +1630,7 @@ public class RuleSetService
         {
             var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // fix round 4: a deactivated draft is not a repeat
             var versions = await _entities.RetrieveMultipleAsync(query, ct);
             if (versions.MoreRecords)
             {
@@ -2234,6 +2529,7 @@ public class RuleSetService
     /// <summary>Task 081: the next version number of <paramref name="policyId"/> across every Procedure Version (highest existing + 1).</summary>
     private async Task<int> NextVersionNumberAsync(Guid policyId, CancellationToken ct)
     {
+        // all versions: numbering counts every version, active or not (the number is a key).
         var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet("sprk_versionnumber"), TopCount = 1 };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Orders.Add(new OrderExpression("sprk_versionnumber", OrderType.Descending));
@@ -2254,6 +2550,7 @@ public class RuleSetService
     /// <summary>Whether <paramref name="policyId"/> has a version numbered <paramref name="number"/> (read after a failed create).</summary>
     private async Task<bool> VersionNumberExistsAsync(Guid policyId, int number)
     {
+        // all versions: the (policy, number) key holds for inactive versions too.
         var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet("sprk_versionnumber"), TopCount = 1 };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("sprk_versionnumber", ConditionOperator.Equal, number);
@@ -2916,6 +3213,7 @@ public class RuleSetService
         {
             var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // fix round 4 (EB-D-216): a deactivated draft is not read
             if (procedureVersionId is { } procedureVersion)
             {
                 query.Criteria.AddCondition(ProcedureVersionColumn, ConditionOperator.Equal, procedureVersion);
@@ -3000,9 +3298,26 @@ public class RuleSetService
             return (null, RuleSetOutcome<T>.Refused(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be changed here."));
         }
 
+        if (rule is null && await IsDeactivatedRuleOfAsync(ruleSetId, policyId, ct))
+        {
+            // Fix round 4 (EB-D-216): a draft a redraft deactivated is never edited, accepted, rejected or published; asked for by id it is 409.
+            return (null, RuleSetOutcome<T>.Refused(
+                StatusCodes.Status409Conflict, CodeDraftInactive, "This draft was replaced by a later drafting run and can no longer be changed."));
+        }
+
         return rule is null
             ? (null, RuleSetOutcome<T>.Refused(StatusCodes.Status404NotFound, CodeProposalNotFound, "The rule was not found in this rule set."))
             : (rule, null);
+    }
+
+    /// <summary>Fix round 4: whether <paramref name="policyId"/> is a Billing policy of this set that is Inactive (by id: no statecode filter).</summary>
+    private async Task<bool> IsDeactivatedRuleOfAsync(Guid ruleSetId, Guid policyId, CancellationToken ct)
+    {
+        var query = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet("sprk_ruleset", "statecode", RuleDomains.PolicyDomainColumn), TopCount = 1 };
+        query.Criteria.AddCondition("sprk_policyid", ConditionOperator.Equal, policyId);
+        var row = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(p => p.Id == policyId);
+        return row is not null && RuleDomains.IsBillingRow(row) && !IsActive(row)
+            && row.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId;
     }
 
     private static VersionRow ToVersion(Entity v) => new(
