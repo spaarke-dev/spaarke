@@ -504,6 +504,85 @@ public sealed class GateDecisionRecordSharingDirectTests
             It.IsAny<CancellationToken>()), Times.Once, "a write that reports failure can have committed");
     }
 
+    // ── F-198-1: an unfile to Direct re-checks the owner after its grants and before its revokes ────────────────
+
+    private static readonly Guid SecureMember = Guid.Parse("b0000000-0000-4000-8000-0000000000b4");
+    private static readonly Guid SecureTeam = Guid.Parse("5ec00000-0000-4000-8000-0000000000f1");
+
+    /// <summary>
+    /// The race: a re-file into a secure record lands while the unfile pass is between its reads and its writes. On the pass's FIRST read of
+    /// the record's shares, the Secure reconciler has re-owned the record to the Secure team and mirrored a Secure member.
+    /// </summary>
+    private static void RefiledIntoASecureRecordOnTheFirstRecordShareRead(GateSharingWorld world, Action? onFired = null)
+    {
+        var fired = false;
+        world.Shares.BeforeStrictRead = (table, id) =>
+        {
+            if (table == GateSharingWorld.Record && !fired)
+            {
+                fired = true;
+                world.OwnByTeam(id, SecureTeam);
+                world.Share(GateSharingWorld.Record, id, SecureMember);
+                onFired?.Invoke();
+            }
+        };
+    }
+
+    [Fact(DisplayName = "F-198-1 must-fire: an unfile pass on a Direct-owned record re-filed into a secure record meanwhile keeps no grant and revokes no Secure share")]
+    public async Task F198_1_Unfile_ADirectOwnedRecordMovedToTheSecureTeamDuringThePass_KeepsNoGrant_AndRevokesNoNonParticipant()
+    {
+        var world = UnfiledDirectMessage().WithSecureTeam(SecureTeam);
+        var raced = false;
+        RefiledIntoASecureRecordOnTheFirstRecordShareRead(world, () => raced = true);
+
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        raced.Should().BeTrue();
+        OwnerTeamOf(world).Should().Be(SecureTeam);
+        world.RecordSharees(RecordId).Should().Equal(new[] { SecureMember },
+            "no participant grant survives a read-back that names the Secure team, and the Secure member's share is the Secure mirror's");
+        world.Calls.Should().NotContain(Revoke(SecureMember), "nothing outside the audience is revoked once the owner is no longer the Direct team");
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        world.Log.Entries.Should().Contain(e => e.Message.Contains(RecordId.ToString("D"), StringComparison.Ordinal)
+            && e.Message.Contains("are revoked", StringComparison.Ordinal), "the undone grants are logged");
+    }
+
+    [Fact(DisplayName = "F-198-1 must-fire (assign branch): a record re-owned to Direct in this pass, then re-filed into a secure record, keeps no grant and revokes no Secure share")]
+    public async Task F198_1_Unfile_ARecordReownedToDirectThenMovedToTheSecureTeam_KeepsNoGrant_AndRevokesNoNonParticipant()
+    {
+        var world = UnfiledBackToDirect().WithSecureTeam(SecureTeam);
+        var raced = false;
+        RefiledIntoASecureRecordOnTheFirstRecordShareRead(world, () => raced = true);
+
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        raced.Should().BeTrue();
+        world.Calls.Should().Contain($"assign:{RecordId:D}:{DirectTeam:D}", "the record was re-owned to the Direct team in this pass");
+        OwnerTeamOf(world).Should().Be(SecureTeam);
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Third, SecureMember }.OrderBy(g => g),
+            "only this pass's grant (Recipient) is undone; the shares it found are not this pass's to revoke once the owner moved");
+        world.Calls.Should().NotContain(Revoke(SecureMember)).And.NotContain(Revoke(Third)).And.NotContain(Revoke(Sender));
+        world.Log.Entries.Should().Contain(e => e.Message.Contains(RecordId.ToString("D"), StringComparison.Ordinal)
+            && e.Message.Contains("are revoked", StringComparison.Ordinal), "the undone grant is logged");
+    }
+
+    [Fact(DisplayName = "F-198-1 must-not-fire: with the owner still the Direct team, the unfile pass grants the participants and revokes every other share, a team's too")]
+    public async Task F198_1_Unfile_TheOwnerStaysDirect_GrantsTheParticipants_AndRevokesEveryOtherShare()
+    {
+        var otherTeam = Guid.Parse("e0000000-0000-4000-8000-0000000000e9");
+        var world = UnfiledDirectMessage().Share(GateSharingWorld.Record, RecordId, Third);
+        world.SharesOf(GateSharingWorld.Record, RecordId)[DataversePrincipalRef.Team(otherTeam)] = Read;
+
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        OwnerTeamOf(world).Should().Be(DirectTeam);
+        world.RecordSharees(RecordId).Should().Equal(new[] { Sender, Recipient }.OrderBy(g => g));
+        world.Calls.Should().Contain(Grant(Sender)).And.Contain(Grant(Recipient)).And.Contain(Revoke(Third))
+            .And.Contain($"revoke:{GateSharingWorld.Record}:{RecordId:D}:{otherTeam:D}", "every share that is not a participant's goes, as before");
+        world.SharesOf(GateSharingWorld.Record, RecordId).Keys.Should().NotContain(DataversePrincipalRef.Team(otherTeam));
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
     [Fact]
     public async Task Unfile_ASecureTeamOwnedRecord_IsLeftToTheSecureReconciler()
     {
