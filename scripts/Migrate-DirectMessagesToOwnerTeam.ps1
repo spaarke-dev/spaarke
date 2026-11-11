@@ -48,19 +48,39 @@
       systemusers). A row without one stays with its current owner and is listed (no_valid_pair). Then, per message, its
       content rows: sprk_communicationattachment, sprk_communicationparticipant and sprk_emailreviewlog (by their
       sprk_communication lookup), sprk_document (by sprk_relatedcommunication) and the gate sprk_decisionrecord (by
-      sprk_regardingcommunication, unconfirmed, created by a -GateRecordWriterApplicationIds user). Rows owned by the Direct team or the
-      Secure Record team are not moved. Content rows move before their message, so a resumed run still finds them.
+      sprk_regardingcommunication, unconfirmed, created by a -GateRecordWriterApplicationIds user: the same set
+      GateDecisionRecordSharing.FindGateRecordsAsync re-owns; a confirmed record carries a person's review and stays with its
+      owner). Rows owned by the Direct team or the Secure Record team are not moved. Content rows move before their message,
+      so a resumed run still finds them.
       Per row (-Apply): re-read organization.sharetopreviousowneronassign (stop when true), count the row's shares, assign
       it to the Direct team, read the owner back (stop when it did not land), count again (stop when the count fell; a rise
       is reported). Before a message's rows move, the message and its thread are read again; a pair no longer valid, a
       message now owned by the Secure Record team, or a regarding lookup now set on the message or its thread moves nothing
       of it (it is listed). If a write throws, the review list gathered so far is written before the error is rethrown.
+      PARTICIPANTS KEEP READ (per message, after that re-read, before any of its rows is assigned): the participants are
+      sprk_sentby and sprk_directrecipient; a disabled (or missing) participant is skipped, as the BFF's Direct share pass
+      does. The message's share rows are read strictly. Each enabled participant must hold a systemuser share with the Read
+      bit (mask & 1). The one exception: the message's current owning user (no owning team) with no share is granted Read
+      (GrantAccess, ReadAccess) while the message is still user-owned, and the grant is confirmed by reading the share rows
+      back; that keeps access the owner already has and widens nobody's. Anyone else without Read is never granted here (a
+      new grant would bypass the BFF's Restricted bar, RestrictedFilingShareBar.EligibleForGrantAsync), and a share without
+      the Read bit is never upgraded (as DirectMessageParticipantShares.GrantContentRowAndConfirmAsync). Otherwise nothing of
+      that message moves, and it is listed.
+      Move review reasons: thread_has_regarding, thread_default_flag_unread, no_valid_pair, changed_since_selection,
+      participants_not_readable (no enabled participant, or one without Read who is not the owning user),
+      participant_share_without_read, participant_grant_unconfirmed (the grant threw or its read-back lacks Read),
+      read_fault (participant or share read), participant_without_read (-Verify only).
 
     MODES
-      -DryRun   (default) every check, the selection, the plan and the review list; writes nothing to Dataverse.
-      -Apply    writes the plan, one row at a time, verified by read-back; stops at the first failed check.
+      -DryRun   (default) every check, the selection, the plan (Move: the owner Read grants it would make) and the review
+                list; writes nothing to Dataverse.
+      -Apply    writes the plan, one row at a time, verified by read-back; stops at the first failed check. -Phase Move
+                -Apply also needs -DirectShareJobLive.
       -Verify   read-only gate. Stamp: exit 1 while a row would stamp. Move: exit 1 while a valid-pair message, or a content
-                row of one, is not owned by the Direct team (Secure-owned rows excepted). Otherwise exit 0.
+                row of one, is not owned by the Direct team (Secure-owned rows excepted), or while a Direct-team-owned
+                valid-pair message has an enabled participant without a Read share (participant_without_read) or its
+                participant or share read faults. Otherwise exit 0.
+      Every mode prints the review list with a count per reason ("review: <reason> <n>, ...").
 
     Exit codes: 0 done / pass; 1 refused, stopped or a Verify failure.
 
@@ -107,6 +127,17 @@
 .PARAMETER DirectMessageOwnerTeamName
     The Direct message owner team (the BFF setting DirectMessage:OwnerTeamName). Required for -Phase Move. No default.
 
+.PARAMETER DirectShareJobLive
+    The operator's acknowledgement, required by -Phase Move -Apply: without it the run refuses (exit 1) before anything is
+    selected or written. -DryRun and -Verify do not need it; -Phase Stamp ignores it. Passing it asserts that the BFF build
+    with task 198's Direct share pass (SecureChildShareReconciliationJob) is deployed on this environment, and that its
+    settings DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName equal -DirectMessageBusinessUnitName /
+    -DirectMessageOwnerTeamName. The script cannot read the BFF's deployment or settings; the operator asserts it.
+    It cannot be passed honestly on an environment until those two settings are set there: that is an owner go in the
+    unified-access-control-r2 session, which comes only after Set-ThreadFlagFieldSecurity.ps1 -Verify exits 0 there.
+    The script keeps each participant's Read on the message itself; the moved content rows still rely on that job to
+    grant the participants Read.
+
 .PARAMETER SecureRecordBusinessUnitName
     The Secure Record unit (SecureRecord:BusinessUnitName). Default 'Secure Record'. -Phase Move only.
 
@@ -128,7 +159,7 @@
 .EXAMPLE
     .\Migrate-DirectMessagesToOwnerTeam.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Phase Move `
         -BffApplicationIds <bff-app-id> -GateRecordWriterApplicationIds <ontology-writer-app-id> -ReviewPath .\move-review.csv `
-        -DirectMessageBusinessUnitName '<unit>' -DirectMessageOwnerTeamName '<team>' -Apply
+        -DirectMessageBusinessUnitName '<unit>' -DirectMessageOwnerTeamName '<team>' -Apply -DirectShareJobLive
 
 .NOTES
     field-mapping-server-write-path-r1 task 054 (projects/field-mapping-server-write-path-r1/tasks/054-direct-message-owner-team.poml),
@@ -148,6 +179,7 @@ param(
     [switch]$DryRun,
     [switch]$Apply,
     [switch]$Verify,
+    [switch]$DirectShareJobLive,
     [string]$DirectMessageBusinessUnitName,
     [string]$DirectMessageOwnerTeamName,
     [string]$SecureRecordBusinessUnitName = 'Secure Record',
@@ -177,6 +209,13 @@ $GateRecordWriterApplicationIds = @(foreach ($id in $GateRecordWriterApplication
 $AcceptedAssignCascade = Split-List $AcceptedAssignCascade
 if ($Phase -eq 'Move' -and ([string]::IsNullOrWhiteSpace($DirectMessageBusinessUnitName) -or [string]::IsNullOrWhiteSpace($DirectMessageOwnerTeamName))) {
     throw '-Phase Move needs -DirectMessageBusinessUnitName and -DirectMessageOwnerTeamName (the BFF settings DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName). They have no default.'
+}
+# The Move -Apply acknowledgement, before any read or write (see .PARAMETER DirectShareJobLive).
+if ($Phase -eq 'Move' -and $Mode -eq 'Apply' -and -not $DirectShareJobLive) {
+    Write-Host ("REFUSED: -Phase Move -Apply needs -DirectShareJobLive: the operator's assertion that the BFF build with task 198's Direct share pass " +
+        "is deployed on this environment with DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName equal to -DirectMessageBusinessUnitName / " +
+        "-DirectMessageOwnerTeamName. Nothing was selected and nothing was written.") -ForegroundColor Red
+    exit 1
 }
 $Api = "$EnvironmentUrl/api/data/v9.2"
 
@@ -240,6 +279,10 @@ function Get-All([string]$Path) {
 function Invoke-DvPatch([string]$Path, [hashtable]$Body) {
     $h = $headers.Clone(); $h['If-Match'] = '*'
     Invoke-RestMethod -Uri "$Api/$Path" -Headers $h -Method Patch -Body ([Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Compress))) | Out-Null
+}
+# POST a Web API action (Move: GrantAccess only).
+function Invoke-DvPost([string]$Path, [hashtable]$Body) {
+    Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Post -Body ([Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Compress -Depth 6))) | Out-Null
 }
 # An OData string literal inside a URL: quotes doubled (OData), then percent-encoded so a name with &, #, + or a space cannot
 # end the query value or change its meaning.
@@ -366,6 +409,20 @@ function Select-DirectMessages {
         })
 }
 
+# Each participant's standing (Stamp: the pair's eligibility; Move: who is enabled). A read fault propagates to the caller.
+function Get-Eligibility([string[]]$Ids) {
+    $rows = @(Get-All ("systemusers?`$select=systemuserid,isdisabled,applicationid&`$filter=" + (($Ids | ForEach-Object { "systemuserid eq $_" }) -join ' or ')))
+    $result = @{}
+    foreach ($id in $Ids) {
+        $row = $rows | Where-Object { (Lc $_.systemuserid) -eq $id } | Select-Object -First 1
+        $result[$id] = if (-not $row) { 'participant_missing' }
+        elseif (NonEmpty $row.applicationid) { 'participant_application_user' }
+        elseif ($row.isdisabled -eq $false) { 'eligible' }
+        else { 'participant_disabled' }
+    }
+    return $result
+}
+
 $review = New-Object System.Collections.Generic.List[object]
 function Add-Review($Message, [string]$Reason, [string]$Detail = '') {
     $review.Add([pscustomobject]@{
@@ -381,6 +438,9 @@ function Write-Review {
     elseif ($review.Count -eq 0) { 'Phase,MessageId,Name,ThreadId,SentBy,Reason,Detail' | Set-Content -LiteralPath $ReviewPath -Encoding UTF8 }
     else { @($review.ToArray()) | Export-Csv -LiteralPath $ReviewPath -NoTypeInformation -Encoding UTF8 }
     Write-Host "Manual-review list ($($review.Count) row(s)) written: $ReviewPath"
+    # A count per reason: how many rows stay behind, and why.
+    $counts = @($review.ToArray() | Group-Object Reason | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Count)" })
+    Write-Host ("review: {0}" -f $(if ($counts.Count -gt 0) { $counts -join ', ' } else { 'none' }))
     foreach ($r in $review) { Write-Host "   REVIEW $($r.MessageId) '$($r.Name)' thread $($r.ThreadId): $($r.Reason)$(if ($r.Detail) { " ($($r.Detail))" })" -ForegroundColor Yellow }
 }
 
@@ -412,19 +472,6 @@ if ($Phase -eq 'Stamp') {
         $pairCache[$ThreadId] = $answer
         return $answer
     }
-    function Get-Eligibility([string[]]$Ids) {
-        $rows = @(Get-All ("systemusers?`$select=systemuserid,isdisabled,applicationid&`$filter=" + (($Ids | ForEach-Object { "systemuserid eq $_" }) -join ' or ')))
-        $result = @{}
-        foreach ($id in $Ids) {
-            $row = $rows | Where-Object { (Lc $_.systemuserid) -eq $id } | Select-Object -First 1
-            $result[$id] = if (-not $row) { 'participant_missing' }
-            elseif (NonEmpty $row.applicationid) { 'participant_application_user' }
-            elseif ($row.isdisabled -eq $false) { 'eligible' }
-            else { 'participant_disabled' }
-        }
-        return $result
-    }
-
     $plan = New-Object System.Collections.Generic.List[object]
     $candidates = @(Select-DirectMessages)
     foreach ($m in $candidates) {
@@ -596,7 +643,48 @@ function Get-ContentRows([string]$MessageId) {
     return $rows
 }
 
+# The message's participants (sprk_sentby, sprk_directrecipient) and their shares on it. Enabled: a systemuser row read with
+# isdisabled false (a disabled or missing participant is skipped, as the BFF's Direct share pass skips a disabled one).
+# Readers hold a systemuser share with the Read bit; Holders hold any non-zero systemuser share. Fault: a read that threw
+# (strict: a faulted read is never "no shares").
+function Get-ParticipantShares($Message) {
+    $answer = [pscustomobject]@{ Fault = $null; Enabled = @(); Readers = @(); Holders = @(); OwnerUser = $null }
+    $ids = @(@((NonEmpty $Message._sprk_sentby_value), (NonEmpty $Message._sprk_directrecipient_value)) | Where-Object { $_ } | Select-Object -Unique)
+    try { $standing = Get-Eligibility $ids }
+    catch { $answer.Fault = "participant read: $($_.Exception.Message)"; return $answer }
+    $answer.Enabled = @($ids | Where-Object { $standing[$_] -notin @('participant_disabled', 'participant_missing') })
+    if ($answer.Enabled.Count -eq 0) { return $answer }
+    $messageId = Lc $Message.sprk_communicationid
+    try { $shares = @(Get-All "principalobjectaccessset?`$select=principalid,principaltypecode,accessrightsmask&`$filter=objectid eq $messageId") }
+    catch { $answer.Fault = "share read: $($_.Exception.Message)"; return $answer }
+    $users = @($shares | Where-Object { $_.principaltypecode -eq 'systemuser' -and (NonEmpty $_.principalid) })
+    $answer.Readers = @($users | Where-Object { (([int64]$_.accessrightsmask) -band $ReadBit) -ne 0 } | ForEach-Object { NonEmpty $_.principalid })
+    $answer.Holders = @($users | Where-Object { [int64]$_.accessrightsmask -ne 0 } | ForEach-Object { NonEmpty $_.principalid })
+    if (-not (NonEmpty $Message._owningteam_value)) { $answer.OwnerUser = NonEmpty $Message._owninguser_value }
+    return $answer
+}
+# Whether every enabled participant keeps Read once the message leaves its owner: Reason (a review reason; nothing of the
+# message moves) or Grants (the owning user to grant Read while the message is still user-owned). Read-only.
+function Get-ParticipantAccess($Message) {
+    $answer = [pscustomobject]@{ Reason = $null; Detail = ''; Grants = @() }
+    $s = Get-ParticipantShares $Message
+    if ($s.Fault) { $answer.Reason = 'read_fault'; $answer.Detail = $s.Fault; return $answer }
+    if ($s.Enabled.Count -eq 0) { $answer.Reason = 'participants_not_readable'; $answer.Detail = 'no enabled participant'; return $answer }
+    $grants = @()
+    foreach ($p in $s.Enabled) {
+        if ($s.Readers -contains $p) { continue }
+        if ($s.Holders -contains $p) {
+            $answer.Reason = 'participant_share_without_read'; $answer.Detail = "participant $p holds a share without Read (never upgraded here)"; return $answer
+        }
+        if ($s.OwnerUser -and $p -eq $s.OwnerUser) { $grants += $p; continue }
+        $answer.Reason = 'participants_not_readable'; $answer.Detail = "participant $p holds no Read share and is not the message's owning user"; return $answer
+    }
+    $answer.Grants = $grants
+    return $answer
+}
+
 $plan = New-Object System.Collections.Generic.List[object]
+$verifyFailures = New-Object System.Collections.Generic.List[string]
 $candidates = @(Select-DirectMessages)
 foreach ($m in $candidates) {
     $thread = $threads[(Lc $m._sprk_communicationthread_value)]
@@ -606,10 +694,22 @@ foreach ($m in $candidates) {
     if ($secureTeamId -and (NonEmpty $m._owningteam_value) -eq $secureTeamId) { continue }   # Secure-owned: never this script's
     if (-not (ValidPair $m)) { Add-Review $m 'no_valid_pair' "sentby=$(NonEmpty $m._sprk_sentby_value) recipient=$(NonEmpty $m._sprk_directrecipient_value)"; continue }
     $id = Lc $m.sprk_communicationid
-    $content = @(Get-ContentRows $id | Where-Object { -not $_.Excluded })
     $messageMoves = (NonEmpty $m._owningteam_value) -ne $directTeamId
+    # -Verify: a Direct-team-owned message whose enabled participant holds no Read share fails the gate.
+    if ($Mode -eq 'Verify' -and -not $messageMoves) {
+        $s = Get-ParticipantShares $m
+        if ($s.Fault) { Add-Review $m 'read_fault' $s.Fault; $verifyFailures.Add("message $id`: $($s.Fault)") }
+        else {
+            $without = @($s.Enabled | Where-Object { $s.Readers -notcontains $_ })
+            if ($without.Count -gt 0) {
+                Add-Review $m 'participant_without_read' "enabled participant(s) without a Read share: $($without -join ', ')"
+                $verifyFailures.Add("message $id is on the Direct team and $($without -join ', ') holds no Read share on it")
+            }
+        }
+    }
+    $content = @(Get-ContentRows $id | Where-Object { -not $_.Excluded })
     if (-not $messageMoves -and $content.Count -eq 0) { continue }   # done
-    $plan.Add([pscustomobject]@{ MessageId = $id; Name = $m.sprk_name; Owner = (OwnerOf $m); MessageMoves = $messageMoves; Content = $content })
+    $plan.Add([pscustomobject]@{ MessageId = $id; Name = $m.sprk_name; Owner = (OwnerOf $m); MessageMoves = $messageMoves; Content = $content; Message = $m })
 }
 
 Write-Host "`nSelection: $($candidates.Count) Direct message(s)."
@@ -621,11 +721,22 @@ foreach ($p in $plan) {
 
 if ($Mode -eq 'Verify') {
     Write-Review
-    if ($plan.Count -eq 0) { Write-Host "`nVERIFY: PASS (every valid-pair Direct message and its content rows are on the Direct team; $($review.Count) on the manual-review list)" -ForegroundColor Green; exit 0 }
+    if ($plan.Count -eq 0 -and $verifyFailures.Count -eq 0) { Write-Host "`nVERIFY: PASS (every valid-pair Direct message and its content rows are on the Direct team, and every enabled participant of a Direct-owned message holds Read on it; $($review.Count) on the manual-review list)" -ForegroundColor Green; exit 0 }
     foreach ($p in $plan) { Write-Host "VERIFY FAIL: message $($p.MessageId) has $(@($p.Content).Count + [int]$p.MessageMoves) row(s) not on the Direct team." -ForegroundColor Red }
+    foreach ($f in $verifyFailures) { Write-Host "VERIFY FAIL: $f." -ForegroundColor Red }
     exit 1
 }
 if ($Mode -eq 'DryRun') {
+    # The participants' Read, as -Apply would decide it now (read-only): the grants it would make, or why nothing would move.
+    foreach ($p in $plan) {
+        $access = Get-ParticipantAccess $p.Message
+        if ($access.Reason) {
+            Add-Review $p.Message $access.Reason $access.Detail
+            Write-Host "   would move nothing of message $($p.MessageId): $($access.Reason) ($($access.Detail))"
+            continue
+        }
+        foreach ($g in $access.Grants) { Write-Host "   WOULD grant Read to systemuser $g on message $($p.MessageId) (its owning user), before the assign" }
+    }
     Write-Review
     if ($org.sharetopreviousowneronassign -ne $false) { Write-Host 'STOP (for -Apply): organization.sharetopreviousowneronassign is not false.' -ForegroundColor Red }
     Write-Host "`nDRY RUN: nothing was written to Dataverse."
@@ -659,6 +770,27 @@ try {
         if (-not $threadNowId) { Add-Review $now 'changed_since_selection' 'now has no thread'; continue }
         $threadChange = Get-ThreadChange $threadNowId
         if ($threadChange) { Add-Review $now 'changed_since_selection' $threadChange; continue }
+        # The participants keep Read on the message before anything of it moves (the Direct team has no members and the
+        # previous owner gets no share on assign).
+        $access = Get-ParticipantAccess $now
+        if ($access.Reason) { Add-Review $now $access.Reason $access.Detail; continue }
+        $unconfirmed = $null
+        foreach ($g in $access.Grants) {
+            # Only the owning user, while the message is still user-owned: access the owner already has.
+            try {
+                Invoke-DvPost 'GrantAccess' @{
+                    Target          = @{ '@odata.id' = "sprk_communications($($p.MessageId))" }
+                    PrincipalAccess = @{ Principal = @{ '@odata.id' = "systemusers($g)" }; AccessMask = 'ReadAccess' }
+                }
+            }
+            catch { $unconfirmed = "GrantAccess for $g threw: $($_.Exception.Message)"; break }
+            try { $back = @(Get-All "principalobjectaccessset?`$select=principalid,principaltypecode,accessrightsmask&`$filter=objectid eq $($p.MessageId)") }
+            catch { $unconfirmed = "read-back after the grant to $g threw: $($_.Exception.Message)"; break }
+            $confirmed = @($back | Where-Object { $_.principaltypecode -eq 'systemuser' -and (NonEmpty $_.principalid) -eq $g -and (([int64]$_.accessrightsmask) -band $ReadBit) -ne 0 })
+            if ($confirmed.Count -eq 0) { $unconfirmed = "read-back after the grant shows no Read share for $g"; break }
+            Write-Host "   granted Read to $g on message $($p.MessageId) (its owning user): confirmed by read-back"
+        }
+        if ($unconfirmed) { Add-Review $now 'participant_grant_unconfirmed' $unconfirmed; continue }
         foreach ($c in $p.Content) { Move-Row $c.Set $c.Table $c.Id }
         if ((NonEmpty $now._owningteam_value) -ne $directTeamId) { Move-Row 'sprk_communications' 'sprk_communication' $p.MessageId }
     }

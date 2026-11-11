@@ -7,7 +7,9 @@
 # team share and a share without the Read bit are not participants); the Move assign invariant (no valid stamped pair, no
 # move); the Direct team checks; the Assign-cascade refusal; the gate-record creator list (separate from the BFF list); the
 # thread's own regarding lookups; a team-owned thread has no owner participant; the write-time re-read; a write that throws
-# keeps the review list; OData literals are percent-encoded; the per-row stops; idempotence and -Verify.
+# keeps the review list; OData literals are percent-encoded; the per-row stops; idempotence and -Verify; the Move -Apply
+# acknowledgement (-DirectShareJobLive); the participants keep Read before anything of a message moves (owner-only grant,
+# confirmed by read-back); the per-reason review counts.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -19,7 +21,7 @@ BeforeAll {
     $global:MdmBffAppId = 'aaaaaaaa-0000-4000-8000-000000000001'
     $global:MdmGateAppId = 'cccccccc-0000-4000-8000-000000000003'   # the ontology writer's identity: in neither the BFF list nor the writer profile
     $global:MdmIds = @{
-        Bff = MdmId 1; Alice = MdmId 2; Bob = MdmId 3; Carol = MdmId 4; Dave = MdmId 5; AppUser = MdmId 6; Disabled = MdmId 7; GateWriter = MdmId 8
+        Bff = MdmId 1; Alice = MdmId 2; Bob = MdmId 3; Carol = MdmId 4; Dave = MdmId 5; AppUser = MdmId 6; Disabled = MdmId 7; GateWriter = MdmId 8; Disabled2 = MdmId 9
         Root = MdmId 10; SecureBu = MdmId 11; DirectBu = MdmId 12; CustomerBu = MdmId 13
         SecureTeam = MdmId 20; DirectTeam = MdmId 21; SomeTeam = MdmId 22; DirectDefault = MdmId 23
         Reader = MdmId 30; Writer = MdmId 31; Other = MdmId 32
@@ -50,6 +52,7 @@ BeforeAll {
                 [pscustomobject]@{ systemuserid = $i.AppUser; isdisabled = $false; applicationid = 'bbbbbbbb-0000-4000-8000-000000000002'; bu = $i.Root }
                 [pscustomobject]@{ systemuserid = $i.Disabled; isdisabled = $true; applicationid = $null; bu = $i.CustomerBu }
                 [pscustomobject]@{ systemuserid = $i.GateWriter; isdisabled = $false; applicationid = $global:MdmGateAppId; bu = $i.Root }
+                [pscustomobject]@{ systemuserid = $i.Disabled2; isdisabled = $true; applicationid = $null; bu = $i.CustomerBu }
             )
             Units        = @(
                 [pscustomobject]@{ businessunitid = $i.Root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
@@ -71,6 +74,8 @@ BeforeAll {
             Faults       = @()   # regexes: a GET whose URI matches throws
             IgnoreAssign = $false
             DropShareOnAssign = $false
+            GrantFault   = $false      # a GrantAccess POST throws
+            GrantNoop    = $false      # a GrantAccess POST is accepted but leaves no Read share (the read-back lacks Read)
             Requests     = New-Object System.Collections.Generic.List[string]
             Writes       = New-Object System.Collections.Generic.List[object]
         }
@@ -212,6 +217,27 @@ BeforeAll {
         }
     }
 
+    # The GrantAccess action: recorded in Writes (in order with the assigns), then a systemuser share with the Read bit lands on
+    # the target unless GrantNoop is set; GrantFault throws before anything is recorded.
+    function global:Invoke-MdmPost([string]$u, $Body) {
+        $w = $global:MdmWorld
+        if ($u -notmatch '/GrantAccess$') { throw "Test: unexpected action $u" }
+        if ($w.GrantFault) { throw "Test: simulated GrantAccess fault on $u" }
+        $b = [Text.Encoding]::UTF8.GetString([byte[]]$Body) | ConvertFrom-Json
+        $w.Writes.Add([pscustomobject]@{ Uri = $u; Body = $b })
+        if ($b.Target.'@odata.id' -notmatch '^sprk_communications\(([0-9a-f-]+)\)$') { throw "Test: GrantAccess on an unexpected target $($b.Target.'@odata.id')" }
+        $target = $Matches[1]
+        if ($b.PrincipalAccess.Principal.'@odata.id' -notmatch '^systemusers\(([0-9a-f-]+)\)$') { throw 'Test: GrantAccess to a principal that is not a systemuser' }
+        $user = $Matches[1]
+        if ($b.PrincipalAccess.AccessMask -ne 'ReadAccess') { throw "Test: GrantAccess with mask $($b.PrincipalAccess.AccessMask)" }
+        if (-not $w.GrantNoop) { $w.Poa += [pscustomobject]@{ objectid = $target; principalid = $user; principaltypecode = 'systemuser'; accessrightsmask = 1; changedon = '2026-06-01T00:00:00Z' } }
+    }
+    # A systemuser share on a row (default: the Read bit).
+    function global:Add-MdmShare([string]$Object, [string[]]$Users, [int]$Mask = 1) {
+        foreach ($u in $Users) { $global:MdmWorld.Poa += [pscustomobject]@{ objectid = $Object; principalid = $u; principaltypecode = 'systemuser'; accessrightsmask = $Mask; changedon = '2026-01-01T00:00:00Z' } }
+    }
+    function global:WriteKinds() { @($global:MdmWorld.Writes | ForEach-Object { if ($_.Uri -match '/GrantAccess$') { 'grant' } else { ([regex]::Match($_.Uri, '/(\w+)\([0-9a-f-]+\)$')).Groups[1].Value } }) }
+
     # Runs the script; Output is everything it printed; Review is the review list it wrote (JSON).
     function global:Invoke-Mdm([hashtable]$Arguments) {
         $review = Join-Path ([IO.Path]::GetTempPath()) ("mdm-review-{0}.json" -f [guid]::NewGuid())
@@ -226,7 +252,8 @@ BeforeAll {
         [pscustomobject]@{ ExitCode = $code; Output = $output; Review = @($rows | Where-Object { $_ }); Thrown = $thrown }
     }
     function global:Invoke-MdmMove([hashtable]$Extra = @{}) {
-        $a = @{ Phase = 'Move'; DirectMessageBusinessUnitName = 'Direct Messages'; DirectMessageOwnerTeamName = 'Direct Owners'; GateRecordWriterApplicationIds = @($global:MdmGateAppId) }
+        # The acknowledgement is passed by default; the tests of the refusal call Invoke-Mdm (or pass DirectShareJobLive = $false).
+        $a = @{ Phase = 'Move'; DirectMessageBusinessUnitName = 'Direct Messages'; DirectMessageOwnerTeamName = 'Direct Owners'; GateRecordWriterApplicationIds = @($global:MdmGateAppId); DirectShareJobLive = $true }
         foreach ($k in $Extra.Keys) { $a[$k] = $Extra[$k] }
         Invoke-Mdm $a
     }
@@ -246,6 +273,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             foreach ($f in $global:MdmWorld.Faults) { if ([string]$Uri -match $f) { throw "Test: simulated fault on $Uri" } }
             if ($Method -eq 'Get') { return Invoke-MdmGet ([string]$Uri) }
             if ($Method -eq 'Patch') { return Invoke-MdmPatch ([string]$Uri) $Body }
+            if ($Method -eq 'Post') { return Invoke-MdmPost ([string]$Uri) $Body }
             throw "Test: unexpected $Method $Uri"
         }
         $i = $global:MdmIds
@@ -656,6 +684,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             Add-MdmContent 'sprk_decisionrecords' (MdmId 300) $M1 -CreatedBy $i.GateWriter
             Add-MdmContent 'sprk_decisionrecords' (MdmId 301) $M1 -CreatedBy $i.Bff
             $r = Invoke-MdmMove @{ Apply = $true }
@@ -681,6 +710,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
         }
 
         It 'must fire: <Case>' -TestCases @(
@@ -738,6 +768,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             Add-MdmContent 'sprk_documents' (MdmId 300) $M1
         }
 
@@ -795,6 +826,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             Add-MdmContent 'sprk_documents' (MdmId 300) $M1
             Add-MdmMessage (MdmId 201) $T1 $i.Alice $null          # no valid pair: review
             $global:MdmWorld.PatchFault = "sprk_documents\($(MdmId 300)\)"
@@ -812,6 +844,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             $r = Invoke-MdmMove @{ Apply = $true; DirectMessageBusinessUnitName = 'Legal & Co #1+2'; DirectMessageOwnerTeamName = 'Direct+Owners & Co #2' }
             $r.ExitCode | Should -Be 0
             $r.Output | Should -Match "Direct team $($i.DirectTeam)"
@@ -827,6 +860,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             Add-MdmContent 'sprk_communicationattachments' (MdmId 300) $M1
             Add-MdmContent 'sprk_communicationparticipants' (MdmId 301) $M1
             Add-MdmContent 'sprk_emailreviewlogs' (MdmId 302) $M1
@@ -865,6 +899,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $i = $global:MdmIds
             Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
             Add-MdmMessage $M1 $T1 $i.Alice $i.Bob -OwnerTeam $i.DirectTeam
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)                    # both participants already hold Read on the message
             (Invoke-MdmMove @{ Verify = $true }).ExitCode | Should -Be 0
             Add-MdmContent 'sprk_communicationattachments' (MdmId 300) $M1                            # a content row left behind
             $v = Invoke-MdmMove @{ Verify = $true }
@@ -873,6 +908,227 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             (Invoke-MdmMove @{ Apply = $true }).ExitCode | Should -Be 0
             $global:MdmWorld.Writes.Count | Should -Be 1
             (Invoke-MdmMove @{ Verify = $true }).ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'Move: the -DirectShareJobLive acknowledgement' {
+        BeforeEach {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)
+        }
+
+        It 'must fire: Move -Apply without -DirectShareJobLive refuses before any selection or write' {
+            $r = Invoke-MdmMove @{ Apply = $true; DirectShareJobLive = $false }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'REFUSED: -Phase Move -Apply needs -DirectShareJobLive'
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?' }).Count | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -BeNullOrEmpty
+        }
+
+        It 'must not fire: -DryRun and -Verify do not need it (<Mode>)' -ForEach @(
+            @{ Mode = 'DryRun'; Code = 0 }
+            @{ Mode = 'Verify'; Code = 1 }   # the message is not on the Direct team yet: the gate runs and fails on that
+        ) {
+            $r = Invoke-MdmMove @{ $Mode = $true; DirectShareJobLive = $false }
+            $r.ExitCode | Should -Be $Code
+            $r.Output | Should -Not -Match 'REFUSED'
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?' }).Count | Should -BeGreaterThan 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It 'must not fire: -Phase Stamp -Apply does not need it' {
+            $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Not -Match 'DirectShareJobLive'
+        }
+    }
+
+    Context 'Move: the participants keep Read before anything of a message moves' {
+        BeforeEach {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+        }
+
+        It 'must fire: the sender owns the message and has no share -> GrantAccess (Read) before any assign, confirmed, then the rows move' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob                 # owned by Alice (the sender)
+            Add-MdmShare $M1 @($i.Bob)                             # the recipient already reads it
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            WriteKinds | Should -Be @('grant', 'sprk_documents', 'sprk_communications')
+            $g = $global:MdmWorld.Writes[0].Body
+            $g.Target.'@odata.id' | Should -Be "sprk_communications($M1)"
+            $g.PrincipalAccess.Principal.'@odata.id' | Should -Be "systemusers($($i.Alice))"
+            $g.PrincipalAccess.AccessMask | Should -Be 'ReadAccess'
+            $r.Output | Should -Match "granted Read to $($i.Alice) on message $M1 .*confirmed by read-back"
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -Be $i.DirectTeam
+            $r.Review.Count | Should -Be 0
+        }
+
+        It 'must not fire: a participant who already holds a Read share gets no second grant' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice)
+            Add-MdmShare $M1 @($i.Bob) -Mask 3                      # Read + Write: the Read bit is held
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            WriteKinds | Should -Be @('sprk_communications')
+        }
+
+        It 'must fire: the recipient is not the owner and holds no share -> no grant, nothing of the message moves (participants_not_readable)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice)
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'participants_not_readable'
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owninguser_value | Should -Be $i.Alice
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -BeNullOrEmpty
+            ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 300))._owningteam_value | Should -BeNullOrEmpty
+        }
+
+        It 'must fire: the owner is granted but the read-back lacks Read -> nothing moves (participant_grant_unconfirmed)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Bob)
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            $global:MdmWorld.GrantNoop = $true
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            WriteKinds | Should -Be @('grant')
+            ReasonOf $r $M1 | Should -Be 'participant_grant_unconfirmed'
+            @($r.Review | Where-Object { $_.MessageId -eq $M1 })[0].Detail | Should -Match 'no Read share'
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -BeNullOrEmpty
+            ($global:MdmWorld.Content | Where-Object Id -eq (MdmId 300))._owningteam_value | Should -BeNullOrEmpty
+        }
+
+        It 'must fire: the grant throws -> nothing moves, listed, and the run goes on to the next message' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Bob)
+            Add-MdmMessage (MdmId 201) $T1 $i.Alice $i.Bob
+            Add-MdmShare (MdmId 201) @($i.Alice, $i.Bob)
+            $global:MdmWorld.GrantFault = $true
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.Thrown | Should -BeNullOrEmpty
+            $r.ExitCode | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'participant_grant_unconfirmed'
+            @($r.Review | Where-Object { $_.MessageId -eq $M1 })[0].Detail | Should -Match 'threw'
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -BeNullOrEmpty
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq (MdmId 201))._owningteam_value | Should -Be $i.DirectTeam
+        }
+
+        It 'must fire: a participant holding a share without the Read bit -> no grant, no assign (participant_share_without_read)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Bob)
+            Add-MdmShare $M1 @($i.Alice) -Mask 2                    # Write only: never upgraded here
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'participant_share_without_read'
+        }
+
+        It 'must not fire: one participant disabled, the other readable -> moves (the disabled one is skipped)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Disabled
+            Add-MdmShare $M1 @($i.Alice)
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            WriteKinds | Should -Be @('sprk_communications')
+            ($global:MdmWorld.Messages | Where-Object sprk_communicationid -eq $M1)._owningteam_value | Should -Be $i.DirectTeam
+        }
+
+        It 'must fire: both participants disabled -> nothing moves (participants_not_readable)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Disabled $i.Disabled2 -OwnerUser $i.Disabled
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.ExitCode | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'participants_not_readable'
+        }
+
+        It 'must fire: the message''s share read faults -> nothing moves (read_fault)' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Alice, $i.Bob)
+            Add-MdmContent 'sprk_documents' (MdmId 300) $M1
+            $global:MdmWorld.Faults = @("principalobjectaccessset.*objectid eq $M1")
+            $r = Invoke-MdmMove @{ Apply = $true }
+            $r.Thrown | Should -BeNullOrEmpty
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            ReasonOf $r $M1 | Should -Be 'read_fault'
+        }
+
+        It '-DryRun prints the owner grant it would make and the rows that stay, and writes nothing' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob
+            Add-MdmShare $M1 @($i.Bob)
+            Add-MdmMessage (MdmId 201) $T1 $i.Alice $i.Bob          # Bob holds no share and does not own it
+            $r = Invoke-MdmMove @{}
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match "WOULD grant Read to systemuser $($i.Alice) on message $M1"
+            $r.Output | Should -Match "would move nothing of message $(MdmId 201): participants_not_readable"
+            ReasonOf $r (MdmId 201) | Should -Be 'participants_not_readable'
+            $global:MdmWorld.Writes.Count | Should -Be 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -notmatch '^Get ' }).Count | Should -Be 0
+        }
+
+        It '-Verify: a Direct-owned message whose enabled participant lacks Read fails (participant_without_read); with both readers it passes' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Bob -OwnerTeam $i.DirectTeam
+            Add-MdmShare $M1 @($i.Alice)
+            $v = Invoke-MdmMove @{ Verify = $true }
+            $v.ExitCode | Should -Be 1
+            ReasonOf $v $M1 | Should -Be 'participant_without_read'
+            $v.Output | Should -Match "VERIFY FAIL: message $M1 is on the Direct team and $($i.Bob) holds no Read share"
+            Add-MdmShare $M1 @($i.Bob)
+            $ok = Invoke-MdmMove @{ Verify = $true }
+            $ok.ExitCode | Should -Be 0
+            $ok.Review.Count | Should -Be 0
+            $global:MdmWorld.Writes.Count | Should -Be 0
+        }
+
+        It '-Verify: a disabled participant without Read does not fail the gate' {
+            $i = $global:MdmIds
+            Add-MdmMessage $M1 $T1 $i.Alice $i.Disabled -OwnerTeam $i.DirectTeam
+            Add-MdmShare $M1 @($i.Alice)
+            (Invoke-MdmMove @{ Verify = $true }).ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'The review list prints a count per reason' {
+        It 'Move dry run, Apply and Verify each print a "review:" line with each reason and its count' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $i.Alice $null                   # no_valid_pair
+            Add-MdmMessage (MdmId 201) $T1 $i.Alice $i.Alice       # no_valid_pair
+            Add-MdmMessage (MdmId 202) $T1 $i.Alice $i.Bob         # participants_not_readable (Bob: no share, not the owner)
+            foreach ($mode in @{}, @{ Apply = $true }) {
+                $r = Invoke-MdmMove $mode
+                $r.ExitCode | Should -Be 0
+                $r.Output | Should -Match 'review: no_valid_pair 2, participants_not_readable 1'
+            }
+            $v = Invoke-MdmMove @{ Verify = $true }
+            $v.Output | Should -Match 'review: no_valid_pair 2(\r?\n|$)'
+        }
+
+        It 'Stamp prints the count per reason, and "none" when nothing is listed' {
+            $i = $global:MdmIds
+            Add-MdmThread $T1 $i.Alice $null @(@{ P = $i.Bob; Mask = 1 })
+            Add-MdmMessage $M1 $T1 $null $null                      # no_sentby
+            Add-MdmMessage (MdmId 201) $T1 $null $null              # no_sentby
+            Add-MdmThread (MdmId 101) $i.Alice $null @()
+            Add-MdmMessage (MdmId 202) (MdmId 101) $i.Alice $null   # not_two_participants
+            (Invoke-Mdm @{ Phase = 'Stamp' }).Output | Should -Match 'review: no_sentby 2, not_two_participants 1'
+            $global:MdmWorld.Messages = @()
+            (Invoke-Mdm @{ Phase = 'Stamp' }).Output | Should -Match 'review: none'
         }
     }
 
@@ -909,7 +1165,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
         It 'must not fire: shares kept and owner landed -> exit 0' {
             $r = Invoke-MdmMove @{ Apply = $true }
             $r.ExitCode | Should -Be 0
-            $r.Output | Should -Match 'shares 1 -> 1'
+            $r.Output | Should -Match 'shares 2 -> 2'   # Bob's Read share plus the owner's confirmed Read grant
         }
     }
 
