@@ -2213,7 +2213,19 @@ public sealed partial class SecureRootInheritance
             if (mask == 0 && (IsPending(row) || mask != written))
             {
                 if (await PairedGrantNotEndedAsync(rootType, recordId, principal, endingParent, ct).ConfigureAwait(false))
+                {
+                    // Task 193 review F1: the known cause goes on record, as the removal branch below writes it, so the next
+                    // pass's step (a) never reads the missing share as an operator's removal and settles the row without
+                    // ending the paired grant.
+                    if (row.Reason != AssignedAccessReason.PairedGrantPending)
+                    {
+                        await UpdateDecidedRowAsync(row,
+                            new AssignedAccessLedgerWrite(AssignedAccessState.Shared, AssignedAccessReason.PairedGrantPending, GrantedLevel: written),
+                            ct).ConfigureAwait(false);
+                    }
+
                     return new EndOutcome(false, false, PairedGrantNotEndedDetail, RowEnded: false, PairedNotEnded: true);
+                }
 
                 if (row.Reason == AssignedAccessReason.PairedGrantPending)
                 {

@@ -446,6 +446,34 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         row.Reason.Should().Be(AssignedAccessReason.AccessRemoved, "removed by the rule, never read as an out-of-band removal");
     }
 
+    /// <summary>
+    /// Task 193 review F1: the inherited share was ALREADY gone (removed in the model-driven app) when the matter's unshare
+    /// tried to end the paired grant, and that end failed. The row records the known cause, so the job's next pass ends the
+    /// paired grant instead of reading the missing share as an operator's removal and leaving the grant active.
+    /// </summary>
+    [Fact]
+    public async Task G4a_AShareAlreadyRemovedOutOfBand_WhenThePairedGrantCouldNotBeEnded_TheJobsNextPassStillEndsIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Colleague)); // outside the BFF
+        grants.Grants.FailDeactivations = true;
+        await UnshareAsync("matter", matter, Colleague);
+        var live = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        live.State.Should().Be(AssignedAccessState.Shared, "the row stays live while the paired grant remains");
+        live.Reason.Should().Be(AssignedAccessReason.PairedGrantPending, "the known cause is on record");
+        grants.Grants.FailDeactivations = false;
+
+        await _job.RunAsync();
+
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired, "the job's next pass ends it");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
     /// <summary>Task 193 G4a (A-F2): ending the paired grant with the inherited share is a SYSTEM removal: no decline is recorded.</summary>
     [Fact]
     public async Task G4a_EndingThePairedGrant_LeavesTheContactsAssignedToSuggestionAlone()
