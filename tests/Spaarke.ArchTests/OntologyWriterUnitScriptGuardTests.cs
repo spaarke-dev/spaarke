@@ -40,19 +40,12 @@ public class OntologyWriterUnitScriptGuardTests
     private const string ProcedurePath =
         "src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs";
 
-    private const string EbillingReason =
-        "owned by ebilling-r1; fix agreed 2026-11-10, lands with their master merge; #2618";
-
     /// <summary>
     /// Ratchet baseline: script path (repo-relative, forward slashes) → why it is allowed to trip the guard for now.
     /// Remove an entry as soon as the script is fixed (the stale-entry check fails until you do).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> KnownOffenders = new Dictionary<string, string>
     {
-        ["scripts/ebilling/Deploy-EbillingProcedureSchema.ps1"] = EbillingReason,
-        ["scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1"] = EbillingReason,
-        ["scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1"] = EbillingReason,
-        ["scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1"] = EbillingReason,
     };
 
     // One quoted-or-bare Web API query starting at "teams?" (up to the closing quote or end of line).

@@ -123,7 +123,7 @@ $DevUrl = 'https://spaarkedev1.crm.dynamics.com'
 # `pwsh -File` passes a comma list as ONE string: split it.
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 # Keeps the ontology writer's business unit's default team out of the reader profile (ebilling-r1; the helper is customer-provisioning-orchestration-r1 task 267's).
-. (Join-Path $PSScriptRoot '..' 'common' 'OntologyWriterUnit.ps1')
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 
 # ---------------------------------------------------------------------------------------------------------------
 # Constants

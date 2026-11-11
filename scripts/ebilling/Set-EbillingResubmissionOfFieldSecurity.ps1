@@ -145,7 +145,7 @@ function Invoke-DvWrite([string]$Method, [string]$Path, $Body, [hashtable]$Extra
 }
 
 . (Join-Path $PSScriptRoot '..' 'common' 'DataverseSolutionMembership.ps1')
-. (Join-Path $PSScriptRoot '..' 'common' 'OntologyWriterUnit.ps1')
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 $script:Wrote = $false
 function Report([string]$State, [string]$What) {

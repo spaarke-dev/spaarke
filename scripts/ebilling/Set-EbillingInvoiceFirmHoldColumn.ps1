@@ -210,7 +210,7 @@ function Get-AllPages([string]$Path) {
 }
 
 . (Join-Path $PSScriptRoot '..' 'common' 'DataverseSolutionMembership.ps1')
-. (Join-Path $PSScriptRoot '..' 'common' 'OntologyWriterUnit.ps1')
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 $script:Wrote = $false
 function Report([string]$State, [string]$What) {
