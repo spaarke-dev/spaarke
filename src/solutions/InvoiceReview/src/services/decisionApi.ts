@@ -52,7 +52,13 @@ export interface ApprovalState {
   openLines: ApprovalOpenLines;
   /** Clean lines with no decision that an approve accepts in bulk (D-72). */
   undecidedCleanLines: number;
+  /** Approve is refused for a hold: a blocked submission (FR-20) or the invoice's billing Procedures (082c-2). */
   held: boolean;
+  /**
+   * The hold is (or includes) a blocked submission: Reject and Return are refused too, and the blocked banner's Override / Return is the way
+   * out. False for a Procedure-only hold, which refuses Approve only. Optional so an older server reads `held` as a blocked submission.
+   */
+  blockedSubmissionHeld?: boolean;
   approvedAmount: number | null;
   decidedBy: string | null;
   decidedOn: string | null;

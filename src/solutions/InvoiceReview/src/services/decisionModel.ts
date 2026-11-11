@@ -26,14 +26,31 @@ export type DecisionAccess =
 const DECIDED_APPROVALS: ReadonlySet<string> = new Set(['Approved', 'Rejected', 'Returned']);
 
 /**
+ * The approval's hold is a blocked submission (FR-20), which refuses Reject and Return as well as Approve. An older server that does not
+ * name the kind reads as blocked, so nothing it would refuse is offered.
+ */
+function blockedSubmissionHold(approval: ApprovalState): boolean {
+  return approval.blockedSubmissionHeld ?? approval.held;
+}
+
+/** The approval is held only for the invoice's billing Procedures (082c-2): Approve is refused; Reject and Return are not. */
+function procedureOnlyHold(approval: ApprovalState): boolean {
+  return approval.held && !blockedSubmissionHold(approval);
+}
+
+const PROCEDURE_HOLD_WORDS =
+  'This invoice is on hold for its billing terms: some work dates have no terms in force, or the terms could not be checked. It can be approved once they are set up and the invoice is re-checked.';
+
+/**
  * Whether the page offers "Decide invoice…", "View decision" or nothing. The server stays authoritative (a 403 or 409 is shown when the
- * action runs); this only keeps buttons the server's own signals say will be refused off the screen.
+ * action runs); this only keeps buttons the server's own signals say will be refused off the screen. A blocked submission hides the wizard
+ * (the blocked banner owns it); a Procedure-only hold keeps it, with Approve disabled (`canApprove` is false) and Reject / Return open.
  */
 export function decisionAccess(review: Pick<InvoiceReview, 'header'>, approval: ApprovalState | null, canWrite: boolean): DecisionAccess {
   if (!approval) return 'none';
   if (DECIDED_APPROVALS.has(approval.status)) return 'view';
   if (approval.status !== 'Pending') return 'none';
-  if (approval.held || review.header.held) return 'none';
+  if (blockedSubmissionHold(approval) || review.header.held) return 'none';
   if (review.header.status !== 'InReview') return 'none';
   return canWrite && approval.callerEligible ? 'decide' : 'none';
 }
@@ -55,6 +72,7 @@ export function approveBlocker(approval: ApprovalState): string | null {
   if (flagged > 0) open.push(`${flagged} ${flagged === 1 ? 'line' : 'lines'} to decide`);
   if (pending > 0) open.push(`${pending} still processing`);
   if (open.length > 0) return `Not yet: ${open.join(', ')}.`;
+  if (procedureOnlyHold(approval)) return PROCEDURE_HOLD_WORDS;
   if (approval.held) return 'This invoice is held until its blocked submission is overridden or returned.';
   if (approval.noEligibleApprover) return 'No eligible approver is named for this invoice.';
   return 'Not available right now. A saved correction may still be finishing; reload and try again.';
@@ -78,6 +96,7 @@ export function awaitingLine(approval: ApprovalState | null): AwaitingLine | nul
       return { tone: 'neutral', text: `${verb}${approval.decidedBy ? ` by ${approval.decidedBy}` : ''}` };
     }
     case 'Pending': {
+      if (procedureOnlyHold(approval)) return { tone: 'warning', text: 'On hold for its billing terms: it can be approved once they are re-checked.' };
       if (approval.held) return { tone: 'warning', text: 'On hold: the submission is blocked and waits for an override or a return.' };
       if (approval.eligibilityUnavailable) return { tone: 'warning', text: 'Approvers could not be resolved right now.' };
       if (approval.noEligibleApprover || approval.eligibleApprovers.length === 0) {

@@ -651,6 +651,28 @@ describe('Reject and Return to firm', () => {
     expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
   });
 
+  it('PR #2689 F1: a Procedure-only hold keeps the wizard with Approve disabled (the billing-terms words) and Return open', async () => {
+    const decision = mockDecisionApi(approval({ held: true, blockedSubmissionHeld: false, canApprove: false }));
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    expect(radio(d, /^Approve/)).toBeDisabled();
+    expect(within(d).getByText(/on hold for its billing terms/)).toBeInTheDocument();
+    expect(radio(d, /^Reject/)).toBeEnabled();
+    fireEvent.click(radio(d, /^Return to firm/));
+    fireEvent.click(next(d));
+    fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'Terms missing for June' } });
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-decision');
+    fireEvent.click(finishBtn(d, /^Return to firm & record$/));
+    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledWith(INVOICE_ID, 'Terms missing for June'));
+  });
+
+  it('PR #2689 F1: a blocked-submission hold still offers no wizard', async () => {
+    renderDecisions(clean(), mockDecisionApi(approval({ held: true, blockedSubmissionHeld: true, canApprove: false })));
+    await screen.findByTestId('awaiting');
+    expect(screen.queryByTestId('decide-invoice')).not.toBeInTheDocument();
+  });
+
   it('returns to the firm with a reason', async () => {
     const decision = mockDecisionApi();
     renderDecisions(clean(), decision);

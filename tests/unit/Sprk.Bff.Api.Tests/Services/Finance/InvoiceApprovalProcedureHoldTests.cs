@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Finance;
@@ -49,6 +50,23 @@ public sealed class InvoiceApprovalProcedureHoldTests
         var state = (await w.GetAs(AliceUser))!;
         state.CanApprove.Should().BeFalse();
         state.Held.Should().BeTrue();
+        state.BlockedSubmissionHeld.Should().BeFalse("a Procedure-only hold refuses Approve, not Reject or Return");
+    }
+
+    [Fact(DisplayName = "PR #2689 F1 (contract): the approval state names the blocked-submission hold apart from a Procedure hold on the wire (blockedSubmissionHeld)")]
+    public async Task State_NamesTheBlockedSubmissionHold_OnTheWire()
+    {
+        var procedure = new ApprovalWorld();
+        procedure.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        HoldForProcedures(procedure, SubmissionReasonCodes.ProcedureGap, null);
+        var procedureJson = JsonSerializer.Serialize((await procedure.GetAs(AliceUser))!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        procedureJson.Should().Contain("\"held\":true").And.Contain("\"blockedSubmissionHeld\":false");
+
+        var blocked = new ApprovalWorld();
+        blocked.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        blocked.Hold();
+        var blockedJson = JsonSerializer.Serialize((await blocked.GetAs(AliceUser))!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        blockedJson.Should().Contain("\"held\":true").And.Contain("\"blockedSubmissionHeld\":true");
     }
 
     [Fact(DisplayName = "082c-2 / 165a: an Internal gap (the pipeline marker, kind Blocked) is held by FR-20 first; the genuine Override release (Accepted, Overridden, the stamp) lifts both holds")]
@@ -71,12 +89,16 @@ public sealed class InvoiceApprovalProcedureHoldTests
 
         held.Code.Should().Be(InvoiceApprovalCodes.Held, "an Internal gap is Blocked, so the FR-20 hold answers first");
         InvoiceProcedureHold.ReasonsOf(row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "the pipeline marker holds too");
+        (await w.GetAs(AliceUser))!.Should().Match<InvoiceApprovalStateDto>(s => s.Held && s.BlockedSubmissionHeld,
+            "both holds: the blocked submission is named, so the page keeps Reject and Return off (the blocked banner owns it)");
 
         // The Override release as SubmissionOverrideService writes it: status Accepted, code Overridden and the stamp, in one write.
         findings[SubmissionOverrideService.OverrideMember] = new System.Text.Json.Nodes.JsonObject
         {
-            ["recordId"] = Guid.NewGuid().ToString("D"), ["bySystemUserId"] = Guid.NewGuid().ToString("D"),
-            ["on"] = "2026-11-06T10:00:00.0000000Z", ["reason"] = "negotiated",
+            ["recordId"] = Guid.NewGuid().ToString("D"),
+            ["bySystemUserId"] = Guid.NewGuid().ToString("D"),
+            ["on"] = "2026-11-06T10:00:00.0000000Z",
+            ["reason"] = "negotiated",
         };
         row["sprk_findingsjson"] = findings.ToJsonString();
         row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);

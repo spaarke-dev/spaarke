@@ -43,6 +43,18 @@ describe('decisionAccess: actions come only from the server signals', () => {
     expect(decisionAccess(closed, approval(), true)).toBe('none');
   });
 
+  it('PR #2689 F1: a Procedure-only hold keeps the wizard (Reject and Return stay open); a blocked submission hides it', () => {
+    const procedureOnly = approval({ held: true, blockedSubmissionHeld: false, canApprove: false });
+    expect(decisionAccess(pending(), procedureOnly, true)).toBe('decide');
+    expect(decisionAccess(pending(), approval({ held: true, blockedSubmissionHeld: true, canApprove: false }), true)).toBe('none');
+    // An older server that does not name the hold kind reads as blocked.
+    expect(decisionAccess(pending(), approval({ held: true, canApprove: false }), true)).toBe('none');
+    // The review's own blocked flag still hides it, whatever the approval says.
+    const blockedReview = review([line(1)]);
+    blockedReview.header.held = true;
+    expect(decisionAccess(blockedReview, procedureOnly, true)).toBe('none');
+  });
+
   it('offers to view a decided invoice, to anyone who can read it', () => {
     for (const status of ['Approved', 'Rejected', 'Returned']) {
       expect(decisionAccess(pending(), approval({ status, callerEligible: false, canApprove: false }), false)).toBe('view');
@@ -74,6 +86,16 @@ describe('approveBlocker', () => {
     expect(approveBlocker(approval({ canApprove: false, noEligibleApprover: true }))).toContain('No eligible approver');
     expect(approveBlocker(approval({ canApprove: false }))).toContain('Not available right now');
   });
+
+  it('PR #2689 F1: names the billing terms for a Procedure-only hold, and the blocked submission only for that hold', () => {
+    const procedure = approveBlocker(approval({ canApprove: false, held: true, blockedSubmissionHeld: false }));
+    expect(procedure).toContain('billing terms');
+    expect(procedure).not.toContain('blocked submission');
+    expect(approveBlocker(approval({ canApprove: false, held: true, blockedSubmissionHeld: true }))).toContain('blocked submission');
+    expect(approveBlocker(approval({ canApprove: false, held: true }))).toContain('blocked submission');
+    // The open counts still come first (I-2).
+    expect(approveBlocker(approval({ canApprove: false, held: true, blockedSubmissionHeld: false, openLines: { pending: 0, flagged: 1 } }))).toBe('Not yet: 1 line to decide.');
+  });
 });
 
 describe('awaitingLine', () => {
@@ -91,6 +113,13 @@ describe('awaitingLine', () => {
   it('warns when eligibility could not be resolved, and when the invoice is held', () => {
     expect(awaitingLine(approval({ eligibilityUnavailable: true }))?.tone).toBe('warning');
     expect(awaitingLine(approval({ held: true }))?.text).toContain('On hold');
+  });
+
+  it('PR #2689 F1: says the billing terms, not a blocked submission, for a Procedure-only hold', () => {
+    const procedure = awaitingLine(approval({ held: true, blockedSubmissionHeld: false }));
+    expect(procedure).toEqual({ tone: 'warning', text: expect.stringContaining('billing terms') });
+    expect(procedure?.text).not.toContain('blocked');
+    expect(awaitingLine(approval({ held: true, blockedSubmissionHeld: true }))?.text).toContain('submission is blocked');
   });
 
   it('says how a decided invoice closed, and nothing for an unknown state', () => {

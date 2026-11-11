@@ -189,6 +189,10 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 /// <param name="CanApprove">The caller is eligible and holds Write on the invoice, the invoice is In Review and not held, no line is Pending or
 /// Flagged, no correction is waiting for its follow-through (101), the portion is Pending, and the invoice does not need a firm (095c-4).</param>
 /// <param name="UndecidedCleanLines">Clean lines an approve accepts in bulk (D-72).</param>
+/// <param name="Held">Approve is refused for a hold: a blocked submission (FR-20, <see cref="InvoiceBlockedHold"/>) or the invoice's Procedures
+/// (082c-2, <see cref="InvoiceProcedureHold"/>).</param>
+/// <param name="BlockedSubmissionHeld">The FR-20 blocked-submission hold alone (<see cref="InvoiceBlockedHold"/>): Reject and Return are refused too
+/// (the submission's Override or Return is the way out). False for a Procedure-only hold, which refuses Approve only.</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
     Guid? ApprovalId,
@@ -206,7 +210,8 @@ public sealed record InvoiceApprovalStateDto(
     DateTime? DecidedOn,
     Guid? DecisionRecordId,
     DateTime? EligibleResolvedOn,
-    bool FirmNeeded = false);
+    bool FirmNeeded = false,
+    bool BlockedSubmissionHeld = false);
 
 public sealed record ApprovalResult(
     ApprovalOutcome Outcome,
@@ -406,8 +411,10 @@ public sealed class InvoiceApprovalService
         var portions = await _resolver.ReadPortionsAsync(invoiceId, ct).ConfigureAwait(false);
         var portion = portions.Count == 1 ? portions[0] : null;
         var lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
-        // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false).
-        var held = (await HoldAsync(invoiceId, ct).ConfigureAwait(false)).Held
+        // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false). Only the blocked-submission hold also
+        // refuses Reject and Return (InvoiceRejectReturnService), so the state names it apart for the page.
+        var blockedSubmissionHeld = (await HoldAsync(invoiceId, ct).ConfigureAwait(false)).Held;
+        var held = blockedSubmissionHeld
             || (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false)).Count > 0;
         // Task 095d-0 (EB-D-185, EB-D-190): the page's Approve and Reject follow the same gate the routes refuse on (no firm, held, or the re-run pending).
         var firmNeeded = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmGateResult.Open;
@@ -472,7 +479,7 @@ public sealed class InvoiceApprovalService
             && (await InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false)).Contains(invoiceId);
 
         return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded,
-            approveRecorded);
+            approveRecorded, blockedSubmissionHeld);
     }
 
     // ── POST approve ──
@@ -1564,7 +1571,7 @@ public sealed class InvoiceApprovalService
 
     private static InvoiceApprovalStateDto State(
         Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, bool correctionsPending, EligibleApproverSet? set, bool eligibilityUnavailable,
-        bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded, bool approveRecorded)
+        bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded, bool approveRecorded, bool blockedSubmissionHeld)
     {
         var portionStatus = portion is null ? null : StatusOf(portion);
 
@@ -1604,7 +1611,8 @@ public sealed class InvoiceApprovalService
             DecidedOn: decided ? portion!.GetAttributeValue<DateTime?>(PortionDecidedOn) : null,
             DecisionRecordId: portion?.GetAttributeValue<EntityReference>(PortionRecord)?.Id,
             EligibleResolvedOn: resolvedOn,
-            FirmNeeded: firmNeeded);
+            FirmNeeded: firmNeeded,
+            BlockedSubmissionHeld: blockedSubmissionHeld);
     }
 
     private static ApprovalOpenLinesDto OpenLines(IEnumerable<Entity> lines)
