@@ -203,10 +203,15 @@ internal sealed class UpdateRecordActionCore
         // person. WriteIdentity.Caller (the pre-#2251 sets only) is the field-mapping push's, which #2253 leaves to its
         // caller's own privileges; a playbook payload is built by configuration or a model, not by the runner, so the
         // runner's own rights are not the only lock on it (PlaybookRunIdentityTests).
+        // #2250 (owner decision, option 2): every payload that reaches this refusal is asked as WriteIdentity.Playbook, which
+        // also refuses a root's Assigned-To columns, so neither a playbook nor a model causes an Assigned-To grant. That is the
+        // Update Record node's payload (Configuration) AND a confirmed proposal no person confirmed (no impersonated user, or
+        // Guid.Empty): written app-only, it is configuration- or model-built, so it gets the playbook rule (uac-r2 review).
+        // Only a proposal confirmed and written AS its person skips the refusal; that person's own privileges decide it.
         if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal
                 || input.ImpersonateSystemUserId is not { } confirmingUser || confirmingUser == Guid.Empty)
             && InheritedAccessPermission.RefuseAppOnlyWrite(
-                input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
+                input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.Playbook) is { } documentRefusal)
         {
             // The writer-only column refusal (EB-D-207) is about an update to an existing row: not the owner constructor, whose
             // message is about a create's owner. The update's own words, the same as the fixed-after-create refusal below.
