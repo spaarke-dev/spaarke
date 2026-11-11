@@ -21,12 +21,12 @@ The steps for each test are in [`owner-hands-on-checklist-2026-10-08.md`](owner-
 | D-11 | 166 (f): a non-admin without Create | (a) a live test with such a user; (b) accept the tests as proof | **(b).** Server tests cover it, and it is a UI-only negative |
 | D-12 | ebilling task 116, condition 1, revised: a redraft uses the same rights a reject needs, checked as the user; then the app writes. No role or team change | (a) accept; (b) give admins Local-depth Write on the rule tables | **(a).** (b) widens Write to published rule versions across the unit through the form. ebilling is putting this to you |
 
-**Added 2026-11-11 by task 090, after "Accept all": D-13 and D-14 are NOT covered by that answer. Both await the owner's answer; nothing below is decided.**
+**Added 2026-11-11 by task 090, after "Accept all": D-13 and D-14 are not covered by that answer. The owner decided both separately, the same day, in the uac-r2 session.**
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| D-13 | #2179 / task 191: flagged-external systemusers reach internal-only records through direct Dataverse access | (a) build it in uac-r2 now (design study first; reverses the round-77 accepted gap); (b) carry it to uac-secure-project-r3, with the round-77 gap staying recorded as accepted until then | **(b)**, because it is a Dataverse role and field-security redesign, not a fix, and the gap is documented and accepted. **Awaiting the owner's answer** |
-| D-14 | #2338 / task 193: Manage Access gets one "Add person" entry and a server-side share-or-grant decision | (a) build it in uac-r2; (b) carry it to the follow-on | **(b)**, because it is a usability feature with no exposure. **Awaiting the owner's answer** |
+| # | Decision | Options | Recommendation | Decision |
+|---|---|---|---|---|
+| D-13 | #2179 / task 191: flagged-external systemusers reach internal-only records through direct Dataverse access | (a) build it in uac-r2 now (design study first; reverses the round-77 accepted gap); (b) carry it to uac-secure-project-r3, with the round-77 gap staying recorded as accepted until then | (b), because it is a Dataverse role and field-security redesign, not a fix, and the gap is documented and accepted | **(a). Owner, 2026-11-11: "Build in uac-r2 now"** (against the recommendation) |
+| D-14 | #2338 / task 193: Manage Access gets one "Add person" entry and a server-side share-or-grant decision | (a) build it in uac-r2; (b) carry it to the follow-on | (b), because it is a usability feature with no exposure | **(a). Owner, 2026-11-11: "Build in uac-r2 now"** (against the recommendation) |
 
 ## B. Owner tests (UAT)
 
