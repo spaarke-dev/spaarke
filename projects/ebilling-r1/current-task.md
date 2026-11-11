@@ -177,7 +177,14 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
   - The owning team is memberless by contract, so the per-row Write as the user can NEVER pass, and the membership invariant is impossible.
   - Proposed to uac-r2 (awaiting its ruling): `/draft` authorizes like the reject route (`DecideRule()` privileges + Read on the set + Write on the Procedure, as the caller), then deactivates app-only with still-Draft and row-version checks in one transaction.
   - Additions 1 and 2 fall away; addition 3 stays.
-- Round 5 waits for that ruling, then bundles it with the re-check findings.
+- **uac-r2 ACCEPTED = EB-D-216a** (decisions log). Round 5's binding points:
+  - (1) the check runs per distinct affected rule set and Procedure, or the call asserts they are all the target's;
+  - (2) rights first, so a caller without rights learns nothing about state;
+  - (3) a realistic test where row Write is refused yet the redraft succeeds, plus the three negatives, each with nothing written;
+  - (4) the other conditions stand, plus the 503 `ruleset.redraft_not_queued` and the retry test;
+  - (5) record why in the notes and the PR.
+- **Round 5 starts when the round-4 Opus re-check returns,** and bundles its findings.
+- Tell the owner it's a refinement with no role change.
 - Tell the owner (no role change; consistent with EB-D-216).
 - The DEF-060 note line is added on work (`152257b9f1`).
 
