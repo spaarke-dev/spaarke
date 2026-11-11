@@ -130,7 +130,7 @@ public static class GrantExternalAccessEndpoint
 
         // ── Task 193 (#2338) step 3: a contact that represents an internal user is SHARED with, not granted ──
         // Manage Access has ONE "add person" entry, so the server decides: exactly one represented user → the /share-user
-        // core at the requested level (no grant row); several → 409; unreadable → 503 (never a contact grant instead);
+        // core at the requested level (no unpaired grant row); several → 409; unreadable → 503 (never a contact grant instead);
         // nobody → the grant below, unchanged. The share core answers a disabled, non-person or Restricted-barred user with
         // its own refusal. An organization grant is not a person and never asks.
         // A share has no end date (as when the user is picked directly): a requested ExpiryDate is not applied to it, and the

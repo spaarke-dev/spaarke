@@ -155,7 +155,8 @@ public static class InviteAndGrantExternalUserEndpoint
 
         // ── Task 193 (#2338) step 4: never CIAM-invite an internal user ──
         // An email that names ONE existing contact which represents an internal user takes /grant's decision: exactly one
-        // represented user → shared at the requested level (no CIAM account, no email, no grant row); several → 409;
+        // represented user → shared at the requested level, plus the grant paired with that share (no CIAM account, no
+        // email); several → 409;
         // unreadable → 503. Decided by ContactUserRepresentation after the organisation decision (which reads no contact),
         // BEFORE the contact policy (a share is not a contact grant) and before anything is onboarded. The binder's link refusal below and the invite core's link guard stay
         // as safety nets, never the decider. No contact, or two (the binder refuses those), goes on unchanged.

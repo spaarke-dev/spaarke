@@ -25,7 +25,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="SharedWithUser">
 /// Task 193 (#2338): set when the contact represents exactly ONE internal user, so the record was SHARED with that user
-/// instead of granted to the contact. Then no grant row was written: <paramref name="AccessRecordId"/> is
+/// instead of granted to the contact. Then this answer names no grant row (the grant paired with the share, if any, is
+/// reported in <paramref name="WorkforceApp"/>): <paramref name="AccessRecordId"/> is
 /// <see cref="Guid.Empty"/>, <paramref name="Invite"/> is <c>null</c>, and <paramref name="GrantedAccessLevel"/>,
 /// <paramref name="Narrowed"/> and <paramref name="NotificationFailed"/> describe the share. <c>null</c> for a grant. Additive.
 /// </param>

@@ -14,8 +14,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 
 // =====================================================================================================================
 // unified-access-control-r2 task 193 (#2338) steps 3-4 — Manage Access's ONE "add person" entry: when staff add a CONTACT
-// that represents an internal user, the SERVER shares the record with that user (model-driven-app access), instead of
-// writing a contact grant that gives the internal user SPA-only access.
+// that represents an internal user, the SERVER shares the record with that user (model-driven-app access) and then, task 193
+// G1 / owner round 131, grants the contact paired with that share (their workforce-app access) — never a contact grant alone,
+// which gave the internal user SPA-only access.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: ContactUserRepresentation answers who a contact represents; InternalUserShareCore writes an internal-user
@@ -117,7 +118,8 @@ public sealed class ContactInternalUserShare
     /// <summary>
     /// Decides <paramref name="contactId"/> on <paramref name="rootType"/> <paramref name="rootId"/> at
     /// <paramref name="level"/>. <see cref="ContactShareDecision.GrantPath"/> means the contact represents nobody: the caller
-    /// goes on with its grant, unchanged. Anything else is the answer, and no grant row may be written.
+    /// goes on with its grant, unchanged. Anything else is the answer, and the caller writes no grant row of its own: the only
+    /// grant is the one paired with the confirmed share, written here (task 193 G1, <c>workforceApp</c>).
     /// </summary>
     internal async Task<ContactShareDecision> DecideAsync(
         Guid contactId,
@@ -194,7 +196,7 @@ public sealed class ContactInternalUserShare
 
         logger.LogInformation(
             "[CONTACT-SHARE] Contact {ContactId} represents internal user {SystemUserId}; sharing {RootType} {RootId} with " +
-            "them instead of a contact grant.", contactId, userId, rootType, rootId);
+            "them, then granting the contact paired with that share.", contactId, userId, rootType, rootId);
 
         var shared = await InternalUserShareCore.ShareAsync(
             new ShareRecordWithUserRequest(rootType.ToString(), rootId, userId, level),

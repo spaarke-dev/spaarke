@@ -234,7 +234,8 @@ exception is **Update Access** (`/assigned-access/sync`, which re-runs the Assig
 ### Adding an internal colleague: the share and the paired workforce-app grant
 
 The share is written first. Only after it is confirmed does the BFF write the paired grant, through the same grant core
-as `/grant` (grantor ceiling, never lower, the No Access list, a lapsed row restored). The grant row names the colleague
+as `/grant` (grantor ceiling, never lower, the No Access list, a lapsed row restored unless the request was narrowed below
+it: a lapsed higher grant is never lowered, round 80). The grant row names the colleague
 in `sprk_pairedsystemuser`. The contact gets **no invite and no notification**.
 
 | | The share | The paired grant |
@@ -256,7 +257,7 @@ show in their workforce app because …", with one plain reason per group:
 | workforce app access is not set up in this environment yet | `sdap.access.share.workforce_pairing_column_missing` (see the deploy note below) |
 | that access could not be set up just now; adding them again retries it | a read or write that failed: `…workforce_pairing_unreadable`, `…workforce_grant_failed`, `…workforce_link_unreadable`, and the grant core's `caller_rights_unreadable`, `policy_unreadable`, `owner_unreadable`, `no_access_unverifiable` |
 | their contact is on this record's No Access List | `sdap.access.grant.grantee_denied` |
-| (a sentence of its own) "Their contact already holds higher workforce app access to this record, which is left as it is." | `sdap.access.grant.would_lower_existing` |
+| (a sentence of its own) "Their contact already holds a higher workforce app grant on this record, which is left as it is. If that grant has expired, someone with access at that level can renew it." (A lapsed higher grant counts too, so the sentence never claims the access is live.) | `sdap.access.grant.would_lower_existing` |
 | that access could not be given | any other code |
 
 The modal never shows the codes. If the No Access flags cannot be read, the share itself is refused and nothing is

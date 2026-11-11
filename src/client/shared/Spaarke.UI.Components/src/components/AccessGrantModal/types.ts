@@ -9,8 +9,9 @@
  * dependency on `Xrm` or any Dataverse-entity-specific field names: the caller
  * (the `TrackingFieldTrio` PCF's `index.ts`, which alone knows the `sprk_project`
  * schema per FR-14's entity-agnostic discipline) supplies the candidate list,
- * existing-grants list, contact search, and internal/external contact
- * classification via callback props.
+ * existing-grants list, contact search and the person picker via callback
+ * props. Whether a contact is an internal colleague is decided by the server
+ * (task 193), never classified here.
  *
  * `AuthenticatedFetchFn` is imported from `@spaarke/auth` — already an existing
  * dependency of `@spaarke/ui-components` (see `services/EmailComposer`,
