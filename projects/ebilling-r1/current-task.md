@@ -153,7 +153,18 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
 4. A citation of a deactivated draft still resolves; say so in the notes.
 5. The role-privilege guard is unchanged; confirm the Write depth fits team-owned drafts and report what you find.
 
-**Waiting on the owner's choice.** Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
+**Waiting on the owner's choice.**
+
+**Re-check of round 2: NOT APPROVED.**
+- F4: the rule-set citation must stay until the column `-Delete`.
+- F1: the first reset hides "drafted" when the upload never lands; the precheck must use `CanStageAsync`; one test checks the wrong thing.
+- F4: `/draft` timing for an unknown versus a no-Read id.
+- K2: the take-back writes `DBNull`, not the cleared envelope.
+- K4: ledger prose.
+
+**Fix round 3 RUNNING** (Opus, in the 116 worktree, from `61d133463d`): those four items; the draft-supersede behaviour is excluded pending the owner. After that: the (c) build if the owner picks it, the ledger prose, a scoped re-check, then the diff to uac-r2.
+
+Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
 
 ## Queued: default-team exclusion in our scripts (from provisioning-r1, 2026-11-10)
 
