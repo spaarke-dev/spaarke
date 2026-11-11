@@ -122,8 +122,10 @@ function global:Invoke-RestMethod {
     if ($p -match "^GlobalOptionSetDefinitions\(Name='sprk_storedfilepurpose'\)") {
         return [pscustomobject]@{ MetadataId = 'os-1'; Options = @(@(@(100000000, 'Procedure source'), @(100000001, 'Invoice PDF'), @(100000002, 'Invoice supporting file'), @(100000003, 'Export file')) | ForEach-Object { [pscustomobject]@{ Value = $_[0]; Label = (New-FakeLabel $_[1]) } }) }
     }
+    # The ontology writer business unit (OntologyWriterUnit.ps1) does not exist in this world: nothing to leave out.
+    if ($p -like 'businessunits?*') { return [pscustomobject]@{ value = @() } }
     if ($p -like 'teams?*') {
-        return [pscustomobject]@{ value = @($global:FakeReaderBus | ForEach-Object { [pscustomobject]@{ teamid = "team-$_"; name = $_; businessunitid = [pscustomobject]@{ name = $_; isdisabled = $false } } }) }
+        return [pscustomobject]@{ value = @($global:FakeReaderBus | ForEach-Object { [pscustomobject]@{ teamid = "team-$_"; name = $_; _businessunitid_value = "bu-$_"; businessunitid = [pscustomobject]@{ name = $_; isdisabled = $false } } }) }
     }
     if ($p -match "^fieldsecurityprofiles\?.*name eq '([^']+)'") {
         $id = if ($Matches[1] -like '*Readers*') { 'p-reader' } else { 'p-writer' }
