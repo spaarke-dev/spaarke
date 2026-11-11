@@ -1392,7 +1392,8 @@ public sealed class FirmFindingsProjectionTests
     {
         ["schema"] = 1,
         ["kind"] = kind,
-        ["reasonCode"] = BillingReasonCodes.RateAboveApproved,
+        // A code that can never reject: a test that the document's own top-level code is never shown must be able to tell it from a finding's.
+        ["reasonCode"] = BillingReasonCodes.CurrencyNotUsd,
         ["findings"] = new JsonArray(entries),
         ["signalPlan"] = new JsonArray(new JsonObject { ["sentence"] = InternalSentence }),
     }.ToJsonString();
@@ -1449,15 +1450,26 @@ public sealed class FirmFindingsProjectionTests
     [Fact(DisplayName = "130c: only the stored values and rule fields are projected; the stored clause, sentence, policy code and confidence never are")]
     public async Task Rejected_NothingInternalInTheStoredFindingsIsProjected()
     {
-        var world = TwoFindingsWorld();
+        // The document's top-level code (CurrencyNotUsd, which cannot reject) and a finding that did not reject (its own distinct code) are
+        // internal: neither may reach the partner, while the rejecting findings' own codes do.
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("RequiredData", VersionB, null, values: ("invoice.firmInvoiceNumber", null)),
+            Stored("ApprovedRate", VersionA, 2, values: [("line.rate", "450.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")]),
+            Stored("ApprovedRate", VersionA, 5, rejects: false, reason: BillingReasonCodes.RateUnresolved)));
         world.Clause = _ => FlagOnText;
         world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
 
-        var json = JsonSerializer.Serialize(await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None));
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+        var json = JsonSerializer.Serialize(outcome);
 
         json.Should().Contain(ClauseQuote).And.Contain("Your rate is above the agreed rate.");
+        outcome!.Items.Select(i => i.ReasonCode).Should().Equal(BillingReasonCodes.RateAboveApproved, BillingReasonCodes.RequiredFieldMissing);
+        json.Should().Contain(BillingReasonCodes.RateAboveApproved, "130d: the rejecting finding's own reason code is projected, as reasonCode");
+        json.Should().NotContain(BillingReasonCodes.CurrencyNotUsd, "the document's top-level reason code is never shown")
+            .And.NotContain(BillingReasonCodes.RateUnresolved, "a finding that did not reject is never shown, nor its code");
         json.Should().NotContain(InternalClause).And.NotContain(InternalSentence).And.NotContain("INTERNAL location")
-            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("0.42").And.NotContain(BillingReasonCodes.RateAboveApproved).And.NotContain("400.00").And.NotContain("Internal rule set name")
+            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("0.42").And.NotContain("400.00").And.NotContain("Internal rule set name")
             .And.NotContain("Internal procedure name");
         world.Queries.Where(q => q.EntityName == "sprk_invoicesubmission").Should().OnlyContain(
             q => q.ColumnSet.Columns.All(c => c == "sprk_processingstatus" || c == "sprk_trackingnumber" || c == "sprk_findingsjson"));
@@ -1477,7 +1489,7 @@ public sealed class FirmFindingsProjectionTests
         outcome.Items[0].LineNumber.Should().Be(3);
         outcome.Items[0].ValuesRead.Should().HaveCount(2);
         outcome.Items[0].FirmReasons.Should().Equal("Your rate is above the agreed rate.");
-        outcome.Items[1].FirmReasons.Should().BeEmpty();
+        outcome.Items[1].FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.RequiredFieldMissing]]);
         JsonSerializer.Serialize(outcome).Should().NotContain(ClauseQuote).And.NotContain(ClauseSection).And.NotContain(FirmLabel)
             .And.NotContain("Travel time").And.NotContain("Block billing").And.NotContain("Internal rule set name");
     }
@@ -1534,7 +1546,9 @@ public sealed class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
         outcome!.Items.Should().HaveCount(2);
-        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0 && i.FirmReasons.Count == 0);
+        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]]);
+        outcome.Items[1].FirmReasons.Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RequiredFieldMissing]);
         outcome.Items[0].ValuesRead.Should().HaveCount(2);
         world.ClauseCalls.Should().BeEmpty();
         world.WriterCalls.Should().Be(0);
@@ -1834,7 +1848,7 @@ public sealed class FirmFindingsProjectionTests
 
         var names = new List<string>();
         CollectNames(JsonDocument.Parse(json).RootElement, names);
-        names.Should().Contain(["LineNumber", "ValuesRead", "Citations", "FirmReasons"]);
+        names.Should().Contain(["LineNumber", "ValuesRead", "Citations", "FirmReasons", "ReasonCode"]);
         names.Should().NotContain(n => new[] { "document", "container", "drive", "link", "url", "uri", "procedure", "ruleset" }
             .Any(bad => n.Contains(bad, StringComparison.OrdinalIgnoreCase)));
         json.Should().NotContainAny("http:", "https:", "/drives/", "sharepoint");
@@ -1853,7 +1867,8 @@ public sealed class FirmFindingsProjectionTests
 
         var json = JsonSerializer.Serialize((await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single());
 
-        json.Should().NotContain("lineNumber").And.NotContain("valuesRead").And.NotContain("LineNumber").And.NotContain("ValuesRead");
+        json.Should().NotContain("lineNumber").And.NotContain("valuesRead").And.NotContain("LineNumber").And.NotContain("ValuesRead")
+            .And.NotContain("reasonCode").And.NotContain("ReasonCode");
     }
 
     [Fact(DisplayName = "130c: a rejected submission's outcome is built from stored findings alone (no live line, no invoice, no Decision Record read)")]
@@ -2409,5 +2424,264 @@ public sealed class FirmFindingsProjectionTests
         var hold = await blocked.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
         hold!.Items.Should().BeEmpty();
         hold.NotShownCount.Should().BeNull("an internal hold is not a rejection the firm was given");
+    }
+
+    // ── 130d: the firm-safe reason text ──
+
+    /// <summary>Every reject-capable (type, reason) of the catalogue, read from the catalogue.</summary>
+    private static IEnumerable<(string RuleType, string Reason)> CatalogueReasons() =>
+        Enum.GetValues<RuleType>().Where(t => RuleDomains.IsBilling(t) && !BillingRuleCatalogue.IsSystemType(t))
+            .SelectMany(t => BillingRuleCatalogue.RejectCapableReasons(t).OrderBy(r => r, StringComparer.Ordinal).Select(r => (t.ToString(), r)));
+
+    public static IEnumerable<object[]> CatalogueReasonCases() => CatalogueReasons().Select(c => new object[] { c.RuleType, c.Reason });
+
+    [Theory(DisplayName = "130d must-fire: every reject-capable reason shows its table text and its code, with the flag on and with it off")]
+    [MemberData(nameof(CatalogueReasonCases))]
+    public async Task Rejected_EveryRejectCapableReason_ShowsItsTableText_FlagOnAndOff(string ruleType, string reason)
+    {
+        foreach (var flagOn in new[] { true, false })
+        {
+            var world = new World();
+            world.Clause = _ => flagOn ? FlagOnText : FirmClauseText.None;
+            world.AddRejectedSubmission(RejectedDocument(Stored(ruleType, VersionA, 1, reason: reason)));
+
+            var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+            var item = outcome!.Items.Should().ContainSingle().Subject;
+            item.ReasonCode.Should().Be(reason);
+            item.FirmReasons.Should().Equal([FirmRejectionReasonText.Table[reason]]);
+            Warnings(world).Should().BeEmpty();
+            if (!flagOn)
+            {
+                JsonSerializer.Serialize(outcome).Should().NotContain(ClauseQuote).And.NotContain(ClauseSection).And.NotContain(FirmLabel)
+                    .And.NotContain("Internal rule set name").And.NotContain("Travel time");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "130d: a non-blank firm reason from the writer's Signal replaces the default, trimmed and cut to 200 characters")]
+    public async Task Rejected_ANonBlankFirmReason_ReplacesTheDefault_TrimmedAndCut()
+    {
+        var world = TwoFindingsWorld();
+        world.AddRejectionSignal(VersionA, 2, "   Your rate is above the agreed rate.  ");
+        world.AddRejectionSignal(VersionB, null, new string('x', 199) + "\U0001F600" + new string('y', 100)); // the emoji straddles the cut
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal("Your rate is above the agreed rate.");
+        var cut = outcome.Items[1].FirmReasons.Should().ContainSingle().Subject;
+        cut.Should().EndWith("...").And.StartWith(new string('x', 199));
+        cut.Length.Should().BeLessThanOrEqualTo(FirmRejectionFindings.MaxValueTextLength + 3);
+        Regex.IsMatch(cut, "[\\uD800-\\uDFFF]").Should().BeFalse("a cut inside the pair is stepped back whole, never leaving half of it");
+        outcome.Items.Should().OnlyContain(i => i.FirmReasons.Count == 1 && i.ReasonCode != null);
+    }
+
+    [Theory(DisplayName = "130d must-not-fire: a blank or whitespace firm reason falls back to the default text")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\r\n")]
+    [InlineData(null)]
+    public async Task Rejected_ABlankFirmReason_FallsBackToTheDefault(string? written)
+    {
+        var world = TwoFindingsWorld();
+        world.AddRejectionSignal(VersionA, 2, written);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]);
+    }
+
+    [Fact(DisplayName = "130d: a reject-capable reason with no table entry fails closed to the generic sentence, with a Warning that names the code")]
+    public async Task Rejected_AReasonWithNoEntry_ShowsTheGenericSentence_AndLogsAWarning()
+    {
+        var onlyRate = new Dictionary<string, string> { [BillingReasonCodes.RateAboveApproved] = FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved] };
+        var blankEntries = new Dictionary<string, string>
+        {
+            [BillingReasonCodes.RateAboveApproved] = "   ",
+            [BillingReasonCodes.RequiredFieldMissing] = "",
+        };
+
+        foreach (var texts in new[] { onlyRate, blankEntries })
+        {
+            var world = TwoFindingsWorld();
+            var projection = new FirmFindingsProjection(
+                world.Entities.Object, (_, _, _) => Task.FromResult(FirmClauseText.None), _ => Task.FromResult(world.WriterId), world.Logger)
+            {
+                RejectionReasonTexts = texts,
+            };
+
+            var outcome = await projection.GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+            var missing = outcome!.Items.Where(i => i.FirmReasons.SequenceEqual([FirmRejectionReasonText.GenericSentence])).ToList();
+            missing.Should().NotBeEmpty();
+            outcome.Items.Should().OnlyContain(i => i.FirmReasons.Count == 1 && !string.IsNullOrWhiteSpace(i.FirmReasons[0]));
+            var warnings = Warnings(world).Where(w => w.Contains(FirmRejectionReasonText.MissingEntryCode)).ToList();
+            warnings.Should().HaveCount(missing.Count);
+            warnings.Should().Contain(w => w.Contains(missing[0].ReasonCode!));
+            warnings.Should().NotContain(w => w.Contains("450.00") || w.Contains("400.00") || w.Contains(FirmRejectionReasonText.GenericSentence)
+                || w.Contains(FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]), "the Warning carries the code only, never a value or text");
+            outcome.Items.SelectMany(i => i.FirmReasons).Should().NotContain(r => r.Contains(BillingReasonCodes.RateAboveApproved) || r.Contains(BillingReasonCodes.RequiredFieldMissing));
+        }
+
+        // Nothing missing, nothing logged.
+        var full = TwoFindingsWorld();
+        await full.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+        Warnings(full).Should().NotContain(w => w.Contains(FirmRejectionReasonText.MissingEntryCode));
+    }
+
+    [Fact(DisplayName = "130d: a non-rejecting item (a reviewer-decided line) has no reasonCode and keeps its firm reasons exactly as before")]
+    public async Task ANonRejectingItem_IsUnchanged_ByTheReasonText()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+
+        var item = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single();
+
+        item.ReasonCode.Should().BeNull();
+        item.FirmReasons.Should().Equal("Firm reason.");
+        JsonSerializer.Serialize(item).Should().NotContain("reasonCode");
+    }
+
+    [Fact(DisplayName = "130d: on the wire a rejection finding carries reasonCode and the one firmReasons entry, and no citation when the flag is off")]
+    public async Task Rejected_TheWireShape_CarriesTheCodeAndTheText()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FirmClauseText.None;
+
+        var json = JsonSerializer.Serialize(await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None), WebJson);
+
+        using var document = JsonDocument.Parse(json);
+        var first = document.RootElement.GetProperty("items")[0];
+        first.GetProperty("reasonCode").GetString().Should().Be(BillingReasonCodes.RateAboveApproved);
+        first.GetProperty("firmReasons").EnumerateArray().Select(e => e.GetString()).Should().Equal(FirmRejectionReasonText.Table[BillingReasonCodes.RateAboveApproved]);
+        first.GetProperty("citations").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "130d K3: a Duplicate rejection reads byte-identically whether its detail is withheld or in scope (reasonCode and description)")]
+    public async Task Rejected_ADuplicate_HasOneUniformReason_WithheldOrNot()
+    {
+        async Task<FirmOutcome> Project(bool withheld, string? signalText = null)
+        {
+            var world = new World();
+            if (signalText is not null)
+            {
+                world.AddRejectionSignal(VersionA, null, signalText); // the writer's Signal for this finding
+            }
+
+            // The writer's real difference between the two: a withheld group stores its values without text; an in-scope one stores them with it.
+            world.AddRejectedSubmission(RejectedDocument(
+                Stored("Duplicate", VersionA, null, withheld: withheld, reason: BillingReasonCodes.DuplicateInvoiceNumber,
+                    values: [("invoice.firmInvoiceNumber", withheld ? null : "INV-100"), ("duplicateOf.trackingNumber", withheld ? null : "TRK-0")])));
+            world.Clause = _ => FlagOnText;
+            return (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!;
+        }
+
+        var hidden = await Project(withheld: true);
+        var shown = await Project(withheld: false);
+        // F-1: only the in-scope Signal carries firm-reason text; a Duplicate never takes the override, so the outcomes still match.
+        var shownWithText = await Project(withheld: false, signalText: "A Signal-written explanation that must not replace the Duplicate text.");
+
+        var expected = "This invoice number has already been used with this client. Please check it or contact the client.";
+        foreach (var outcome in new[] { hidden, shown })
+        {
+            var item = outcome.Items.Should().ContainSingle().Subject;
+            item.ReasonCode.Should().Be(BillingReasonCodes.DuplicateInvoiceNumber);
+            item.FirmReasons.Should().Equal([expected]);
+        }
+
+        JsonSerializer.Serialize(hidden.Items[0].FirmReasons).Should().Be(JsonSerializer.Serialize(shown.Items[0].FirmReasons));
+        hidden.Items[0].ReasonCode.Should().Be(shown.Items[0].ReasonCode);
+
+        // What else could tell the two cases apart: the whole response, member by member. Nothing in the outcome differs (the projection shows no
+        // value for a Duplicate either way; NotShownCount, the item count, citations, line number and degraded flag are the same).
+        hidden.NotShownCount.Should().Be(shown.NotShownCount);
+        hidden.Degraded.Should().Be(shown.Degraded);
+        hidden.Items.Count.Should().Be(shown.Items.Count);
+        JsonSerializer.Serialize(hidden, WebJson).Should().Be(JsonSerializer.Serialize(shown, WebJson));
+        JsonSerializer.Serialize(hidden, WebJson).Should().Be(JsonSerializer.Serialize(shownWithText, WebJson));
+    }
+
+    [Fact(DisplayName = "130d F-1: a Duplicate whose Signal carries firm-reason text still shows exactly the table text; a non-Duplicate rejection takes the override")]
+    public async Task Rejected_ADuplicate_NeverTakesTheOverride_ANonDuplicateDoes()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("Duplicate", VersionA, null, reason: BillingReasonCodes.DuplicateInvoiceNumber),
+            Stored("ApprovedRate", VersionB, 1, reason: BillingReasonCodes.RateAboveApproved)));
+        world.AddRejectionSignal(VersionA, null, "Override text for the Duplicate.");
+        world.AddRejectionSignal(VersionB, 1, "Override text for the rate.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        var rate = outcome.Items.Single(i => i.ReasonCode == BillingReasonCodes.RateAboveApproved);
+        var duplicate = outcome.Items.Single(i => i.ReasonCode == BillingReasonCodes.DuplicateInvoiceNumber);
+        rate.FirmReasons.Should().Equal(["Override text for the rate."]);
+        duplicate.FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.DuplicateInvoiceNumber]]);
+    }
+
+    private const string DirtyReason = "Your\u202E rate\u0000 is\u200F too\u2066 high\u007F\u0085\t.\r\n";
+
+    [Fact(DisplayName = "130d K-b: control and bidi characters are stripped from a rejection finding's firm reason; control-only text falls back to the table")]
+    public async Task Rejected_TheFirmReason_HasControlAndBidiCharactersStripped_AndControlOnlyFallsBack()
+    {
+        var world = TwoFindingsWorld();
+        world.AddRejectionSignal(VersionA, 2, DirtyReason);                       // the rate finding
+        world.AddRejectionSignal(VersionB, null, "\u0001\u202E\u2069\u200F  \u0085"); // the required-data finding: nothing printable
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal(["Your rate is too high."]);
+        outcome.Items[1].FirmReasons.Should().Equal([FirmRejectionReasonText.Table[BillingReasonCodes.RequiredFieldMissing]]);
+        outcome.Items.SelectMany(i => i.FirmReasons).Should().OnlyContain(t => !Regex.IsMatch(t, "[ --‎‏‪-‮⁦-⁩]"));
+    }
+
+    [Fact(DisplayName = "130d K-b: control and bidi characters are stripped from an invoice item's firm reason, which is now capped; control-only text is omitted")]
+    public async Task AnInvoiceItem_FirmReason_HasControlAndBidiCharactersStripped_Capped_AndControlOnlyIsOmitted()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, DirtyReason);
+        world.AddReducedWithCitation(2, "Reason.", VersionA, "\u0001\u202E\u2069 \u0085");
+        world.AddReducedWithCitation(3, "Reason.", VersionA, new string('z', 199) + "\U0001F600" + new string('y', 100));
+
+        var items = (await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items;
+
+        items.Should().HaveCount(3);
+        var texts = items.SelectMany(i => i.FirmReasons).ToList();
+        texts.Should().Contain("Your rate is too high.");
+        items.Count(i => i.FirmReasons.Count == 0).Should().Be(1, "the control-only text is omitted, never substituted");
+        var cut = texts.Single(t => t.StartsWith("zzzz", StringComparison.Ordinal));
+        cut.Should().EndWith("...");
+        cut.Length.Should().BeLessThanOrEqualTo(FirmRejectionFindings.MaxValueTextLength + 3);
+        Regex.IsMatch(cut, "[\\uD800-\\uDFFF]").Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "130d fix 3: one rule - every Control, Format, LineSeparator and ParagraphSeparator character is dropped from a firm reason; ordinary text is kept")]
+    [InlineData("\u061C")]   // Arabic letter mark (Format)
+    [InlineData("\uFEFF")]   // byte order mark / zero-width no-break space (Format)
+    [InlineData("\u200B")]   // zero-width space (Format)
+    [InlineData("\u200D")]   // zero-width joiner (Format)
+    [InlineData("\u2060")]   // word joiner (Format)
+    [InlineData("\u00AD")]   // soft hyphen (Format)
+    [InlineData("\u2028")]   // line separator
+    [InlineData("\u2029")]   // paragraph separator
+    [InlineData("\u202E")]   // right-to-left override (Format)
+    [InlineData("\u0085")]   // next line (Control)
+    [InlineData("\U000E0041")] // TAG LATIN CAPITAL LETTER A (Format, outside the BMP: a surrogate pair in UTF-16)
+    [InlineData("\U000E007F")] // CANCEL TAG (Format, outside the BMP)
+    public void TheFirmReasonFilter_DropsEveryInvisibleCategory(string invisible)
+    {
+        FirmRejectionFindings.ShownFirmReason($"Your{invisible} rate{invisible} is high.{invisible}").Should().Be("Your rate is high.");
+        FirmRejectionFindings.ShownFirmReason($"{invisible}{invisible} ").Should().BeNull("nothing printable is left");
+        FirmRejectionFindings.ShownFirmReason("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.").Should().Be("Plain text: it's 100% fine, \u00E9\u00E8 \u4E2D\u6587 \U0001F600.");
+    }
+
+    [Fact(DisplayName = "130d fix 4: a non-BMP emoji survives whole, a lone surrogate becomes U+FFFD, and a tag sequence hiding in text is removed")]
+    public void TheFirmReasonFilter_WalksRunes()
+    {
+        FirmRejectionFindings.ShownFirmReason("Ok \U0001F600 and \U0001F44D\U0001F3FD").Should().Be("Ok \U0001F600 and \U0001F44D\U0001F3FD");
+        FirmRejectionFindings.ShownFirmReason("a\uD800b").Should().Be("a\uFFFDb", "EnumerateRunes reads a malformed lone surrogate as U+FFFD, which is kept");
+        FirmRejectionFindings.ShownFirmReason("Rate\U000E0001\U000E0068\U000E0069 high.").Should().Be("Rate high.", "a hidden tag-character payload is removed whole");
+        FirmRejectionFindings.ShownFirmReason("\U000E0041\U000E007F").Should().BeNull();
     }
 }

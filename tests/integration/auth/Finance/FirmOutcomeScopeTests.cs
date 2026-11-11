@@ -1053,7 +1053,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
         var items = body.RootElement.GetProperty("items");
         items.GetArrayLength().Should().Be(2);
         items[0].GetProperty("valuesRead").GetArrayLength().Should().Be(2);
-        items.EnumerateArray().Should().OnlyContain(i => i.GetProperty("citations").GetArrayLength() == 0 && i.GetProperty("firmReasons").GetArrayLength() == 0);
+        items.EnumerateArray().Should().OnlyContain(i => i.GetProperty("citations").GetArrayLength() == 0);
+        // 130d: no Signal is read for an undecided invoice, but every rejection still carries its reason code and the firm-safe default text.
+        items.EnumerateArray().Should().OnlyContain(i => i.GetProperty("firmReasons").GetArrayLength() == 1 && i.GetProperty("reasonCode").GetString()!.Length > 0);
         text.Should().NotContain("Clause of firm A.");
         _clauseInvoices.Should().BeEmpty();
         _projectionReads.Should().NotContain(new[] { "sprk_invoice", "sprk_billingevent", "sprk_signal", "sprk_policyversion", "sprk_policy" });

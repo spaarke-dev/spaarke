@@ -98,10 +98,13 @@ public sealed record FirmOutcome(
 /// <param name="Reason">The reviewer's reason; null when none is on record for this item (never substituted).</param>
 /// <param name="FirmReasons">
 /// The explanations addressed to the firm (<c>sprk_signal.sprk_firmreason</c>) of the Billing rules the item's decision resolved: one per rule
-/// version that has one (the first non-blank in creation order), duplicates removed, in the order those chosen Signals were created (then by id);
-/// empty when none
-/// (never substituted). NOT a citation and not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an
-/// invoice-level adjustment (it resolves no Signal).
+/// version that has one (the first non-blank in creation order), duplicates removed, in the order those chosen Signals were created (then by id).
+/// For a decided line or an adjustment: empty when none (never substituted); this text has control and directional characters removed and is cut
+/// like a rejection finding's (up to 203 characters), and a text with nothing printable in it counts as none. NOT a citation and
+/// not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an invoice-level adjustment (it resolves no
+/// Signal). A rejection finding (130d) is different: it always has exactly one entry, the writer-created Signal's firm reason when it has one
+/// (trimmed and cut: at most 200 characters, plus "..." when cut, so up to 203), otherwise the firm-safe text for its reason code
+/// (<see cref="FirmRejectionReasonText"/>), whatever the firm flag says.
 /// </param>
 /// <param name="LineNumber">
 /// A rejection finding only (130c): the one-based position of the line it is about, counting the lines in the order the submission read
@@ -112,6 +115,11 @@ public sealed record FirmOutcome(
 /// A rejection finding only (130c): the values the rule read, as the submission stored them (name and value, nothing else); null for every other
 /// item (omitted from the JSON), empty when the finding shows none (a Duplicate, a withheld detail, nothing stored).
 /// </param>
+/// <param name="ReasonCode">
+/// A rejection finding only (130d): the catalogue's reason code the rule rejected on (one of <c>BillingRuleCatalogue.RejectCapableReasons</c>, a
+/// stable code such as <c>approved_rate.above_approved</c>); null for every other item (omitted from the JSON). Its firm-safe description is the
+/// item's single <see cref="FirmOutcomeItem.FirmReasons"/> entry.
+/// </param>
 public sealed record FirmOutcomeItem(
     FirmOutcomeDecision Decision,
     Guid? LineId,
@@ -121,7 +129,8 @@ public sealed record FirmOutcomeItem(
     IReadOnlyList<string> FirmReasons,
     IReadOnlyList<FirmOutcomeCitation> Citations,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? LineNumber = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<FirmOutcomeValueRead>? ValuesRead = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<FirmOutcomeValueRead>? ValuesRead = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReasonCode = null);
 
 /// <summary>One value a rule read for a rejection finding (130c): its name and the value as the submission stored it.</summary>
 public sealed record FirmOutcomeValueRead(string Name, string Value);
@@ -180,7 +189,8 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// and drops a malformed entry): its one-based line number and the values the rule read, as stored. The rule and clause (the citation) and the
 /// firm reason follow the same rules as an invoice item's, for the submission's derived invoice and only when the caller decided it:
 /// the citation as <see cref="RuleSetService.GetFirmClauseAsync"/> and the InternalStandard check publish it, and the firm reason only from a
-/// Signal the BFF writer created, whatever the citation says. A live invoice line is never read and nothing is re-extracted. A Blocked
+/// Signal the BFF writer created, whatever the citation says; with no such reason the finding carries the closed, firm-safe text for its
+/// reason code (130d, shown whatever the flag and whether or not the invoice was decided). A live invoice line is never read and nothing is re-extracted. A Blocked
 /// submission (an internal hold) projects no finding.</para>
 /// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header, or a header with no status,
 /// gives an <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged
@@ -223,6 +233,9 @@ public sealed class FirmFindingsProjection
 
     /// <summary>The stored-findings parser (<see cref="FirmRejectionFindings.Parse"/>); replaceable by the test assembly to inject a parser fault.</summary>
     internal Func<string?, ILogger, Guid, FirmRejectionFindings.ParseResult> ParseRejectionFindings { get; init; } = FirmRejectionFindings.Parse;
+
+    /// <summary>The firm-safe description of each rejection reason (<see cref="FirmRejectionReasonText.Table"/>); replaceable by the test assembly to prove the missing-entry path.</summary>
+    internal IReadOnlyDictionary<string, string> RejectionReasonTexts { get; init; } = FirmRejectionReasonText.Table;
 
     /// <param name="writerUserId">The <c>systemuserid</c> of the identity that creates every Decision Record (<c>BillingDecisionRecorder.WriterUserIdAsync</c>).
     /// Asked at most once per projection, and only when the invoice has decided lines to give a reason to; a fault, or an empty id, degrades the
@@ -346,7 +359,8 @@ public sealed class FirmFindingsProjection
     /// internal caller that shows the invoice passes true). False (130b fix round 2, F1): nothing is read from that invoice. Received or
     /// Processing is the status with no billed total; Accepted is <see cref="FirmOutcomeKind.Unavailable"/> (a 503: the retry is decided
     /// afresh, now that the invoice exists). Rejected (130c): the findings still show their line and values (the submission's own), but with no
-    /// citation and no firm reason, because both name the invoice (the clause reader and the Signals are keyed by it).
+    /// citation and no Signal-written firm reason, because both name the invoice (the clause reader and the Signals are keyed by it); each
+    /// finding still carries its reason code and the firm-safe table text (130d), which need nothing of the invoice.
     /// </param>
     /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
     public async Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, bool invoiceDecided, CancellationToken ct)
@@ -535,7 +549,7 @@ public sealed class FirmFindingsProjection
                     .GroupBy(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id))
                 {
                     // The version's reason is its first non-blank Signal's; that Signal's creation (then id) orders the reasons (fix round 3, K4).
-                    var reasonSignal = byVersion.FirstOrDefault(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason")) is not null);
+                    var reasonSignal = byVersion.FirstOrDefault(s => FirmRejectionFindings.ShownFirmReason(s.GetAttributeValue<string>("sprk_firmreason")) is not null);
                     if (reasonSignal is not null)
                     {
                         reasonSignals.Add(reasonSignal);
@@ -551,7 +565,7 @@ public sealed class FirmFindingsProjection
             var firmReasons = new List<string>();
             foreach (var reasonSignal in reasonSignals.OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id))
             {
-                var firmReason = NullIfBlank(reasonSignal.GetAttributeValue<string>("sprk_firmreason"))!;
+                var firmReason = FirmRejectionFindings.ShownFirmReason(reasonSignal.GetAttributeValue<string>("sprk_firmreason"))!;
                 if (!firmReasons.Contains(firmReason, StringComparer.Ordinal))
                 {
                     firmReasons.Add(firmReason);
@@ -910,8 +924,9 @@ public sealed class FirmFindingsProjection
     /// <summary>
     /// One item per rejection finding: its one-based line number and the values read (both from the stored finding), and, only for the
     /// invoice the caller decided: the citation as the firm flag publishes it (exactly as an invoice item's, 130b fix round 2) and the firm
-    /// reason of the writer-created Signal that finding raised (independent of the citation gate). Reads no live invoice line and runs no
-    /// extraction.
+    /// reason of the writer-created Signal that finding raised (independent of the citation gate; never for a Duplicate). Every finding, decided
+    /// invoice or not, carries its reason code and exactly one description: that Signal text (control and directional characters removed, cut)
+    /// when there is one, otherwise the closed table's text (130d). Reads no live invoice line and runs no extraction.
     /// </summary>
     private async Task<IReadOnlyList<FirmOutcomeItem>> BuildRejectionItemsAsync(
         Guid submissionId, IReadOnlyList<FirmRejectionFindings.Finding> findings, bool invoiceDecided, CancellationToken ct)
@@ -944,12 +959,21 @@ public sealed class FirmFindingsProjection
         {
             var version = finding.PolicyVersionId;
             var lineId = finding.LineIndex is { } index ? InvoiceSubmissionPersister.LineIdFor(submissionId, index) : (Guid?)null;
-            var reason = signals
-                .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
-                    && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
-                .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
-                .Select(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason")))
-                .FirstOrDefault(r => r is not null);
+            // A Duplicate never takes the override: its description is the one table text, so what a firm reads cannot depend on what a Signal
+            // happens to hold (130d fix round 2). Any other type: the first Signal text with something printable in it.
+            var written = finding.RuleType == RuleType.Duplicate
+                ? null
+                : signals
+                    .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
+                        && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
+                    .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
+                    .Select(s => FirmRejectionFindings.ShownFirmReason(s.GetAttributeValue<string>("sprk_firmreason")))
+                    .FirstOrDefault(r => r is not null);
+
+            // 130d: a rejection always carries a description. A non-blank firm reason the writer stored replaces the default (trimmed and cut like
+            // a value read, with control and directional characters removed); otherwise the closed table's text for the reason code, whatever
+            // the firm flag says (a missing entry fails closed).
+            var reason = written ?? FirmRejectionReasonText.For(RejectionReasonTexts, finding.ReasonCode, _logger, submissionId);
 
             items.Add(new FirmOutcomeItem(
                 FirmOutcomeDecision.RejectionFinding,
@@ -957,10 +981,11 @@ public sealed class FirmFindingsProjection
                 null,
                 null,
                 null,
-                reason is null ? [] : [reason],
+                [reason],
                 citable.Contains(version) ? [Cite(rules[version], clauses[version])] : [],
                 finding.LineIndex is { } zeroBased ? zeroBased + 1 : null,
-                finding.ValuesRead.Select(v => new FirmOutcomeValueRead(v.Name, v.Value)).ToList()));
+                finding.ValuesRead.Select(v => new FirmOutcomeValueRead(v.Name, v.Value)).ToList(),
+                finding.ReasonCode));
         }
 
         return items;

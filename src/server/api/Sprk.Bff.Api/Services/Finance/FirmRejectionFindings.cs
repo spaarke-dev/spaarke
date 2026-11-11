@@ -53,7 +53,7 @@ internal static class FirmRejectionFindings
     internal sealed record ValueRead(string Name, string Value);
 
     /// <summary>One finding that rejected the submission. <paramref name="LineIndex"/> is zero-based; null for an invoice-level finding.</summary>
-    internal sealed record Finding(RuleType RuleType, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
+    internal sealed record Finding(RuleType RuleType, string ReasonCode, Guid PolicyVersionId, int? LineIndex, IReadOnlyList<ValueRead> ValuesRead);
 
     /// <summary>
     /// The result of a parse: the findings to show and how many rejecting findings could not be shown (<paramref name="NotShown"/>; zero when
@@ -337,15 +337,17 @@ internal static class FirmRejectionFindings
             }
         }
 
-        finding = new Finding(ruleType, versionId, lineIndex, values);
+        // reasonCode is non-blank and on the type's reject-capable allow-list here (checked above), so it is one of the catalogue's own codes.
+        finding = new Finding(ruleType, reasonCode!, versionId, lineIndex, values);
         return EntryResult.Accepted;
     }
 
     /// <summary>
-    /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "..."; a cut that would fall between the two
-    /// halves of a surrogate pair (one character) steps back so the text stays valid.
+    /// <paramref name="text"/> cut to <see cref="MaxValueTextLength"/> characters and marked with "...", so a cut text is at most
+    /// <see cref="MaxValueTextLength"/> + 3 characters (203); a cut that would fall between the two halves of a surrogate pair (one character)
+    /// steps back so the text stays valid. Used for a value read and (130d) for a rejection finding's firm reason.
     /// </summary>
-    private static string Truncate(string text)
+    internal static string Truncate(string text)
     {
         if (text.Length <= MaxValueTextLength)
         {
@@ -360,6 +362,40 @@ internal static class FirmRejectionFindings
 
         return text[..cut].TrimEnd() + "...";
     }
+
+    /// <summary>
+    /// A firm reason (<c>sprk_signal.sprk_firmreason</c>) as a firm may be shown it (130d fix rounds 2 to 4): every Unicode scalar (a rune, so a
+    /// character outside the Basic Multilingual Plane such as the TAG characters U+E0000 to U+E007F is judged whole) whose category is Control, Format,
+    /// LineSeparator or ParagraphSeparator removed (<see cref="IsInvisibleControl"/>: the C0 and C1 controls, the directional marks and overrides,
+    /// U+061C, the zero-width characters, U+2060 to U+2064, U+FEFF, U+00AD, U+2028 and U+2029), then trimmed, then cut with <see cref="Truncate"/>;
+    /// null when nothing printable is left (the caller then shows no reason, or for a rejection the table text). A malformed lone surrogate is
+    /// read as U+FFFD by <c>EnumerateRunes</c> and kept as that replacement character. Applied on the read side to every firm reason; the writer
+    /// (DEF-060) must walk runes with the same predicate at write time.
+    /// </summary>
+    internal static string? ShownFirmReason(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw))
+        {
+            return null;
+        }
+
+        var kept = new System.Text.StringBuilder(raw.Length);
+        foreach (var rune in raw.EnumerateRunes())
+        {
+            if (!IsInvisibleControl(rune))
+            {
+                kept.Append(rune.ToString());
+            }
+        }
+
+        var text = kept.ToString().Trim();
+        return text.Length == 0 ? null : Truncate(text);
+    }
+
+    /// <summary>The one rule for a scalar (rune) a firm reason may not hold: Unicode category Control, Format, LineSeparator or ParagraphSeparator.</summary>
+    internal static bool IsInvisibleControl(System.Text.Rune rune) =>
+        System.Text.Rune.GetUnicodeCategory(rune) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format
+            or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
 
     /// <summary>A member that is a string, or absent / JSON null (then <paramref name="text"/> is null). False for any other type.</summary>
     private static bool TryText(JsonElement element, string name, out string? text)
