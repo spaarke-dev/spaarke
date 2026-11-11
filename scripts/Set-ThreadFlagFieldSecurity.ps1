@@ -21,6 +21,9 @@
     thread would read as unset.
 
     PRECONDITIONS (checked in every mode; -Apply refuses unless all pass):
+      (p0) each of the five columns exists. Checked first, before any other read or any write; a missing column stops the
+           run in EVERY mode with exit 1 and nothing written. sprk_directrecipient is added by
+           scripts/Set-DirectRecipientSchema.ps1 -Apply (run it first); the other four come with the SpaarkeMaster import;
       (p1) both profiles exist and are in -SolutionUniqueName;
       (p2) the reader profile is on EVERY business unit's default team;
       (p3) the writer profile's members are exactly the -BffApplicationIds application users (no human, no team);
@@ -49,10 +52,17 @@
     LIVE ORDER: dev BFF deployed from master -> THIS SCRIPT (-Apply, then -Verify) -> Direct setup (UAC-r2: the
     DirectMessage:* settings) -> 054c Stamp -> piece 3 -> 054c Move.
 
-    AFTER EVERY SpaarkeMaster IMPORT on an environment where this script has been applied: run -Verify (a non-zero exit is
-    a gap: -Apply, then -Verify again). The solution source marks sprk_sentby, the message's sprk_communicationthread,
-    sprk_threadtype and sprk_isdefaultthread IsSecured; sprk_directrecipient exists only where
-    scripts/Set-DirectRecipientSchema.ps1 ran, is not in the solution source, and so is secured only by this script.
+    A NEW ENVIRONMENT: provisioning runs this script after the SpaarkeMaster import, scripts/Set-DirectRecipientSchema.ps1
+    -Apply and scripts/Set-RecordCreatorPersonSchema.ps1 -Apply: dry run, then -Apply, then -Verify (each must exit 0). The
+    import alone is not enough: the solution source marks sprk_sentby, the message's sprk_communicationthread,
+    sprk_threadtype and sprk_isdefaultthread IsSecured and carries both profiles' permissions on them, but the profiles'
+    members (every business unit's default team, the BFF application users) are per environment, and sprk_directrecipient
+    is not in the solution source at all.
+
+    AFTER EVERY SpaarkeMaster IMPORT: run -Verify. A non-zero exit is a gap: -Apply, then -Verify again.
+
+    A NEW BUSINESS UNIT: its default team joins the reader profile through Set-RecordCreatorPersonSchema.ps1 -Apply; then
+    run this script's -Verify.
 
     MANUAL CHECKS after -Verify passes (they need a non-administrator sign-in, so the script does not run them):
       (m1) As a non-administrator, PATCH a communication's sprk_sentby, sprk_directrecipient or sprk_communicationthread
@@ -170,6 +180,33 @@ Write-Host ("Columns     : {0}" -f (($Targets | ForEach-Object { $t = $_.Table; 
 
 # ── PRECONDITIONS ───────────────────────────────────────────────────────────────────────────────────────────
 Write-Host "`nPreconditions"
+
+# (p0) Every target column exists. Every later step reads or secures the columns by name, so a missing one stops the run
+# here, in every mode, before any write.
+$missingColumns = [System.Collections.Generic.List[string]]::new()
+foreach ($target in $Targets) {
+    $present = @((Invoke-DvGet "EntityDefinitions(LogicalName='$($target.Table)')/Attributes?`$select=LogicalName").value |
+            ForEach-Object { ([string]$_.LogicalName).ToLowerInvariant() })
+    foreach ($col in $target.Columns) {
+        if ($present -contains $col) { Report 'OK' "(p0) $($target.Table).$col exists" }
+        else {
+            $remedy = if ($col -eq 'sprk_directrecipient') { 'run scripts/Set-DirectRecipientSchema.ps1 -Apply first' } else { 'import SpaarkeMaster first' }
+            Report 'FAIL' "(p0) $($target.Table).$col does not exist in this environment; $remedy"
+            $missingColumns.Add("$($target.Table).$col")
+        }
+    }
+}
+if ($missingColumns.Count -gt 0) {
+    Write-Host "`nREFUSED: $($missingColumns -join ', ') missing. Nothing was written." -ForegroundColor Red
+    if ($missingColumns -contains 'sprk_communication.sprk_directrecipient') {
+        Write-Host '  Run scripts/Set-DirectRecipientSchema.ps1 -Apply on this environment, then re-run this script.' -ForegroundColor Red
+    }
+    if ($Verify -or $Apply) {
+        Write-Host "PRECONDITION NOT MET: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName UNSET on $EnvironmentUrl (fm task 054b binding rule)." -ForegroundColor Red
+    }
+    exit 1
+}
+
 function Get-Profile([string]$Name) {
     @((Invoke-DvGet ("fieldsecurityprofiles?`$select=fieldsecurityprofileid,name&`$filter=name eq '$Name'" +
         '&$expand=teamprofiles_association($select=teamid,name,isdefault),systemuserprofiles_association($select=systemuserid,fullname,applicationid)')).value)
