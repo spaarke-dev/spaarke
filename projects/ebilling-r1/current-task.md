@@ -40,7 +40,7 @@
 
 1. **Master sync:**
    - When the blockers are fixed, MERGE `merge/ebilling-master-sync` into work. Don't fast-forward: work has newer commits.
-   - Re-run `merge-tree` against current master.
+   - Re-run `merge-tree` against current master. uac-r2 (2026-11-11) warns that master now has #2673 (F-198-1) and #2679 (#2669: `ExternalModuleDataEndpoints.cs` and `ExternalDataService.cs` around the document narrowing), with #2677 (198b) coming. Our batch also edits `ExternalModuleDataEndpoints.cs`, so expect a hand-resolve there and list it for uac-r2.
    - Send uac-r2 the sync SHA and the hand-resolved files. They read `--remerge-diff` for the ExternalAccess files and `FeatureRolePrivilegeGuardTests` before the PR opens. Guards and ratchets: union only.
    - Hand-resolved so far: `Set-CustomerOwnerTeams.ps1` fixes `2011574c2c` and `50c6b9ee76` (provisioning-r1 confirmed them); test signature fix `7171d01aa6`.
 2. **`/merge-to-master`** (owner-authorized):
@@ -48,10 +48,16 @@
    - The PR gets reviews from ontology-r1, uac-r2 and spa-r4.
    - Notify every peer with the SHA.
 3. **After master:**
-   - dev deploy via uac-r2 and mcp-r1;
+   - dev deploy via uac-r2 and mcp-r1. uac-r2 needs the owner's go typed in ITS session and is putting the specific deploy (which build, mcp-r1's spike `755987b385`, timing alongside 198) to the owner itself; nothing more to relay;
    - the 164 `-Apply`, plus read-backs to uac-r2;
    - one message to provisioning-r1 (master SHA + SpaarkeMaster version for DEF-059, 166 and 089d option R; the 166 field-security grants with `-Verify`; 116's `sprk_procedureversion.sprk_notconvertedlist` reader/writer line; the writer-unit team needs no grant);
-   - word-add-in-r1: the master SHA carrying 095c-2..4 (it releases pane PR #2552), the 095a/095b/151e PR plus SHA, and the session-move notice.
+   - word-add-in-r1 (session-move notice done 2026-11-11):
+     - the master SHA carrying 095c-2..4 (it releases pane PR #2552);
+     - the 095a/095b/151e PR plus SHA;
+     - **the dev SHA that carries 095a**, so the owner can retest the already-submitted banner;
+     - the 151e SHA.
+     - Ours, with the owner's OK: backfilling the already-submitted marker for older submissions. The pane has no approve UI until 110/111/112.
+     - They will tell us when Slice C (removing Invoice from Save and "+ New") is approved, for our 096.
 4. **116, after round 5:**
    - a scoped Opus re-check;
    - the rounds 2–5 diff to uac-r2 (it waits for our re-check);
