@@ -8,8 +8,8 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Tier / effort |
 |-----|-------|-------|--------|--------------|----------|---------------|
-| 001 | Shared RecordCommandBar + icon map (FR-04, FR-05) | 1 | 🔲 [open] | none | Group A | opus / high |
-| 002 | BFF matter/WA event routes + delete-409 ProblemDetails (FR-08, FR-09) | 1 | 🔲 [open] | none | Group A | opus / high |
+| 001 | Shared RecordCommandBar + icon map (FR-04, FR-05) | 1 | ✅ [done] | none | Group A | opus / high |
+| 002 | BFF matter/WA event routes + delete-409 ProblemDetails (FR-08, FR-09) | 1 | ✅ [done] | none | Group A | opus / high |
 | 003 | RecordTemplateConfig + template shell (FR-01, FR-02) | 1 | 🔲 [open] | 001 | — | opus / high |
 | 005 | Section renderers for six types; retire R3 modal (FR-01) | 1 | 🔲 [open] | 003 | — | opus / high |
 | 004 | Child dialogs inside the parent SprkModal (FR-03) | 1 | 🔲 [open] | 005 | — | sonnet / high |

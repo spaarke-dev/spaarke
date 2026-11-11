@@ -4,7 +4,7 @@
     <title>BFF matter/work-assignment event routes, per-record canCreate, delete-409 ProblemDetails (FR-08, FR-09)</title>
     <phase>1 Record template and actions</phase>
     <gate>startable after the owner reviews the plan and tasks (owner directive 2026-11-10)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, endpoints, authorization; adds external write routes (.cs)</rigor-reason>
     <model-tier>opus</model-tier>

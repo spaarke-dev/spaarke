@@ -2089,8 +2089,19 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
             + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:1895-1897; "
-            + "task 036 confirms it against Dataverse for a Dataverse-decided caller) before the write."),
+            "Delegates to CreateEventForRoot (R4 task 002): Read from RightsForRoot on the route project, then Create "
+            + "(RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:2409, :2416-2421; task 036 confirms it against "
+            + "Dataverse for a Dataverse-decided caller) before the write."),
+        // spaarke-SPA-external-access-platform-r4 task 002 (FR-08): the project event create, generalized over the root kind
+        // as the to-do create is; the matter and work-assignment routes are two more adapters on the same handler.
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/events", "CreateMatterEvent", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to CreateEventForRoot: Read from RightsForRoot on the route matter (ExternalProjectDataEndpoints.cs:2409), "
+            + "then Create through RightsForRootWriteAsync (:2416-2421, Dataverse-confirmed for a Dataverse-decided caller) "
+            + "before the owner read and the write."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/events", "CreateWorkAssignmentEvent", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to CreateEventForRoot: Read from RightsForRoot on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:2409), then Create through RightsForRootWriteAsync (:2416-2421, "
+            + "Dataverse-confirmed for a Dataverse-decided caller) before the owner read and the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
@@ -2141,18 +2152,22 @@ public partial class RouteAuthorizationGuardTests
             "Refused unless the record is in the caller principal's accessible set (module.IsRecordAccessible, "
             + "ExternalModuleDataEndpoints.cs:405)."),
         new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/messages", "GetMessagesAsync", "IsRecordAccessible",
-            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.IsRootRecordReadableAsync" },
+            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.EvaluateRecordGateAsync" },
             "403 unless the route record is in the caller principal's accessible set, decided by the registered module "
             + "(module.IsRecordAccessible for project / matter / work assignment; the module's ScopeRows over the record's "
             + "own scope lookups for an invoice or the caller's own service request), before the app-only message read "
-            + "(ExternalMessageEndpoints.cs:339 the gate call, :506 EvaluateRecordGateAsync, :563 ScopeRows); an unsupported root is a 404 with no read."),
+            + "(ExternalMessageEndpoints.cs:427 the gate call, :765 EvaluateRecordGateAsync, :793 IsRecordAccessible, :833/:843 "
+            + "ScopeRows); an unsupported root is a 404 with no read. R4 task 002: the core calls the gate evaluation directly "
+            + "(its former boolean wrapper IsRootRecordReadableAsync was removed) so the thread's canCreate reuses it with no "
+            + "second gate read."),
         new HandlerDecision("POST /api/v1/external/{root}/{id:guid}/messages", "PostMessageAsync", "IsRecordAccessible",
             new[] { "ExternalMessageEndpoints.PostMessageCoreAsync", "ExternalMessageEndpoints.GetRecordRightsAsync" },
             "Task 034 (FR-11): the SAME record gate as the GET (module.IsRecordAccessible / ScopeRows, through "
-            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:506, :563) — outside the set, absent or no grants is the "
+            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:664, :765) — outside the set, absent or no grants is the "
             + "same 403 — and then Create on the record (the caller's rights on the root, on an invoice's parent root, or "
-            + "the requester on their own service request; :211, :223) before CommunicationService.PostToRecordThreadAsync "
-            + "writes app-only (:233). The body is validated and an unattributable sender refused before any read (:191, :200)."),
+            + "the requester on their own service request; RightsFromGate :696, the check :299) before "
+            + "CommunicationService.PostToRecordThreadAsync writes app-only (:310). The body is validated and an unattributable "
+            + "sender refused before any read (:235, :244, :253)."),
         new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
             "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
             + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:161 — a CIAM partner only with the partner "

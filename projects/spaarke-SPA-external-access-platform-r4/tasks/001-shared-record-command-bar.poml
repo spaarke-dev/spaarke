@@ -4,7 +4,7 @@
     <title>Shared RecordCommandBar + record-action icon map (FR-04, FR-05)</title>
     <phase>1 Record template and actions</phase>
     <gate>startable after the owner reviews the plan and tasks (owner directive 2026-11-10)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Creates new .tsx/.ts files in the shared library (tags frontend, fluent-ui; code implementation)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -145,7 +145,10 @@
     <criterion testable="true">Test scope: cover the stated contract (visibility, tooltip/aria-label, overflow, keyboard, empty list, themes) plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-04, FR-05, §ADR Tensions (ADR-012), Unresolved Question 3 (candidate second consumer). Candidate verified 2026-11-10: `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx` hand-builds a record-level action bar (a Fluent Toolbar at :99 with icon-only buttons wrapped in per-button Tooltips from :127: Save to SharePoint, Create Event, Create To Do, Link Invoice, Open full form) gated by one `recordActionsDisabled` flag (disable, not hide). It renders inside `EmailWorkspace.tsx`, consumed by the Console (`src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`) and `src/solutions/EmailPage/src/main.tsx`; its header says it mirrors the `CommunicationActions` PCF bar (`CommunicationActionsApp.tsx:621`), a second hand-built copy. Name it only; migrating it is out of scope. Icon keys are action ids, not entity literals. Shared-lib tests run under Jest.</notes>
+  <notes>Spec FR-04, FR-05, §ADR Tensions (ADR-012), Unresolved Question 3 (candidate second consumer). Candidate verified 2026-11-10: `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx` hand-builds a record-level action bar (a Fluent Toolbar at :99 with icon-only buttons wrapped in per-button Tooltips from :127: Save to SharePoint, Create Event, Create To Do, Link Invoice, Open full form) gated by one `recordActionsDisabled` flag (disable, not hide). It renders inside `EmailWorkspace.tsx`, consumed by the Console (`src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`) and `src/solutions/EmailPage/src/main.tsx`; its header says it mirrors the `CommunicationActions` PCF bar (`CommunicationActionsApp.tsx:621`), a second hand-built copy. Name it only; migrating it is out of scope. Icon keys are action ids, not entity literals. Shared-lib tests run under Jest.
+
+Completion (2026-11-11): RecordCommandBar, types, RECORD_ACTION_ICONS and index created; exported from components/index.ts; HeaderToolbar unchanged. 14 Jest tests pass; package tsc --noEmit passes. Second consumer named: EmailToolbar.tsx (:99, :127-151) via EmailReadingPaneShell → EmailWorkspace (EmailPage, Console email widget), mirroring CommunicationActionsApp.tsx:621. code-review and adr-check approved the ADR-012 Path C placement; no F-class finding. Known limits: Fluent MenuList arrow navigation and browser UI tests not verifiable under jsdom / before task 003. Detail: notes/task-001-notes.md.
+rework: none task 001</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

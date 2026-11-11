@@ -117,11 +117,14 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterTodo = CreateChildUnder(MatterTable, TodoTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentTodo = CreateChildUnder(WorkAssignmentTable, TodoTable);
 
-    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; the project create is Create + AppendTo.</summary>
+    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; a create is Create + AppendTo the root
+    /// (the matter and work-assignment creates: spaarke-SPA-external-access-platform-r4 task 002, FR-08).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectEvents = ReadChildrenOf(ProjectTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterEvents = ReadChildrenOf(MatterTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentEvents = ReadChildrenOf(WorkAssignmentTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateProjectEvent = CreateChildUnder(ProjectTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterEvent = CreateChildUnder(MatterTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentEvent = CreateChildUnder(WorkAssignmentTable, EventTable);
 
     /// <summary><c>PATCH /todos/{id}</c>: Write on the to-do (its root is read only to gate it; nothing of it is returned).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateTodo = Set((TodoTable, AccessRights.Write));
@@ -285,6 +288,27 @@ internal static class WorkforceRoleCeilingGate
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the ceiling would let the caller through a route that declares <paramref name="required"/> — the same
+    /// decision <see cref="DenyAsync"/> makes, as a boolean and without logging a refusal. For a list that tells the caller
+    /// whether the matching create route would admit them (<c>canCreate</c>, spaarke-SPA-external-access-platform-r4 task 002,
+    /// FR-06): <see langword="true"/> when the ceiling does not apply (a systemuser, a CIAM partner — nothing is read);
+    /// otherwise only when the role is available and holds every requirement. An unavailable role and an empty set are
+    /// <see langword="false"/> (fail closed). The role read is the one the list route's own ceiling filter has just made
+    /// (cached, <see cref="IDataversePrivilegeChecker.GetWorkforceRoleCeilingAsync"/>).
+    /// </summary>
+    internal static async Task<bool> AdmitsAsync(
+        CallerPrincipal principal,
+        IDataversePrivilegeChecker privileges,
+        IReadOnlyList<WorkforceCeilingRequirement> required,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(required);
+        var ceiling = await CeilingForAsync(principal, privileges, ct).ConfigureAwait(false);
+        return ceiling is null
+               || (ceiling.IsAvailable && required.Count > 0 && required.All(r => ceiling.Holds(r.Table, r.Rights)));
     }
 
     /// <summary>

@@ -489,6 +489,35 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         body!.CanCreate.Should().BeTrue("the requester always holds Read and Create on their own request");
     }
 
+    // R4 task 002 (FR-06): the list's canCreate also carries the upload route's workforce ceiling, so a workforce contact
+    // whose role cannot create documents is not offered an upload the route refuses with the ceiling's 403.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task List_ForAWorkforceContact_CanCreate_FollowsTheUploadRoutesCeiling(bool roleHoldsDocumentCreate)
+    {
+        _fixture.WorkforceCeiling.Reset();
+        _fixture.Principal = CollaborateOn("servicerequests", RecordA);
+        if (!roleHoldsDocumentCreate)
+            _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(Sprk.Bff.Api.Api.ExternalAccess.WorkforceRoleCeilingGate.DocumentTable, AccessRights.Create);
+
+        try
+        {
+            using var client = _fixture.CreateAuthenticatedClient();
+            using var list = await client.GetAsync($"/api/v1/external/servicerequests/{RecordA}/documents");
+            using var upload = await client.PostAsync($"/api/v1/external/servicerequests/{RecordA}/documents", FileForm());
+
+            list.StatusCode.Should().Be(HttpStatusCode.OK, "the list's own ceiling needs Read only");
+            (await list.Content.ReadFromJsonAsync<ExternalDocumentListResponse>())!.CanCreate.Should().Be(roleHoldsDocumentCreate);
+            upload.StatusCode.Should().Be(roleHoldsDocumentCreate ? HttpStatusCode.Created : HttpStatusCode.Forbidden,
+                "canCreate agrees with the upload route for the same caller");
+        }
+        finally
+        {
+            _fixture.WorkforceCeiling.Reset();
+        }
+    }
+
     // =====================================================================
     // AC 3: a record outside the caller's set is 403 on list, download, versions and upload
     // =====================================================================

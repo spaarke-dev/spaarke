@@ -110,6 +110,7 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/contact-grants/revoke",   // owner-allowed management route (2026-10-13, option A)
         "POST /api/v1/external/invoices/{id:guid}/documents",
         "POST /api/v1/external/matters/{id:guid}/documents",
+        "POST /api/v1/external/matters/{id:guid}/events",   // R4 task 002 (FR-08): the project event create, on a matter
         "POST /api/v1/external/matters/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
         "POST /api/v1/external/matters/{id:guid}/todos",
         "POST /api/v1/external/notifications/seen",
@@ -124,6 +125,7 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/servicerequests",
         "POST /api/v1/external/servicerequests/{id:guid}/documents",
         "POST /api/v1/external/workassignments/{id:guid}/documents",
+        "POST /api/v1/external/workassignments/{id:guid}/events",   // R4 task 002 (FR-08): the project event create, on a work assignment
         "POST /api/v1/external/workassignments/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
         "POST /api/v1/external/workassignments/{id:guid}/todos",
         // r3 task 048 (ADR-028 A9): its OWN group, as 047; the handler admits WorkforceHome only and links only the

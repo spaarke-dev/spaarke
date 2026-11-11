@@ -38,6 +38,7 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -364,6 +365,8 @@ public static class ExternalMessageEndpoints
         RecordService recordService,
         CommunicationThreadReadService threadReadService,
         ExternalDataService dataService,
+        CallerRecordAccessProbe probe,
+        IDataversePrivilegeChecker privileges,
         [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -376,14 +379,18 @@ public static class ExternalMessageEndpoints
                 detail: "Authentication context not available — ensure AddCallerPrincipalAuthorizationFilter is applied"));
         }
 
+        // R4 task 002 (FR-06): the post route's own Create question rides on the read, so the thread says canCreate.
         return GetMessagesCoreAsync(
             root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices);
+            logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext), privileges);
     }
 
     /// <summary>
-    /// The message read pipeline: root lookup → record gate (<see cref="IsRootRecordReadableAsync"/>) → app-only read →
-    /// allow-list projection. Separated from the route handler only so it can be driven with a test double for
+    /// The message read pipeline: root lookup → record gate (<see cref="EvaluateRecordGateAsync"/>, the evaluation the post
+    /// route also makes) → app-only read → allow-list projection, plus <c>canCreate</c>
+    /// (<see cref="CanPostAsync"/>). Separated from the route handler only so it can be driven with a test double for
     /// <paramref name="readRecord"/> (the shared <see cref="RecordService"/> needs a live ServiceClient); the handler
     /// passes <c>RecordService.GetRecordAsync</c> unchanged.
     /// </summary>
@@ -398,7 +405,10 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         LiveParentRootReader? readLiveParents = null,
-        ExternalInvoiceHiding? hideInvoices = null)
+        ExternalInvoiceHiding? hideInvoices = null,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? readCallerRights = null,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
+        IDataversePrivilegeChecker? privileges = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
@@ -413,11 +423,12 @@ public static class ExternalMessageEndpoints
         {
             // The gate is INSIDE the try: a Dataverse fault on its app-only record read (invoices / service requests) is
             // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
-            // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
-            if (!await IsRootRecordReadableAsync(
-                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
-                        hideInvoices)
-                    .ConfigureAwait(false))
+            // and stays a 403 (no existence oracle); no message is read unless the gate admitted the record.
+            var gate = await EvaluateRecordGateAsync(
+                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
+                    hideInvoices)
+                .ConfigureAwait(false);
+            if (!gate.Readable)
             {
                 logger.LogWarning(
                     "[EXT-MESSAGES] DENY {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in the " +
@@ -438,6 +449,9 @@ public static class ExternalMessageEndpoints
             {
                 Value = read.Messages.Select(m => ToExternalDto(m, principal)).ToList(),
                 Truncated = read.Truncated,
+                CanCreate = await CanPostAsync(
+                        messageRoot, id, principal, gate, privileges, readCallerRights, readCallerPrivilege, logger, ct)
+                    .ConfigureAwait(false),
             });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -456,6 +470,52 @@ public static class ExternalMessageEndpoints
     }
 
     /// <summary>
+    /// Whether <c>POST /{root}/{id}/messages</c> would admit this caller on a record the read gate has just admitted — the
+    /// thread's <c>canCreate</c> (spaarke-SPA-external-access-platform-r4 task 002, FR-06). The post route's own decision,
+    /// minus the request-body checks, on the gate evaluation the read already made (no second gate read):
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>the post route's workforce ceiling (<see cref="WorkforceRoleCeilingGate.PostMessageOn"/>), read only for a
+    /// workforce contact, and then the role read the read route's own ceiling filter has just made (cached). With no
+    /// checker (a test drive of the core) a caller the ceiling applies to is refused (fail closed);</item>
+    /// <item>an attributable sender (<see cref="ExternalDataService.CanStampCreator"/>);</item>
+    /// <item>Create in the gate's rights (<see cref="RightsFromGate"/>), widened by Dataverse's answer for a caller whose
+    /// access Dataverse decides — the post route's one probe (+ <see cref="CreateMessagePrivilege"/>); every other caller is
+    /// asked nothing. An unanswered Dataverse question offers no post (<c>false</c>; the post route answers 503).</item>
+    /// </list>
+    /// </remarks>
+    private static async Task<bool> CanPostAsync(
+        MessageRoot root,
+        Guid id,
+        CallerPrincipal principal,
+        (bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow, bool Undecided) gate,
+        IDataversePrivilegeChecker? privileges,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? readCallerRights,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var ceilingAdmits = privileges is null
+            ? !WorkforceRoleCeilingGate.Applies(principal)
+            : await WorkforceRoleCeilingGate.AdmitsAsync(
+                principal, privileges, WorkforceRoleCeilingGate.PostMessageOn(root.EntityLogicalName), ct).ConfigureAwait(false);
+        if (!ceilingAdmits || !ExternalDataService.CanStampCreator(principal))
+            return false;
+
+        var rights = RightsFromGate(root, id, principal, gate).Rights;
+        if (DataverseConfirmedEntitySet(root) is { } entitySet)
+        {
+            rights = (await ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+                    principal, rights, entitySet, id, readCallerRights, logger, ct,
+                    CreateMessagePrivilege, readCallerPrivilege).ConfigureAwait(false))
+                .Rights;
+        }
+
+        return rights.HasFlag(Spaarke.Dataverse.AccessRights.Create);
+    }
+
+    /// <summary>
     /// Which messages of a thread the caller may see by the core roots they are stamped with (fix round for r3 task 039;
     /// the one rule is <see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B): a message also filed to a
     /// SECURE project, matter or work assignment the caller cannot read (or one whose secure state cannot be read) is
@@ -465,7 +525,7 @@ public static class ExternalMessageEndpoints
     /// <para><b>Invoice threads match the secure-family rule</b> (unified-access-control-r2 task 187, fix round 1, owner
     /// round 100 decisions D1 and D4). An invoice is not a root: its thread is reached through the UNION of the caller's
     /// rights on its parents (owner decision 2026-10-11, option A "inherit"), and the gate
-    /// (<see cref="IsRootRecordReadableAsync"/>) refuses an invoice whose LIVE roots include a SECURE root the caller cannot
+    /// (<see cref="EvaluateRecordGateAsync"/>) refuses an invoice whose LIVE roots include a SECURE root the caller cannot
     /// read (D4, as the invoices list withholds it, D2). Each message is then decided like any other thread's: its stamps
     /// and the live roots of its OTHER parents (a related event, document, budget ...; the route invoice is the gate's
     /// decision and is not walked again, D1). So a message also filed under secure X is withheld from a caller who cannot
@@ -578,43 +638,8 @@ public static class ExternalMessageEndpoints
             authorizedParent);
 
     /// <summary>
-    /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside
-    /// the set are all <c>false</c>.
-    /// </summary>
-    /// <remarks>
-    /// A root module (its scope attribute is the record's own id) answers from the principal alone
-    /// (<see cref="ExternalModuleDescriptor.IsRecordAccessible"/>). A child or requester-scoped module (invoices: parent
-    /// lookups; service requests: <c>sprk_requestedby</c>) needs the record's scope attributes, read app-only by id, and
-    /// then the module's own <see cref="ExternalModuleDescriptor.ScopeRows"/> — the same predicate the module grid applies.
-    /// The read happens only when the caller has SOME accessible id in that module, so a caller with none never causes a
-    /// Dataverse read.
-    /// <para>Task 187, fix round 1, owner decision D4: for a module with
-    /// <see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/> (the invoices module, D2) the gate reads every
-    /// attribute the rule needs (<see cref="ExternalModuleDescriptor.RootRuleAttributes"/>: the invoice's matter, project and
-    /// agreement), resolves the live roots of its parents (<paramref name="readLiveParents"/>) and the secure flags
-    /// (<paramref name="readNonSecureRoots"/>), and applies the predicate the module grid applies. So an invoice whose live
-    /// roots include a SECURE root the caller cannot read is refused, as the list withholds it. A reader not given, or a
-    /// read that could not decide, refuses (fail closed).</para>
-    /// </remarks>
-    internal static async Task<bool> IsRootRecordReadableAsync(
-        MessageRoot root,
-        Guid id,
-        CallerPrincipal principal,
-        ExternalModuleRegistry registry,
-        Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
-        ILogger logger,
-        CancellationToken ct,
-        NonSecureRootReader? readNonSecureRoots = null,
-        LiveParentRootReader? readLiveParents = null,
-        ExternalInvoiceHiding? hideInvoices = null) =>
-        (await EvaluateRecordGateAsync(
-                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents, hideInvoices)
-            .ConfigureAwait(false))
-            .Readable;
-
-    /// <summary>
     /// The caller's rights on the record for a POST (task 034): <see cref="Spaarke.Dataverse.AccessRights.None"/> unless
-    /// the read gate (<see cref="IsRootRecordReadableAsync"/>, the same evaluation) admits it; then:
+    /// the read gate (<see cref="EvaluateRecordGateAsync"/>, the same evaluation) admits it; then:
     /// <list type="bullet">
     /// <item>project / matter / work assignment — the caller's stored rights on that root
     /// (<see cref="CallerPrincipal.RightsOn"/>, the dispatch the to-do and document routes use);</item>
@@ -716,12 +741,27 @@ public static class ExternalMessageEndpoints
     }
 
     /// <summary>
-    /// The one record-gate evaluation behind <see cref="IsRootRecordReadableAsync"/> and <see cref="GetRecordRightsAsync"/>:
-    /// whether the record is readable, and — for a child or requester-scoped root — the scope row the module predicate was
-    /// applied to (the record's scope attributes, read app-only). <c>ScopeRow</c> is null for a root module. For a module
-    /// with <see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/> the rule's attributes, live parents and secure
-    /// flags are read too (task 187 D4, see <see cref="IsRootRecordReadableAsync"/>).
+    /// The record gate — the one evaluation behind the read (<see cref="GetMessagesCoreAsync"/>, whose thread <c>canCreate</c>
+    /// reuses it) and the post (<see cref="GetRecordRightsAsync"/>): whether the record is readable, and — for a child or
+    /// requester-scoped root — the scope row the module predicate was applied to (the record's scope attributes, read
+    /// app-only). <c>ScopeRow</c> is null for a root module. Fail-closed: no registered module, an empty accessible set, a
+    /// missing record and a record outside the set are all not readable.
     /// </summary>
+    /// <remarks>
+    /// A root module (its scope attribute is the record's own id) answers from the principal alone
+    /// (<see cref="ExternalModuleDescriptor.IsRecordAccessible"/>). A child or requester-scoped module (invoices: parent
+    /// lookups; service requests: <c>sprk_requestedby</c>) needs the record's scope attributes, read app-only by id, and
+    /// then the module's own <see cref="ExternalModuleDescriptor.ScopeRows"/> — the same predicate the module grid applies.
+    /// The read happens only when the caller has SOME accessible id in that module, so a caller with none never causes a
+    /// Dataverse read.
+    /// <para>Task 187, fix round 1, owner decision D4: for a module with
+    /// <see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/> (the invoices module, D2) the gate reads every
+    /// attribute the rule needs (<see cref="ExternalModuleDescriptor.RootRuleAttributes"/>: the invoice's matter, project and
+    /// agreement), resolves the live roots of its parents (<paramref name="readLiveParents"/>) and the secure flags
+    /// (<paramref name="readNonSecureRoots"/>), and applies the predicate the module grid applies. So an invoice whose live
+    /// roots include a SECURE root the caller cannot read is refused, as the list withholds it. A reader not given, or a
+    /// read that could not decide, refuses (fail closed).</para>
+    /// </remarks>
     private static async Task<(bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow, bool Undecided)> EvaluateRecordGateAsync(
         MessageRoot root,
         Guid id,

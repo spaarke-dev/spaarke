@@ -2351,21 +2351,27 @@ public class ExternalDataService
     private const string SecureFlagColumn = "sprk_issecure";
 
     /// <summary>
-    /// Creates a new <c>sprk_event</c> record associated with the supplied project via
-    /// <c>sprk_regardingproject</c>.
+    /// Creates a new <c>sprk_event</c> record associated with the supplied accessible ROOT — project, matter or work
+    /// assignment — via that root's regarding lookup (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>,
+    /// <c>sprk_regardingworkassignment</c>).
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="CreateTodoAsync"/> this does NOT apply the four ADR-024 resolver fields:
-    /// those are a <c>sprk_todo</c> construct (the 11-entity regarding model). <c>sprk_event</c>
-    /// carries a direct project lookup only.
+    /// <para>Unlike <see cref="CreateTodoAsync"/> this does NOT yet write the ADR-024 resolver fields
+    /// (<c>sprk_regardingrecordid</c>/<c>…name</c>/<c>…url</c>/<c>sprk_RegardingRecordType</c>), although
+    /// <c>sprk_event</c> has them and the internal <c>EventEndpoints</c> create writes them: an event created here
+    /// carries the direct root lookup only, so a read keyed on the resolver fields misses it. Known gap, recorded in
+    /// R4 <c>notes/defer-issues.md</c> (task 002 review, F1); out of task 002's scope.</para>
+    /// <para><b>spaarke-SPA-external-access-platform-r4 task 002 (FR-08) widened this from project-only</b>, as task 029
+    /// widened the to-do create: the root kind comes from the ROUTE, and the bind from
+    /// <see cref="TryGetRootBinding"/>, never from the request.</para>
     /// </remarks>
     // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
     // route resolved reached the create — and that a refused owner never reached Dataverse at all.
     public virtual async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
         CancellationToken ct = default)
     {
-        var body = BuildEventCreatePayload(projectId, request, owningTeamId);
+        var body = BuildEventCreatePayload(rootKind, rootId, request, owningTeamId);
         StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
@@ -2386,8 +2392,8 @@ public class ExternalDataService
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("[EXT-DATA] Create event failed for project {ProjectId}: {Status} — {Body}",
-                projectId, response.StatusCode, errorBody);
+            _logger.LogWarning("[EXT-DATA] Create event failed for {RootKind} {RootId}: {Status} — {Body}",
+                rootKind, rootId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to create event: {response.StatusCode}");
         }
 
@@ -2424,17 +2430,25 @@ public class ExternalDataService
     internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
 
     /// <summary>
-    /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
-    /// OWNER the route resolved from the project (task 146 — the named Secure team for a secure project). Pure so a
+    /// The COMPLETE create payload for an external calendar event: the caller's fields, the ROOT bind, and the
+    /// OWNER the route resolved from the root (task 146 — the named Secure team for a secure root). Pure so a
     /// test can read it. Task 097: the DTO's sprk_name / sprk_status are written to the LIVE sprk_eventname / statuscode
     /// (with the paired statecode) — sprk_event has neither sprk_name nor sprk_status, so the former body was a 400.
-    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
+    /// R4 task 002 (FR-08): the bind comes from <see cref="TryGetRootBinding"/> for the route's root kind — the same row
+    /// the to-do create and the events list use; <c>sprk_event</c>'s three regarding lookups carry the same schema names
+    /// as <c>sprk_todo</c>'s (<c>docs/data-model/sprk_event-related-tables.md</c>).
+    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>, or
+    /// <paramref name="rootKind"/> is a deny state (None/Ambiguous).</exception>
     /// </summary>
     internal static Dictionary<string, object?> BuildEventCreatePayload(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId)
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var binding = TryGetRootBinding(rootKind)
+            ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
+                "Events can only be created against a project, matter or work assignment. "
+                + "None/Ambiguous are deny states — a caller reaching here has skipped its gate.");
+        if (rootId == Guid.Empty)
+            throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
         ArgumentNullException.ThrowIfNull(request);
         RequireOwner(owningTeamId, "sprk_event");
 
@@ -2454,8 +2468,9 @@ public class ExternalDataService
         body[EventStatusColumn] = status;
         body["statecode"] = EventStatusCode.GetStateCode(status);
 
-        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
-        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses. ONE root, ONE bind: the key
+        // and the entity set come from the same binding row (R4 task 002).
+        body[binding.BindKey] = $"/{binding.EntitySet}({rootId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
         return body;
     }

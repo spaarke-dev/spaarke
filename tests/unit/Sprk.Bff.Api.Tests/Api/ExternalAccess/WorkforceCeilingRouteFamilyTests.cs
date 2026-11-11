@@ -81,7 +81,12 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "GET", $"/projects/{Project}/events", None, "sprk_event", AccessRights.Read },
         { "POST", $"/projects/{Project}/events", Json, "sprk_project", AccessRights.AppendTo },
         { "GET", $"/matters/{Matter}/events", None, "sprk_event", AccessRights.Read },
+        // R4 task 002: the matter / work-assignment event creates carry the project create's pair (child Create, root AppendTo)
+        { "POST", $"/matters/{Matter}/events", Json, "sprk_event", AccessRights.Create },
+        { "POST", $"/matters/{Matter}/events", Json, "sprk_matter", AccessRights.AppendTo },
         { "GET", $"/workassignments/{WorkAssignment}/events", None, "sprk_workassignment", AccessRights.Read },
+        { "POST", $"/workassignments/{WorkAssignment}/events", Json, "sprk_event", AccessRights.Create },
+        { "POST", $"/workassignments/{WorkAssignment}/events", Json, "sprk_workassignment", AccessRights.AppendTo },
         // Delete own
         { "DELETE", $"/documents/{Item}", None, "sprk_document", AccessRights.Delete },
         { "DELETE", $"/todos/{Item}", None, "sprk_todo", AccessRights.Delete },

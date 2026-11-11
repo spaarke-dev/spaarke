@@ -300,20 +300,22 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     }
 
     // =====================================================================
-    // Read only: event create stays project-only
+    // Event create on a matter / work assignment: a route since R4 task 002 (FR-08; it was GET-only through R3). Its
+    // contract (201, 400, 403, 409, 503, the ceiling, the bind) is ExternalRootEventCreateContractTests; here, a reader
+    // without Create is refused before anything reaches Dataverse.
     // =====================================================================
 
     [Theory]
     [InlineData("matters")]
     [InlineData("workassignments")]
-    public async Task EventCreate_OnAMatterOrWorkAssignment_IsNotARoute(string segment)
+    public async Task EventCreate_OnAMatterOrWorkAssignment_ForAViewOnlyReader_Is403_AndReachesNoDataverse(string segment)
     {
-        _fixture.Principal = Principal(segment, ExternalAccessLevel.FullAccess, RecordA);
+        _fixture.Principal = Principal(segment, ExternalAccessLevel.ViewOnly, RecordA);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{RecordA}/events", new { sprk_name = "x" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed, "the path is a GET-only route");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the read route's reader may not create");
         _fixture.Data.Urls.Should().BeEmpty();
     }
 
