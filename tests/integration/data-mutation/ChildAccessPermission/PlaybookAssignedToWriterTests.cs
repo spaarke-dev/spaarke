@@ -156,6 +156,34 @@ public class PlaybookAssignedToWriterTests
         _writes.Invocations.Should().BeEmpty();
     }
 
+    public static TheoryData<Guid?, string> UnconfirmedProposals() => new()
+    {
+        { null, "sprk_assignedattorney1" },
+        { null, "sprk_assignedattorney1@odata.bind" },
+        { Guid.Empty, "sprk_assignedattorney1" },
+        { Guid.Empty, "sprk_assignedattorney1@odata.bind" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnconfirmedProposals))]
+    public async Task AProposalNoPersonConfirmed_ThatWritesAnAssignedToColumn_IsRefused_AndNothingIsWritten(Guid? user, string key)
+    {
+        // #2250 review: a ConfirmedProposal with no confirming person is a model-built payload nobody confirmed, written
+        // app-only, so it gets the playbook rule.
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        var act = () => new UpdateRecordActionCore(_writes.Object, scopes.Object, NullLogger.Instance).UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_matter", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_name"] = "x", [key] = $"/contacts({Assignee:D})" },
+                Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.PlaybookAssignedToWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("the whole write is refused: no field of the payload is written");
+        scopes.Invocations.Should().BeEmpty("nothing was written, so the Assigned-To materializer is never reached");
+    }
+
     [Fact]
     public async Task APersonsConfirmedProposal_OfAnAssignedToColumn_IsWrittenAsThatPerson()
     {

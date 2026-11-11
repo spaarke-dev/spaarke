@@ -756,7 +756,8 @@ internal static class InheritedAccessPermission
 
         /// <summary>
         /// #2250 (owner decision, option 2): a playbook write — the Update Record node (a
-        /// <c>UpdateRecordPayloadSource.Configuration</c> payload) and a playbook's output mapping
+        /// <c>UpdateRecordPayloadSource.Configuration</c> payload, and a <c>ConfirmedProposal</c> no person confirmed, which is
+        /// written app-only and so is model-built) and a playbook's output mapping
         /// (<see cref="DataverseUpdateHandler"/>) — whatever identity the run writes as. Every <see cref="AppOnly"/> refusal,
         /// plus a grant root's Assigned-To columns (<see cref="IsAssignedToGrantColumn"/>): a playbook is configuration, so it
         /// never causes an Assigned-To access grant. The other app-only writers (the create-time mapping, Repair) keep

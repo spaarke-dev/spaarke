@@ -520,6 +520,31 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         _h.Grants.ActiveRowsOf(matter, contact).Should().ContainSingle();
     }
 
+    public static TheoryData<Guid?> NoConfirmingPerson() => new() { null, Guid.Empty };
+
+    [Theory]
+    [MemberData(nameof(NoConfirmingPerson))]
+    public async Task UpdateRecordActionCore_AProposalNoPersonConfirmed_ThatWritesAnAssignedLookup_IsRefused_AndGrantsNothing(Guid? user)
+    {
+        // #2250 review: a proposal written app-only (no confirming person) is model-built, so it gets the playbook rule.
+        var matter = Guid.NewGuid();
+        var contact = _h.Contact();
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, contact);
+        var fieldMappings = new Mock<IFieldMappingDataverseService>();
+        var core = new UpdateRecordActionCore(fieldMappings.Object, Scopes(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(new UpdateRecordActionInput(
+            "sprk_matter", matter, null, null,
+            new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) },
+            ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.PlaybookAssignedToWriteReasonCode);
+        fieldMappings.Invocations.Should().BeEmpty();
+        _h.Grants.ActiveRowsOf(matter, contact).Should().BeEmpty();
+        _h.TotalWrites.Should().Be(0, "no Assigned-To grant, share or ledger row comes from an unconfirmed proposal");
+    }
+
     [Fact]
     public async Task UpdateRecordActionCore_APlaybookNodeThatWritesAnAssignedLookup_IsRefused_AndGrantsNothing()
     {
