@@ -447,13 +447,15 @@ public sealed class StoredFileService
 
     /// <summary>
     /// Task 116 fix round 2: the refusals <see cref="UploadForCallerAsync"/> would give for the request itself (the row's name and type rules,
-    /// a length the size column holds, a configured store), decided with no read or write, so a route can answer them before it changes
-    /// anything. Null: the upload goes on to its own checks (which still run). Otherwise the <see cref="StoredFileRefusal"/> code.
+    /// a length the size column holds, a store that can stage now: <see cref="CanStageAsync"/>), decided with no write (fix round 3: the
+    /// stage check's cached environment read is the only read), so a route can answer them before it changes anything. Null: the upload goes
+    /// on to its own checks (which still run). Otherwise the <see cref="StoredFileRefusal"/> code. A fault of the environment read throws.
     /// </summary>
     /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the same checks inside <see cref="UploadForCallerAsync"/> and the stage.
     /// (2) Extension — they run there only after the caller's version route has already reset the drafted state; this exposes them, it adds no
     /// rule. (3) Cost of doing nothing — a refused name or an unconfigured store would leave a drafted version reset with no new file.</remarks>
-    internal string? PrecheckUpload(StoredFilePurpose purpose, StoredFileParent parent, string name, string contentType, long length)
+    internal async Task<string?> PrecheckUploadAsync(
+        StoredFilePurpose purpose, StoredFileParent parent, string name, string contentType, long length, CancellationToken ct)
     {
         var spec = new StoredFileRowSpec
         {
@@ -474,7 +476,8 @@ public sealed class StoredFileService
             return StoredFileRefusal.SizeOutOfRange;
         }
 
-        return _blobs.IsConfigured ? null : StoredFileRefusal.NotConfigured;
+        // Fix round 3: the stage's own condition (configured AND its name segment confirmed as this environment's), not only configured.
+        return await CanStageAsync(ct).ConfigureAwait(false) ? null : StoredFileRefusal.NotConfigured;
     }
 
     /// <summary>

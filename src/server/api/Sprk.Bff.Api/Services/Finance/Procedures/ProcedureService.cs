@@ -1156,6 +1156,9 @@ public class ProcedureService
     /// <para>Fix round 2: this first reset writes ONLY the marker. The list stays until <see cref="RecheckDraftAfterNewFileAsync(Guid,
     /// CancellationToken)"/> has seen the version still a Draft once the new file is Servable, so a publish that lands between the two keeps
     /// its version's list. A list under No is never shown (the rule set read shows it only for a drafted version).</para>
+    /// <para>Fix round 3: the marker is written only when the list names no file (the earlier bare list, or no list). A version whose list is
+    /// an envelope is not written: its drafted state is already stale once the envelope's file is no longer the one Servable source file, and
+    /// an upload that never lands leaves it drafted, list shown, as before the request.</para>
     /// </summary>
     public virtual Task<bool> ResetDraftedStateIfDraftAsync(Guid versionId, CancellationToken ct) =>
         ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, ct);
@@ -1196,7 +1199,11 @@ public class ProcedureService
             return false;
         }
 
-        if (version.GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn) == true)
+        // Fix round 3: the first reset (clearList false) writes the marker only for a list that names no file (the earlier bare list, or no
+        // list); an envelope's file id already makes "drafted" stale once its file is replaced, so a first reset whose upload never lands
+        // leaves an envelope version as it was. The re-check (clearList true) runs once the new file is Servable and writes No as before.
+        if (version.GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn) == true
+            && (clearList || !RuleSetService.ParseStoredNotConverted(version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn)).IsEnvelope))
         {
             await entities.UpdateAsync(
                 ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionDraftedColumn] = false }, ct);

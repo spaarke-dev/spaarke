@@ -404,8 +404,20 @@ public static class ProcedureEndpoints
         var parent = new StoredFileParent(StoredFileParentKind.ProcedureVersion, versionId);
 
         // Fix round 2: what the store would refuse about the request itself (name, type, size, an unconfigured store) is answered before the
-        // reset below, so such a request changes nothing.
-        if (files.PrecheckUpload(StoredFilePurpose.ProcedureSource, parent, fileName, mediaType, file.Length) is { } early)
+        // reset below, so such a request changes nothing. Fix round 3: a store that cannot stage now (the stage's own check) is refused here
+        // too; a fault of that check stores nothing and resets nothing.
+        string? early;
+        try
+        {
+            early = await files.PrecheckUploadAsync(StoredFilePurpose.ProcedureSource, parent, fileName, mediaType, file.Length, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the file store check failed; nothing changed ({ExceptionType})", versionId, ex.GetType().Name);
+            return FileWriteFailed();
+        }
+
+        if (early is not null)
         {
             logger.LogWarning("Procedure Version {ProcedureVersionId}: the source file was refused before anything changed ({Code})", versionId, early);
             return FileRefused(StoredFileCreateResult.Refused(early), maxMb, http);

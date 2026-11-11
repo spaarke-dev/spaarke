@@ -108,12 +108,19 @@ public sealed class ProcedureEndpointsTests
         public HttpClient Client = null!;
         public IServiceProvider Services => _app.Services;
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25, bool storeConfigured = true)
+        public static async Task<Host> StartAsync(
+            bool ebillingEnabled = true, bool admin = true, int maxFileMb = 25, bool storeConfigured = true,
+            Func<CancellationToken, Task<Guid>>? organizationId = null)
         {
             var host = new Host();
             if (!storeConfigured)
             {
                 host.Files = new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig(configured: false); // fix round 2: a store with no configuration
+            }
+            else if (organizationId is not null)
+            {
+                // Fix round 3: a configured store whose environment check answers as given (another environment: the stage refuses).
+                host.Files = new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig(organizationId: organizationId);
             }
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -1105,5 +1112,51 @@ public sealed class ProcedureEndpointsTests
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(StoredFileRefusal.NotConfigured);
         host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 116 fix round 3
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "116 fix 3 (item 2, scenario B) must-fire: PUT /file to a store whose stage check fails (another environment) is 503 before the reset; nothing is written")]
+    public async Task File_AStoreThatCannotStage_Is503_BeforeTheReset()
+    {
+        await using var host = await Host.StartAsync(organizationId: _ => Task.FromResult(Guid.NewGuid()));
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(StoredFileRefusal.NotConfigured);
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Files.Dataverse.Writes.Should().Be(0);
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 2): PUT /file whose store check faults is 500 before the reset; nothing is written")]
+    public async Task File_AFaultedStoreCheck_Is500_BeforeTheReset()
+    {
+        await using var host = await Host.StartAsync(organizationId: _ => Task.FromException<Guid>(new InvalidOperationException("simulated Dataverse 503")));
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileWriteFailed);
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Files.Dataverse.Writes.Should().Be(0);
+        host.Files.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 2) must-not-fire: PUT /file to a store whose environment check confirms it stores the file")]
+    public async Task File_AStoreThatCanStage_StoresTheFile()
+    {
+        await using var host = await Host.StartAsync(organizationId: _ => Task.FromResult(Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig.Tenant));
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

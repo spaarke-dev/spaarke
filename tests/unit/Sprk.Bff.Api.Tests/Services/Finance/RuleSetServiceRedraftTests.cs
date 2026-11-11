@@ -135,12 +135,13 @@ public sealed class RuleSetServiceRedraftTests
         Version(h, d.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn).Should().Be(RuleSetService.ClearedNotConverted);
     }
 
-    [Fact(DisplayName = "116 fix 2 (K) must-fire: a version published between the first reset and the re-check keeps its list; the re-check refuses and writes nothing")]
+    [Fact(DisplayName = "116 fix 2 (K) / fix 3 must-fire: a version published between the first reset and the re-check keeps its list visible to the rule set read; the re-check refuses and writes nothing")]
     public async Task Recheck_AVersionPublishedAfterTheFirstReset_KeepsItsList()
     {
         var h = new Harness();
         const string List = """[{"text":"Staff sensibly.","reason":"Nothing to check."}]""";
-        var d = h.DraftVersion(drafted: true, notConvertedList: List);
+        var d = h.DraftVersion(drafted: true);
+        Version(h, d.Version)[RuleSetService.VersionNotConvertedListColumn] = RuleSetService.StoredNotConvertedOf(d.File, List);
 
         (await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None)).Should().BeTrue();
         Version(h, d.Version)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive); // a publish lands
@@ -149,7 +150,66 @@ public sealed class RuleSetServiceRedraftTests
 
         stillDraft.Should().BeFalse();
         h.Writes.Should().BeEmpty();
-        Version(h, d.Version).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn).Should().Be(List, "the published version's list survives");
+        var shown = (await h.Service().GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted;
+        shown.Should().NotBeNull("the published version's list survives and is shown");
+        shown!.ToJsonString().Should().Contain("Staff sensibly.");
+    }
+
+    // ── Fix round 3 (item 2): the first reset writes the marker only for a list that names no file ──
+
+    [Fact(DisplayName = "116 fix 3 (item 2) must-fire: the first reset of a version whose list is an envelope writes nothing")]
+    public async Task Reset_AnEnvelopeList_WritesNothing()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        (await h.Service().AddDraftsAsync(d.Version, d.File, new[] { Increment() }, None, CallerOid, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Writes.Clear();
+
+        var draft = await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None);
+
+        draft.Should().BeTrue();
+        h.Writes.Should().BeEmpty();
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 2, scenario A) must-fire: drafted from F, the upload of G starts, a publish lands, the re-check refuses and G is withdrawn: the published version is still drafted and its list is shown")]
+    public async Task ScenarioA_APublishDuringTheUpload_LeavesTheVersionDrafted_AndItsListShown()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        (await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, new[] { new NotConvertedClause("Staff sensibly.", null, "Nothing to check.") },
+            CallerOid, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        // The version-file route: the first reset, then G staged and made Servable, a publish lands, the re-check refuses, G withdrawn.
+        (await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None)).Should().BeTrue();
+        var g = h.SourceFile(d.Version, StoredFileStatus.Servable, "guidelines-v2.pdf");
+        Version(h, d.Version)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive);
+        (await ProcedureService.RecheckDraftAfterNewFileAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None)).Should().BeFalse();
+        h.Row(StoredFileSchema.Entity, g)[StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed);
+
+        Version(h, d.Version).GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn).Should().BeTrue();
+        var shown = (await service.GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted;
+        shown.Should().NotBeNull("F is still the one Servable file, so the version is drafted and its list is shown");
+        shown!.ToJsonString().Should().Contain("Staff sensibly.");
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 2, scenario B) must-fire: the upload is refused after the first reset (an owner it cannot resolve, a stage that fails): the version is still drafted and its list is shown")]
+    public async Task ScenarioB_AnUploadRefusedAfterTheReset_LeavesTheVersionDrafted_AndItsListShown()
+    {
+        var h = new Harness();
+        var d = h.DraftVersion();
+        var service = h.Service();
+        (await service.AddDraftsAsync(d.Version, d.File, new[] { Increment() }, new[] { new NotConvertedClause("Staff sensibly.", null, "Nothing to check.") },
+            CallerOid, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        (await ProcedureService.ResetDraftedStateIfDraftAsync(h.Entities.Object, d.Version, NullLogger.Instance, CancellationToken.None)).Should().BeTrue();
+        // The store refuses the upload here: no new file, no re-check.
+
+        (await service.GetDraftSourceAsync(d.Version, CancellationToken.None)).Value!.AlreadyDrafted.Should().BeTrue("the file did not change");
+        var shown = (await service.GetAsync(d.RuleSet, CancellationToken.None)).Value!.NotConverted;
+        shown.Should().NotBeNull();
+        shown!.ToJsonString().Should().Contain("Staff sensibly.");
     }
 
     [Theory(DisplayName = "116 fix 1 (A2) must-not-fire: a never-drafted Draft is not written; a version that is not a Draft is refused and not written")]
