@@ -506,6 +506,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_ChildId = '00000000-0000-4000-8000-000000000021'          # a child unit of Customer One
         $global:SetCustomerOwnerTeamsTest_OtherCustomerId = '00000000-0000-4000-8000-000000000022'  # another customer's top unit
         $global:SetCustomerOwnerTeamsTest_OtherChildId = '00000000-0000-4000-8000-000000000023'     # a child unit of Customer Two
+        $global:SetCustomerOwnerTeamsTest_DirectUnitId = '00000000-0000-4000-8000-000000000024'     # the Direct-message unit (uac-r2 198), a root child, never a customer
         # One copy of the role per unit (the root copy is the role itself), keyed by a short name the tests use. 'otherchild'
         # is a unit only (a holder's home); it has no entry in CopyId, so the role has no copy in it here.
         $global:SetCustomerOwnerTeamsTest_Unit = @{
@@ -515,6 +516,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             child      = $global:SetCustomerOwnerTeamsTest_ChildId
             other      = $global:SetCustomerOwnerTeamsTest_OtherCustomerId
             otherchild = $global:SetCustomerOwnerTeamsTest_OtherChildId
+            direct     = $global:SetCustomerOwnerTeamsTest_DirectUnitId
         }
         $global:SetCustomerOwnerTeamsTest_CopyId = @{
             root     = '00000000-0000-4000-8000-000000000101'
@@ -522,6 +524,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             customer = '00000000-0000-4000-8000-000000000103'
             child    = '00000000-0000-4000-8000-000000000104'
             other    = '00000000-0000-4000-8000-000000000105'
+            direct   = '00000000-0000-4000-8000-000000000106'
         }
         $global:SetCustomerOwnerTeamsTest_CandidateId = '00000000-0000-4000-9000-000000000099'
         function Invoke-Billing([switch]$Verify, [switch]$Apply, [string]$ConfigPath = $script:BillingConfig, [guid[]]$Assign) {
@@ -624,26 +627,34 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                 return @{ value = @([pscustomobject]@{ organizationid = $global:SetCustomerOwnerTeamsTest_OrgId; name = 'test'; orgdborgsettings = $settings }) }
             }
             if ($u -match '/businessunits\?') {
-                return @{ value = @(
-                        [pscustomobject]@{ businessunitid = $unit.root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
-                        [pscustomobject]@{ businessunitid = $unit.secure; name = 'Secure Record'; _parentbusinessunitid_value = $(if ($global:SetCustomerOwnerTeamsTest_SecureUnderCustomer) { $unit.customer } else { $unit.root }) }
-                        [pscustomobject]@{ businessunitid = $unit.customer; name = 'Customer One'; _parentbusinessunitid_value = $unit.root }
-                        [pscustomobject]@{ businessunitid = $unit.child; name = 'Customer One Litigation'; _parentbusinessunitid_value = $unit.customer }
-                        [pscustomobject]@{ businessunitid = $unit.other; name = 'Customer Two'; _parentbusinessunitid_value = $unit.root }
-                        [pscustomobject]@{ businessunitid = $unit.otherchild; name = 'Customer Two Litigation'; _parentbusinessunitid_value = $unit.other }
-                    )
+                $allUnits = @(
+                    [pscustomobject]@{ businessunitid = $unit.root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
+                    [pscustomobject]@{ businessunitid = $unit.secure; name = 'Secure Record'; _parentbusinessunitid_value = $(if ($global:SetCustomerOwnerTeamsTest_SecureUnderCustomer) { $unit.customer } else { $unit.root }) }
+                    [pscustomobject]@{ businessunitid = $unit.customer; name = 'Customer One'; _parentbusinessunitid_value = $unit.root }
+                    [pscustomobject]@{ businessunitid = $unit.child; name = 'Customer One Litigation'; _parentbusinessunitid_value = $unit.customer }
+                    [pscustomobject]@{ businessunitid = $unit.other; name = 'Customer Two'; _parentbusinessunitid_value = $unit.root }
+                    [pscustomobject]@{ businessunitid = $unit.otherchild; name = 'Customer Two Litigation'; _parentbusinessunitid_value = $unit.other }
+                    [pscustomobject]@{ businessunitid = $unit.direct; name = 'Spaarke Direct Messages'; _parentbusinessunitid_value = $unit.root }
+                )
+                # uac-r2 198 (R6): the script reads named units by Dataverse's own `name eq` filter; answer only that name.
+                if ($u -match "filter=name eq '((?:[^']|'')*)'") {
+                    $wanted = $Matches[1] -replace "''", "'"
+                    $allUnits = @($allUnits | Where-Object { $_.name -eq $wanted })
                 }
+                return @{ value = $allUnits }
             }
             if ($u -match "EntityDefinitions\(LogicalName='([^']+)'\)/Privileges" -and $global:SetCustomerOwnerTeamsTest_ReadPrivs.Contains($Matches[1])) {
                 $p = $global:SetCustomerOwnerTeamsTest_ReadPrivs[$Matches[1]]
                 return @{ value = @([pscustomobject]@{ PrivilegeType = 'Read'; Name = $p.Name; PrivilegeId = [guid]$p.Id }) }
             }
             if ($u -match '/roles\?.*name eq') {
+                # Only this role exists by name here (the Direct-message owner role the customer mode looks up does not).
+                if ($u -notmatch [regex]::Escape("name eq '$roleName'")) { return @{ value = @() } }
                 if (-not $global:SetCustomerOwnerTeamsTest_RoleExists) { return @{ value = @() } }
                 return @{ value = @([pscustomobject]@{ roleid = $copy.root; name = $roleName; isinherited = $global:SetCustomerOwnerTeamsTest_IsInherited; _parentrootroleid_value = $copy.root }) }
             }
             if ($u -match '/roles\?.*_parentrootroleid_value eq') {
-                return @{ value = @(foreach ($k in 'root', 'secure', 'customer', 'child', 'other') {
+                return @{ value = @(foreach ($k in 'root', 'secure', 'customer', 'child', 'other', 'direct') {
                             $inh = if ($global:SetCustomerOwnerTeamsTest_CopyIsInherited.ContainsKey($k)) { $global:SetCustomerOwnerTeamsTest_CopyIsInherited[$k] } else { $global:SetCustomerOwnerTeamsTest_IsInherited }
                             [pscustomobject]@{ roleid = $copy[$k]; isinherited = $inh; _businessunitid_value = $unit[$k] }
                         })
@@ -892,6 +903,14 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r.ExitCode | Should -Be 0 -Because $r.Output
         $r.Output | Should -Match "INFO        : 2 user\(s\) hold the 'Customer Two' copy, homed in that unit or below"
         $r.Output | Should -Not -Match 'HOLDER UNIT'
+    }
+
+    It 'must fire (merge with uac-r2 198): the Direct-message unit is never another customer''s top unit, so a holder of its copy homed there is drift, not information' {
+        $global:SetCustomerOwnerTeamsTest_UserHolders = @(@{ Copy = 'customer'; Home = 'child'; Admin = $true }, @{ Copy = 'direct'; Home = 'direct'; Admin = $true })
+        $r = Invoke-Billing -Verify
+        $r.ExitCode | Should -Be 1 -Because $r.Output
+        $r.Output | Should -Match "ROLE ASSIGNED ELSEWHERE: user 'holder 2' .* holds the 'Spaarke Direct Messages' copy"
+        $r.Output | Should -Not -Match "INFO .* hold the 'Spaarke Direct Messages' copy"
     }
 
     It 'F3 -Apply -AssignBillingRuleReader: the one write assigns the CUSTOMER TOP UNIT''s copy (never the root''s), and the read-back shows the holder' {
