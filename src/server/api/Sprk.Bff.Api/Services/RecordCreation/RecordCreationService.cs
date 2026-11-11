@@ -429,6 +429,16 @@ internal sealed partial class RecordCreationService
                     RecordCreationRefusal.BlockedColumnCode, $"The {noun} was not created: {appOnlyRefusal.Reason}."));
             }
 
+            // fm task 054b: a BFF-owned column of a communication or its thread is written only by the BFF's typed writers, for
+            // every identity — a system principal's create included, except a column the server set itself (the "for" person).
+            if (InheritedAccessPermission.RefuseBffOwnedCommunicationColumn(
+                    table, item.Columns.Where(c => request.ServerSetLookupColumns?.Contains(SecureRootInheritance.NormalizeColumn(c).Trim()) != true))
+                is { } bffOwnedRefusal)
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                    RecordCreationRefusal.BlockedColumnCode, $"The {noun} was not created: {bffOwnedRefusal.Reason}."));
+            }
+
             // Recorded as before: the caller's column policy is the step, and a system principal skips it.
             trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Skipped, "system principal (FR-07)");
         }
