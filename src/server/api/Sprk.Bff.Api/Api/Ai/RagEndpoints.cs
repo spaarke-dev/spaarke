@@ -632,7 +632,8 @@ public static class RagEndpoints
             // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
             // sprk_searchindexed=true + sprk_searchindexedon for the transition window
             // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
-            if (!string.IsNullOrEmpty(request.DocumentId))
+            // A skipped file (E-Billing Output Files container, ebilling-r1 FR-16) was not indexed: no stamp.
+            if (!string.IsNullOrEmpty(request.DocumentId) && !result.Skipped)
             {
                 var indexName = searchIndexNameResolver.GetDefaultIndexName();
                 var completedAt = DateTime.UtcNow;
@@ -659,8 +660,8 @@ public static class RagEndpoints
         }
         catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
         {
-            // e.g. 400 INDEX_NOT_ALLOWED for a SearchIndexName outside the allow-list — rendered by the global
-            // ProblemDetails middleware (ADR-019), not swallowed into a 500.
+            // A typed problem the pipeline raises — rendered by the global ProblemDetails middleware (ADR-019), not
+            // swallowed into a 500.
             throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1297,20 +1298,8 @@ public static class RagEndpoints
                 // secure state -> no parent (fail closed). A row naming one record keeps the parent it always had.
                 var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
 
-                // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE
-                // building the index request. Previously this handler called ONLY
-                // searchIndexNameResolver.GetDefaultIndexName() (the tenant default), so a document
-                // whose own sprk_searchindexname (or a parent/BU's AI Search Index lookup) named a
-                // different index was silently routed to the tenant-default index instead — the
-                // write landed in the wrong place, not just the wrong tracking stamp. Mirrors
-                // RagIndexingJobHandler's precedence exactly: resolver chain (document's own
-                // sprk_ai_search_index lookup, falling back to the legacy sprk_searchindexname text
-                // column → parent → parent's owning BU) first; GetDefaultIndexName() is now only the
-                // final fallback when the chain resolves nothing.
-                var resolvedIndexName = await searchIndexNameResolver.ResolveAsync(
-                    documentId, parentEntity?.EntityType, parentEntity?.EntityId, cancellationToken);
-
-                // Step 4: Build file index request
+                // Step 4: Build file index request. The index follows the content type (task 041, FR-40): the request
+                // names none, so the pipeline writes the files index; no record or business-unit index column is read.
                 var indexRequest = new FileIndexRequest
                 {
                     // Task 063 / F2: the partition key is the TOKEN's tenant. The body's TenantId was
@@ -1322,10 +1311,6 @@ public static class RagEndpoints
                     FileName = document.FileName ?? document.Name,
                     DocumentId = documentId,
                     ParentEntity = parentEntity,
-                    // Null/whitespace here falls through to IRagService's own tenant-default chain
-                    // (byte-for-byte backward compatible), so the ACTUAL write — not just the
-                    // Dataverse stamp below — honors the per-record index.
-                    SearchIndexName = resolvedIndexName,
                     // Task 048 (spaarkeai-word-add-in-r1): this route re-indexes an EXISTING Dataverse
                     // document by id ("Send to Index" / the Dataverse ribbon button) — the item may
                     // already carry chunks from an earlier index. Trim any leftover tail after the new
@@ -1336,17 +1321,26 @@ public static class RagEndpoints
                 // Step 5: Index via OBO authentication
                 var indexResult = await fileIndexingService.IndexFileAsync(indexRequest, httpContext, cancellationToken);
 
-                if (indexResult.Success)
+                if (indexResult.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): no stamp, and the
+                    // caller is told it was not indexed rather than shown a success with zero chunks.
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = "This document is stored in a container that is not indexed."
+                    });
+                }
+                else if (indexResult.Success)
                 {
                     // Step 6: Update Dataverse with search index fields.
                     // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
                     // sprk_searchindexed=true + sprk_searchindexedon for the transition window
                     // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
                     //
-                    // Stamp the index the file actually landed in (task 033 fix, mirrors
-                    // RagIndexingJobHandler): the per-record resolved value when the chain found
-                    // one, otherwise the single canonical tenant default.
-                    var stampedIndexName = resolvedIndexName ?? searchIndexNameResolver.GetDefaultIndexName();
+                    // Stamp the index the file actually landed in: the single canonical index (task 041, FR-40).
+                    var stampedIndexName = searchIndexNameResolver.GetDefaultIndexName();
                     var completedAt = DateTime.UtcNow;
                     var updateRequest = new UpdateDocumentRequest
                     {
@@ -1355,7 +1349,7 @@ public static class RagEndpoints
                         // Legacy dual-write (preserved during transition)
                         SearchIndexed = true,
                         SearchIndexedOn = completedAt,
-                        // Index routing (task 033: per-record when resolved, else tenant default)
+                        // Index routing (task 041: the content type's index)
                         SearchIndexName = stampedIndexName
                     };
 

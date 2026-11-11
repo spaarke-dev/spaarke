@@ -68,6 +68,13 @@ public sealed class AuthenticationSchemeCensusTests
         "GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}",
         "GET /api/v1/external/api/dataverse/savedquery/{savedQueryId:guid}",
         "GET /api/v1/external/contact-grants",   // owner-allowed management route (2026-10-13, option A)
+        // ebilling-r1 tasks 044 / 051 (FR-17 SPA channel), reached on merging master's task 045 census (2026-10-18): on the
+        // collaboration group behind CallerPrincipalAuthorizationFilter, each route also carrying
+        // ExternalInvoiceSubmissionAuthorizationFilter (Read + Create on the core record for a submit, a firm among the caller
+        // contact's memberships, a systemuser refused; reads uniform 404). Pinned for the R3 owner's WorkforceHome review.
+        "GET /api/v1/external/invoice-submissions",
+        "GET /api/v1/external/invoice-submissions/firm-records",
+        "GET /api/v1/external/invoice-submissions/{id:guid}",
         "GET /api/v1/external/invoices/{id:guid}/documents",
         "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content",
         "GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions",
@@ -103,10 +110,12 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/contact-grants/revoke",   // owner-allowed management route (2026-10-13, option A)
         "POST /api/v1/external/invoices/{id:guid}/documents",
         "POST /api/v1/external/matters/{id:guid}/documents",
+        "POST /api/v1/external/matters/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
         "POST /api/v1/external/matters/{id:guid}/todos",
         "POST /api/v1/external/notifications/seen",
         "POST /api/v1/external/projects/{id:guid}/documents",
         "POST /api/v1/external/projects/{id:guid}/events",
+        "POST /api/v1/external/projects/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
         "POST /api/v1/external/projects/{id:guid}/todos",
         // r3 task 047 (ADR-028 A9): its OWN group, ExternalCollaboration WITHOUT CallerPrincipalAuthorizationFilter (the
         // caller is not yet resolved); the handler admits WorkforceHome only. The only caller of the WorkforceHome create
@@ -115,6 +124,7 @@ public sealed class AuthenticationSchemeCensusTests
         "POST /api/v1/external/servicerequests",
         "POST /api/v1/external/servicerequests/{id:guid}/documents",
         "POST /api/v1/external/workassignments/{id:guid}/documents",
+        "POST /api/v1/external/workassignments/{id:guid}/invoice-submissions",   // ebilling-r1 044 (see the invoice-submissions note above)
         "POST /api/v1/external/workassignments/{id:guid}/todos",
         // r3 task 048 (ADR-028 A9): its OWN group, as 047; the handler admits WorkforceHome only and links only the
         // caller's own two identities (RegistrationIsTheOnlyCallerOfTheWorkforceHomeWrites below).

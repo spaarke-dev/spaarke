@@ -62,8 +62,10 @@ export const PRACTICEAREA_NAV_PROP =
 export const SYSTEMUSER_KEY_ATTR = 'sprk_systemuser';
 
 /**
- * `sprk_primaryrole` closed option set — bound to the GLOBAL set `sprk_timekeeperrole`
- * (IsGlobal=True, verified 2026-07-16, resolving schema-contract finding F-1). Label↔value is the
+ * `sprk_primaryrole` closed option set — bound to the GLOBAL set `sprk_userprofilerole`
+ * (IsGlobal=True; moved off `sprk_timekeeperrole` on 2026-10-15 by ebilling-r1 D-84, which holds
+ * only the LEDES timekeeper classifications now; the 14 values and labels below are unchanged).
+ * Reading this list from Dataverse instead of this constant is GitHub #1954. Label↔value is the
  * contract the server-side producer (task 030) renders; we present the label and store the value.
  * This is a constrained/system-owned value set: the user picks from a fixed dropdown — the value is
  * NEVER LLM-emitted.

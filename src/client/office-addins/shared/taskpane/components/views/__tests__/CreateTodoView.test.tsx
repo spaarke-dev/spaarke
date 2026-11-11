@@ -288,5 +288,68 @@ describe('CreateTodoView', () => {
       );
       expect(screen.queryByText(/To Do created/)).not.toBeInTheDocument();
     });
+
+    // fm 030a (2026-11-06): a transient refusal says "Try again in a moment", and OFFICE_009 says "choose a
+    // different person". Both need Save to work again on the kept input; before this fix only Cancel (which
+    // clears the form) re-enabled it.
+    it('keeps the input and lets the user save again, which clears the error once the retry succeeds', async () => {
+      const onCreateTodo = jest
+        .fn<Promise<CreateTodoResult>, unknown[]>()
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'The To Do could not be created right now, and nothing was saved. Try again in a moment.',
+        })
+        .mockResolvedValueOnce({ ok: true, todoId: 'todo-456' });
+
+      renderWithProvider(
+        <CreateTodoView
+          hostAdapter={makeHostAdapter()}
+          savedContext={SAVED_CONTEXT}
+          onCreateTodo={onCreateTodo}
+          onSearchContacts={jest.fn().mockResolvedValue([])}
+        />
+      );
+
+      // The visible MessageBar only: the screen-reader live region (`sr-only`) repeats the text on its own timer.
+      const visibleError = (): HTMLElement[] =>
+        screen.queryAllByText(/could not be created right now/).filter(el => !el.classList.contains('sr-only'));
+
+      await typeName('Call the client');
+      await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      await waitFor(() => expect(visibleError()).toHaveLength(1));
+
+      expect(screen.getByPlaceholderText('What needs to be done?')).toHaveValue('Call the client');
+      const save = screen.getByRole('button', { name: /^save$/i });
+      expect(save).toBeEnabled();
+
+      await userEvent.click(save);
+
+      await waitFor(() => expect(screen.getByText('To Do created: Call the client')).toBeInTheDocument());
+      expect(onCreateTodo).toHaveBeenCalledTimes(2);
+      expect(onCreateTodo).toHaveBeenNthCalledWith(2, expect.objectContaining({ name: 'Call the client' }));
+      expect(visibleError()).toHaveLength(0);
+    });
+
+    it('does not offer Save again after the error when the name has been cleared', async () => {
+      const onCreateTodo = jest
+        .fn<Promise<CreateTodoResult>, unknown[]>()
+        .mockResolvedValue({ ok: false, error: 'Failed to create the To Do.' });
+
+      renderWithProvider(
+        <CreateTodoView
+          hostAdapter={makeHostAdapter()}
+          savedContext={SAVED_CONTEXT}
+          onCreateTodo={onCreateTodo}
+          onSearchContacts={jest.fn().mockResolvedValue([])}
+        />
+      );
+
+      await typeName('Call the client');
+      await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      await waitFor(() => expect(screen.getByText('Failed to create the To Do.')).toBeInTheDocument());
+
+      await userEvent.clear(screen.getByPlaceholderText('What needs to be done?'));
+      expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+    });
   });
 });

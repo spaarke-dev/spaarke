@@ -348,11 +348,24 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public virtual async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+    public virtual Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        => QueryCoreAsync<T>(entitySetName, filter, select, top, skip, orderBy: null, cancellationToken);
+
+    /// <summary>
+    /// <see cref="QueryAsync{T}(string, string?, string?, int?, int?, CancellationToken)"/> with a <c>$orderby</c>
+    /// (e.g. <c>modifiedon desc</c>), for a capped read that must keep a defined end of the set rather than whatever
+    /// prefix Dataverse returns. A separate method, so the existing <c>QueryAsync</c> overrides keep compiling.
+    /// </summary>
+    public virtual Task<List<T>> QueryOrderedAsync<T>(string entitySetName, string? filter, string? select, int? top, string orderBy, CancellationToken cancellationToken = default)
+        => QueryCoreAsync<T>(entitySetName, filter, select, top, skip: null,
+            orderBy ?? throw new ArgumentNullException(nameof(orderBy)), cancellationToken);
+
+    private async Task<List<T>> QueryCoreAsync<T>(string entitySetName, string? filter, string? select, int? top, int? skip, string? orderBy, CancellationToken cancellationToken)
     {
         var queryParams = new List<string>();
         if (filter != null) queryParams.Add($"$filter={filter}");
         if (select != null) queryParams.Add($"$select={select}");
+        if (orderBy != null) queryParams.Add($"$orderby={orderBy}");
         if (top != null) queryParams.Add($"$top={top}");
         if (skip != null && skip > 0) queryParams.Add($"$skip={skip}");
 

@@ -131,12 +131,12 @@ public class FieldMappingPushAuthorizationContractTests
         host.ProbedSources.Should().Equal(new[] { ("sprk_matters", MatterId) }, "the SOURCE is asked as the caller, by its entity set");
         host.ChildQueries.Should().ContainSingle().Which.Should().Be(
             ("sprk_events", $"$filter=_sprk_regardingmatter_value eq {MatterId:D}&$select=sprk_eventid&$top=501", CallerSystemUserId));
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, "no app-only child write remains on this route");
         host.FieldMappings.Verify(f => f.QueryChildRecordIdsAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -158,8 +158,8 @@ public class FieldMappingPushAuthorizationContractTests
         var text = await response.Content.ReadAsStringAsync();
         JsonNode.Parse(text)!["totalRecords"]!.GetValue<int>().Should().Be(1);
         text.Should().NotContain(ChildB.ToString());
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =========================================================================================
@@ -223,10 +223,10 @@ public class FieldMappingPushAuthorizationContractTests
         });
         dataverse.Requests.Should().OnlyContain(r => r.CallerId == CallerSystemUserId.ToString(),
             "every read on the push, metadata included, impersonates the caller");
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static HttpResponseMessage Rows(params object[] rows) => new(HttpStatusCode.OK)
@@ -295,8 +295,8 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(PushBody()));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never, "a value the caller cannot read is never written anywhere");
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         json["skippedCount"]!.GetValue<int>().Should().Be(2);
@@ -315,8 +315,8 @@ public class FieldMappingPushAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         Normalize(await response.Content.ReadAsStringAsync()).Should().Be(Normalize(await UnknownSourceBodyAsync()));
         host.ChildQueries.Should().BeEmpty();
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -375,8 +375,35 @@ public class FieldMappingPushAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be(reasonCode);
         host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 043 review round 2 (F1, iv; must-not-fire): only a DOCUMENT source is resolved by the
+    /// target's ownership primary order. A matter source whose target has two lookups to it is still the existing 409, with the
+    /// same reason code and wording, even where that order (sprk_analysis: sprk_regardingmatter is declared) would name one.
+    /// </summary>
+    [Fact]
+    public async Task Push_FromANonDocumentSource_WithTwoLookupsOnTheTarget_IsStillTheAmbiguous409()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            targetEntity: "sprk_analysis", targetSet: "sprk_analysises", lookupsToSource: ["sprk_regardingmatter", "sprk_secondmatter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_analysis")));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        var problem = JsonNode.Parse(body)!;
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ParentLookupAmbiguousReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be(
+            "'sprk_analysis' has 2 lookups to 'sprk_matter', so which one names the parent is ambiguous. Nothing was updated.");
+        host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -392,6 +419,31 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "an entity name is interpolated into OData and metadata paths");
+        host.ProbedSources.Should().BeEmpty();
+        host.VerifyNothingReadOrWritten();
+        host.MetadataQueries.Should().BeEmpty();
+    }
+
+    // field-mapping-server-write-path-r1 task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision
+    // Record and a Budget Revision are changed only by their writers. A push aimed at one is refused on the request, with the one
+    // message of RecordTableRules.RefuseWriterOnlyTableUpdate, before the source is authorized or anything is read or written.
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task Push_ToATableOnlyItsWriterChanges_Is400_AndNothingIsAsked(string targetEntity)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        problem["errors"]!["targetEntity"]![0]!.GetValue<string>()
+            .Should().Be(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(targetEntity));
         host.ProbedSources.Should().BeEmpty();
         host.VerifyNothingReadOrWritten();
         host.MetadataQueries.Should().BeEmpty();
@@ -458,12 +510,15 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     [Fact]
-    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind_MatterToInvoice()
+    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind()
     {
         await using var host = await PushHost.StartAsync();
-        host.Probe.Rights = AccessRights.Read;
+        // Task 032b-1: this ran Matter to Invoice until the invoice's attorney columns became display copies, which a push never
+        // writes (Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice). The lookup-bind proof is unchanged on the event target,
+        // where sprk_assignedtoattorney1 is plain data; the host gives every target the same schema-cased navigation property.
+        // The request still opts in (with Write on the source), as before.
+        host.Probe.Rights = AccessRights.Read | AccessRights.Write;
         host.ArrangeHappyPathData(
-            targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
             rules:
             [
                 PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
@@ -471,9 +526,10 @@ public class FieldMappingPushAuthorizationContractTests
             ],
             extraSourceColumns: AttorneyColumns(AttorneyId));
 
-        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_invoice")));
+        var response = await host.SendAsync(Authenticated(
+            new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo = true }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "the live Matter to Invoice (Attorney Matrix) push 500ed here");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a lookup rule's push 500ed here (first seen on the live Matter to Invoice profile)");
         host.SourceReads.Should().ContainSingle().Which.Should().Be(
             ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
              CallerSystemUserId),
@@ -483,11 +539,43 @@ public class FieldMappingPushAuthorizationContractTests
              (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
             "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
         host.Writes.Should().HaveCount(2);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_event" && w.ImpersonatedAs == CallerSystemUserId,
+            "a child is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
         host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
         {
             ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
             ["sprk_clientreference"] = "REF-166",
         }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+    }
+
+    /// <summary>
+    /// Task 032b-1 (U3 (c)): the invoice's attorney and paralegal columns are display copies. A push never writes one — not at
+    /// Manual Refresh, not when the request opts in to the Assigned-To rules — and the response counts it as a skipped rule. The
+    /// plain rule of the same profile is still written.
+    /// </summary>
+    [Fact]
+    public async Task Push_ADisplayCopyRule_IsNeverWritten_MatterToInvoice()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read | AccessRights.Write;
+        host.ArrangeHappyPathData(
+            targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: AttorneyColumns(AttorneyId));
+
+        var response = await host.SendAsync(Authenticated(
+            new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_invoice", includeAssignedTo = true }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId);
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" },
+            "the display copy is written by the create only; a push never re-maps it"));
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
     }
 
     [Fact]
@@ -615,6 +703,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         public Exception? Fault { get; set; }
 
+        /// <summary>The one source record <see cref="Rights"/> applies to (task 043: a document source sets its own).</summary>
+        public Guid RightsOn { get; set; } = MatterId;
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
@@ -624,7 +715,7 @@ public class FieldMappingPushAuthorizationContractTests
                 return Task.FromException<AccessRights>(Fault);
             }
 
-            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == MatterId ? Rights : AccessRights.None);
+            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == RightsOn ? Rights : AccessRights.None);
         }
 
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
@@ -666,10 +757,12 @@ public class FieldMappingPushAuthorizationContractTests
             _dataverse = dataverse;
         }
 
-        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null)
+        /// <param name="dataverse">A stand-in for Dataverse behind the REAL impersonated seam (#2253 fix round 3).</param>
+        /// <param name="configure">Task 043: registrations added last (e.g. the stated caller for the external document narrowing).</param>
+        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null, Action<IServiceCollection>? configure = null)
         {
             var host = new PushHost(dataverse);
-            await host.InitializeAsync();
+            await host.InitializeAsync(configure);
             return host;
         }
 
@@ -699,11 +792,26 @@ public class FieldMappingPushAuthorizationContractTests
             Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
             Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+            // ebilling-r1 #2081: the invoice-family guard reads each pushed child's stored row (app-only) and refuses a missing
+            // one, so the children the caller's query found exist here too (no core lookups stored).
+            Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+            ArrangeSourceGateRead("sprk_matter");
             FieldMappings
-                .Setup(f => f.UpdateRecordFieldsAsync(
-                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-                .Callback((string _, Guid id, Dictionary<string, object?> payload, CancellationToken _, Guid? _) =>
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Callback((string _, Guid id, Dictionary<string, object?> payload, Guid? _, CancellationToken _) =>
                     Writes.Add((id, new Dictionary<string, object?>(payload))))
+                .Returns(Task.CompletedTask);
+            // ebilling-r1 #2081: an invoice or line is pushed UPDATE-ONLY (If-Match: *), still as the caller.
+            FieldMappings
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Callback((string table, Guid id, Dictionary<string, object?> payload, Guid? caller, CancellationToken _) =>
+                {
+                    Writes.Add((id, new Dictionary<string, object?>(payload)));
+                    UpdateOnlyWrites.Add((table, id, caller));
+                })
                 .Returns(Task.CompletedTask);
 
             // The SOURCE row, as the caller reads it (task 166 r2): a field-secured column the caller cannot read comes
@@ -786,22 +894,56 @@ public class FieldMappingPushAuthorizationContractTests
                 });
         }
 
+        /// <summary>
+        /// Task 022 fix round 4 (the mapping-source rule): the source's gate columns as the app-only read returns them — its
+        /// owner, and the secure flag on a root. By default an ordinary source: owned by a user, flag explicitly off.
+        /// </summary>
+        public void ArrangeSourceGateRead(string sourceTable, Microsoft.Xrm.Sdk.EntityReference? owner = null, bool? secureFlag = false)
+        {
+            Entities.Setup(e => e.RetrieveAsync(sourceTable, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                {
+                    var row = new Microsoft.Xrm.Sdk.Entity(table, id)
+                    {
+                        ["ownerid"] = owner ?? new Microsoft.Xrm.Sdk.EntityReference("systemuser", SourceOwnerUserId),
+                    };
+                    if (secureFlag is { } flag)
+                        row["sprk_issecure"] = flag;
+                    return row;
+                });
+        }
+
+        /// <summary>The user who owns the source in <see cref="ArrangeSourceGateRead"/> by default.</summary>
+        public static readonly Guid SourceOwnerUserId = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
+
         /// <summary>Every child PATCH, with a copy of its payload.</summary>
         public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();
 
+        /// <summary>The writes that went through the update-only overload (<c>If-Match: *</c>), with the user they acted as.</summary>
+        public List<(string Table, Guid Id, Guid? ImpersonatedAs)> UpdateOnlyWrites { get; } = new();
+
         internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
         {
-            Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
-            TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = $"{sourceField}->{targetField}",
+            SourceField = sourceField,
+            SourceFieldType = sourceType,
+            TargetField = targetField,
+            TargetFieldType = targetType,
+            MappingType = 0,
+            ExecutionOrder = 1,
+            IsActive = true,
+            // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh; a rule left at One Time is not pushed.
+            SyncMode = Spaarke.Dataverse.SyncMode.ManualRefresh,
         };
 
         private static Dictionary<string, JsonElement> Relationship(
             string referencingAttribute, string referencedEntity, string? navigationProperty = null) => new()
-        {
-            ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
-            ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
-            ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
-        };
+            {
+                ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
+                ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
+                ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
+            };
 
         private static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true) => new()
         {
@@ -816,13 +958,13 @@ public class FieldMappingPushAuthorizationContractTests
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
             FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
-            FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+            FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             ChildQueries.Should().BeEmpty("no child query — as the caller or app-only — before the source is authorized");
             SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
         }
 
-        private async Task InitializeAsync()
+        private async Task InitializeAsync(Action<IServiceCollection>? configure)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -849,6 +991,19 @@ public class FieldMappingPushAuthorizationContractTests
             // Batch-4 integration (task 158): a push that files a work assignment or project under a secure record secures
             // it; no record in these tests is secure (a module boundary here).
             builder.Services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            // Task 040 fix round 1: the push's required services, REAL. The Assigned-To classifier reads the bound registry, seeded
+            // by the same post-configure the BFF registers (MembershipModule); the family reader runs over the caller-scoped seam;
+            // the participation service answers every flag read as unreadable (its Dataverse refuses), so a preview never
+            // under-reports a policy.
+            builder.Services.AddOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions>();
+            builder.Services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions>,
+                Sprk.Bff.Api.Services.Ai.Membership.MembershipOptionsDefaults>();
+            builder.Services.AddSingleton(sp => new Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader(
+                sp.GetRequiredService<IImpersonatedCommunicationQuery>(),
+                new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader>.Instance));
+            builder.Services.AddSingleton(_ => RefusingParticipations());
+            configure?.Invoke(builder.Services);
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();
@@ -863,6 +1018,27 @@ public class FieldMappingPushAuthorizationContractTests
         }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client!.SendAsync(request);
+
+        /// <summary>The REAL participation service over a Dataverse that refuses every read (503): every flag reads unreadable.</summary>
+        private static ExternalParticipationService RefusingParticipations()
+        {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                .Build();
+            var accessor = new Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+            return new ExternalParticipationService(
+                new HttpClient(new RefusingDataverse()) { BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/") },
+                Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(), configuration, new OfflineWebApiService.StaticToken(), accessor.Object,
+                NullLogger<ExternalParticipationService>.Instance,
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
+        }
+
+        /// <summary>A Dataverse that answers every request 503.</summary>
+        private sealed class RefusingDataverse : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }
 
         public async ValueTask DisposeAsync()
         {

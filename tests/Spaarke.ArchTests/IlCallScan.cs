@@ -150,21 +150,30 @@ internal static class IlCallScan
         {
             foreach (var method in Bodies(type))
             {
-                foreach (var operand in TokenOperands(method))
+                foreach (var target in ReferencedMethods(method))
                 {
-                    var target = operand.Kind switch
-                    {
-                        OperandType.InlineMethod => Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMethod(token, ta, ma)),
-                        OperandType.InlineTok when IsMethodTable(operand.Token) =>
-                            Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMember(token, ta, ma)) as MethodBase,
-                        _ => null,
-                    };
-
-                    if (target is not null)
-                    {
-                        yield return (type, method, target);
-                    }
+                    yield return (type, method, target);
                 }
+            }
+        }
+    }
+
+    /// <summary>Every method referenced from ONE body (same rules as <see cref="MethodReferences"/>), in IL order.</summary>
+    internal static IEnumerable<MethodBase> ReferencedMethods(MethodBase method)
+    {
+        foreach (var operand in TokenOperands(method))
+        {
+            var target = operand.Kind switch
+            {
+                OperandType.InlineMethod => Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMethod(token, ta, ma)),
+                OperandType.InlineTok when IsMethodTable(operand.Token) =>
+                    Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMember(token, ta, ma)) as MethodBase,
+                _ => null,
+            };
+
+            if (target is not null)
+            {
+                yield return target;
             }
         }
     }
@@ -200,6 +209,9 @@ internal static class IlCallScan
             }
         }
     }
+
+    /// <summary>The methods and constructors (static ones included) a type declares: the bodies a scan reads.</summary>
+    internal static IEnumerable<MethodBase> DeclaredBodies(Type type) => Bodies(type);
 
     /// <summary>Metadata tables a type-token operand names a TYPE from (TypeRef, TypeDef, TypeSpec).</summary>
     private static bool IsTypeTable(int token) => (token >> 24) is 0x01 or 0x02 or 0x1B;
@@ -409,17 +421,17 @@ internal static class IlCallScan
         switch (handle.Kind)
         {
             case HandleKind.MethodDefinition:
-            {
-                var m = reader.GetMethodDefinition((MethodDefinitionHandle)handle);
-                return new FileMemberRef(MetadataTypeName(reader, m.GetDeclaringType()), self, reader.GetString(m.Name));
-            }
+                {
+                    var m = reader.GetMethodDefinition((MethodDefinitionHandle)handle);
+                    return new FileMemberRef(MetadataTypeName(reader, m.GetDeclaringType()), self, reader.GetString(m.Name));
+                }
 
             case HandleKind.MemberReference:
-            {
-                var m = reader.GetMemberReference((MemberReferenceHandle)handle);
-                var (type, assembly) = MetadataEntityType(reader, self, m.Parent);
-                return new FileMemberRef(type, assembly, reader.GetString(m.Name));
-            }
+                {
+                    var m = reader.GetMemberReference((MemberReferenceHandle)handle);
+                    var (type, assembly) = MetadataEntityType(reader, self, m.Parent);
+                    return new FileMemberRef(type, assembly, reader.GetString(m.Name));
+                }
 
             case HandleKind.MethodSpecification:
                 return ResolveInFile(reader, self, reader.GetMethodSpecification((MethodSpecificationHandle)handle).Method);
@@ -436,40 +448,40 @@ internal static class IlCallScan
             case HandleKind.TypeDefinition:
                 return (MetadataTypeName(reader, (TypeDefinitionHandle)handle), self);
             case HandleKind.TypeReference:
-            {
-                var r = reader.GetTypeReference((TypeReferenceHandle)handle);
-                var name = reader.GetString(r.Name);
-                var ns = reader.GetString(r.Namespace);
-                switch (r.ResolutionScope.Kind)
                 {
-                    case HandleKind.TypeReference:
+                    var r = reader.GetTypeReference((TypeReferenceHandle)handle);
+                    var name = reader.GetString(r.Name);
+                    var ns = reader.GetString(r.Namespace);
+                    switch (r.ResolutionScope.Kind)
                     {
-                        var (outer, assembly) = MetadataEntityType(reader, self, (EntityHandle)r.ResolutionScope);
-                        return ($"{outer}+{name}", assembly);
-                    }
+                        case HandleKind.TypeReference:
+                            {
+                                var (outer, assembly) = MetadataEntityType(reader, self, (EntityHandle)r.ResolutionScope);
+                                return ($"{outer}+{name}", assembly);
+                            }
 
-                    case HandleKind.AssemblyReference:
-                    {
-                        var assembly = reader.GetString(reader.GetAssemblyReference((AssemblyReferenceHandle)r.ResolutionScope).Name);
-                        return (ns.Length == 0 ? name : $"{ns}.{name}", assembly);
-                    }
+                        case HandleKind.AssemblyReference:
+                            {
+                                var assembly = reader.GetString(reader.GetAssemblyReference((AssemblyReferenceHandle)r.ResolutionScope).Name);
+                                return (ns.Length == 0 ? name : $"{ns}.{name}", assembly);
+                            }
 
-                    default:
-                        return (ns.Length == 0 ? name : $"{ns}.{name}", self);
+                        default:
+                            return (ns.Length == 0 ? name : $"{ns}.{name}", self);
+                    }
                 }
-            }
 
             case HandleKind.TypeSpecification:
-            {
-                var blob = reader.GetBlobReader(reader.GetTypeSpecification((TypeSpecificationHandle)handle).Signature);
-                if (blob.ReadSignatureTypeCode() == SignatureTypeCode.GenericTypeInstance)
                 {
-                    blob.ReadSignatureTypeCode();   // CLASS or VALUETYPE
-                    return MetadataEntityType(reader, self, blob.ReadTypeHandle());
-                }
+                    var blob = reader.GetBlobReader(reader.GetTypeSpecification((TypeSpecificationHandle)handle).Signature);
+                    if (blob.ReadSignatureTypeCode() == SignatureTypeCode.GenericTypeInstance)
+                    {
+                        blob.ReadSignatureTypeCode();   // CLASS or VALUETYPE
+                        return MetadataEntityType(reader, self, blob.ReadTypeHandle());
+                    }
 
-                return ("<type-spec>", "?");
-            }
+                    return ("<type-spec>", "?");
+                }
 
             default:
                 return ("<unknown>", "?");

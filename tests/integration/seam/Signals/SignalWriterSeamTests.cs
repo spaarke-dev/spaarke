@@ -260,7 +260,9 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         // SignalWriter hard-codes Open 100000000, Acknowledged 100000001 (refresh rule) and the freeze on Resolved 100000002.
         labels.Should().Equal(new Dictionary<int, string>
         {
-            [100000000] = "Open", [100000001] = "Acknowledged", [100000002] = "Resolved",
+            [100000000] = "Open",
+            [100000001] = "Acknowledged",
+            [100000002] = "Resolved",
         });
 
     }

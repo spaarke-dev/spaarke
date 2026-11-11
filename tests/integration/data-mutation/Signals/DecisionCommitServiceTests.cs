@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -48,7 +49,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// dismissal reasons; D-119; the gate tier; the server-derived core and owner; step 6 against a system closure.
 /// Option values are the live ones (SignalWriter constants; sprk_decisionrecord read 2026-10-10).
 /// </remarks>
-public sealed class DecisionCommitServiceTests
+public sealed partial class DecisionCommitServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid Caller = Guid.Parse("c0430000-0000-4000-8000-000000000001");
@@ -135,9 +136,12 @@ public sealed class DecisionCommitServiceTests
 
         public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
-        public Mock<IGenericEntityService> Entities { get; } = new();
+        public Mock<IGenericEntityService> Entities { get; } = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
+
+        /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
+        public CallerRecordAccessProbe? ProbeOverride { get; set; }
         public InMemoryTenantCache Ledger { get; } = new();
         public Mock<DecisionCommitFollowUps> FollowUps { get; }
         public FakeTimeProvider Clock { get; } = new(Now);
@@ -579,7 +583,7 @@ public sealed class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -1351,6 +1355,29 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Theory]
+    [InlineData("approve-invoice")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
+    [InlineData("accept-line")]
+    public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
+    {
+        // ebilling-r1 task 074: billing decisions are recorded by the eBilling endpoints. The commit route does not know their codes, so
+        // a review naming one is refused before anything runs, and no executor exists to run it.
+        DecisionActionCatalog.TryGetBilling(code, out _).Should().BeTrue();
+        var rig = new Rig();
+        rig.Executors.Should().NotContainKey(code);
+        var review = PathBReview();
+        review = review with { Actions = [.. review.Actions!, Take(code)] };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.UnresolvedAction);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("notInPlan")]
@@ -2106,6 +2133,7 @@ public sealed class DecisionCommitServiceTests
     private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
     private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
     private static readonly Guid FilingDocument = Guid.Parse("c0430000-0000-4000-8000-000000000096");
+    private static readonly Guid TypeDocument = Guid.Parse("c0430000-0000-4000-8000-000000000097");   // the sprk_recordtype_ref row for sprk_document (#2506: a lookup, as on dev)
     private static readonly Guid FilingServiceRequest = Guid.Parse("c0430000-0000-4000-8000-000000000095");
 
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
@@ -2184,7 +2212,7 @@ public sealed class DecisionCommitServiceTests
                 // identity parents (not lineage) and the ADR-024 pair alone: all FILED, so the assignee never wins
                 "todo-regarding-organization" => new() { ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid()) },
                 "todo-regarding-contact" => new() { ["sprk_regardingcontact"] = new EntityReference("contact", Guid.NewGuid()) },
-                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = "sprk_document", ["sprk_regardingrecordid"] = FilingDocument.ToString() },
+                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", TypeDocument), ["sprk_regardingrecordid"] = FilingDocument.ToString() },
                 _ => null,
             });   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch

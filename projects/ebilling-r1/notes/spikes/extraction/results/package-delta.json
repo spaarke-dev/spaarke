@@ -1,0 +1,16 @@
+{
+  "package": "Azure.AI.ContentUnderstanding 1.1.0",
+  "procedure": "bff-hygiene item 4: two throwaway worktrees (C:/wt005m master, C:/wt005b master + PackageReference) at origin/master f63b57f8d; dotnet publish -c Release -o deploy/api-publish in src/server/api/Sprk.Bff.Api (linux-x64 framework-dependent per the csproj RuntimeIdentifier); zip with PowerShell Compress-Archive -CompressionLevel Optimal (PDBs included); dotnet SDK 10.0.101. Both worktrees removed and pruned after measuring.",
+  "master": { "files": 192, "zip_bytes": 38904719, "uncompressed_bytes": 129938144 },
+  "with_package": { "files": 193, "zip_bytes": 39067975, "uncompressed_bytes": 130437140 },
+  "delta": { "files": 1, "zip_bytes": 163256, "zip_mb": 0.16, "uncompressed_bytes": 498996 },
+  "added_files": ["Azure.AI.ContentUnderstanding.dll (498208 bytes)"],
+  "changed_files": ["Sprk.Bff.Api.deps.json", "Sprk.Bff.Api.pdb (rebuild noise)"],
+  "transitive_changes": "none (Azure.Core already at a compatible version on master)",
+  "vulnerable_packages": {
+    "master": "none",
+    "with_package": "none",
+    "command": "dotnet list package --vulnerable --include-transitive"
+  },
+  "threshold_check": "+0.16 MB < +5 MB justification threshold; total 39.07 MB zip < 55 MB architecture-review trigger"
+}

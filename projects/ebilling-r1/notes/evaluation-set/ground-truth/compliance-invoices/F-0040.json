@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0040",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0040","generator_id":"gen_eval_set.py@1 F-0040","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0040.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Garrison and Ambrose LLP","firm_invoice_number":"INV-2026-73226","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"23610-0032","po_number":"PO-4562580","fees_total":5570.0,"expenses_total":2441.25,"adjustments_total":0.0,"total_due":8011.25,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Thornbury","title":"Senior Associate","rate":400.0,"billed_as":"Aisha Thornbury"},{"name":"Beatrix Blackwood","title":"Paralegal","rate":210.0,"billed_as":"Beatrix Blackwood"},{"name":"Dmitri Thornbury","title":"Associate","rate":290.0,"billed_as":"Dmitri Thornbury"},{"name":"Sofia Nakamura","title":"Partner","rate":725.0,"billed_as":"Sofia Nakamura"},{"name":"Tomas Tavares","title":"Partner","rate":575.0,"billed_as":"Tomas Tavares"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-31","timekeeper":"Aisha Thornbury","timekeeper_name":"Aisha Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":400.0,"amount":1000.0,"narrative":"Telephone conference with client representative regarding factual background of the distribution agreement","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-11","timekeeper":"Beatrix Blackwood","timekeeper_name":"Beatrix Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":210.0,"amount":577.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-16","timekeeper":"Beatrix Blackwood","timekeeper_name":"Beatrix Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":210.0,"amount":157.5,"narrative":"Conference with client regarding budget variance for the construction contract","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-06","timekeeper":"Dmitri Thornbury","timekeeper_name":"Dmitri Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":290.0,"amount":652.5,"narrative":"Invoice preparation and review of billing entries","codes":["L210","A111"],"page":2,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2026-03-12","timekeeper":"Dmitri Thornbury","timekeeper_name":"Dmitri Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":290.0,"amount":507.5,"narrative":"Ran conflict check for new party","codes":["L220","A110"],"page":2,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2026-03-30","timekeeper":"Sofia Nakamura","timekeeper_name":"Sofia Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":725.0,"amount":1812.5,"narrative":"Review and organize incoming production from Northwind Logistics for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-12","timekeeper":"Tomas Tavares","timekeeper_name":"Tomas Tavares","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":575.0,"amount":862.5,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-03-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1818.44,"amount":1818.44,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":594.97,"amount":594.97,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-03-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":232.0,"rate":0.12,"amount":27.84,"narrative":"Photocopies - 232 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["731 Lakeshore Drive","Atlanta","Tax ID 37-5276012"],"template":"T10","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-02-17","matter_close":"2026-06-29","matter_budget":6409.0,"approved_timekeepers":["Beatrix Blackwood","Dmitri Thornbury","Aisha Thornbury","Sofia Nakamura","Daniel Tavares","Dalia Sandoval","Tomas Tavares"],"invoice_received_date":"2026-04-15"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

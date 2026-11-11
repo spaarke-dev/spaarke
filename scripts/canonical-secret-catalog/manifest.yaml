@@ -950,6 +950,19 @@ per_env_settings:
       uploads are refused (StoreDisabled) and the blob probe reports
       NotConfigured.
 
+  - key: 'Ontology__Writer__ManagedIdentityClientId'
+    per_env_source: 'from-h2a-output:ontology_writer_client_id'
+    iOptionsModule: 'SignalsModule (OntologyWriterCredentialFactory)'
+    required: true
+    notes: >-
+      Task 266 / #2605. Client id of the stamp's ontology writer UAMI
+      (customer.bicep output `ontologyWriterIdentityClientId`), attached to
+      both slots next to the stamp UAMI. The BFF's Signal and Decision Record
+      writers authenticate ONLY as this identity and fail closed without it;
+      it must never be the stamp UAMI (System Administrator). Not a secret.
+      H10 creates its Dataverse application user; H7b S24 grants it the
+      writer role and field-security profiles; H13 T7 reads the setting back.
+
   - key: 'DocumentIntelligence__Enabled'
     per_env_source: 'literal'
     literal_value: 'true'
@@ -971,6 +984,23 @@ per_env_settings:
       data-plane calls; pairs with A37 RBAC (Search Index Data Contributor +
       Search Service Contributor) already granted to the BFF runtime UAMI.
       Global literal -- every deployed env sets this to true.
+
+  - key: 'AiSearch__AllowedIndexes'
+    per_env_source: 'from-h2b-output:ai_search_index_names'
+    indexed: true
+    iOptionsModule: 'AiSearchOptions'
+    required: true
+    notes: >-
+      T186 follow-up (AiSearch allow-list). The AI Search indexes the BFF may be asked to
+      query, written as AiSearch__AllowedIndexes__0, __1, … on BOTH slots. The BFF's
+      DataverseAllowedIndexesProvider reads sprk_aisearchindex rows first (H12b seeds them,
+      #2429) and falls back to this configured list when there are none -- before the rows
+      exist, or if they are missing. AiSearchOptions.AllowedIndexes defaults to empty, so
+      without this setting and without rows every call that names an index (record search,
+      semantic search, RAG, visualization) answers 400 INDEX_NOT_ALLOWED. The value is exactly the indexes H2b built and verified
+      on the stamp's OWN search service (InterStepState.AiSearchIndexNames, canonical-catalog
+      order; H4b <- H2b in the DAG) -- never a hand-kept list. Indices the list no longer has
+      are removed.
 
   - key: 'AiSafety__ContentSafety__ManagedIdentity__Enabled'
     per_env_source: 'literal'

@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0483",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0483","generator_id":"gen_eval_set.py@1 F-0483","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0483.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Northcott and Forsythe LLP","firm_invoice_number":"INV-2026-80139","invoice_date":"2026-06-01","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"39138-0025","po_number":"PO-4587524","fees_total":2065.5,"expenses_total":5383.31,"adjustments_total":0.0,"total_due":7448.81,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Yilmaz","title":"Associate","rate":250.0,"billed_as":"Helena Yilmaz"},{"name":"Tomas Hargrove","title":"Associate","rate":260.0,"billed_as":"Tomas Hargrove"},{"name":"Tomas Zielinski","title":"Paralegal","rate":135.0,"billed_as":"Tomas Zielinski"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-06","timekeeper":"Helena Yilmaz","timekeeper_name":"Helena Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":250.0,"amount":50.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-21","timekeeper":"Helena Yilmaz","timekeeper_name":"Helena Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":250.0,"amount":525.0,"narrative":"Conference with client regarding settlement authority for the vendor agreement","codes":["L160","A106"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-25","timekeeper":"Helena Yilmaz","timekeeper_name":"Helena Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":250.0,"amount":150.0,"narrative":"Attend case management conference in the licensing dispute","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-27","timekeeper":"Helena Yilmaz","timekeeper_name":"Helena Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":250.0,"amount":525.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-26","timekeeper":"Tomas Hargrove","timekeeper_name":"Tomas Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":260.0,"amount":208.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-04","timekeeper":"Tomas Zielinski","timekeeper_name":"Tomas Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":135.0,"amount":283.5,"narrative":"Telephone conference with client representative regarding factual background of the customs audit","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-13","timekeeper":"Tomas Zielinski","timekeeper_name":"Tomas Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":135.0,"amount":324.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.9,"amount":7.9,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5375.41,"amount":5375.41,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["623 Federal Plaza","Denver","Tax ID 80-3004055"],"template":"T10","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-05-22","matter_close":"2026-08-29","matter_budget":54795.0,"approved_timekeepers":["Helena Yilmaz","Tomas Zielinski","Tomas Hargrove","Oliver Thornbury","Tomas Lindqvist","Gregory Fairweather"],"invoice_received_date":"2026-06-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

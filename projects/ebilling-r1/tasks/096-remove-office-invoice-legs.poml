@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="ebilling-r1">
+  <metadata>
+    <title>Remove the Office server legs for Invoice as a save target and invoice quick-create</title>
+    <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
+    <gate>blocked until 095 is done AND word-add-in-r1 has removed the add-in's Invoice save target and invoice quick-create AND one add-in release has passed since</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Breaking change to two authorized BFF route contracts (/api/office/save and Office quick-create; tags bff-api, api).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped removal at named lines with an explicit refusal contract; no new design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 095 (dep), which edits OfficeService.cs and OfficeDocumentPersistence.cs.</parallel-reason>
+    <deps>095</deps>
+    <tags>bff-api, api, office, finance</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Invoices are created only by submission (FR-17, FR-20; owner L, model section 9.1). Remove the two Office server legs that create or file onto an invoice outside submission: an Office save whose target is an invoice, and the Office quick-create of an invoice. Each is refused with a stable 400 before any write. Searching invoices and To Do "Related to" an invoice are not changed.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Office add-in BFF routes and ProblemDetails contracts. Follow ADRs strictly.</role>
+
+  <goal>/api/office/save refuses a TargetEntity of type invoice with 400 and writes nothing; Office quick-create refuses entity type Invoice with 400 and writes nothing; the invoice-only quick-create code is deleted; other target types and routes behave as before.</goal>
+
+  <context>
+    <background>Model 9.1 bullets "Invoices are created only by submission" and "Removal order" (add-in first, server legs one release later because cached clients still call them); notes/procedure-model-reviews.md section 4.x item 3. Verified 2026-10-21 (line numbers drift):
+- Save target: the accepted type list is Api/Office/OfficeEndpoints.cs:444-447 ("matter", "project", "invoice", ...). The model's citation OfficeDocumentPersistence.cs:47 is the DirectAssociationAttributes slot list used by the name-collision lookup (:471, :488-489) to report where an EXISTING document is filed; it is not the save-target gate. The document's lookup is set through the shared Spaarke.Dataverse DocumentAssociationMap.TryApply (OfficeDocumentPersistence.cs:304), which other paths also use.
+- Quick-create: Models/Office/QuickCreateRequest.cs:151 (enum value), :180, :193, :213; Services/Office/OfficeService.cs:1880-1886 (scope check) and the Invoice-only block :1899-1964 plus InvoiceDescriptionAttribute / InvoiceAssignedToAttribute (:2047-2051); Api/Filters/QuickCreateSourceAccessFilter.cs:116; the type list in Api/Office/OfficeEndpoints.cs:1764.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (:444-447 save type list; :1755-1765 quick-create type list)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (:1880-1886 scope; delete :1899-1964 invoice leg and :2047-2051 constants if unused)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/Office/QuickCreateRequest.cs (:151, :180, :193, :213)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/QuickCreateSourceAccessFilter.cs (:116)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs:46-47 (keep sprk_invoice in the collision slot list)</file>
+      <file role="modify">tests under tests/unit/Sprk.Bff.Api.Tests/Api/Office and tests/integration/contract/Api/Office that assert an invoice save or invoice quick-create</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 9.1 (owner L), FR-17, FR-20">Every /api/office/save request whose TargetEntity type is invoice (any casing) is refused with 400 ProblemDetails (stable errorCode, message pointing to Submit Invoice) before the job row, the email capture, the upload or any Dataverse write.</constraint>
+    <constraint source="model 9.1 (owner L)">Every Office quick-create request for entity type Invoice is refused with 400 ProblemDetails (stable errorCode) before any read or write. The enum value may stay for request binding; no code path creates sprk_invoice from the Office routes afterwards.</constraint>
+    <constraint source="scope">Unchanged: OfficeDocumentPersistence.DirectAssociationAttributes (an existing document filed to an invoice must still be reported by the collision lookup); the shared DocumentAssociationMap; AssociationEntityType.Invoice in OfficeSearchService (search); To Do "Related to" Invoice (OfficeService.cs:2086); quick-create of Matter and Project.</constraint>
+    <constraint source="ADR-019">Refusals use ProblemDetails with errorCode and correlationId, in the shape of the existing OFFICE_002 invalid-entity-type answer (OfficeEndpoints.cs:1755-1765).</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: publish-size delta against a fresh master build; no new package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 9.1)</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Confirm the gate: word-add-in-r1's release that removed both add-in legs is named, and one later add-in release has shipped; record both in notes. If not, STOP.</step>
+    <step order="1">Grep src/server and tests for "invoice" in the Office save type list, QuickCreateEntityType.Invoice and AssociationType.Invoice; list each hit in notes as remove / keep with the reason.</step>
+    <step order="2">Save: drop "invoice" from the accepted save types and answer the stable 400; add the test.</step>
+    <step order="3">Quick-create: refuse Invoice with the stable 400; delete the invoice-only leg and constants that become unused; drop the Invoice arm from QuickCreateSourceAccessFilter; add the test.</step>
+    <step order="4">Update or delete tests that asserted the removed behaviour; dotnet build; Office unit and contract tests; full ArchTests; publish-size delta.</step>
+    <step order="5">Notes in projects/ebilling-r1/notes/096-remove-office-invoice-legs.md; tell word-add-in-r1 the legs are gone.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any client other than the Office add-in (grep src/client, src/solutions) sends an Office save with an invoice target or an invoice quick-create, STOP and report before removing.</trigger>
+    <trigger>If removing the save type would also stop reporting an existing document's invoice filing in the collision answer, STOP; that list stays.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">OfficeEndpoints.cs, OfficeService.cs, QuickCreateRequest.cs, QuickCreateSourceAccessFilter.cs</output>
+    <output type="test">Updated Office unit and contract tests</output>
+    <output type="docs">projects/ebilling-r1/notes/096-remove-office-invoice-legs.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An /api/office/save with TargetEntity type "invoice" (also "Invoice", "sprk_invoice" if accepted today) → 400 with the stable errorCode; no job row, capture, upload or document is created (test).</criterion>
+    <criterion testable="true">An Office quick-create of entity type Invoice → 400 with the stable errorCode; no sprk_invoice is created (test).</criterion>
+    <criterion testable="true">Saves to matter, project and workassignment targets and quick-create of Matter and Project behave as before (existing tests pass unchanged).</criterion>
+    <criterion testable="true">The collision answer still names an existing document's invoice filing (existing collision tests pass); Office search of invoices and To Do "Related to" Invoice are unchanged.</criterion>
+    <criterion testable="true">No code under src/server/api/Sprk.Bff.Api/Services/Office or Api/Office creates sprk_invoice (grep recorded in notes).</criterion>
+    <criterion testable="true">dotnet build exits 0; Office unit and contract tests and the full ArchTests pass (known pre-existing failures listed by name); publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>No new surface: two refusals replace two legs. The removal order (add-in first, server one release later) is the owner's (model 9.1). A deploy of this change goes with the next WP deploy task; it is not deployed here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

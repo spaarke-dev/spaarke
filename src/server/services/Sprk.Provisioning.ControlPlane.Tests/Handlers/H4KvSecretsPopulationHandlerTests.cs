@@ -1333,10 +1333,10 @@ public sealed class H4KvSecretsPopulationHandlerTests
     /// </summary>
     private static KvSecretsPopulationOptions ValidOptions(
         bool requireSecretFreeIdentity = false, bool secretFreeIdentityRollback = false) => new()
-    {
-        RequireSecretFreeIdentity = requireSecretFreeIdentity,
-        SecretFreeIdentityRollback = secretFreeIdentityRollback,
-    };
+        {
+            RequireSecretFreeIdentity = requireSecretFreeIdentity,
+            SecretFreeIdentityRollback = secretFreeIdentityRollback,
+        };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {

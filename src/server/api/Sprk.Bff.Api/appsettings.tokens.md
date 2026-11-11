@@ -51,6 +51,7 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{INSIGHTS_INDEX_NAME}#` | AI Search derived-intelligence index (AllowedIndexes) | `spaarke-insights-index` |
 | `#{SESSION_FILES_INDEX_NAME}#` | AI Search session-scoped chat-upload index (AllowedIndexes) | `spaarke-session-files` |
 | `#{INVOICES_INDEX_NAME}#` | AI Search invoices index (AllowedIndexes) | `spaarke-invoices-index` |
+| `#{CONTENT_UNDERSTANDING_ENDPOINT}#` | Azure Content Understanding resource endpoint for the invoice reader (`ContentUnderstanding:Endpoint`; ebilling-r1 task 043, D-81). Auth is the BFF managed identity, with the role named in the section's `_comment` in `appsettings.template.json`; there is no key. Set it to an empty string where e-billing reading is not deployed: the reader then reports `ai.invoice.read.not_configured` and the health check is Healthy. **An unreplaced `#{...}#` value stops the host at startup** (`ValidateOnStart` requires an absolute `https` URI). The analyzer pair (`ApiVersion` + `AnalyzerId`) is not a token: it lives in `appsettings.template.json` and is deployed by `scripts/content-understanding/Deploy-Analyzers.ps1`. | `https://spaarke-docintel-invoices-dev.cognitiveservices.azure.com/` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -133,6 +134,7 @@ RAG_REFERENCES_INDEX_NAME=spaarke-rag-references
 INSIGHTS_INDEX_NAME=spaarke-insights-index
 SESSION_FILES_INDEX_NAME=spaarke-session-files
 INVOICES_INDEX_NAME=spaarke-invoices-index
+CONTENT_UNDERSTANDING_ENDPOINT=https://spaarke-docintel-invoices-dev.cognitiveservices.azure.com/
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

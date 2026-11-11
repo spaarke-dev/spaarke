@@ -36,12 +36,22 @@ const BFF = 'https://bff.example.test';
 const mockCalls: string[] = [];
 /** The arguments of every `createDocumentRecords` call, so the parent bind of the project's files can be pinned. */
 const mockDocumentCalls: unknown[][] = [];
+/** The arguments of every `indexUploadedFiles` call (task 022: no index is named, FR-40). */
+const mockIndexCalls: unknown[][] = [];
+/** Task 049 fix round 2: whether the project double reports it was created secure from creation. */
+const mockCreated = { securedAtCreate: false };
 
 jest.mock('../projectService', () => ({
   ProjectService: jest.fn().mockImplementation(() => ({
     createProject: jest.fn().mockImplementation(async () => {
       mockCalls.push('create-project');
-      return { success: true, projectId: '11111111-1111-1111-1111-111111111111', projectName: 'Acme', warnings: [] };
+      return {
+        success: true,
+        projectId: '11111111-1111-1111-1111-111111111111',
+        projectName: 'Acme',
+        warnings: [],
+        ...(mockCreated.securedAtCreate ? { securedAtCreate: true } : {}),
+      };
     }),
   })),
 }));
@@ -57,7 +67,10 @@ jest.mock('../../../services/EntityCreationService', () => ({
       mockCalls.push('document-records');
       return { warnings: [], createdDocumentIds: [] };
     }),
-    indexUploadedFiles: jest.fn().mockResolvedValue([]),
+    indexUploadedFiles: jest.fn().mockImplementation(async (...args: unknown[]) => {
+      mockIndexCalls.push(args);
+      return [];
+    }),
     sendEmail: jest.fn().mockImplementation(async () => {
       mockCalls.push('email');
       return { success: true };
@@ -100,6 +113,14 @@ const provisioned = {
 const refused = (reasonCode: string) =>
   ({ ok: false, status: 500, json: async () => ({ reasonCode, detail: 'operator text' }) }) as unknown as Response;
 
+/** Task 049 fix round 2: a 409 ProblemDetails (title and status, so the thrown ApiError carries its reason code). */
+const conflict = (reasonCode: string) =>
+  ({
+    ok: false,
+    status: 409,
+    json: async () => ({ title: 'Conflict', status: 409, reasonCode, detail: 'operator text' }),
+  }) as unknown as Response;
+
 /** Asks for everything the wizard can add: a file, a work assignment, an event and an email. */
 const everything: IFinishContext = {
   uploadedFiles: [{ id: 'u1', name: 'brief.pdf' } as unknown as IUploadedFile],
@@ -121,9 +142,9 @@ const everything: IFinishContext = {
 const ADDS = ['work-assignment', 'event', 'upload', 'document-records', 'email'];
 
 /**
- * The host's authenticated fetch, told apart by route: the provisioning call answers `provisionResponse`; task 142's
- * Assigned-To sync (`syncAssignedAccess`, which a secure-requested project gets right after provisioning) is logged as
- * its own entry. The sync writes no content and nothing to storage — it is not one of the ADDS this suite holds back.
+ * The host's authenticated fetch, told apart by route: the provisioning call answers `provisionResponse`; an
+ * Assigned-To sync (`syncAssignedAccess`) would be logged as its own entry. Task 022: the wizard makes no such call any
+ * more (the server's create runs the Assigned * pass), so no expected sequence below contains it.
  */
 // authenticatedFetch THROWS ApiError for a non-2xx: the double turns a refused provision answer into that failure.
 const bffFetch = (provisionResponse: Response) =>
@@ -157,6 +178,8 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
     mockShell.config = undefined;
     mockCalls.length = 0;
     mockDocumentCalls.length = 0;
+    mockIndexCalls.length = 0;
+    mockCreated.securedAtCreate = false;
     consoleSpies = (['info', 'error', 'warn'] as const).map(m => jest.spyOn(console, m).mockImplementation(() => {}));
   });
 
@@ -172,7 +195,7 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
 
     const success = await finish(true, authFetch);
 
-    expect(mockCalls).toEqual(['create-project', 'provision', 'assigned-access-sync']);
+    expect(mockCalls).toEqual(['create-project', 'provision']);
     expect(success.warnings).toContain(
       describeHeldBackForSecure(['the work assignment', 'the event', 'the files you attached', 'the email'])
     );
@@ -206,6 +229,18 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
     expect(mockCalls).toEqual(expect.arrayContaining(['create-project', ...ADDS]));
   });
 
+  it.each([true, false])(
+    'makes no client Assigned-To sync, and indexes the files without naming an index (task 022; secure: %s)',
+    async isSecure => {
+      await finish(isSecure, bffFetch(provisioned));
+
+      expect(mockCalls).not.toContain('assigned-access-sync');
+      // FR-40: the index follows the content type; the server's FileIndexRequest has no searchIndexName.
+      expect(mockIndexCalls).toHaveLength(1);
+      expect(mockIndexCalls[0]).toHaveLength(4);
+    }
+  );
+
   it('files the project documents under the parent column: sprk_projects / project id / nav prop sprk_Project (task 162)', async () => {
     // Live metadata (spaarkedev1): sprk_document.sprk_project -> nav prop `sprk_Project`, the column the Project form's
     // Documents subgrid reads. `sprk_RelatedProject` (column sprk_relatedproject) is the other lookup and must not be used.
@@ -214,6 +249,53 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
     expect(mockDocumentCalls).toHaveLength(1);
     const [entitySet, parentId, navProp] = mockDocumentCalls[0];
     expect([entitySet, parentId, navProp]).toEqual(['sprk_projects', PROJECT_ID, 'sprk_Project']);
+  });
+});
+
+describe('CreateProjectWizard — a project created secure from creation (task 049 fix round 2, UAC-r2 ruling D2)', () => {
+  let consoleSpies: jest.SpyInstance[];
+
+  beforeEach(() => {
+    mockShell.config = undefined;
+    mockCalls.length = 0;
+    mockDocumentCalls.length = 0;
+    mockIndexCalls.length = 0;
+    mockCreated.securedAtCreate = false;
+    consoleSpies = (['info', 'error', 'warn'] as const).map(m => jest.spyOn(console, m).mockImplementation(() => {}));
+  });
+
+  afterEach(() => consoleSpies.forEach(s => s.mockRestore()));
+
+  it('already_provisioned after a secure-from-creation create is success: nothing is held back', async () => {
+    mockCreated.securedAtCreate = true;
+    const authFetch = bffFetch(conflict('sdap.provision.already_provisioned'));
+
+    const success = await finish(true, authFetch);
+
+    expect(mockCalls[0]).toBe('create-project');
+    expect(mockCalls[1]).toBe('provision');
+    expect(mockCalls.slice(2)).toEqual(expect.arrayContaining(ADDS));
+    expect((success.warnings ?? []).join(' ')).not.toMatch(/nothing reached shared storage|already secured/);
+  });
+
+  it('already_provisioned after an ordinary create stays a failure: everything is held back', async () => {
+    const authFetch = bffFetch(conflict('sdap.provision.already_provisioned'));
+
+    const success = await finish(true, authFetch);
+
+    expect(mockCalls).toEqual(['create-project', 'provision']);
+    expect(success.warnings).toContain(
+      describeHeldBackForSecure(['the work assignment', 'the event', 'the files you attached', 'the email'])
+    );
+  });
+
+  it('any other refusal after a secure-from-creation create is still a failure: everything is held back', async () => {
+    mockCreated.securedAtCreate = true;
+    const authFetch = bffFetch(conflict('sdap.provision.owned_by_other_secure_team'));
+
+    await finish(true, authFetch);
+
+    expect(mockCalls).toEqual(['create-project', 'provision']);
   });
 });
 

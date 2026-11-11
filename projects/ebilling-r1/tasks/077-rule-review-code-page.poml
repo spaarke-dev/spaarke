@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="ebilling-r1">
+  <metadata>
+    <title>Rule Review code page</title>
+    <phase>3 Rules (WP3) — wave W3-3</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend over 076's API; authorization and validation are enforced server-side, so the page is presentation and workflow.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Code page built from an existing page skeleton and shared Fluent v9 components with a fixed API contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>076</deps>
+    <tags>frontend, code-page, fluent-ui</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Rule Review code page (FR-28): an admin creates a rule set from a guideline document, starts drafting, reviews each proposed rule beside its quoted clause, edits, rejects or accepts it, publishes the set (seeing that clause quotes will be visible to firms when the flag is on), assigns the set to the client default or a firm and toggles "visible to firms".</prompt>
+
+  <role>SPAARKE frontend developer. Expert in React 18/19 code pages, Fluent UI v9 tokens, @spaarke/ui-components and @spaarke/auth.</role>
+
+  <goal>A single-file web resource built from src/solutions/RuleReview/ that drives every 076 route (plus 075's draft trigger), registers the Navigator side pane, passes the ui-tests below including dark mode, and adds no npm package.</goal>
+
+  <context>
+    <background>Spec FR-28, D-66 (publish message "clause quotes will be visible to firms"), NFR-13 (Fluent v9, shared components). API: 076 routes under /api/finance/rulesets (list, detail with proposals and describer text, create with upload, edit, reject, accept, publish, assignment, visibility) and 075's draft trigger returning 202 with a job status URL (ADR-017). Server enforces admin-only (403); the page hides write actions when a call returns 403 and shows a read-only notice. Skeleton to copy: src/solutions/CommunicationReconciliation/ (vite single-file build, package.json build script, main.tsx imports from @spaarke/ui-components including resolveCodePageTheme, setupCodePageThemeListener, AppErrorBoundary, getXrm, ensureNavigatorSidePane at :45-53, registration in a mount effect at :188-197). Shared components: PanelSplitter and useTwoPanelLayout (proposal list beside clause pane), DataGrid framework for the proposals list, SprkModal FormModal preset (reject reason, publish confirmation; ADR-050), StatusBadge for Draft / Accepted / Rejected / Published.</background>
+    <relevant-files>
+      <file role="new">src/solutions/RuleReview/ (index.html, package.json, vite.config.ts, tsconfig*.json, src/main.tsx, src/App.tsx, src/services/ruleSetApi.ts, src/components/)</file>
+      <file role="new">src/solutions/RuleReview/src/__tests__/ (component tests where the copied skeleton supports them)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="076" status="pending">Rule set API</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021, NFR-13">Fluent UI v9 only, semantic tokens only (no hard-coded colours); works in light, dark and high-contrast. Style a wrapper div, not the FluentProvider (project gotcha F-10).</constraint>
+    <constraint source="ADR-012">Shared components first (@spaarke/ui-components); a new shared component only with a CLAUDE.md section 11 justification in notes.</constraint>
+    <constraint source=".claude/patterns/webresource/full-page-custom-page.md, ADR-026">Single self-contained HTML output; no React Router; guard every Xrm access; initAuth from @spaarke/auth before rendering, BFF calls through authenticatedFetch / useAuth (ADR-028).</constraint>
+    <constraint source="root CLAUDE.md section 17">Register the Navigator side pane with ensureNavigatorSidePane() on mount.</constraint>
+    <constraint source="ADR-050">Modals through the SprkModal / FormModal shell.</constraint>
+    <constraint source="NFR-12">No new npm package; install with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+    <constraint source="ADR-002">The page previews and calls the server; it never writes Dataverse policy rows directly through Xrm.WebApi.</constraint>
+    <constraint source="076 round-2 re-check K3 (accept/reject staleness)">An admin must never accept or reject draft content they were not shown. Accept and Reject send the version of the draft the page displayed (its row version or modifiedon, whichever 076's read returns). 076's decide endpoint refuses a mismatch with 409 (modifying 076's existing decide surface: add the expected-version input, required from this UI). On 409 the UI reloads the draft and shows what changed. Required tests: admin A loads, admin B edits, admin A accepts: 409, nothing accepted; an unchanged draft accepts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page skeleton" location="src/solutions/CommunicationReconciliation/src/main.tsx">Theme, auth, error boundary, Navigator registration.</pattern>
+      <pattern name="Canonical Vite single-file config" location="src/solutions/EventsPage/vite.config.ts">viteSingleFile, assetsInlineLimit, manualChunks undefined.</pattern>
+      <pattern name="Two-panel layout" location="src/client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout.ts">Proposal list on the left, rule detail beside its clause on the right.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Scaffold src/solutions/RuleReview/ from CommunicationReconciliation (build script output name sprk_rulereviewpage.html, directional); npm install with the flags above.</step>
+    <step order="2">Rule set list: name, scope (client default or firm), status, visible-to-firms, effective date; "New rule set" FormModal with document upload, name, scope, firm, source kind.</step>
+    <step order="3">Rule set detail: proposals grid (type, plain-language description, consequence, status badge) and a detail pane showing the proposed rule beside the quoted clause and its location; edit parameters with typed inputs per rule type and a consequence choice; reject (reason) and accept actions; "Draft rules" button calling the 075 trigger and polling job status; not-converted text listed.</step>
+    <step order="4">Publish: confirmation FormModal with effective date; when visible-to-firms is on, the text "Clause quotes will be visible to firms"; show per-rule validation errors returned by the server; assignment and visibility controls.</step>
+    <step order="5">Error handling: ProblemDetails title and stable code shown; 403 switches the page to read-only; eBilling-disabled code shows a disabled notice.</step>
+    <step order="6">Build (npm run build), check the single-file output, run component tests; run the ui-tests below against dev after 079 deploys (or a local dev server with mocked API for the visual checks).</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (web resource name, entry point) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a needed shared component is missing (for example a typed parameter editor), STOP and propose either composing existing Fluent v9 controls in the page or a shared-library addition with justification; do not copy components from the prototype repository.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Invoice Review and Rule Review code pages" (overlap: sprk_invoicespage grid); no rule review UI exists (Glob src/solutions/* shows none).</existing>
+    <extension>No — sprk_invoicespage is an invoice grid; rule review needs a document-clause workspace with publish workflow. The page reuses shared components rather than adding new ones.</extension>
+    <cost-of-doing-nothing>Admins cannot review or publish drafted rules, so FR-28 and success criterion 3 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Page renders and registers Navigator">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_rulereviewpage</url>
+      <steps>
+        <step>Open the page as a billing admin</step>
+        <step>Verify the rule set list loads and the Navigator side pane is docked</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>List renders, Navigator present, no console errors</expected>
+    </test>
+    <test name="Review and publish">
+      <steps>
+        <step>Open a rule set with Draft proposals</step>
+        <step>Select a proposal; verify the clause quote and location appear beside the rule</step>
+        <step>Edit a parameter, accept it; reject another with a reason</step>
+        <step>Publish with visible-to-firms on; verify the confirmation states clause quotes will be visible to firms</step>
+      </steps>
+      <expected>Statuses update; publish succeeds; rejected proposal not published</expected>
+    </test>
+    <test name="Publish refused">
+      <steps>
+        <step>Accept a proposal the server will refuse (for example AiObservation with consequence Reject)</step>
+        <step>Publish</step>
+      </steps>
+      <expected>Per-rule error shown; nothing published</expected>
+    </test>
+    <test name="Non-admin">
+      <steps>
+        <step>Open the page as a user without the admin right</step>
+        <step>Attempt any write action</step>
+      </steps>
+      <expected>Read-only notice; write actions hidden or refused with 403 surfaced</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the app theme to dark</step>
+        <step>Verify no white backgrounds or black text in list, detail pane, grid and modals</step>
+        <step>Verify icons use currentColor and badges remain legible</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build, test</tool>
+    <tool name="ui-test">browser checks via the ui-test skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/RuleReview/</output>
+    <output type="test">src/solutions/RuleReview/src/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build produces one self-contained HTML file; package.json adds no dependency beyond those in the copied skeleton.</criterion>
+    <criterion testable="true">Every 076 operation and the 075 draft trigger are reachable from the page and reflect server results (including ProblemDetails errors).</criterion>
+    <criterion testable="true">Each proposal is shown beside its clause quote and location.</criterion>
+    <criterion testable="true">The publish confirmation shows "clause quotes will be visible to firms" exactly when the rule set's flag is on.</criterion>
+    <criterion testable="true">A 403 response switches the page to read-only; the eBilling-disabled code shows a disabled notice.</criterion>
+    <criterion testable="true">ensureNavigatorSidePane() is called on mount.</criterion>
+    <criterion testable="true">The ui-tests above pass, including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deployment of the web resource is 079's. How admins open the page (sitemap subarea or a command on the rule set form) is a solution change: 079 raises it if no entry exists. Parallel group P3-C with 072: no file overlap.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

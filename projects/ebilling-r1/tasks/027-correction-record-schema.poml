@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="ebilling-r1">
+  <metadata>
+    <title>Correction record schema</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New table (or columns) and a new script file; includes one recorded design decision; no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema script with an exact field list from D-64; the shape decision has stated criteria and a recommendation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Decide the shape of the D-64 structured correction record (columns on the invoice line vs a child table), record the decision as a proposed D-entry, and create it in dev with an idempotent Web API script so every reviewer confirmation and correction can be stored and queried per Action version.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse data modelling and metadata Web API scripting. Follow ADRs strictly.</role>
+
+  <goal>The decision is in projects/ebilling-r1/notes/decisions-log.md (proposed D-entry) and task notes; scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 has created the chosen shape in spaarkedev1 (second run: no change); docs/data-model describes it.</goal>
+
+  <context>
+    <background>D-64 and FR-31: every confirmation and correction is stored in structured form — field, AI value, final value, AI confidence, Action / analyzer code and version, outcome type (Corrected, Confirmed individually, Accepted in bulk, Unreviewed), reviewer and role, when — queryable per Action version (feeds the D-47 calibration report, task 161). Only Corrected and Confirmed individually count as labels. Spec section New Components row "Structured correction record": Dataverse audit is not queryable per Action version or field. Writers: task 101 (corrections), 100 (bulk accept), 103 (approve implies Accepted in bulk). The tuning platform (spaarkeai-tuning-and-feedback-r1) consumes this later; build nothing for it beyond D-64.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_invoicecorrection.md (name per the decision)</file>
+      <file role="modify">docs/data-model/INDEX.md (one row)</file>
+      <file role="modify">projects/ebilling-r1/notes/decisions-log.md (one proposed D-entry)</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:585 (MSCRM.SolutionUniqueName header)</file>
+      <file role="canonical-reference">docs/data-model/sprk_billingevent.md (current line columns)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Parallel with 010 (line columns); this task adds no column to sprk_billingevent if a child table is chosen.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">One script, scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1, dev only (spaarkedev1), -WhatIf supported, existence checks before every create, entity-scoped PublishXml.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029). Additive only.</constraint>
+    <constraint source="project">The outcome type is a closed choice with exactly the four D-64 values; Action / analyzer code and version are separate filterable columns.</constraint>
+    <constraint source="ADR-015">AI and final values may contain invoice narrative text; the data-model doc states this and that logs never carry these values. No AI prompt content is stored.</constraint>
+    <constraint source="project">Shared append point docs/data-model/INDEX.md: re-read before editing, add only this row.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Structured feedback capture (D-64)</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + decision">Declare RIGOR LEVEL: STANDARD. Read D-64, D-47, FR-31. Decide the shape with these criteria: several fields per line each need their own AI value, confidence and outcome; header fields are corrected too (no line); one value can be confirmed then corrected later; rows must be queried per Action version. Recommendation: a child table sprk_invoicecorrection (columns on the line cannot hold per-field history). Write the decision and rationale as a proposed D-entry in notes/decisions-log.md.</step>
+    <step order="1" name="Table + columns">If the child table is chosen: user/team-owned table sprk_invoicecorrection (display "Invoice Correction"), primary name sprk_name (text 200). Columns: sprk_fieldname (text 100); sprk_aivalue (multiline 4000); sprk_finalvalue (multiline 4000); sprk_aiconfidence (decimal 0-1, precision 4); sprk_outcometype (local choice Corrected, Confirmed individually, Accepted in bulk, Unreviewed); sprk_islabel (yes / no — true only for Corrected and Confirmed individually); sprk_sourcecode (text 100, Action code or analyzer id, e.g. INVOICE-LINE-CODE or sprk_invoice_v1); sprk_sourceversion (text 20); sprk_reviewerrole (text 100); sprk_reviewedon (date and time).</step>
+    <step order="2" name="Lookups">OneToMany (Delete = RemoveLink for reviewer, Cascade for invoice and line): sprk_invoice → sprk_invoice (required); sprk_invoiceline → sprk_billingevent (empty for header fields); sprk_reviewedby → systemuser.</step>
+    <step order="3" name="Run">Header MSCRM.SolutionUniqueName = SpaarkeMaster. -WhatIf, real run, second run no change.</step>
+    <step order="4" name="Verify">Metadata read; a FetchXML query in dev filtering by sprk_sourcecode + sprk_sourceversion + sprk_outcometype on a test row returns it (test rows removed afterwards). Record in task notes.</step>
+    <step order="5" name="Docs">docs/data-model/sprk_invoicecorrection.md: columns, outcome semantics (only Corrected and Confirmed individually are labels), append-only expectation for writers, ADR-015 note; INDEX.md row.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="7">Record deviations in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the analysis favours columns on sprk_billingevent instead of a child table, STOP and confirm with the owner before creating anything, because task 010 owns that table's columns.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Dataverse audit history on changed rows; no correction or feedback table exists (git grep for sprk_*correction / sprk_*feedback in src finds nothing; spaarkeai-tuning-and-feedback-r1 has notes only).</existing>
+    <extension>No — audit records are not queryable per field, Action version or outcome type and carry no AI confidence (spec section New Components).</extension>
+    <cost-of-doing-nothing>No calibration report (D-47, task 161), corrections cannot be told apart from bulk acceptance, and the later tuning platform has no labelled history to load (D-64).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="mcp-dataverse">describe and read_query for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_invoicecorrection.md, INDEX.md row, decisions-log proposed D-entry</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The shape decision with its rationale is recorded as a proposed D-entry in notes/decisions-log.md.</criterion>
+    <criterion testable="true">A metadata read in spaarkedev1 lists every column and lookup in steps 1-2, including exactly four sprk_outcometype values.</criterion>
+    <criterion testable="true">A row without sprk_invoice is refused; a header-field row with empty sprk_invoiceline is accepted.</criterion>
+    <criterion testable="true">A query filtered by source code, source version and outcome type returns the matching test row (queryable per Action version).</criterion>
+    <criterion testable="true">A second run reports no change; -WhatIf makes no change; no file under src/dataverse/solutions/SpaarkeMaster/ is modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    sprk_islabel is stored rather than derived so the calibration query (161) and the later platform filter labels without re-implementing the rule; writers set it from the outcome type.
+    Open for 013 / uac-r2 (not this task): secure-record family membership of the correction table (it holds values from secure invoices).
+    COMPLETED 2026-10-15. Child table sprk_invoicecorrection chosen (D-82 proposed in notes/decisions-log.md); created in spaarkedev1 by scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 (second run: created 0, changed 0, skipped 27). Line lookup is RemoveLink, not Cascade: Dataverse allows one cascade-delete (parental) relationship per table and the invoice is the parent. Added the ADR-024 sprk_regarding* trio + resolver fields (invoice-family shape, as 021) and SystemRequired on sprk_invoice, sprk_fieldname, sprk_outcometype. Live test: row without invoice refused; header row (no line) accepted; FetchXML on source code + version + outcome returned the matching row; test rows deleted. Details: notes/027-correction-record-schema.md; docs/data-model/sprk_invoicecorrection.md.
+    rework: fix-round-1 task 027
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

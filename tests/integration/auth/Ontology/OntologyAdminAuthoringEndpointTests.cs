@@ -488,6 +488,52 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         _fixture.World.Writes.Should().BeEmpty();
     }
 
+    /// <summary>ebilling-r1 070 fix-round-2 (ontology-r1's paired change): a billing rule type is refused by the one shared
+    /// validation on <c>ruleType</c> with code <c>ontology.admin.rule_type_wrong_domain</c>, identically on every authoring route, never as a
+    /// <c>ruleBody</c> error, and nothing is evaluated or written. The body is a valid Ontology body, so only the type is wrong.</summary>
+    [Theory]
+    [InlineData("ApprovedTimekeeper")]
+    [InlineData("100000003")]
+    [InlineData("AiObservation")]
+    public async Task ABillingRuleType_IsRefusedOnRuleType_WithTheWrongDomainCode_ByValidateDryRunSaveAndPublish(string ruleType)
+    {
+        const string code = "ontology.admin.rule_type_wrong_domain";
+        var draft = new
+        {
+            ruleType,
+            ruleBody = Body,
+            messageTemplate = Template,
+            shortHeadline = "Needs a look",
+            proposedAction = "Review the matter",
+            decisionPlan = DecidePlan,
+        };
+
+        var validate = await Json(await Validate(draft));
+        var dryRunExisting = await _client.PostAsJsonAsync($"{Root}/dry-run",
+            new { policyId = (Guid?)PolicyId, lane = (string?)null, ruleType, ruleBody = Body, messageTemplate = Template });
+        var dryRunNew = await _client.PostAsJsonAsync($"{Root}/dry-run",
+            new { policyId = (Guid?)null, lane = "Decide", ruleType, ruleBody = Body, messageTemplate = Template });
+        var save = await Save(draft: draft);
+        var publish = await Publish(PolicyId, draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be(code);
+        ValidateErrors(validate).Keys.Should().Equal("ruleType");
+        validate.GetProperty("templateEligibleFields").GetArrayLength().Should().Be(0, "nothing was compiled");
+        foreach (var (route, response) in new[] { ("dry run", dryRunExisting), ("dry run (new)", dryRunNew), ("save", save), ("publish", publish) })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            (await ReasonOf(response)).Should().Be(code, route);
+            var errors = (await Json(response)).GetProperty("errors");
+            errors.EnumerateObject().Select(p => p.Name).Should().Equal(new[] { "ruleType" }, route);
+            errors.GetProperty("ruleType")[0].GetString()
+                .Should().Be(ValidateErrors(validate)["ruleType"][0], $"{route} and validate give the same message");
+        }
+
+        _fixture.Engine.Evaluated.Should().BeEmpty("a billing rule type is never evaluated by the Ontology dry run");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
     // ── Dry run (#39) ─────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -1885,7 +1931,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
                     value = Versions.Where(v => v.Value.PolicyId == policy)
                         .Select(v => new
                         {
-                            sprk_policyversionid = v.Key.ToString("D"), sprk_versionnumber = v.Value.Number, sprk_inforceto = v.Value.InForceTo,
+                            sprk_policyversionid = v.Key.ToString("D"),
+                            sprk_versionnumber = v.Value.Number,
+                            sprk_inforceto = v.Value.InForceTo,
                             versionnumber = v.Value.RowVersion,
                         })
                         .ToArray(),
@@ -1997,27 +2045,27 @@ public sealed class AuthoringWorld : IDataverseUserClient
             switch (absoluteApiPath)
             {
                 case "/api/data/v9.2/sprk_policies":
-                {
-                    var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
-                    AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
-                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
-                        matter: MatterOf(json));
-                    foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
                     {
-                        AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
+                        AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
+                            json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
+                            matter: MatterOf(json));
+                        foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
+                        {
+                            AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        }
+
+                        Writes.Add(new Write("POST sprk_policies", json, null));
+                        return NoContent();
                     }
 
-                    Writes.Add(new Write("POST sprk_policies", json, null));
-                    return NoContent();
-                }
-
                 case "/api/data/v9.2/sprk_policyversions":
-                {
-                    var policy = Guid.Parse(Regex.Match(json.GetProperty("sprk_Policy@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
-                    AddVersion(Guid.Parse(json.GetProperty("sprk_policyversionid").GetString()!), policy, json.GetProperty("sprk_versionnumber").GetInt32(), null);
-                    Writes.Add(new Write("POST sprk_policyversions", json, null));
-                    return NoContent();
-                }
+                    {
+                        var policy = Guid.Parse(Regex.Match(json.GetProperty("sprk_Policy@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
+                        AddVersion(Guid.Parse(json.GetProperty("sprk_policyversionid").GetString()!), policy, json.GetProperty("sprk_versionnumber").GetInt32(), null);
+                        Writes.Add(new Write("POST sprk_policyversions", json, null));
+                        return NoContent();
+                    }
 
                 default:
                     throw new InvalidOperationException($"Unexpected create: {absoluteApiPath}");

@@ -5,13 +5,13 @@ techStack: [pcf-framework, typescript, react, dataverse]
 appliesTo: ["**/pcf/**", "deploy pcf", "build and deploy pcf", "pcf solution import"]
 alwaysApply: false
 exemplar: src/client/pcf/SemanticSearchControl/
-last-reviewed: 2026-05-17
+last-reviewed: 2026-11-03
 ---
 
 # PCF Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Reviewed**: 2026-05-17
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — fixed 2 broken ADR file paths; added FAILURE-MODES.md#AP-1 cross-reference; `leave-alone-justified` on body length per dereferencing-reliability concern)
 > **Exemplar rationale**: `src/client/pcf/SemanticSearchControl/` is the canonical PCF control — named throughout this skill's body. Live, verifiable reference.
 > **AP-1 fix verified in skill** (2026-05-14): Wrong "NEVER use npm run build:prod" instruction was removed. The Bundle Size & Production Mode section now mandates the correct `pcf-scripts build --buildMode production`. See [FAILURE-MODES.md#AP-1](../../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong) for incident history.
@@ -228,6 +228,20 @@ All paths relative to the repository root. **Claude Code MUST use these exact pa
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 1: Version Bump (ALL 5 Locations)
+- [ ] Step 1.5: Compile Shared Library (if modified)
+- [ ] Step 2: Build Fresh
+- [ ] Step 3: Copy Build Output to Solution
+- [ ] Step 4: Pack Solution ZIP
+- [ ] Step 5: Import to Dataverse
+- [ ] Step 6: Verify (solution version equals the ZIP `<Version>`, importjob `progress` is 100)
+```
+
 ## Deployment Steps
 
 ### Step 1: Version Bump (ALL 5 Locations)
@@ -304,14 +318,10 @@ Controls/sprk_Spaarke.Controls.{ControlName}/css/*.css  (if applicable)
 ### Step 5: Import to Dataverse
 
 ```bash
-# Disable CPM if needed
-mv /c/code_files/{worktree}/Directory.Packages.props{,.disabled}
-
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
-
-# Restore CPM
-mv /c/code_files/{worktree}/Directory.Packages.props{.disabled,}
 ```
+
+(No "disable CPM" step any more: `Directory.Packages.props` was removed on 2026-11-10. A worktree branched before that may still have it; if `pac` reports NU1008 there, rename it aside for the command.)
 
 ### Step 6: Verify
 
@@ -330,6 +340,8 @@ pac solution list | grep -i "{SolutionName}"
 ```
 
 Hard refresh browser (`Ctrl+Shift+R`) and verify version footer in the PCF control.
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ---
 

@@ -100,8 +100,8 @@ gh run watch
 | Job | Purpose | Blocking? |
 |-----|---------|-----------|
 | `classify` (Classify Diff) | Path-aware diff classification | — |
-| Tier 1 → `ci-tier1-blocking.yml` | Compile (Debug) · Arch Tests (full suite) · Changed-Surface Integration Smoke · Auth Smoke · Eval Gate (Golden Utterances) · Tenant Isolation (I1–I5) · Compose Fidelity Gate · Xrm Capability Guard (getXrm AST scan; on client/solution/workflow changes) · DataGrid External-Host Gate (advisory until its flip) | **Yes** (DataGrid gate: no, until flipped) |
-| Tier 2 → `ci-tier2-advisory.yml` | Format (`dotnet format`) · Lint (ESLint + Prettier) · Full Unit Tests · ADR Compliance (NetArchTest) · Markdown Link Validator · Last Reviewed Stamp · Plugin Size (ADR-002) · one deduplicated advisory PR comment | No — excluded from the gate by construction |
+| Tier 1 → `ci-tier1-blocking.yml` | Compile (Debug) · Arch Tests (full suite) · Changed-Surface Integration Smoke · Auth Smoke · Eval Gate (Golden Utterances) · Tenant Isolation (I1–I5) · Compose Fidelity Gate · Xrm Capability Guard (getXrm AST scan; on client/solution/workflow changes) · Format (changed C# files under `src/`, `tests/`) · DataGrid External-Host Gate (advisory until its flip) | **Yes** (DataGrid gate: no, until flipped) |
+| Tier 2 → `ci-tier2-advisory.yml` | Format (`dotnet format`, whole solution — backstop) · Lint (ESLint + Prettier) · Full Unit Tests · ADR Compliance (NetArchTest) · Markdown Link Validator · Last Reviewed Stamp · Plugin Size (ADR-002) · one deduplicated advisory PR comment | No — excluded from the gate by construction |
 | `router-result` (**Router**) | `if: always()` + `re-actors/alls-green` over the tiers — its result IS the required check | **Yes** |
 
 The legacy `sdap-ci.yml` and `sdap-ci-docs-only.yml` were retired 2026-10-14 (archived at `docs/archive/workflows/`). Checks with no Router equivalent run in `ci-standalone-checks.yml` (dependency audit, Release build + `deployment-packages`, Compose client gate, client typecheck, PCF ESLint; advisory). Master failures raise quality alerts: `master-ci-alert.yml` (`router-master`, `tier2-master/full-unit-tests`, `master-ci-alert/evaluation`) and the standalone `alerts` job (`ci-standalone/*`).
@@ -242,6 +242,7 @@ Verify:  curl https://{app}.azurewebsites.net/ping
 | Tier 1 `Tenant Isolation (I1–I5 invariants)` | A tenant-isolation ArchTest failed | Read the failing invariant test; never weaken it |
 | Tier 1 `Xrm Capability Guard (getXrm AST scan)` | A `getXrm(...)` value is used for a member its requested capability does not cover, or the analyzer reported a blind spot | Read file:line in the log; request the capability the code calls (or rewrite the shape); run `npx jest src/utils/__tests__/xrmCapabilityUsage.guard.test.ts` in `Spaarke.UI.Components` |
 | Tier 1 smoke / eval / Compose gates | Changed surface broke an integration path | Read the job log; reproduce with the named test project |
+| Tier 1 `Format (changed C# files)` | A changed `.cs` file under `src/` or `tests/` is not whitespace-formatted (usually a `--no-verify` commit) | `dotnet format whitespace . --folder --include <file>...`, commit, push. Check before pushing: `bash scripts/quality/check-changed-cs-format.sh origin/master` |
 | Tier 2 (any) | Format, lint, unit test, ADR compliance, links, stamps | Advisory — does not block, but fix what the PR comment lists |
 
 ### View Detailed Logs

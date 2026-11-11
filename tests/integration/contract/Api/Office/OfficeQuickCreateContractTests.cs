@@ -59,7 +59,7 @@ public class OfficeQuickCreateContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndLeavesTheNumberToThePlatform()
+    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeAndOwner_NoSearchIndex_AndLeavesTheNumberToThePlatform()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -90,8 +90,8 @@ public class OfficeQuickCreateContractTests
         matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         matter.GetAttributeValue<string>("sprk_mattername").Should().Be("Acme v. Globex");
         matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be("From Word");
-        matter.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
-        matter.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
+        matter.Contains("sprk_searchindexname").Should().BeFalse("the index follows the content type, not the unit (task 041)");
+        matter.Contains("sprk_ai_search_index").Should().BeFalse("the index follows the content type, not the unit (task 041)");
         AssertNumberLeftToThePlatform(matter);
         matter.Contains("sprk_containerid").Should().BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
     }
@@ -224,9 +224,11 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
 
-        // One source read spanning every Copy field and every placeholder.
+        // One source read spanning every Copy field and every placeholder, plus the source's owner and secure flag (the
+        // mapping-source rule's own columns, read in the same request).
         requestedColumns.Single().Should().BeEquivalentTo(
-            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber");
+            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber",
+            "ownerid", "sprk_issecure");
 
         var matter = created.Entity!;
         matter.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
@@ -885,7 +887,7 @@ public class OfficeQuickCreateContractTests
         factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => requests.Add(columns))
-            .ReturnsAsync(source);
+            .ReturnsAsync(source.WithGate());
         return requests;
     }
 

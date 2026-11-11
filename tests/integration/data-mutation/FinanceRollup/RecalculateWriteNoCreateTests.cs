@@ -56,6 +56,68 @@ public class RecalculateWriteNoCreateTests
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    // ── ebilling-r1 #2081 fix round 2: the update-only overload that KEEPS impersonation ─────────────────────────────────
+
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_AsAUser_SendsIfMatchStar_AndTheImpersonationHeader()
+    {
+        var handler = new RecordingHandler(PatchReturns(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+        var id = Guid.NewGuid();
+        var caller = Guid.NewGuid();
+
+        await sut.UpdateExistingRecordFieldsAsync(
+            "sprk_invoice", id, new Dictionary<string, object?> { ["sprk_name"] = "x" }, caller);
+
+        var patch = handler.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Patch).Subject;
+        patch.Target!.ToString().Should().EndWith($"sprk_invoices({id})");
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*", "update-only: a deleted row is never re-created");
+        patch.Values(DataverseImpersonation.CallerIdHeader).Should().ContainSingle().Which.Should().Be(caller.ToString(),
+            "the write still acts as the person");
+    }
+
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithNoUser_IsTheAppOnlyUpdateOnlyPatch()
+    {
+        var handler = new RecordingHandler(PatchReturns(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync(
+            "sprk_invoice", Guid.NewGuid(), new Dictionary<string, object?> { ["sprk_name"] = "x" }, impersonateSystemUserId: null);
+
+        var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+        patch.Values(DataverseImpersonation.CallerIdHeader).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.PreconditionFailed)]
+    public async Task UpdateExistingRecordFieldsAsync_AsAUser_RecordAbsent_ThrowsKeyNotFound(HttpStatusCode refusal)
+    {
+        var handler = new RecordingHandler(PatchReturns(refusal));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync(
+            "sprk_invoice", Guid.NewGuid(), new Dictionary<string, object?> { ["sprk_name"] = "x" }, Guid.NewGuid());
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        handler.Requests.Count(r => r.Method == HttpMethod.Patch).Should().Be(1, "nothing is retried, so nothing is created");
+    }
+
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_AsTheEmptyUser_IsRefusedBeforeAnythingIsSent()
+    {
+        var handler = new RecordingHandler(PatchReturns(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync(
+            "sprk_invoice", Guid.NewGuid(), new Dictionary<string, object?> { ["sprk_name"] = "x" }, Guid.Empty);
+
+        await act.Should().ThrowAsync<ArgumentException>("an empty caller id must not become an app-only write (task 104)");
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+    }
+
     [Fact]
     public async Task UpdateRecordFieldsAsync_IsUnchanged_StillSendsNoIfMatch()
     {

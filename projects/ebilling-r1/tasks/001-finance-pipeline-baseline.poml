@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ebilling-r1">
+  <metadata>
+    <title>Baseline the existing Finance pipeline and dev rollups</title>
+    <phase>0 Baseline and AI foundations (WP0)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Investigation with a live dev run and a written evidence note; no production code change (defects are fixed in scope only when trivial, else filed).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only investigation against named files with a fixed checklist (FR-01); no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>finance, investigation, dataverse, ai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Verify the existing Finance invoice pipeline end to end in dev and check dev matter finance rollups (spec FR-01), recording pass / fail per step with evidence in notes/baseline-finance-pipeline.md. Every defect found is fixed in scope (only if trivial and inside the files named here) or filed with /project-defer-issue-tracking and listed.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Finance module, Service Bus job handlers and Dataverse Web API reads.</role>
+
+  <goal>projects/ebilling-r1/notes/baseline-finance-pipeline.md exists with one row per pipeline step (classification gate, PB-013 extraction configuration, InvoiceExtractionJobHandler, writes to sprk_invoice and sprk_billingevent, InvoiceIndexingJobHandler, matter / project finance rollups) each marked PASS / FAIL / NOT-PRESENT with evidence (log line, record id, query result, or file:line), and a defect list where every item is either fixed or has a GitHub issue number.</goal>
+
+  <context>
+    <background>eBilling R1 migrates and replaces parts of this pipeline (D-52: classification migrates to an Action, legacy extraction is retired in 050). Later tasks need a truthful picture of what works today. Rollups are ontology DI-69 / issue #1663. The handler's own header says "MVP: Stores extraction as JSON on invoice, updates matter totals (no BillingEvents)" (InvoiceExtractionJobHandler.cs:21) — FR-01 lists a write to sprk_billingevent; record what actually happens rather than assuming either.</background>
+    <relevant-files>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceRollupEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/appsettings.template.json (InvoiceExtractionPlaybookId comment, line 454)</file>
+      <file role="read">scripts/seed-data/playbooks.json (PB-013 entry, line 221)</file>
+      <file role="read">scripts/seed-data/Verify-Finance-Playbook.ps1</file>
+      <file role="output">projects/ebilling-r1/notes/baseline-finance-pipeline.md</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read-only on src/**: do not change Finance code to make a step pass. A fix is allowed only when it is a one-file defect fix with its test; anything larger is filed via /project-defer-issue-tracking (writes notes/defer-issues.md AND a GitHub issue, never one without the other).</constraint>
+    <constraint source="project">Dev only (Dataverse dev, spaarke-bff-dev). Use one sample invoice PDF; do not bulk-load data and do not delete any record you did not create. Delete only the test records this task created, and record their ids.</constraint>
+    <constraint source="ADR-015">Evidence in the note carries identifiers, sizes, timings and outcome codes only — no invoice narrative text or extracted values beyond what proves a field was written.</constraint>
+    <constraint source="root CLAUDE.md §2">Code wins over docs: where docs/architecture/finance-intelligence-architecture.md disagrees with code, record the disagreement in the note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>projects/ebilling-r1/notes/research/repo-state-ingestion.md</file>
+      <file>projects/ebilling-r1/notes/research/repo-state-data-ai.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the relevant files and write the expected flow (trigger → classification → review / confirm → extraction job → writes → indexing job → rollup) as the note's first section, citing file:line.</step>
+    <step order="2">Check the PB-013 / FinanceExtraction / FinanceClassification configuration in dev: the playbook row and id in FinanceOptions / appsettings, the deployment names the code reads, and whether the dev App Service settings carry them (az webapp config appsettings list, names only).</step>
+    <step order="3">Run the pipeline in dev on one sample invoice (through the existing invoice-review confirm route or the path the code supports); capture job ids and Application Insights / log evidence per step.</step>
+    <step order="4">Query Dataverse for the resulting sprk_invoice fields, any sprk_billingevent rows, and the invoice index document; record what was and was not written.</step>
+    <step order="5">Check dev matter / project rollups (FinanceRollupService, DI-69 / #1663): pick two matters with invoices, compare stored rollup values with a manual sum over the counted invoices (FinanceBaseValues.CountedInvoiceStatuses), record matches and mismatches.</step>
+    <step order="6">Write the defect list; fix trivial in-scope defects or file each via /project-defer-issue-tracking; put the issue numbers in the note.</step>
+    <step order="7">Clean up the test records this task created; record what was removed.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="9">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If running the pipeline in dev requires changing dev configuration, seed data or a deployed playbook (not just reading it), STOP and escalate (root CLAUDE.md §6) — this task observes; it does not repair the environment.</trigger>
+    <trigger>If the rollup check shows a mismatch whose cause is in ontology-owned code (Services/Finance/FinanceBaseValues.cs, Services/Signals/**), file it and notify ontology-r1 rather than editing it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Read App Service settings names, Application Insights queries</tool>
+    <tool name="dataverse-mcp">Read-only record queries in dev</tool>
+    <tool name="gh">File defect issues via the defer skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/baseline-finance-pipeline.md</output>
+    <output type="docs">projects/ebilling-r1/notes/defer-issues.md (only if defects are filed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note has one row per step named in the goal, each PASS / FAIL / NOT-PRESENT with concrete evidence (record id, job id, log query result or file:line).</criterion>
+    <criterion testable="true">The note states explicitly whether the extraction job writes sprk_billingevent rows today, with evidence.</criterion>
+    <criterion testable="true">The rollup section compares stored vs recomputed values for at least two dev matters and states match or mismatch per matter.</criterion>
+    <criterion testable="true">Every defect listed is either fixed (commit or file:line of the fix and its test) or has a GitHub issue number and an entry in notes/defer-issues.md.</criterion>
+    <criterion testable="true">No file under src/** changed except a listed one-file defect fix with its test; test records created in dev are removed and listed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Inputs for later tasks: 042 (classification baseline numbers for the FR-46 before/after comparison — record the classification outcome on the sample), 050 (what the legacy extraction path writes), 152 (indexing job state). If the dev pipeline cannot run at all, the note still records each step's static configuration and why it could not run.</notes>
+
+  <progress-notes>2026-10-15: static + read-only dev baseline complete (notes/baseline-finance-pipeline.md). Live pipeline run (step 3) NOT performed: escalation trigger 1 fired (dev lacks the playbook-id setting, FinanceExtraction/FinanceClassification playbooks and a gpt-4o deployment; classification has no trigger). Awaiting owner decision. Defects: #1918, #1919, #1920 filed (notes/defer-issues.md ISS-002..004); #1087, #229, #233, #1663 already open (evidence added to #1663). No src/** change, no dev record created (nothing to clean up). If the owner decides the baseline stands without a live run, mark completed; if an interim dev repair is approved, resume at step 3.</progress-notes>
+  <notes>Owner decision 2026-10-15 (option A): the baseline stands without a live run; no dev repair. The legacy path is replaced in 044 and deleted in 050 (D-71). Completed.
+rework: none task 001</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

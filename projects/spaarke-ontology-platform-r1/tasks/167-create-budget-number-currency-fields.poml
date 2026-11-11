@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="167" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Create budget: autonumber budget number, currency from the business unit, and the budget fields in the step (D-193, UAT round 2 items 5-6)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-193, owner 2026-10-28; the autonumber schema change is approved; the main session applies it to dev)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a decision action's catalog entry, plan route and executor in Sprk.Bff.Api (.cs), the wizard's parameter rendering (.tsx), and solution XML; modifies tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends an existing action (161's create-budget) with known columns; exact files are named.</model-tier-reason>
+    <effort>high</effort>
+    <deps>161 (create-budget), 166 (v3 offers it)</deps>
+    <tags>bff,api,frontend,dataverse-schema,testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 2 (notes/uat-v4-log.md, 2026-10-28, items 5 and 6; decision D-193). The budget that Create budget makes has no number (`sprk_budgetnumber` is plain text; nothing fills it) and a blank `sprk_currency` (String(10), ApplicationRequired, "ISO 4217 currency code", on the budget main form). `transactioncurrencyid` is set only by the Dataverse default. The owner wants the budget step to collect Category, Year, Start date, End date, Period and Currency, with Currency defaulted from the record's business unit Default Currency.</prompt>
+  <role>SPAARKE BFF + front-end engineer (Signals decision actions / decision wizard).</role>
+  <goal>A budget created through the decision wizard gets a `BUD-nnnnnn` number, `transactioncurrencyid` and `sprk_currency` (the ISO code of that currency) filled, and the optional category, year, start date, end date and period the user entered. The currency defaults to the matter's owning business unit's Default Currency and can be changed in the step.</goal>
+
+  <context>
+    <background>
+      Live metadata on spaarkedev1, read 2026-10-28:
+      <ul>
+        <li>`sprk_budgetnumber`: String, RequiredLevel None. Existing rows hold null and one `B003-01`.</li>
+        <li>`sprk_currency`: String(10), ApplicationRequired.</li>
+        <li>`sprk_budgetcategory`: Picklist with placeholder labels "Budget Category 0" to "Budget Category 4" (100000000-100000004). The owner will relabel them later, so read the options from metadata. Never hard-code them.</li>
+        <li>`sprk_budgetyear`: String.</li>
+        <li>`sprk_budgetperiod`: Picklist. Values 0 Annual and 1-4 Quarter 1-4, as read: confirm the values from metadata before use.</li>
+        <li>`sprk_budgetstartdate` and `sprk_budgetenddate`: DateTime, DateOnly behaviour, TimeZoneIndependent.</li>
+        <li>`sprk_totalbudget`: Money, so `transactioncurrencyid` exists.</li>
+      </ul>
+      Matter and project numbering: `sprk_matternumber` uses AutoNumberFormat `MAT-{SEQNUM:6}`, `sprk_projectnumber` uses `PRJ-{SEQNUM:6}`, and `RecordTableRules.cs:98` and `:126` declare `AutonumberColumn`. The sprk_budget rule is at `RecordTableRules.cs:~222`.
+      The executor today, `CreateBudgetExecutor.BuildColumns` (`Services/Signals/Actions/DecisionActionExecutors.cs:595-614`), writes `sprk_name`, `sprk_totalbudget` and the matter bind (`:625`). The catalog entry is `DecisionActionCatalog.cs:186-190`, with `amount` (Money) and `reason` (TextArea). The parameter kinds and `Options` / `OptionsSource` are at `DecisionActionCatalog.cs:25-49`. The server passes `OptionsSource` through (`DecisionPlanEndpoints.cs:283`). The client renders only fixed `parameter.options` (`DecisionWizard/ParameterFields.tsx:233`), and nothing resolves `optionsSource` today. Money values travel as numbers (`decisionDraft.ts:273`). Dates are checked as `yyyy-MM-dd` (`decisionDisplay.ts:41`).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionPlanService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/ParameterFields.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDraft.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts</file>
+      <file>src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Budget/Entity.xml</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The create-budget action (161), the catalog parameter kinds Choice, Text, Date and Lookup, and `OptionsSource` (declared, unresolved). Also `RecordTableRules.AutonumberColumn` and the Dataverse autonumber format used by matter and project.</existing>
+    <extension>Extend create-budget's parameters and columns. Resolve `OptionsSource` for Choice parameters in the plan route from live metadata (one shared resolver, reusable by any action). Add a server-computed default value for a parameter if no default mechanism exists (check first: Grep `Default`, `prefill`, `prefillTo` in the catalog and wizard). There is no new endpoint, action or table.</extension>
+    <cost-of-doing-nothing>Budgets made from a decision have no number, a blank required currency code and none of the fields the owner budgets by (owner UAT).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-193">Autonumber format `BUD-{SEQNUM:6}` on `sprk_budgetnumber`. In the repo: set AutoNumberFormat on that attribute in `SpaarkeMaster/Entities/sprk_Budget/Entity.xml`, matching how `sprk_Matter/Entity.xml` records `MAT-{SEQNUM:6}` (copy its XML shape exactly), and add `AutonumberColumn = "sprk_budgetnumber"` to the sprk_budget rule in `RecordTableRules.cs`. Do NOT apply anything to Dataverse; the main session applies the format live. Do not set `sprk_budgetnumber` in code.</constraint>
+    <constraint source="D-193 currency">The server decides the default currency. It reads the core matter's `_owningbusinessunit_value`, then `businessunit.transactioncurrencyid`. The plan returns that default for the Currency parameter (a Lookup to `transactioncurrency`). At commit, an omitted currency resolves to the same default on the server. An explicit currency must be an existing, active `transactioncurrency`, or the commit fails validation (400, nothing written). The executor binds `transactioncurrencyid` and writes `sprk_currency` = that currency's `isocurrencycode`. If the business unit has no currency (null), fall back to the organization base currency and log it. If no currency can be determined, fail closed with a validation error, never a blank `sprk_currency`.</constraint>
+    <constraint source="D-193 fields">Category, Year, Start date, End date and Period are optional. Category and Period are Choice parameters whose options come from live metadata through `OptionsSource` (for example `metadata:sprk_budget.sprk_budgetcategory`), resolved in the plan route. A value not in the live option set is refused at commit (400). Year is Text, at most the column's MaxLength. The dates are `yyyy-MM-dd` and written date-only. End date before Start date is refused at commit (400) and flagged in the wizard. The reason still goes to the Decision Record only.</constraint>
+    <constraint source="D-17 / D-180">The DR stays the last write, through the single commit route. `create-budget` stays non-authorable. Revise budget is unchanged.</constraint>
+    <constraint source="no-regression">Every other action's parameters and rendering are unchanged. Run the Signals and DecisionWizard tests, plus the full `dotnet test tests/Spaarke.ArchTests`. Never run the unfiltered Sprk.Bff.Api.Tests; filter with `--filter FullyQualifiedName~Signals` and the specific test classes.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. Use `npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts` in a fresh worktree (root and `src/client/shared/Spaarke.UI.Components`). Measure the publish-size delta (`.claude/rules/bff-hygiene.md`). Never use --no-verify or a bare git stash. No sub-agents.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor and the reason, then load the knowledge files. Work in your own worktree `C:\wts-167` on branch `task/167-create-budget-fields` from `origin/docs/ontology-platform-design`.</step>
+    <step order="1">Write the failing tests first.
+      <ul>
+        <li>Plan: create-budget includes the new parameters, metadata-sourced options for Category and Period, and a currency default from the matter's business unit.</li>
+        <li>Commit: the columns are written, with `sprk_currency` set to the ISO code. An omitted currency gets the default. A bad currency, a bad option or end before start returns 400 with nothing written.</li>
+        <li>`RecordTableRules`: sprk_budget declares the autonumber column.</li>
+        <li>Client: the new fields render, the currency is prefilled, and the date-order message shows.</li>
+      </ul>
+      Show the tests failing.</step>
+    <step order="2">Implement it. Resolve `OptionsSource` server-side, with one cached metadata read per (table, column) and a short TTL so a relabel shows up. Add the default value. Update the executor and the client rendering. Update the Entity.xml and RecordTableRules.</step>
+    <step order="3">Run the tests, the full ArchTests, the publish-size delta and `tsc` for `Spaarke.UI.Components`. Open the PR into `docs/ontology-platform-design`. The PR body gives the main session the exact live step: a Web API `PUT EntityDefinitions(LogicalName='sprk_budget')/Attributes(LogicalName='sprk_budgetnumber')` with AutoNumberFormat `BUD-{SEQNUM:6}`, the `MSCRM.SolutionUniqueName` header for the solution that holds the column, and `PublishXml` for sprk_budget only.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The plan for create-budget includes Category (metadata options), Year, Start date, End date, Period (metadata options) and Currency (defaulted to the core matter's business-unit currency). Amount and reason are unchanged.</criterion>
+    <criterion testable="true">A commit writes `transactioncurrencyid` and `sprk_currency` (the ISO code) and every supplied optional field. An omitted currency gets the business-unit default.</criterion>
+    <criterion testable="true">Must-not-fire: an unknown or inactive currency, a Category or Period value outside the live options, or end date before start date returns 400, and nothing is created.</criterion>
+    <criterion testable="true">`RecordTableRules` declares `sprk_budgetnumber` as the sprk_budget autonumber column, and Entity.xml carries `BUD-{SEQNUM:6}`. No code sets `sprk_budgetnumber`.</criterion>
+    <criterion testable="true">Every other action's plan and rendering is unchanged. The existing Signals, DecisionWizard and ArchTests suites pass.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Create budget on dev (owner, after deploy)"><steps><step>Open a no-budget Work Item and choose Create budget. Fill in the amount, category, year, dates and period, keep the default currency, and record it.</step></steps><expected>The budget has a BUD-nnnnnn number, the business unit's currency in both currency fields, and the entered fields.</expected></test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If the autonumber format cannot be recorded in Entity.xml the way the matter's is, or `sprk_budgetnumber` is in a solution this project must not export, STOP and report. Also STOP if the business-unit currency read needs a privilege the caller lacks (Core User), and report the privilege.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-17, D-129, D-180, D-193)</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/161-create-budget-when-matter-has-none.poml</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-28">
+    The create-budget step reads category and period from metadata, plus year (at most 4 characters, checked in the wizard and on the server), start and end dates (Date Only; end before start blocks Next), and currency. The currency is prefilled from the matter owning business unit's currency, with the organization base currency as fallback, and is re-validated on the server against active currencies. The commit binds `transactioncurrencyid` and writes the same row's ISO code to `sprk_currency`. `RecordTableRules` declares `sprk_budgetnumber` as the autonumber column; `sprk_budgetnumber` is never written, and the Decision Record stays the last write. Review: the Opus pass found no F1 or F3. Its four F4s (currency resolved three times per commit, a misleading inactive-default message, the year length not checked in the wizard, a PR-body placeholder) were fixed in `520dab325e`, and the Sonnet re-check was clean. K1 (a secure matter's owning business unit has no currency, so it falls back to the base currency) awaits the owner's ruling. K2 (option labels in the first caller's language) and K3/K4 are recorded in the PR. Tests: 2272 filtered BFF, 1593 ArchTests, 173 DecisionWizard jest. PR #2403 merged to docs (`4f52d3641f`). Live: `sprk_budgetnumber` AutoNumberFormat `BUD-{SEQNUM:6}` set and published (entity only) on spaarkedev1, read back (deploy-log).
+  </completion>
+</task>

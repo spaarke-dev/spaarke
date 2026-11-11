@@ -7,6 +7,49 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
+
+Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.
+
+- **`.lintstagedrc.mjs`**: the C# step is `dotnet format whitespace <repo> --folder --include <staged>` (~2 s, no MSBuild workspace, same changes as the workspace mode).
+- **`scripts/quality/check-changed-cs-format.sh`** (new) and Tier 1 job **`format-changed-cs`** (blocking, owner-approved §6.5 path-A exception): checks only the `*.cs` under `src/` and `tests/` that a PR changes; under a minute, in parallel with `arch-tests`.
+- **`.claude/skills/ci-cd`**, **`push-to-github`**: tier tables and the failure row updated.
+
+###### 2026-11-09 — The Stop quality gate now blocks
+
+`scripts/quality/task-quality-gate.sh` never stopped Claude: it exited `1` (Claude Code only blocks a Stop on exit `2`, reading stderr), its error trap exited `0` mid-run, and its report went to stdout. Found while evaluating an external quality-recommendations document.
+
+- **`scripts/quality/task-quality-gate.sh`** (rewritten): exit `2` with the report on stderr on definite code failures only — compiler errors in any project owning a changed `.cs` file (was: BFF only), TypeScript errors located in a changed file (new `tsc --noEmit` gate), failing `Spaarke.ArchTests`, a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. Loop guard: with `stop_hook_active` it never blocks again and shows the user a `systemMessage` instead. Includes untracked files. Drops the CLI `-warnaserror`: `Directory.Build.props` owns the warning policy, including the sanctioned `WarningsNotAsErrors` CS0618 sites, and CI tier1 `compile` omits the flag for the same reason. No bare `python3` (WindowsApps stub hazard). The error trap logs and continues instead of exiting `0`.
+- **`.claude/settings.json`**: Stop hook `timeout: 420` (the gate's own budget stops starting new checks at 240 s).
+- **Root `CLAUDE.md` §16**: states the blocking behaviour (+104 bytes, line count unchanged at 218 — owner OK requested in the PR).
+- **`docs/procedures/testing-and-code-quality.md`**: the hooks table said `TaskCompleted` (not a real event, FAILURE-MODES G-1); now `Stop`, with the blocking contract.
+- **Lint steps never worked (same day, both hooks)**: every `--format compact` ESLint call exited 2 because the compact formatter left ESLint core in v9, and `timeout N dotnet format` never finished (it loads the MSBuild workspace) and left its BuildHost child running — 97 orphaned BuildHosts (~650 MB) were found and killed. ESLint now runs once per config folder with that package's own eslint and the default `stylish` output; C# uses `dotnet format whitespace --folder` (seconds, no workspace; ENDOFLINE ignored because `.gitattributes` normalises line endings) in the Stop gate only — `post-edit-lint.sh` no longer lints `.cs`, since nothing fits its 4 s budget. On timeout both hooks kill the whole Windows process tree (`taskkill /T`), not just the direct child.
+
+---
+###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
+
+On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees` hung VS Code and Claude sessions opened there.
+
+- **`scripts/worktree/Clean-AgentWorktrees.ps1`** (new): removes a copy only when it is unlocked, idle ≥ 12 h, clean, and its commits are on another branch (`-Project` = merged into `work/<slug>`), through `Remove-WorktreeSafe.ps1` one path per call; removes empty unregistered folders; lists everything else for a human. Pester: `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`).
+- **`devops-project-archive`**: Step 5.5 removes the project's finished agent copies. The project worktree is still kept.
+- **`.claude/settings.json`**: the `post-edit-lint.sh` and `task-quality-gate.sh` hooks now `cd "${CLAUDE_PROJECT_DIR}"` first. They used repo-relative paths, so they failed (`No such file or directory`, exit 127) whenever a session's working directory was not the repo root.
+- **Test fix**: `tests/scripts/Remove-WorktreeSafe.Tests.ps1` "validates every path first" passed two paths through `pwsh -File`, which binds one string `"a,b"`, so it tested a single missing path. It now uses `-Command` and asserts the refusal names the real path.
+- **`.claude/FAILURE-MODES.md`**: G-25.
+- **Follow-up fix (same day)**: idle time now uses the newest reflog *entry's* timestamp, not the `logs/HEAD` file time. `git gc` rewrites every reflog file in the repo, so after a gc every copy looked active and nothing was removed (44 kept, 0 removed on the first real run; 21 removable after the fix).
+
+---
+###### 2026-11-03 — Skill authoring standard: 500-line cap, conditional branches in `references/`, length guard
+
+Our template said "under 200 lines, cap 400", but 25 skills were over 400 and nothing enforced it. A whole SKILL.md loads on every invocation: provision-environment alone was 229 KB (~57k tokens). Checked against Anthropic's skill-authoring guidance (keep SKILL.md under 500 lines; progressive disclosure; a contents list atop long reference files, which Claude may only preview; match freedom to the task; checklists with validate → fix → re-validate loops).
+
+- **Standard** (`.claude/skills/_template/SKILL.md` items 7–10; `ai-procedure-maintenance` Checklist E item 8): aim under 200, cap 500 (owner choice). Over 500 only with a `length-justification:` key + a "Read this file in full" line + a `## Contents` map. Every-time steps, rules, gates and cited step numbers stay inline; a branch that applies only sometimes moves to `references/` behind an explicit "If <condition>, read … before continuing" directive (answers the earlier "dereferencing reliability" objection: it held for every-time steps, not for conditional ones). Reference files over 100 lines open with `## Contents`.
+- **Guard**: `scripts/quality/check-skill-length.py` (CI Tier 2, beside the instruction-path check), ratcheted by `scripts/quality/skill-length.baseline.txt` — a baselined skill fails only if it grows. Controls: `scripts/quality/tests/test_check_skill_length.py` (7 must-not-fire, 6 must-fire), picked up by `agent-guard-tests`.
+- **Restructured** (originals verbatim + a MOVE-MAP of every section's destination in `.claude/archive/2026-11-03/skills/`): task-execute 1,308 → 721 (justified), project-pipeline 1,204 → 341, task-create 1,040 → 574 (justified), code-review 1,097 → 470, design-to-spec 819 → 246; project-setup's stale prerequisites trimmed (519 → 497; original archived, no move map — a single-section edit). Every step id another file cites is preserved. provision-environment (3,057 lines) is restructured separately in draft PR #2536 — it moves inline PowerShell into never-run scripts, so the provisioning project reviews and dry-runs it first; until then it is baselined here.
+- **Defects fixed on the way**: project-pipeline's Plan Mode rule blocked the file writes its own Steps 2–3 make, and Step 4 created `feature/` branches instead of the `work/` branches the hooks track; project-pipeline Step 1 required a "Technical approach" section the spec template never produced (aligned to the template); task-create's POML skeleton lacked `role="new"`, so the §11 justification lint could never fire on a skill-written task; task-create had three conflicting status vocabularies; Testing mapped to ADR-022 (PCF libraries) instead of ADR-038 in task-create and adr-aware; code-review Step 2.6 compared against `HEAD~1` regardless of the change's real baseline; code-review "quick/standard" depth dropped findings, contradicting "report every finding"; project branches named `feature/{project-name}` in push-to-github, project-continue, context-handoff and SKILL-INTERACTION-GUIDE (now `work/`, with older `feature/` branches still recognised); docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md told authors to hand-write spec sections that fail project-pipeline Step 1; task-execute claimed per-call effort and read its surface checklists only at rigor levels that run Step 4; dangling citations of project-pipeline "Step 0.7" / "Step 2.5" (doc-drift-audit, project-defer-issue-tracking) and task-execute "Step 9.6" (ui-test).
+- **Stale content removed**: per-skill model/effort env-var setup (`MAX_THINKING_TOKENS`, Opus 4.x notes) reduced to one line pointing at `agent-cost.md`; permission-mode banners; audit-history blockquotes. `/project-pipeline` and `/design-to-spec` command files reduced to pointers at their skills.
+- **Checklists**: a `## Progress Checklist` and a verify → fix → re-verify line added to the nine deploy skills (deploy-new-release's loop returns to its Step 4 confirmation gate; its parameter tables moved to `references/release-reference.md`). Contents lists added to `adr-check/references/adr-validation-rules.md` and `code-review/references/review-checklist.md`.
+
+---
 ###### 2026-10-27 — `project-spend-update`: invoiced actuals and `AI Cost (allocated)`
 
 The board carried only the list-price estimate. The owner's invoices (Max plan fee plus credit purchases, typed in by hand: a Max plan has no export) show what was paid: about 0.58 of the estimate over the cycles the archive fully covers.

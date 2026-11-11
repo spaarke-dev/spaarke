@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ebilling-r1">
+  <metadata>
+    <title>Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New idempotent schema script and additive dev schema change (columns and statuscode values); no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Column and status lists fixed by spec FR-05 / FR-06 / FR-07 and the existing-column map below; exemplar script to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend sprk_invoice for eBilling by writing scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (idempotent Web API metadata script): the missing FR-05 work-assignment lookup, the FR-07 totals, the D-43 supersedes lookup, billing period dates, and the FR-06 lifecycle statuscode values. Run it against dev, verify by metadata read, update docs/data-model/sprk_invoice.md.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API, including statecode / statuscode option metadata (InsertStatusValue).</role>
+
+  <goal>In dev, sprk_invoice has the columns and statuscode values below; a second script run makes no change; task notes and docs/data-model/sprk_invoice.md record every logical name and every statuscode value with its statecode.</goal>
+
+  <context>
+    <background>Existing on sprk_invoice (solution source, 2026-10-15): typed lookups sprk_matter and sprk_project; all five ADR-024 resolver fields already exist (sprk_regardingrecordtype lookup, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber — written by InvoiceReviewService.BuildInvoiceCreateFields); sprk_regardingagreement; sprk_totalamount (money, = billed total per FR-07); sprk_invoicestatus (ToReview / Reviewed — retired by 015, not here); statuscode has only 1 Active (statecode 0) and 2 Inactive (statecode 1). CoreAncestorResolver.IntermediateRootColumns reads sprk_invoice's typed sprk_project / sprk_matter as its root columns (line 182); task 013 maps the work-assignment lookup there. New invoice-family tables (020–022) use the CoreAncestorLookups names sprk_regardingmatter / sprk_regardingproject / sprk_regardingworkassignment (CoreAncestorResolver.cs:116-122); task 010 adds sprk_regardingworkassignment to sprk_billingevent.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1</file>
+      <file role="modify">docs/data-model/sprk_invoice.md (this entity's section only)</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/Entity.xml</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (column constants 321-336, create fields ~828)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (IntermediateRootColumns, line 182)</file>
+      <file role="read">scripts/Deploy-ChartDefinitionEntity.ps1 (exemplar)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Exact additions: (1) sprk_regardingworkassignment lookup → sprk_workassignment (the CoreAncestorLookups name, consistent with 010 and 020–022; the existing typed sprk_matter / sprk_project are reused as the Matter and Project lookups and mapped by 013 — no duplicate sprk_regardingmatter / sprk_regardingproject, no data migration); (2) money columns sprk_feestotal, sprk_expensestotal, sprk_lineadjustmentstotal, sprk_invoiceadjustmentstotal, sprk_approvedtotal (sprk_totalamount stays the billed total); (3) sprk_supersedesinvoice lookup → sprk_invoice (D-43, resubmission after Return to Firm); (4) date-only sprk_billingperiodstart and sprk_billingperiodend (FR-21 header); (5) statuscode values: statecode 0 — In Review, Approved, Sent to AP; statecode 1 — Paid, Rejected, Returned to Firm, Cancelled (FR-06).</constraint>
+    <constraint source="project">Statuscode handling: relabel existing value 1 "Active" to "In Review" (existing active invoices become In Review with no data change). Insert Approved and Sent to AP on statecode 0, and Paid, Rejected, Returned to Firm on statecode 1. Relabel existing value 2 "Inactive" to "Cancelled" only if dev has zero invoices at statecode 1 (count first); otherwise apply the escalation trigger. Default statuscode for statecode 0 stays In Review.</constraint>
+    <constraint source="project">Out of scope here: deleting or migrating sprk_invoicestatus (015), the export-batch lookup (023), the submission link (020 owns sprk_invoicesubmission's "resulting invoice"). Additive only. Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (029 syncs).</constraint>
+    <constraint source="ADR-002 / FR-07">No calculated, rollup or formula columns and no business rules for the totals or status: totals are written only by task 016's calculator and status only by task 014's lifecycle service.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read dev metadata for sprk_invoice (attributes and the statuscode StatusAttributeMetadata options); count invoices per statecode / statuscode; record both in task notes. Skip any listed column that already exists in dev.</step>
+    <step order="2">Write scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 modelled on scripts/Deploy-ChartDefinitionEntity.ps1 and the dataverse-create-schema skill: -EnvironmentUrl, -WhatIf, check-then-create, InsertStatusValue / UpdateStateValue-or-label update for statuscode, summary of created / skipped, publish at the end.</step>
+    <step order="3">Run with -WhatIf against dev; run for real; record output. Run again; confirm no change.</step>
+    <step order="4">Verify by metadata read: every column, the self-lookup relationship, and the seven statuscode values with their statecode; record the numeric statuscode values in task notes (tasks 014, 015, 016 read them from there).</step>
+    <step order="5">Update docs/data-model/sprk_invoice.md with the new columns and the statuscode table.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="7">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dev holds any invoice at statecode 1 (Inactive), STOP before relabelling value 2 and present options (relabel to Cancelled, or keep Inactive and add Cancelled as a new value) to the owner.</trigger>
+    <trigger>If any change would delete or rename a column, option or relationship by logical name, STOP (project CLAUDE.md §5).</trigger>
+    <trigger>Before creating sprk_regardingworkassignment: sprk_regarding{core} columns are access-stamp columns in CoreAncestorResolver (ApplyStamps writes a stamp to any host carrying the column, lines 718-790). If the mixed scheme (typed sprk_matter / sprk_project + sprk_regardingworkassignment) cannot map cleanly — it would make the resolver stamp sprk_invoice, change a derivation, or uac-r2 wants all three regarding columns (duplicating and migrating the typed lookups) — STOP and decide with the owner and uac-r2 before creating any core-record column.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_invoice already has typed matter / project lookups, the five resolver fields and sprk_totalamount (Entity.xml); grep of SpaarkeMaster finds no work-assignment lookup, fee / expense / adjustment / approved totals, supersedes lookup, billing period or lifecycle statuscodes on it.</existing>
+    <extension>Yes — the existing entity and its statuscode attribute are extended (spec §11 "New columns on sprk_invoice … extended, not new entities"); existing columns are reused where they already carry the meaning (billed total, resolver fields).</extension>
+    <cost-of-doing-nothing>FR-05 (work-assignment core record), FR-06 (lifecycle on statuscode — I-6) and FR-07 (approved total per I-1) have no storage; the lifecycle service (014), the totals calculator (016) and Return to Firm resubmission linking (104) cannot be built.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Token for Dataverse Web API</tool>
+    <tool name="dataverse-mcp">Metadata and row-count reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A dev metadata read shows sprk_regardingworkassignment (→ sprk_workassignment), the five totals, sprk_supersedesinvoice, sprk_billingperiodstart / end with the stated types and targets.</criterion>
+    <criterion testable="true">sprk_invoice statuscode lists In Review, Approved, Sent to AP on statecode 0 and Paid, Rejected, Returned to Firm, Cancelled on statecode 1 — and no other value (unless the escalation for value 2 chose otherwise, recorded with the owner's answer).</criterion>
+    <criterion testable="true">A second script run reports no created item and makes no write.</criterion>
+    <criterion testable="true">sprk_invoicestatus still exists, unchanged; no column, option or relationship was deleted or renamed by logical name; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
+    <criterion testable="true">docs/data-model/sprk_invoice.md and task notes list every new column and every statuscode value with its number and statecode.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-10-15 (dev). Details, runs, resolver analysis and statuscode numbers: projects/ebilling-r1/notes/012-invoice-header-schema.md. Dev held 0 invoices at statecode 1, so value 2 was relabelled Cancelled. Statuscode numbers: 1 In Review, 659490000 Approved, 659490001 Sent to AP (statecode 0); 659490002 Paid, 659490003 Rejected, 659490004 Returned to Firm, 2 Cancelled (statecode 1). No resolver/C#/TS change (task 013). rework: fix-round-1 task 012. Shared append point: docs/data-model/sprk_invoice.md (edit only this entity's rows). Billing period columns are included because FR-21's header has no other home; the brief did not list them — recorded as a deviation for the main session. The statuscode numbers are an interface for 014 / 015 / 016 / 150.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

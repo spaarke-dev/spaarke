@@ -4,7 +4,7 @@
     <title>W2 deploy to dev, live checks, adversarial review (security, twice) and publish size (NFR-01, NFR-05)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>017+018 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deploys the BFF to dev and gates W2 on a security review; tags include deploy, security, review; any code fix found here modifies Sprk.Bff.Api .cs.</rigor-reason>
     <model-tier>sonnet</model-tier>

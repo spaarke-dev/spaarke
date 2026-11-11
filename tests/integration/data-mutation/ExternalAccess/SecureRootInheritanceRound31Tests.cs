@@ -62,7 +62,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
     private static int Mask(string rightsCsv) => RecordShareLevels.MaskForRightsCsv(rightsCsv);
 
-    private static int Mirror => RecordShareLevels.ChildMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
+    private static int Mirror => RecordShareLevels.InheritedRootMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
 
     private void ShouldBeSecure(Guid id, string because)
     {
@@ -1473,7 +1473,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         var result = await UnshareAsync("matter", matter, Colleague);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
-        var viewOnly = RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
+        var viewOnly = RecordShareLevels.InheritedRootMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(viewOnly,
             "never kept at the matter's level by a parent that carries less; the project's own level, at once");
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague
@@ -1523,7 +1523,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
         _fixture.FailShareForPrincipal = null;
         (await _job.RunAsync()).Success.Should().BeTrue();
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights)),
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(RecordShareLevels.InheritedRootMirrorMask(Mask(RecordShareLevels.ViewOnlyRights)),
             "the job gives it back");
     }
 

@@ -99,6 +99,38 @@ describe('fetchEnginePreSelection', () => {
     expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/suggestions'));
   });
 
+  it('#2412 must-fire: returns null when the engine declined to choose (Ambiguous conflict) — Quick Save must not file a guess', async () => {
+    const conflicting = (id: string) => ({
+      field: 'sprk_regardingmatter',
+      targetEntity: 'sprk_matter',
+      targetId: id,
+      reinforcedConfidence: 1,
+      deterministicConfidence: 1,
+      written: false,
+      conflict: true,
+      contributors: [{ rung: 'ExplicitReference', confidence: 1, provenance: 'tracking-token:signed:sprk_matter' }],
+    });
+    mockGet.mockResolvedValueOnce(
+      matterSuggestion({
+        status: 'Ambiguous',
+        candidates: [
+          conflicting('11111111-1111-1111-1111-111111111111'),
+          conflicting('33333333-3333-3333-3333-333333333333'),
+        ],
+      })
+    );
+
+    expect(await fetchEnginePreSelection('<ambiguous@contoso.com>')).toBeNull();
+  });
+
+  it('#2412 must-not-fire: a single non-conflicting suggestion is still the prediction (task 042 behaviour)', async () => {
+    mockGet.mockResolvedValueOnce(matterSuggestion());
+
+    const result = await fetchEnginePreSelection('<suggested@contoso.com>');
+
+    expect(result?.predicted.id).toBe('11111111-1111-1111-1111-111111111111');
+  });
+
   it('returns null (no pre-selection) when the email is not captured (404)', async () => {
     mockGet.mockRejectedValueOnce(new ApiClientError({ type: 'about:blank', title: 'Not Found', status: 404 }));
 

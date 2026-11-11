@@ -229,6 +229,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     /// <summary>A9 (r3 task 046): the home contact read ends this way.</summary>
     public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>r3 task 079: the home-tenant read ends this way.</summary>
+    public LookupStatus HomeTenantReadStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>r3 task 079: the home-tenant read throws.</summary>
+    public bool ThrowOnHomeTenantRead { get; set; }
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
     /// <summary>Reinstate option (b): <c>GetContactAsync</c> answers the row with an empty statecode (a statecode not read).</summary>
@@ -333,6 +339,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             HomeLinkWriteFailure = null;
             BeforeHomeLinkWrite = null;
             HomeContactLookupStatus = LookupStatus.Read;
+            HomeTenantReadStatus = LookupStatus.Read;
+            ThrowOnHomeTenantRead = false;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
             MaskHomeColumns = FailHomeProbe = FailLicensedUserLookup = FailTeamLookup = false;
@@ -378,8 +386,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 : null);
         var c = new Contact
         {
-            Id = id, Email = email, Oid = oid, KeyMirror = mirror, Plane = plane is { } p ? (int)p : null,
-            StateCode = stateCode, Flag = flag, InvitedOn = invitedOn, InviteCodeHash = inviteCodeHash, Version = NextVersion(),
+            Id = id,
+            Email = email,
+            Oid = oid,
+            KeyMirror = mirror,
+            Plane = plane is { } p ? (int)p : null,
+            StateCode = stateCode,
+            Flag = flag,
+            InvitedOn = invitedOn,
+            InviteCodeHash = inviteCodeHash,
+            Version = NextVersion(),
         };
         Contacts[id] = c;
         return c;
@@ -408,9 +424,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     {
         var u = new SystemUser
         {
-            Id = id, Oid = oid, Email = email, DomainName = domainName ?? email, PrimaryContactId = primaryContactId,
-            IsDisabled = disabled, AccessMode = accessMode, ApplicationId = applicationId, Version = NextVersion(),
-            FirstName = "First", LastName = email?.Split('@')[0] ?? "Last",
+            Id = id,
+            Oid = oid,
+            Email = email,
+            DomainName = domainName ?? email,
+            PrimaryContactId = primaryContactId,
+            IsDisabled = disabled,
+            AccessMode = accessMode,
+            ApplicationId = applicationId,
+            Version = NextVersion(),
+            FirstName = "First",
+            LastName = email?.Split('@')[0] ?? "Last",
         };
         SystemUsers[id] = u;
         return u;
@@ -788,6 +812,31 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
+    /// r3 task 079: the contact's stored home directory, by id, as the Dataverse store answers it: the stored value through the
+    /// production parse rule (<see cref="HomeTenantLookup.FromStored"/>), null while <see cref="MaskHomeColumns"/> (a masked
+    /// column reads null), and no tenant for a contact that is not there. <see cref="HomeTenantReadStatus"/> and
+    /// <see cref="ThrowOnHomeTenantRead"/> inject a fault.
+    /// </summary>
+    public Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("home-tenant");
+            AfterRead?.Invoke("home-tenant");
+            if (ThrowOnHomeTenantRead) throw new HttpRequestException("injected home-tenant-read fault");
+            if (HomeTenantReadStatus != LookupStatus.Read)
+            {
+                return Task.FromResult(HomeTenantReadStatus == LookupStatus.ColumnMissing
+                    ? HomeTenantLookup.ColumnMissing
+                    : HomeTenantLookup.Failed);
+            }
+
+            return Task.FromResult(HomeTenantLookup.FromStored(
+                !MaskHomeColumns && Contacts.TryGetValue(contactId, out var c) ? c.ExternalTenantId : null));
+        }
+    }
+
+    /// <summary>
     /// A9 (r3 task 047). Deliberately a SUPERSET of the Dataverse filter: every systemuser, of ANY state, whose
     /// internalemailaddress or domainname equals the email (case-insensitive). The enabled-only and either-field rules are
     /// then the production decision's (<see cref="ContactBindingDecision.DecideLicensedUserEmail"/>).
@@ -1074,9 +1123,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             var id = Guid.NewGuid();
             Contacts[id] = new Contact
             {
-                Id = id, Oid = oid.ToString("D"), KeyMirror = oid.ToString("D"), Plane = (int)plane, Email = details.Email,
-                FirstName = details.FirstName, LastName = details.LastName, StateCode = 0, Version = NextVersion(),
-                ExternalTenantId = details.ExternalTenantId?.ToString("D"), Department = details.Department,
+                Id = id,
+                Oid = oid.ToString("D"),
+                KeyMirror = oid.ToString("D"),
+                Plane = (int)plane,
+                Email = details.Email,
+                FirstName = details.FirstName,
+                LastName = details.LastName,
+                StateCode = 0,
+                Version = NextVersion(),
+                ExternalTenantId = details.ExternalTenantId?.ToString("D"),
+                Department = details.Department,
                 OwnerTeamId = details.OwningTeamId,
             };
             Writes.Add(("create", id, $"{oid:D}|{plane}|{details.Email}|{details.LastName}"));
@@ -1193,7 +1250,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         var row = new ContactBindingRow(c.Id, MaskStateCode ? null : c.StateCode, MaskBindingColumn ? null : c.Oid,
             MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
             MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
-            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId) { RemovedOn = c.RemovedOn };
+            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId)
+        { RemovedOn = c.RemovedOn };
         return DataverseContactIdentityStore.WithRemovedMarkerProof(
             DataverseContactIdentityStore.WithIdentityColumnsProof(
                 ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof),

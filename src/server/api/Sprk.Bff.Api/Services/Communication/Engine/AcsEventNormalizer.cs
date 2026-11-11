@@ -61,6 +61,20 @@ public sealed class AcsEventNormalizer
     }
 
     /// <summary>
+    /// Task 054: the sender's ACS identifier (<c>rawId</c>, else <c>communicationUser.id</c>) on <paramref name="payload"/>'s
+    /// event — never the display name, which <see cref="NormalizedMessage.From"/> prefers. This is the key the systemuser
+    /// identity map (<c>sprk_communicationuserid</c>) holds. Null when the event carries none.
+    /// </summary>
+    public string? ResolveSenderIdentifier(IncomingMessagingJobPayload payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        var root = payload.RawEvent;
+        var hasData = TryGetObject(root, "data", out var data);
+        return ResolveSenderIdentifier(data, hasData, root);
+    }
+
+    /// <summary>
     /// Resolves the sender identity from <c>senderCommunicationIdentifier</c>. Prefers a human-readable
     /// display name when present, else the raw ACS identifier (<c>rawId</c> or <c>communicationUser.id</c>).
     /// </summary>
@@ -70,6 +84,12 @@ public sealed class AcsEventNormalizer
         if (!string.IsNullOrWhiteSpace(displayName))
             return displayName;
 
+        return ResolveSenderIdentifier(data, hasData, root);
+    }
+
+    /// <summary>The raw ACS identifier from <c>senderCommunicationIdentifier</c>: <c>rawId</c>, else <c>communicationUser.id</c>.</summary>
+    private static string? ResolveSenderIdentifier(JsonElement data, bool hasData, JsonElement root)
+    {
         var source = hasData ? data : root;
         if (source.ValueKind == JsonValueKind.Object
             && source.TryGetProperty("senderCommunicationIdentifier", out var sender)

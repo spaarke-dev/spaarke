@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0386",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0386","generator_id":"gen_eval_set.py@1 F-0386","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0386.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Ravenscroft & Cranmer LLP","firm_invoice_number":"INV-2025-57235","invoice_date":"2026-07-02","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"84774-0015","po_number":"PO-4514068","fees_total":2984.0,"expenses_total":116.09,"adjustments_total":0.0,"total_due":3100.09,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Marchetti","title":"Paralegal","rate":160.0,"billed_as":"GM"},{"name":"Ingrid Blackwood","title":"Senior Associate","rate":375.0,"billed_as":"IB"},{"name":"Nadia Santoro","title":"Associate","rate":275.0,"billed_as":"NS"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-03","timekeeper":"NS","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":275.0,"amount":82.5,"narrative":"Attend deposition of Harbor Point Capital corporate representative","codes":["L330","A109"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-09","timekeeper":"GM","timekeeper_name":"Gideon Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":160.0,"amount":384.0,"narrative":"Review documents produced by Tidewater Retail for responsiveness","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-18","timekeeper":"NS","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":275.0,"amount":247.5,"narrative":"Review documents produced by Meridian Foods for responsiveness","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-19","timekeeper":"GM","timekeeper_name":"Gideon Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":160.0,"amount":400.0,"narrative":"Research case law supporting answer and affirmative defenses","codes":["L240","A102"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-24","timekeeper":"GM","timekeeper_name":"Gideon Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":160.0,"amount":480.0,"narrative":"Prepare production set and cover correspondence for service on Ironbridge Steel","codes":["L320","A110"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-24","timekeeper":"IB","timekeeper_name":"Ingrid Blackwood","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":375.0,"amount":675.0,"narrative":"Prepare outline for deposition of Bluepine Holdings witness","codes":["L330","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-30","timekeeper":"NS","timekeeper_name":"Nadia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":275.0,"amount":715.0,"narrative":"Research authority for mediation statement","codes":["L250","A102"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":586.0,"rate":0.13,"amount":76.18,"narrative":"Photocopies - 586 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":39.91,"amount":39.91,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["155 Elm Court","Minneapolis","Tax ID 41-7547067"],"template":"T21","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-09-14","matter_close":"2026-09-28","matter_budget":37400.0,"approved_timekeepers":["Gideon Marchetti","Dmitri Marchetti","Elena Ashdown","Ingrid Blackwood","Imani Hargrove","Dmitri Yilmaz","Mei Voss","Nadia Santoro"],"invoice_received_date":"2026-07-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

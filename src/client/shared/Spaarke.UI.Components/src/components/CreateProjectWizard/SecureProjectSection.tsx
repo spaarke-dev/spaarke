@@ -63,7 +63,15 @@ export interface ISecureProjectSectionProps {
   isSecure: boolean;
   /** Called when user flips the toggle. */
   onSecureChange: (value: boolean) => void;
+  /**
+   * Field-mapping task 022 fix round 2: the chosen Matter is secure, so the project is secure — the toggle is shown ON
+   * and cannot be changed, with a short reason. A preview only: the server's mapping-source rule is the invariant.
+   */
+  lockedOn?: boolean;
 }
+
+/** The reason shown under a locked toggle. */
+export const SECURE_PARENT_LOCK_REASON = 'The selected matter is secure, so a project under it is secure too.';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -223,14 +231,20 @@ const PROVISIONING_ITEMS: IProvisioningItem[] = [
 // SecureProjectSection (exported)
 // ---------------------------------------------------------------------------
 
-export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isSecure, onSecureChange }) => {
+export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({
+  isSecure: isSecureValue,
+  onSecureChange,
+  lockedOn = false,
+}) => {
   const styles = useStyles();
+  const isSecure = lockedOn || isSecureValue;
 
   const handleToggleChange = React.useCallback(
     (_ev: React.ChangeEvent<HTMLInputElement>, data: { checked: boolean }) => {
+      if (lockedOn) return;
       onSecureChange(data.checked);
     },
-    [onSecureChange]
+    [onSecureChange, lockedOn]
   );
 
   return (
@@ -255,6 +269,11 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isS
           <Text size={200} className={styles.toggleDescription}>
             Restricts this project to people it is explicitly shared with, and gives it its own document container.
           </Text>
+          {lockedOn && (
+            <Text size={200} className={styles.toggleDescription} data-testid="secure-project-locked-reason">
+              {SECURE_PARENT_LOCK_REASON}
+            </Text>
+          )}
         </div>
 
         {/*
@@ -272,6 +291,7 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isS
         */}
         <Switch
           checked={isSecure}
+          disabled={lockedOn}
           onChange={handleToggleChange}
           label={isSecure ? 'Enabled' : 'Disabled'}
           labelPosition="before"

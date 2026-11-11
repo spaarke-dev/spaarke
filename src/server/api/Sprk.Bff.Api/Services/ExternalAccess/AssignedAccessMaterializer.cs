@@ -35,18 +35,23 @@ public enum AssignedAccessTrigger
 /// true for the sync and L1 triggers (owner answer A4); the job's switch for the job (owner answer R3).</param>
 /// <param name="CacheTenants">The tenant namespaces a shared user's impersonated root-set cache is cleared under — the
 /// namespace that user's own reads write (task 143's rule; never "anonymous").</param>
+/// <param name="OnlySubject">Field-mapping-server-write-path-r1 task 049b (UAC-r2 ruling): when set, the pass evaluates
+/// this one assigned subject and no other, and settles NO ended assignment, so it never removes anything (revoke-on-change
+/// stays with the full pass). <c>null</c> (every caller but the create service's maker grant) is the full pass.</param>
 public sealed record AssignedAccessRequest(
     ExternalGrantRootType RootType,
     Guid RootId,
     AssignedAccessTrigger Trigger,
     string? GrantorOid,
     bool RevokeOnChange,
-    IReadOnlyCollection<string> CacheTenants);
+    IReadOnlyCollection<string> CacheTenants,
+    AssignedSubject? OnlySubject = null);
 
 /// <summary>Stable outcome statuses.</summary>
 public static class AssignedAccessStatus
 {
-    /// <summary>Every subject was evaluated; see the entries (and failures).</summary>
+    /// <summary>Every subject was evaluated; see the entries (and failures). For a one-subject pass
+    /// (<see cref="AssignedAccessRequest.OnlySubject"/> set) this covers that subject only, not every assigned subject.</summary>
     public const string Evaluated = "evaluated";
 
     /// <summary>No root has the id.</summary>
@@ -104,7 +109,8 @@ public sealed record AssignedAccessOutcome(
     IReadOnlyList<AssignedAccessFailure> Failures,
     int Writes)
 {
-    /// <summary>Evaluated with no failure. Anything else is not "clean".</summary>
+    /// <summary>Evaluated with no failure. Anything else is not "clean". For a one-subject pass
+    /// (<see cref="AssignedAccessRequest.OnlySubject"/> set) this covers that subject only, not every assigned subject.</summary>
     public bool Complete => Status == AssignedAccessStatus.Evaluated && Failures.Count == 0;
 }
 
@@ -402,6 +408,8 @@ public sealed class AssignedAccessMaterializer
     /// <param name="grantorOid">The person behind the write, when known.</param>
     /// <param name="logger">The writer's logger.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="onlySubject">Task 049b: evaluate this one subject only and settle no ended assignment
+    /// (<see cref="AssignedAccessRequest.OnlySubject"/>); <c>null</c> for the full pass.</param>
     public static async Task<AssignedAccessOutcome?> RunAfterWriteAsync(
         IServiceScopeFactory? scopes,
         string entityLogicalName,
@@ -409,7 +417,8 @@ public sealed class AssignedAccessMaterializer
         IEnumerable<string>? writtenColumns,
         string? grantorOid,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        AssignedSubject? onlySubject = null)
     {
         if (scopes is null || recordId == Guid.Empty || !TryParseRootLogicalName(entityLogicalName, out _))
             return null;
@@ -426,7 +435,7 @@ public sealed class AssignedAccessMaterializer
                 return null;
             }
 
-            return await materializer.AfterWriteAsync(entityLogicalName, recordId, writtenColumns, grantorOid, ct)
+            return await materializer.AfterWriteAsync(entityLogicalName, recordId, writtenColumns, grantorOid, ct, onlySubject)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -442,7 +451,8 @@ public sealed class AssignedAccessMaterializer
     /// The L1 trigger for a writer that holds this service. Never throws (see <see cref="RunAfterWriteAsync"/>).
     /// </summary>
     public async Task<AssignedAccessOutcome?> AfterWriteAsync(
-        string entityLogicalName, Guid recordId, IEnumerable<string>? writtenColumns, string? grantorOid, CancellationToken ct)
+        string entityLogicalName, Guid recordId, IEnumerable<string>? writtenColumns, string? grantorOid, CancellationToken ct,
+        AssignedSubject? onlySubject = null)
     {
         if (!TryParseRootLogicalName(entityLogicalName, out var rootType) || recordId == Guid.Empty)
             return null;
@@ -453,8 +463,8 @@ public sealed class AssignedAccessMaterializer
         try
         {
             var outcome = await MaterializeAsync(
-                new AssignedAccessRequest(rootType, recordId, AssignedAccessTrigger.Inline, grantorOid, RevokeOnChange: true,
-                    CacheTenants: DeploymentTenants()),
+                new AssignedAccessRequest(rootType, recordId, AssignedAccessTrigger.Inline, grantorOid,
+                    RevokeOnChange: onlySubject is null, CacheTenants: DeploymentTenants(), OnlySubject: onlySubject),
                 ct).ConfigureAwait(false);
 
             if (!outcome.Complete)
@@ -535,6 +545,12 @@ public sealed class AssignedAccessMaterializer
         }
 
         var desired = Desired(registry, root);
+        var assignedCount = desired.Count;
+        if (request.OnlySubject is { } only)
+        {
+            // Task 049b: this one subject (every field that names it); the others are a full pass's.
+            desired = desired.Where(d => d.Key == only).ToDictionary(d => d.Key, d => d.Value);
+        }
 
         // ── The record's policy flags (ADR-003: unreadable → no write) ──────────────────
         var flags = await ReadFlagsAsync(run, ct).ConfigureAwait(false);
@@ -575,8 +591,9 @@ public sealed class AssignedAccessMaterializer
         }
 
         // ── Assignments that ended (field cleared or changed — owner answer A4) ────────
+        // Task 049b: a one-subject pass settles none of them; it never removes access.
         var assignmentEnded = false;
-        foreach (var row in ledger)
+        foreach (var row in request.OnlySubject is null ? ledger : Array.Empty<AssignedAccessLedgerRow>())
         {
             ct.ThrowIfCancellationRequested();
             if (row.State == AssignedAccessState.Revoked || row.Subject is not { } subject || string.IsNullOrWhiteSpace(row.SourceField))
@@ -613,6 +630,16 @@ public sealed class AssignedAccessMaterializer
         // provisioning; nothing for a record filed under no secure parent), rather than at that job's next run.
         if (assignmentEnded && SecureRootInheritance.Inherits(run.Logical))
             await PassParentShareesOnAsync(run, ct).ConfigureAwait(false);
+
+        if (request.OnlySubject is not null)
+        {
+            // Task 049b: never reads as the root's whole pass.
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: {Subjects} of {Assigned} assigned subject(s) evaluated (one subject " +
+                "only; the others are left to a full pass), {Writes} write(s), {Failures} failure(s).",
+                request.Trigger, run.Logical, request.RootId, desired.Count, assignedCount, run.Writes, run.Failures.Count);
+            return run.ToOutcome(AssignedAccessStatus.Evaluated);
+        }
 
         _logger.LogInformation(
             "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: {Subjects} assigned subject(s), {Writes} write(s), {Failures} failure(s).",
@@ -814,6 +841,14 @@ public sealed class AssignedAccessMaterializer
         }
 
         var target = await ResolveTargetAsync(subject, flags, ct).ConfigureAwait(false);
+
+        // A one-subject pass (task 049b) acts only on a share. Any other target (a contact or organization grant, or a skip)
+        // is left untouched here, with no ledger write, no grant and no invite: the queued full pass handles that subject.
+        if (run.Request.OnlySubject is not null && target.Kind != TargetKind.Share)
+        {
+            run.Entry(subject, fields, target.SystemUserId, AssignedAccessState.Skipped, null, AssignedAccessAction.None);
+            return;
+        }
 
         // (3) Access this owner created: verify it, convert it (141 link), renew it.
         if (live.FirstOrDefault(r => r.State is AssignedAccessState.Granted or AssignedAccessState.Shared) is { } ours)

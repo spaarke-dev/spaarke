@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="ebilling-r1">
+  <metadata>
+    <title>Apply WP1 schema to dev; sync SpaarkeMaster source; forms and views</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and solution-source sync of components built in 010-028; no new code; ordered live procedure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive procedure using existing scripts (WP1 schema scripts, Test-SolutionCompleteness, Export-SpaarkeMasterSource, Import-SolutionScoped).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes SpaarkeMaster solution source and the shared dev environment (forms, views, solution components).</parallel-reason>
+    <deps>010, 011, 012, 017, 018, 019, 020, 021, 022, 023, 024, 025, 027, 028</deps>
+    <tags>dataverse, deploy, schema</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Re-run every WP1 schema script against dev in dependency order to prove idempotence, build the WP1 forms, views and app navigation in dev, make sure every WP1 component is in the dev SpaarkeMaster solution, and bring exactly those components into src/dataverse/solutions/SpaarkeMaster with a pack and scoped-import plan check.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse solution lifecycle (pac, unpacked source), model-driven forms and views, and the SpaarkeMaster release process. Follow ADRs strictly.</role>
+
+  <goal>Every WP1 script re-runs with no change; WP1 forms, views and sitemap entries exist in dev; SpaarkeMaster source contains every WP1 table, column, choice, key, relationship, form and view and nothing unrelated; the source packs; Import-SolutionScoped -PlanOnly lists the new components; evidence is in task notes.</goal>
+
+  <context>
+    <background>Pipeline rule (projects/ebilling-r1/CLAUDE.md section 3, 2026-10-15): WP1 schema tasks 010-028 apply their own scripts to dev and never edit solution source; this task performs the WP1 sync of SpaarkeMaster source, forms and views; afterwards only serial tasks edit source (015, 026, 070 for their own components; deploy tasks 053, 079, 112, 136, 153 for their phase's later columns and navigation entries) using this task's procedure. Release procedure: docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md section 3 (Test-SolutionCompleteness, classify, Export-SpaarkeMasterSource). Prior art for copying only one project's files from a full export: projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md section 4 (export to a temp folder, copy only the changed tables' files, no version bump). FR-35 needs an "Invoices to review" view; FR-08 / FR-48 need admin forms and views.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/ (Entities, OptionSets, Other/Relationships, Other/Solution.xml, AppModuleSiteMaps — eBilling hunks only)</file>
+      <file role="modify">docs/data-model/spaarke-components-inventory.json and package-scope.json (only if Test-SolutionCompleteness requires it)</file>
+      <file role="canonical-reference">scripts/ebilling/ (the WP1 scripts written by 010-027; names in each task's notes)</file>
+      <file role="canonical-reference">scripts/solution-authoring/Test-SolutionCompleteness.ps1:30-38</file>
+      <file role="canonical-reference">scripts/solution-authoring/Export-SpaarkeMasterSource.ps1:31-51</file>
+      <file role="canonical-reference">scripts/Import-SolutionScoped.ps1 (-PlanOnly)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:188-202 (AddSolutionComponent)</file>
+      <file role="canonical-reference">src/dataverse/solutions/SpaarkeMaster/AppModuleSiteMaps/sprk_MatterManagement/AppModuleSiteMap.xml:30 (sprk_invoice subarea)</file>
+      <file role="canonical-reference">.github/workflows/publish-dataverse-solutions-manifest.yml (dry run on PRs touching the package source)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010-028" status="pending">Every WP1 schema task done, including 011's owner-approved retirement of sprk_invoicelineitem.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task 014 / #1957 (2026-10-15)">Hide the out-of-the-box Activate and Deactivate commands for sprk_invoice in the model-driven app command bar: invoice status changes only through IInvoiceLifecycleService (FR-06 matrix). Writes outside the product (Web API, flows) remain the accepted L4 gap of DATAVERSE-WRITE-PATH-ARCHITECTURE.md; invoice statuscode is audited.</constraint>
+    <constraint source="task 016 (2026-10-15)">Make the five invoice totals and the Adjustment-line amount read-only on every sprk_invoice / line form: IInvoiceTotalsService is their one owner (I-1).</constraint>
+    <constraint source="project">Dev only (https://spaarkedev1.crm.dynamics.com). Re-runs use the existing scripts unchanged; a script that changes something on re-run is a defect in its task, reported, not patched here.</constraint>
+    <constraint source="project">scripts/Import-SolutionScoped.ps1 is the only way to import a solution; this task runs it with -PlanOnly only. No real import, no Assemble-SpaarkeMasterSolution.ps1 run and no version bump (release steps owned by the release owner).</constraint>
+    <constraint source="project">Only eBilling components enter the repo: export to a temp folder (path at most 140 characters) and copy eBilling files or hunks; unrelated dev drift is listed in notes, never copied.</constraint>
+    <constraint source="ADR-027">Unmanaged authoring in dev; publish only the touched components (entity-scoped PublishXml), never a tenant-wide publish.</constraint>
+    <constraint source="ADR-002">Forms carry no script that enforces an invariant; no business rules.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse solution sync</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Preconditions">Declare RIGOR LEVEL: STANDARD. Confirm 010-028 are ✅ in TASK-INDEX.md and 011's notes record the owner's OK. List scripts/ebilling/*.ps1 and map each to its task.</step>
+    <step order="1" name="Idempotence run">Run each WP1 script with -WhatIf, then for real, in this order: 024, 017, 018 (schema then seed), 019, 010, 012, 023, 020, 021, 022, 027, 025, 011 (no-op expected). Expected: no change, except 025 adding the default code-set lookup it skipped before 018 existed. Record each output in notes.</step>
+    <step order="2" name="Forms and views">In dev, inside SpaarkeMaster: main form and active view for sprk_ebillingsetting, sprk_timekeeper, sprk_ratecard (rates subgrid), sprk_ratecardrate, sprk_billingcodeset (codes subgrid), sprk_billingcode, sprk_ruleset, sprk_invoicesubmission, sprk_invoiceapproval (eligible approvers subgrid), sprk_externalidentifier, sprk_billingexport, sprk_invoicecorrection (read-only); add the WP1 columns to the existing sprk_invoice and sprk_billingevent main forms; view "Invoices to review" on sprk_invoice: In Review invoices whose sprk_invoiceapproval is Pending and lists the current user's contact (contact.sprk_systemuser equals current user) as eligible approver.</step>
+    <step order="3" name="Navigation">Add the admin tables (settings, timekeeper, rate card, code set, rule set) to an eBilling area of the sprk_SpaarkeAdministration sitemap, and the submission and export tables next to the sprk_invoice subarea of sprk_MatterManagement. Publish the touched entities and app modules only.</step>
+    <step order="4" name="Completeness">Run scripts/solution-authoring/Test-SolutionCompleteness.ps1. For each finding that is an eBilling component, add it with AddSolutionComponent (whole table, subcomponents included). Do not act on findings outside eBilling; list them.</step>
+    <step order="5" name="Export">Run Export-SpaarkeMasterSource.ps1 -OutputFolder pointing to a temp folder. Copy into src/dataverse/solutions/SpaarkeMaster only eBilling files: new Entities folders, changed files of sprk_Invoice, sprk_BillingEvent, sprk_Timekeeper, sprk_Policy, sprk_PolicyVersion, sprk_Matter, sprk_Project, sprk_WorkAssignment, sprk_Organization, sprk_MatterType_Ref, sprk_PracticeArea_Ref, new OptionSets, eBilling hunks of Other/Relationships, Other/Solution.xml and the two sitemaps; remove Entities/sprk_InvoiceLineItem and its references (011). Update spaarke-components-inventory.json / package-scope.json only as the completeness check requires.</step>
+    <step order="6" name="Round trip">pac solution pack of the repo source (packagetype Both) into a temp zip succeeds. Import-SolutionScoped.ps1 -EnvironmentUrl dev -SolutionUniqueName SpaarkeMaster -PlanOnly lists the new tables, forms and views. Re-run Test-SolutionCompleteness: no eBilling finding left.</step>
+    <step order="7" name="Verify">For every WP1 table, compare the dev metadata column list with the source Entity.xml; record a table of results. Note removed components (sprk_invoicelineitem) for the release note.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="9">Record deviations, form and view GUIDs, unrelated drift and evidence in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a WP1 script changes anything on re-run other than 025's code-set lookup, STOP and report it to the main session (the owning task is reopened); do not patch the script here.</trigger>
+    <trigger>If 011's notes do not record the owner's OK for deleting sprk_invoicelineitem, STOP before step 1.</trigger>
+    <trigger>If pac solution pack fails, or Import-SolutionScoped -PlanOnly reports an unmapped component or pending collateral from another project, STOP and escalate; never run a real import or Assemble to work around it.</trigger>
+    <trigger>If an eBilling change cannot be separated from another project's drift in a shared file (Solution.xml, a sitemap, a relationship file), STOP and ask the owner how to split it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">WP1 scripts and solution-authoring scripts</tool>
+    <tool name="pac">solution export / unpack / pack</tool>
+    <tool name="mcp-dataverse">metadata reads for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/dataverse/solutions/SpaarkeMaster/ eBilling components</output>
+    <output type="docs">Task notes: script outputs, form / view GUIDs, completeness before and after, pack and PlanOnly output, verification table</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every WP1 script's re-run is recorded; all report no change except the documented 025 code-set lookup.</criterion>
+    <criterion testable="true">The forms, views and sitemap entries in steps 2-3 exist in dev and in the source; the "Invoices to review" view returns a test invoice for an eligible approver's user and not for another user (test rows removed afterwards).</criterion>
+    <criterion testable="true">Test-SolutionCompleteness reports no eBilling finding after step 5.</criterion>
+    <criterion testable="true">The repo source packs with pac (Both) and Import-SolutionScoped -PlanOnly lists the new components; no real import ran.</criterion>
+    <criterion testable="true">The diff under src/dataverse/solutions/SpaarkeMaster contains only eBilling components (unrelated drift listed in notes), and Entities/sprk_InvoiceLineItem is gone.</criterion>
+    <criterion testable="true">The dev-versus-source verification table shows every WP1 column in both.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Brief asked for an Import-SolutionScoped.ps1 "round-trip check"; dev is the authoring environment, so a real import of the exported source back into dev would overwrite other projects' work. The check is pack plus -PlanOnly plus the CI dry run on the PR.
+    Version bump and Assemble are release steps (SPAARKE-SOLUTION-RELEASE-PROCESS.md section 3); the removed sprk_invoicelineitem must appear in the next release note.
+    The BFF caches entity metadata for up to 6 hours (Services/Dataverse/MetadataService.cs; 140-schema-delta.md section 6): later live tests may see stale metadata.
+    WP2+ columns are synced by the serial deploy task of their phase (053, 079, 112, 136, 153) using this task's procedure; record the procedure precisely enough for them to reuse.
+    Result 2026-10-16 (details: notes/029-wp1-apply-and-export.md):
+    - Step 1: every WP1 script re-run changed nothing (025 included); no escalation trigger 1.
+    - Steps 2-3: 11 new main forms + section_ebilling on sprk_timekeeper / sprk_invoice / sprk_billingevent, 12 Active views, view "Invoices to review" (0c7694d8-14c9-f111-a05a-7c1e520a989f), eBilling sitemap entries; totals and sprk_amount read-only; entity-scoped publish only. Script: scripts/ebilling/Deploy-EbillingFormsViews.ps1 (reuse for 053 / 079 / 112 / 136 / 153).
+    - View test: returned for the eligible approver (me), not for a different eligible contact, a non-Pending approval or a non-In-Review invoice. Second-user run impossible (roles lack prvRead on sprk_invoiceapproval): finding B.
+    - Steps 4-5: completeness has no eBilling finding left (6 identity findings remain, not eBilling); only eBilling files and hunks copied into src/dataverse/solutions/SpaarkeMaster; sprk_InvoiceLineItem folder, relationship file, AI skill opt-out and role privileges removed; HideCustomAction for Activate / Deactivate added to Entities/sprk_Invoice/RibbonDiff.xml (source only, not live in dev).
+    - Step 6: pac solution pack Both OK; -PlanOnly lists the new tables, sitemaps, app modules, but warns Unmapped 14/18e5156a-... = contact key sprk_externalobjectiduniquekey (identity project, pre-existing): trigger fired in the letter, reported, nothing worked around.
+    - Step 7: dev equals source for all 23 touched tables, no type mismatch.
+    - Open: tables must be added to the two apps in the app designer (AddAppComponents is a no-op); new tables lack role privileges for non-admins; sprk_amount is read-only for Fee / Expense lines too; secure_child_ribbon.js needs a redeploy; Export-SpaarkeMasterSource F12 guard fails on 6 identity components.
+    rework: none task 029
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

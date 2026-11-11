@@ -650,6 +650,10 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
         + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_rescheduledby>contact;sprk_todoassigned>contact")]
+    // ebilling-r1 task 013: + sprk_regardingworkassignment (added by ebilling-r1 task 012, live spaarkedev1 2026-10-15).
+    // Task 012 also added sprk_supersedesinvoice > sprk_invoice and sprk_billingexport > sprk_billingexport; neither is
+    // a filing (a superseded invoice and an export batch confer no core record), and classifying them is a uac-r2
+    // decision reported by task 013, so they are not in this snapshot yet.
     [InlineData("sprk_invoice", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
@@ -657,6 +661,7 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_assignedtoattorney1>contact;sprk_assignedtoattorney2>contact;sprk_assignedtoparalegal1>contact;"
         + "sprk_assignedtoparalegal2>contact;sprk_matter>sprk_matter;sprk_project>sprk_project;"
         + "sprk_regardingagreement>sprk_agreement;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_securitybu>businessunit;sprk_vendororg>sprk_organization;transactioncurrencyid>transactioncurrency")]
     [InlineData("sprk_workassignment", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
@@ -1140,6 +1145,77 @@ public partial class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0);
+    }
+
+    // ebilling-r1 task 026 (FR-05, D-75, D-94 condition 4): the Invoice Line is an intermediate with ONE root, its own lookup.
+
+    private static readonly Guid InvoiceLineTypeRef = Guid.Parse("fb30d221-bbc9-f111-a05a-7c1e520a989f"); // spaarkedev1, 2026-10-16
+
+    [Fact(DisplayName = "ebilling-r1 task 026: an invoice line of a SECURE matter resolves the matter's own container; the BU is never read")]
+    public async Task InvoiceLine_OfASecureMatter_ResolvesTheMattersContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_billingevent", typedMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: an invoice line of a SECURE project resolves the project's container (the typed sprk_project is followed)")]
+    public async Task InvoiceLine_OfASecureProject_ResolvesTheProjectsContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_billingevent", typedProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 (D-94 condition 4): an invoice line naming a matter AND a project is refused (409) — never given the BU's or a fallback container")]
+    public async Task InvoiceLine_WithTwoRoots_IsRefused_NeverADefaultContainer()
+    {
+        // Both roots are ORDINARY: without the single-root rule the line would quietly take the business unit's container.
+        var world = new World()
+            .WithChild("sprk_billingevent", typedMatter: MatterId, typedProject: ProjectId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+            ex.Message.Should().NotContain(ChildId.ToString("D"), "the refusal names no record");
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.RootReads().Should().Be(0, "refused before the secure walk");
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: a To Do whose pair alone names an invoice line takes the held path — container_ancestor_unverifiable")]
+    public async Task Todo_PairNamingAnInvoiceLine_IsRefusedAsUnverifiable()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: Guid.NewGuid().ToString(), pairType: InvoiceLineTypeRef)
+            .WithRecordType(InvoiceLineTypeRef, "sprk_billingevent")
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     // Task 031 (external-access-r3, owner decision 2026-10-11): a SERVICE REQUEST resolved AS ITSELF (a document filed to
@@ -1922,6 +1998,51 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): a work assignment filed under an invoice that is filed under that same work assignment refuses 409 (unverifiable) — the walk ends")]
+    public async Task WorkAssignment_FiledUnderAnInvoiceOfItself_Is409_AndTheWalkEnds()
+    {
+        // A row pair the BFF refuses at write (InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode) but the model-driven app
+        // can still store: WA.sprk_regardinginvoice -> I and I.sprk_regardingworkassignment -> WA.
+        var invoice = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a1");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: ("sprk_regardinginvoice", invoice), isSecure: false)
+            .WithRow("sprk_invoice", invoice,
+                lookups: [("sprk_regardingworkassignment", "sprk_workassignment", ChildId)])
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        // Observed (2026-10-28): from the work-assignment side the walk refuses as UNVERIFIABLE ("filed under another record
+        // (sprk_regardinginvoice) ... cannot be verified"), not as the filing loop the invoice side names. Both are 409 and fail
+        // closed. UAC-r2: decide whether this side should answer the filing loop too.
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("sprk_invoice").Should().Be(1, "the invoice is read once, never followed round the loop");
+        world.Reads("sprk_workassignment").Should().Be(1, "the work assignment is read once, never followed round the loop");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): an invoice filed under a work assignment that is filed under that same invoice refuses 409 (filing loop) — the walk ends")]
+    public async Task Invoice_FiledUnderAWorkAssignmentOfItself_IsTheFilingLoop409()
+    {
+        var workAssignment = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a2");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_invoice", regardingWorkAssignment: workAssignment)
+            .WithRoot("sprk_workassignment", workAssignment, isSecure: false, containerId: null,
+                intermediate: ("sprk_regardinginvoice", ChildId))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        ex.Detail.Should().Contain("lead back to themselves", "the loop is named, not mistaken for a long chain");
+        world.Reads("sprk_workassignment").Should().BeLessThanOrEqualTo(1, "each record of the loop is read once, never followed round it");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
     [Fact(DisplayName = "#1630 lock-step: every column the inheritance follows through an intermediate is one the storage resolver knows as that table's intermediate")]
     public void IntermediateFilingColumns_AreTheResolversIntermediateColumns()
     {
@@ -2193,6 +2314,233 @@ public partial class ChildRecordContainerResolutionTests
             "retrying cannot place it; as 'transient' it is a retry loop that loses the message capture");
     }
 
+    // ============================================================================================
+    // Task 176 (D-216) — an email filed under a service request AND that request's own matter: the matched-root release
+    // ============================================================================================
+
+    /// <summary>A communication the budget inquiry sends: regarding the service request AND the matter, pair = the request.</summary>
+    private static World InquiryEmailWorld(Guid? matterOnTheEmail = null) => new World()
+        .WithCommunication(
+            regardingMatter: matterOnTheEmail,
+            intermediate: ("sprk_regardingservicerequest", ServiceRequestId),
+            pairId: ServiceRequestId.ToString())
+        .WithBusinessUnit(BusinessUnitContainer);
+
+    /// <summary>
+    /// F-176-1: the columns the release reads — the request entry's link columns, then its pair — pinned LITERALLY here (the
+    /// production list is derived from <c>ChildAncestorLinks</c>; a link added there must show up in this pin).
+    /// </summary>
+    private static readonly string[] ServiceRequestReleaseRead =
+    [
+        "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment", "sprk_regardingcommunication",
+        "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+    ];
+
+    /// <summary>
+    /// The request row as a real Retrieve returns it: ONLY the keys that hold a value (Dataverse omits a null attribute), so
+    /// "only the matter" is a row with the matter key and nothing else.
+    /// </summary>
+    private static Entity ServiceRequestRow(
+        Guid? regardingMatter,
+        (string Column, string Target, Guid Id)? otherLink = null,
+        string? pairId = null,
+        Guid? pairType = null)
+    {
+        var row = new Entity("sprk_servicerequest", ServiceRequestId);
+        if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
+        if (otherLink is { } o) row[o.Column] = new EntityReference(o.Target, o.Id);
+        if (pairId is not null) row["sprk_regardingrecordid"] = pairId;
+        if (pairType is { } t) row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+        return row;
+    }
+
+    /// <summary>The release read the request ONCE, asking for exactly the eight derived columns.</summary>
+    private static void AssertReleaseReadTheEightColumns(World world)
+    {
+        world.Reads("sprk_servicerequest").Should().Be(1);
+        world.ColumnsRead("sprk_servicerequest").Should().BeEquivalentTo(ServiceRequestReleaseRead,
+            "the one read of the request carries every link column and the pair, so the sole-root rule sees them all");
+    }
+
+    [Theory(DisplayName = "Task 176 (must-fire): an email filed under a service request AND that request's OWN matter — the realistic row, only the matter key returned — resolves the MATTER's container; ordinary and secure")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Communication_UnderAServiceRequest_AndThatRequestsOwnMatter_ResolvesTheMattersContainer(bool secure)
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: secure, secure ? RootContainer : null);
+
+        var container = await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        container.Should().Be(secure ? RootContainer : ArchiveContainer,
+            "the released service request adds no container of its own; the matter's resolution decides");
+        AssertReleaseReadTheEightColumns(world);
+        world.Reads("sprk_recordtype_ref").Should().Be(0, "an empty pair needs no type read");
+    }
+
+    [Fact(DisplayName = "Task 176 F-176-1 (must-fire): the request's pair names its matter with type MATTER — released, the secure matter's container")]
+    public async Task Communication_UnderAServiceRequest_WhosePairNamesItsMatter_IsReleased()
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId, pairId: MatterId.ToString(), pairType: MatterTypeRef))
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        var container = await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        container.Should().Be(RootContainer);
+        AssertReleaseReadTheEightColumns(world);
+        world.Reads("sprk_recordtype_ref").Should().Be(1, "the pair's type is mapped through the existing type read");
+    }
+
+    public static TheoryData<string, string> OtherServiceRequestLinks => new()
+    {
+        { "sprk_regardingproject", "sprk_project" },
+        { "sprk_regardingworkassignment", "sprk_workassignment" },
+        { "sprk_regardingcommunication", "sprk_communication" },
+        { "sprk_regardinginvoice", "sprk_invoice" },
+        { "sprk_regardingtodo", "sprk_todo" },
+    };
+
+    [Theory(DisplayName = "Task 176 F-176-1 (must-not-fire): the request ALSO names another record — its matter is not its sole root, so it stays HELD (container_ancestor_unverifiable), never the non-secure matter's container")]
+    [MemberData(nameof(OtherServiceRequestLinks))]
+    public async Task Communication_UnderAServiceRequest_ThatAlsoNamesAnotherRecord_IsStillHeld(string column, string target)
+    {
+        // The danger: a NON-secure matter on both rows and a SECURE record on the request's other link. Released, the email
+        // went to the matter's (business-unit / archive) container and the secure record was never read.
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId, otherLink: (column, target, ProjectId)))
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, $"{column} is set on the request");
+        AssertReleaseReadTheEightColumns(world);
+    }
+
+    public static TheoryData<string, Guid, string?> PairsThatAreNotTheSameMatter => new()
+    {
+        // Another id: held before any type read.
+        { "another-project", ProjectId, null },
+        { "another-matter", OtherMatterId, null },
+        // The matter's id, a type other than the matter.
+        { "matter-id-project-type", MatterId, "sprk_project" },
+    };
+
+    [Theory(DisplayName = "Task 176 F-176-1 (must-not-fire): the request's pair names another id, or the matter's id with a type other than the matter — HELD")]
+    [MemberData(nameof(PairsThatAreNotTheSameMatter))]
+    public async Task Communication_UnderAServiceRequest_WhosePairIsNotTheSameMatter_IsStillHeld(
+        string shape, Guid pairId, string? typeName)
+    {
+        var typeRef = pairId == ProjectId || typeName == "sprk_project" ? ProjectTypeRef : MatterTypeRef;
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId, pairId: pairId.ToString(), pairType: typeRef))
+            .WithRecordType(ProjectTypeRef, "sprk_project")
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, $"pair shape '{shape}'");
+        AssertReleaseReadTheEightColumns(world);
+        world.Reads("sprk_recordtype_ref").Should().Be(typeName is null ? 0 : 1);
+    }
+
+    [Fact(DisplayName = "Task 176 F-176-1 (must-not-fire): the request's pair names its matter but its type cannot be read — HELD")]
+    public async Task Communication_UnderAServiceRequest_WhosePairTypeReadFaults_IsStillHeld()
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId, pairId: MatterId.ToString(), pairType: MatterTypeRef))
+            .WithRecordTypeFault(MatterTypeRef, new TimeoutException("Dataverse did not answer"))
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        AssertReleaseReadTheEightColumns(world);
+        world.Reads("sprk_recordtype_ref").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 176 regression: secure matter + service request — the SECURE container when the request's matter matches, container_ancestor_unverifiable when it does not")]
+    public async Task Communication_UnderASecureMatter_AndAServiceRequest_IsSecureWhenMatched_UnverifiableOtherwise()
+    {
+        var matched = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await matched.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
+
+        var mismatched = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRawRow(ServiceRequestRow(regardingMatter: OtherMatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null);
+
+        var act = async () => await mismatched.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+    }
+
+    public static TheoryData<string> UnmatchedServiceRequestReads => new()
+    {
+        // F-176-1: no "explicit-null" — a real Retrieve never returns a null-valued key, so no test relies on one.
+        "mismatch", "column-absent", "absent-in-row", "fault", "not-found", "null-row",
+    };
+
+    [Theory(DisplayName = "Task 176 (must-not-fire): the service request's matter not READ as the email's own matter keeps the request HELD — container_ancestor_unverifiable")]
+    [MemberData(nameof(UnmatchedServiceRequestReads))]
+    public async Task Communication_UnderAServiceRequest_WhoseMatterIsNotProvenTheSame_IsStillHeld(string read)
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null);
+
+        world = read switch
+        {
+            "mismatch" => world.WithRawRow(ServiceRequestRow(regardingMatter: OtherMatterId)),
+            // The column is not in this environment: Dataverse faults the read (AttributeDoesNotExist).
+            "column-absent" => world.WithRootFault("sprk_servicerequest", ServiceRequestId,
+                new FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103) },
+                    new FaultReason("'sprk_servicerequest' entity doesn't contain attribute"))),
+            // The SDK omits a null column: the row came back without the MATTER key — held (the matter must be present).
+            "absent-in-row" => world.WithRawRow(ServiceRequestRow(regardingMatter: null)),
+            "fault" => world.WithRootFault("sprk_servicerequest", ServiceRequestId,
+                new TimeoutException("Dataverse did not answer")),
+            "not-found" => world.WithRootFault("sprk_servicerequest", ServiceRequestId, NotFound()),
+            "null-row" => world.WithNullRoot("sprk_servicerequest", ServiceRequestId),
+            _ => throw new ArgumentOutOfRangeException(nameof(read)),
+        };
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, $"read '{read}' never proves the same matter");
+        AssertReleaseReadTheEightColumns(world);
+    }
+
+    [Fact(DisplayName = "Task 176 (must-not-fire): an email under a service request with NO matter on the email is held exactly as before — the request is never read")]
+    public async Task Communication_UnderAServiceRequest_WithNoMatterOnTheEmail_IsHeld_WithoutReadingTheRequest()
+    {
+        var world = InquiryEmailWorld(matterOnTheEmail: null)
+            .WithRawRow(ServiceRequestRow(regardingMatter: MatterId))
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        world.Reads("sprk_servicerequest").Should().Be(0);
+    }
+
     [Fact(DisplayName = "Task 155 f4: an email regarding a NON-secure work assignment under a SECURE matter routes to the MATTER's container (transitive)")]
     public async Task Communication_UnderANonSecureWorkAssignment_UnderASecureMatter_RoutesToTheMattersContainer()
     {
@@ -2324,7 +2672,9 @@ public partial class ChildRecordContainerResolutionTests
         // no type. Every ArchiveToSpe send regarding a person, organization or account lost its .eml (live d3516503).
         var written = await OutboundCommunicationRow.WriteAsync(partyEntity, ContactId);
 
-        written.GetAttributeValue<EntityReference>(typedColumn)?.Id.Should().Be(ContactId);
+        var typedParty = written.GetAttributeValue<EntityReference>(typedColumn);
+        typedParty.Should().NotBeNull($"the sender writes the typed {typedColumn}");
+        typedParty!.Id.Should().Be(ContactId);
         written.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ContactId.ToString());
         written.Contains("sprk_regardingrecordtype").Should().BeFalse(
             "MapAssociationFieldsAsync never writes the pair's type — this IS the shape the resolver must place");
@@ -2509,6 +2859,8 @@ public partial class ChildRecordContainerResolutionTests
             "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit",
             "account", "sprk_organization", "sprk_agreement", "sprk_budget", "sprk_reportcard", "sprk_analysis",
             "sprk_recordtype_ref", "sprk_memo", "sprk_timekeeper",
+            // ebilling-r1 task 026: the Invoice Line (live; no sprk_issecure column).
+            "sprk_billingevent",
         };
 
         private readonly Dictionary<string, EntitySecurability> _classificationOverrides = new(StringComparer.Ordinal);
@@ -2743,6 +3095,13 @@ public partial class ChildRecordContainerResolutionTests
         public World WithNullRoot(string entity, Guid id)
         {
             _rows[(entity, id)] = () => null!;
+            return this;
+        }
+
+        /// <summary>Task 176: exactly <paramref name="row"/>, served for its own entity and id (null values kept as written).</summary>
+        public World WithRawRow(Entity row)
+        {
+            _rows[(row.LogicalName, row.Id)] = () => row;
             return this;
         }
 

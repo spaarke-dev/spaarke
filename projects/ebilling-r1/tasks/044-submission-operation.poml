@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="ebilling-r1">
+  <metadata>
+    <title>Submission operation and endpoints (SPA + internal)</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New external (CIAM) and internal write routes with firm-scope and core-record authorization, SPE upload and record creation — security-class and the only invoice intake path (ADR-002).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization design across two principal types reusing external-access seams owned by another project; mistakes leak one firm's data to another.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>013, 040, 045, 029</deps>
+    <tags>bff, api, auth, spe, write-path</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build one InvoiceSubmissionService with two entry points — an external SPA route under /api/v1/external and an internal route under /api/finance — that validates caller, firm and core-record access, stores the PDF through SpeFileStore in the core record's container, creates sprk_document (type Invoice) and sprk_invoicesubmission (Received), enqueues the InvoiceSubmissionProcessing job and returns 202 with job id and status URL (FR-17). Add GET routes for submission status. Run /conflict-check before the PR (uac-r2 and SPA-r3 share external access).</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF endpoint filters, external-access (CIAM) authorization, SPE uploads and ADR-004 jobs. Follow ADRs strictly.</role>
+
+  <goal>Routes exist, are authorized by endpoint filters and gated by RequireEbillingEnabled(); a permitted caller gets 202 {submissionId, jobId, trackingNumber, statusUrl}; other firm, inaccessible core record, non-PDF and oversize requests are refused with stable codes; seeded proofs show the firm-scope and core-record checks are load-bearing; the ArchTest guards are green.</goal>
+
+  <context>
+    <background>Spec FR-17, Processing Pipeline step 0, NFR-10, D-24 (internal submission runs the same checks), D-44 (PDF in the core record's general or secure container). Existing external upload (ExternalProjectDataEndpoints.cs:255 matters route, UploadDocumentForParent :1268): two-stage gate Read then Create through the PRIVATE RightsForDocumentParentAsync (:850), server-derived container, app-only upload with ConflictBehavior.Fail, flat file names (SpeUploadPathIsFlatGuardTests), bytes uploaded before the row, owner set through IRecordOwnershipResolver. Note an unrelated existing route POST /invoices/{id}/documents (:368) attaches files to an existing invoice — not an intake path. Firm membership: ExternalParticipationService.ReadOrganizationMembershipsAsync (used at Api/Filters/ContactGrantorAuthorizationFilter.cs:294-304). Submission columns and the firm-scoped alternate key: task 020 (sprk_vendororg = firm, sprk_firminvoicenumber, sprk_channel, sprk_processingstatus, sprk_document, sprk_ponumber, sprk_regarding* fields).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionService.cs (+ interface, request / result records, JobType constant "InvoiceSubmissionProcessing")</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs (internal routes)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs (MapExternalInvoiceSubmissionEndpoints on the external RouteGroupBuilder)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (one mount line beside externalGroup.MapExternalIntakeEndpoints() at :120)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared Finance mapping call site: one line)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point: service registration)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs (add WorkAssignmentEntitySet beside :226-234; extend only if the internal filter is reused)</file>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs (only if a new operation key is needed — see constraints)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs:30-33 (group /api/finance, RequireAuthorization, AddFinanceAuthorizationFilter)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs:1268 (UploadDocumentForParent — copy its order: gate, container, upload, row, owner, compensation) and :255</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:117 (IsOperationPermittedAsync — required for mutating routes, see :96)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs (ResolveForRecordAsync — secure container or fail closed)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs:46 (SubmitJobAsync) and Services/Jobs/JobContract.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Finance/FinanceEndpointsAuthorizationContractTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceSubmissionEndpointsContractTests.cs and tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="required">One-lookup guard and core-ancestor derivation for sprk_invoicesubmission.</dependency>
+      <dependency task="040" status="required">EbillingOptions (MaxSubmissionFileSizeMb) and RequireEbillingEnabled().</dependency>
+      <dependency task="045" status="required">Tracking-number allocator.</dependency>
+      <dependency task="029" status="required">sprk_invoicesubmission and the Invoice document type live in dev and solution source.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner D-106, refined by D-110 (2026-10-17)">Linked = the record's assigned law firms (sprk_assignedlawfirm1/2) only, and the rule is enforced in the submission service, so it holds on every channel, internal included. The chosen firm must be linked to the chosen core record (matter, project or work assignment). The server refuses otherwise, failing closed, and the picker lists only records linked to the chosen firm.</constraint>
+    <constraint source="D-91 (owner, 2026-10-16)">The firm invoice number is required on both entry points; a missing or blank value is refused with 400 and a stable code before any upload or write. The tracking number is therefore always set in the 202 response.</constraint>
+    <constraint source="D-87 (owner, 2026-10-16)">The submission row is created by ITrackingNumberAllocator with its tracking number already set (create-with-number, retry on the alternate key). Never create a submission without a number, never write a placeholder; sprk_trackingnumber stays SystemRequired.</constraint>
+    <constraint source="task 020 (2026-10-15)">sprk_invoicesubmission.sprk_vendororg is SystemRequired (a null firm escapes the (sprk_vendororg, sprk_trackingnumber) key). The internal channel must set the firm at create. If the internal channel genuinely cannot know the firm at create, lower the column with Set-ColumnRequiredLevel (scripts/ebilling/EbillingSchema.psm1) and report it with the reason; do not write a placeholder firm.</constraint>
+    <constraint source="D-68 / task 022 (2026-10-15)">A firm-quoted external identifier (sprk_externalidentifier) must fill the issuing organization and sprk_regardingrecordid at create: rows with an empty key column escape the D-68 firm/type/value/core-record alternate key and can duplicate. For an invoice-only row, use the sprk_regardingrecordid value task 013 defines.</constraint>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
+    <constraint source="ADR-008 / ADR-028">Every route: RequireAuthorization plus an endpoint filter that decides access before the handler; then RequireEbillingEnabled() (the flag never replaces authorization). External routes sit in the existing /api/v1/external group (ExternalCollaboration policy + caller-principal filter) and check the core record with IsOperationPermittedAsync (mutating), never IsRecordAccessibleAsync. Internal routes check the caller's own Dataverse rights on the core record (Read and AppendTo) the way FinanceAuthorizationFilter does.</constraint>
+    <constraint source="NFR-10 firm scope">The firm is derived server-side: an external caller's firm comes from their organization memberships; a body-supplied firm id is accepted only if it is one of those (else 403 ebilling.submission.firm_forbidden). An internal caller selects the firm; it must be an active sprk_organization (else 400). The submission's sprk_vendororg is always the validated firm.</constraint>
+    <constraint source="ADR-002 / FR-17">This service is the only creator of sprk_invoicesubmission; it never creates sprk_invoice (049 does). Core-ancestor fields come from 013's guard; owner from IRecordOwnershipResolver (RecordOwnerAssignmentCensusTests).</constraint>
+    <constraint source="ADR-007 / D-44">Upload only through SpeFileStore into the container RecordContainerResolver returns for the core record (secure when secure; fail closed); flat file name; ConflictBehavior.Fail. No Blob; this task does not write to the Procedure Library or output containers (028 admits app-only writes to them per D-67, but they are not used here).</constraint>
+    <constraint source="ADR-019">Stable ProblemDetails codes: ebilling.submission.not_pdf (400, content type and %PDF header checked), ebilling.submission.file_required (400), ebilling.submission.too_large (413, above EbillingOptions.MaxSubmissionFileSizeMb), ebilling.submission.firm_forbidden (403), ebilling.submission.record_forbidden (403), ebilling.disabled (503).</constraint>
+    <constraint source="ADR-004 / ADR-017">Enqueue a JobContract with JobType InvoiceSubmissionProcessing, payload {submissionId}, idempotency key = submission id; return 202 with statusUrl pointing at the GET submission route. Tracking number: the submission row is created through 045 with its number (D-87); the firm invoice number is required (D-91), so trackingNumber is never null.</constraint>
+    <constraint source="project coordination">Do not edit Infrastructure/ExternalAccess/** (shared with uac-r2; editing it would make this task parallel-unsafe). Reuse its public seams only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Endpoints, external access, SPE, jobs</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Read spec FR-17 and NFR-10, the 013 / 040 / 045 outputs and 020's column list. Re-read EndpointMappingExtensions.cs, ExternalAccessEndpoints.cs and FinanceModule.cs immediately before editing.</step>
+    <step order="1">Decide the operation key for "submit an invoice against a core record": reuse finance.attach_invoice (OperationAccessPolicy.cs:184-193) only if its documented meaning covers it; otherwise add one key (AppendTo on the core record) with a comment, and keep OperationAccessPolicyCompletenessTests green. Record the choice.</step>
+    <step order="2">Implement InvoiceSubmissionService.SubmitAsync (validated caller context, firm, core record, file stream, required firm invoice number (D-91), optional PO, channel): validate file; resolve container; upload; create sprk_document (type Invoice, linked to the core record); create sprk_invoicesubmission (Received, channel, firm, submitter contact or user, core-record fields via 013, owner); allocate tracking number if possible; enqueue; on a failure after upload, compensate per the reference (no orphan row claiming success).</step>
+    <step order="3">Internal routes: POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions (multipart: file, firmId, firmInvoiceNumber?, poNumber?) and GET /api/finance/invoice-submissions/{id}.</step>
+    <step order="4">External routes in ExternalInvoiceSubmissionEndpoints.cs: POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions; GET /api/v1/external/invoice-submissions/{id} (own firm and accessible core record only, else 404); GET /api/v1/external/invoice-submissions (the caller's firm's submissions for accessible core records, newest first — used by 051 for resume and as the flag probe). Mount with one line in ExternalAccessEndpoints.cs.</step>
+    <step order="5">Unit tests for the service (each validation, firm derivation, missing firm invoice number refused with 400, compensation, job contract shape). Contract tests for every route: 401 unauthenticated; 403 other firm; 403 inaccessible core record; 400 not PDF; 413 oversize; 503 flag off; 202 happy path with Location / statusUrl; GET of another firm's submission is 404.</step>
+    <step order="6">Seeding proofs: temporarily neutralise the firm-scope check, then the core-record check; show the matching contract tests fail; restore; record in notes.</step>
+    <step order="7">Run RouteAuthorizationGuardTests (update the ledger only for these routes), RecordOwnerAssignmentCensusTests, SpeUploadPathIsFlatGuardTests and OperationAccessPolicyCompletenessTests; build, full test, publish-size delta; run /conflict-check.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations (route shapes, operation key, response contract 049 / 051 / 052 rely on) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the external core-record or firm check can only be done by calling the private RightsForDocumentParentAsync or by editing Infrastructure/ExternalAccess/**, STOP and escalate (root CLAUDE.md §6) — options: make a seam public in a uac-r2-reviewed change, or a different public check.</trigger>
+    <trigger>If an external contact belongs to more than one firm and the spec gives no rule for choosing, STOP and ask before defaulting (current proposal: the request must name one of the caller's firms).</trigger>
+    <trigger>If task 020's alternate key is not (sprk_vendororg, sprk_trackingnumber), STOP: a tracking-number-only key collides across firms.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ExternalProjectDataEndpoints uploads documents under a parent but creates no submission, has no firm scoping and enqueues nothing; FinanceEndpoints covers invoice-review confirm / reject for email-derived candidates. No submission service exists (grep InvoiceSubmission in src finds nothing).</existing>
+    <extension>The external upload handler is private and tied to document-only semantics; this task reuses its seams (container resolver, SpeFileStore, ownership resolver, IsOperationPermittedAsync) and adds one service plus two thin endpoint files, as the brief's endpoint-file convention requires.</extension>
+    <cost-of-doing-nothing>FR-17 fails: no server-side intake exists, so invoices would still be created client-side (CreateInvoiceWizard) without firm or core-record checks, violating ADR-002 and NFR-10.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+    <tool name="skill">/conflict-check before the PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Services/Finance/Submission/*, Api/Finance/InvoiceSubmissionEndpoints.cs, Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs, one line each in ExternalAccessEndpoints.cs, EndpointMappingExtensions.cs, FinanceModule.cs</output>
+    <output type="test">InvoiceSubmissionEndpointsContractTests.cs, InvoiceSubmissionServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An external caller submitting a PDF for an accessible core record of their firm gets 202 with submissionId, jobId, statusUrl and trackingNumber (always set, D-87 / D-91); the submission row is Received with channel SPA, firm, document and core-record fields set; one job with JobType InvoiceSubmissionProcessing is enqueued.</criterion>
+    <criterion testable="true">Negative: external caller for a core record they cannot access → 403 ebilling.submission.record_forbidden; naming another firm → 403 ebilling.submission.firm_forbidden; nothing uploaded, no row created, no job enqueued in either case.</criterion>
+    <criterion testable="true">Negative: non-PDF → 400 ebilling.submission.not_pdf; file above the configured limit → 413 ebilling.submission.too_large; unauthenticated → 401; Ebilling:Enabled false → 503 ebilling.disabled on every route.</criterion>
+    <criterion testable="true">The internal route runs the same validation with channel Internal; an internal caller without Read and AppendTo on the core record gets 403.</criterion>
+    <criterion testable="true">GET of a submission belonging to another firm, or to a core record the caller cannot access, returns 404 (no existence leak).</criterion>
+    <criterion testable="true">Seeding proofs recorded: with the firm-scope check removed, the other-firm test fails; with the core-record check removed, the inaccessible-record test fails.</criterion>
+    <criterion testable="true">No code path in this task creates sprk_invoice; a failure after upload leaves no Received submission row.</criterion>
+    <criterion testable="true">RouteAuthorizationGuardTests, RecordOwnerAssignmentCensusTests, SpeUploadPathIsFlatGuardTests and OperationAccessPolicyCompletenessTests pass.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17, NFR-10, D-24, D-44. Shared append points: FinanceModule.cs, EndpointMappingExtensions.cs:376-377, ExternalAccessEndpoints.cs (one mount line; shared with uac-r2 / SPA-r3 — /conflict-check). FinanceAuthorizationFilter has no work-assignment entity-set constant today ("sprk_workassignments" appears in EntityAccessFilter.cs:142). The 25 MB default lives in EbillingOptions (040). The InvoiceSubmissionProcessing handler is task 049; until it lands the job has no handler, so contract tests assert the enqueue, not processing. Done 2026-10-16: new key finance.submit_invoice (Read + AppendTo); external core-record check uses the principal's post-veto rights (Read + Create) because IsOperationPermittedAsync takes a WorkforcePrincipal; firmId is a query parameter; a caller in several firms must name one (400 firm_required). Routes, response contract, seeding proofs and evidence in projects/ebilling-r1/notes/044-submission-operation.md. Review fix round 1: a failed document update and a lost submission-create reply are now compensated. Review fix round 2: writes ignore the caller token (no orphans on disconnect), lost replies and the retried-PUT 409 are cleaned up by path/item/preset id, read faults are 503. rework: fix-round-2 task 044</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

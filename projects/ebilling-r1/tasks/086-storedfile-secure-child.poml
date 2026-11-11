@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
+    <gate>088 applied on dev (sprk_storedfile and its sprk_createdbyperson live); 090 merged (the row builder); 089 merged first (it edits the same uac-r2 files and puts sprk_storedfile on the NFR-05 list); owner OK for the live probe and the two -Apply runs; uac-r2 reviews every edit to its files</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Record ownership of invoice files on Secure records through uac-r2's lineage, role, census and creator-person guards, plus live role and schema writes on dev: tenant-isolation code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant ownership change across uac-r2-owned files with a binding review and live probes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the uac-r2 secure-family files and shared census also edited by 089 (SecureChildLineage.cs, RecordCreatorPerson.cs, config/secure-record-owner-role.json, scripts/Set-ChildRecordCreatorPersonSchema.ps1 and its Pester pin, RecordOwnerAssignmentCensusTests); runs after 089. No file shared with 093. /conflict-check before the PR.</parallel-reason>
+    <deps>088, 090, 089</deps>
+    <tags>bff-api, security, tenant-isolation, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Register invoice Stored Files (sprk_storedfile rows whose parent is sprk_invoice) in the secure family in ONE change, as notes/procedure-and-file-model.md section 5.2 states (row "sprk_storedfile (invoice purposes)", lineage edge sprk_storedfile → sprk_invoice): lineage on sprk_invoice only, a leaf (never an ownership parent), the Secure Record Owners role row with a live refusal probe, the creator-person stamp and script entries (secure and verify only; 088 created the column), and census entries for every Stored File create at HEAD. Procedure-source and export Stored Files stay outside the family. No delete code.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IRecordOwnershipResolver, SecureChildReconciler and the uac-r2 secure-family guards.</role>
+
+  <goal>A Stored File create under an invoice of a Secure core record succeeds, owned by the Secure team; making the core record Secure later re-owns its invoices' Stored Files through the reconciler and Unsecure moves them back; Procedure-source and export Stored Files are never reached; SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests, the census, the Pester pin and the creator-person agreement test pass with sprk_storedfile.</goal>
+
+  <context>
+    <background>Model 5.1 (Stored File rows), 5.2 (census row, lineage edges, delete lists: sprk_storedfile is hard-deny, never deleted by a core-record delete; K6: a contact uploader is not recorded as creator person), 9.1 ("Owner from ForParents(core) inside the Submit Invoice transaction"). The invoice family's existing registration is the reference: sprk_invoice, sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier, sprk_invoicecorrection in SecureChildLineage.cs (:142-165), config/secure-record-owner-role.json (sprk_invoice entry :81-85 with its probe evidence), RecordCreatorPerson.StampedChildTables (:97). Stored File writers: 090's StoredFileService.BuildRow and its callers at HEAD (092's persister when merged; 094 and 150 later). The Stored File has no core-record lookups; it hangs from sprk_invoice (InvoiceFamilyCoreRecordGuard.CoreRecordLookups is unchanged). 088's parent lookups are RemoveLink. Entity set sprk_storedfiles.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (uac-r2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordCreatorPerson.cs (StampedChildTables; uac-r2)</file>
+      <file role="modify">scripts/Set-ChildRecordCreatorPersonSchema.ps1 ($Tables / $SolutionHomes: secure and verify only; uac-r2) and tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1</file>
+      <file role="modify">config/secure-record-owner-role.json (one row with probe evidence; uac-r2)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs; tests/Spaarke.ArchTests/SecureFamilyConsistencyTests.cs (only if its expectations are literal); tests/unit/domain/Access/SecureChildLineageTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Access/SecureChildReconcilerStoredFileTests.cs</file>
+      <file role="read">tests/Spaarke.ArchTests/SecureChildNewCommandAgreementTests.cs; tests/unit/domain/Dataverse/RecordCreation/RecordTableRulesPreWriteRatchetTests.cs; tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/SecureChildReconcilerFixtures.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2 round 2 (general)">Step 0 merges origin/master before any edit. Every edit to a uac-r2 file ships in this PR and is reviewed by uac-r2. Cite symbols in code comments, not line numbers.</constraint>
+    <constraint source="model 5.2 (lineage, leaf)">ONE change: SecureChildLineage T("sprk_storedfile", "sprk_storedfiles", ("sprk_invoice", "sprk_invoice")) — no other lineage column (not the source lookups, not sprk_procedureversion or sprk_billingexport); NOT added to RecordOwnershipResolver.OwnershipParentEntities or to OWNERSHIP_CHILD_TABLES (bffChildWriteAdapter.ts), so SecureChildNewCommandAgreementTests holds; a role row (kind child, Read, Basic, reason, verbatim probe evidence); RecordCreatorPerson.StampedChildTables and Set-ChildRecordCreatorPersonSchema.ps1 under $SolutionHomes with its Pester pin; census ChildTables, a Routed entry for every Stored File create at HEAD and a PersonBearingWriters entry naming the method that writes the creator person.</constraint>
+    <constraint source="model 9.1, 5.2">Owner of an invoice Stored File = ResolveOwnerAsync(ForParents(the invoice's core record)) with RequestedBy = the caller, resolved once per transaction, the same owner as its invoice; a test pins it on 090's row builder path. A refusal writes nothing (the existing OwnerRefused outcome).</constraint>
+    <constraint source="model 5.1, 089">NFR-05: sprk_storedfile is on 089's separate non-throwing depth list, never on SecureBuRoleDepthAssertion.GuardedPrivileges. If 089 did not add it, add it to that list here.</constraint>
+    <constraint source="model 5.2 (delete contract), uac-r2 Q1">No delete code and no delete-Restrict. sprk_storedfile is on uac-r2's hard-deny list (record it in the notes; uac-r2 owns core-record-delete-design.md). Not added to ExternalModuleRegistry. InvoiceFamilyCoreRecordGuard.CoreRecordLookups unchanged.</constraint>
+    <constraint source="live (as 081 / 089)">Live refusal probe on dev before the privilege is added: a sprk_storedfile create with ownerid = Secure Record Owners → verbatim 0x80040299 into the evidence. Then Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf / -Apply / -Verify and Set-ChildRecordCreatorPersonSchema.ps1 dry run / -Apply / -Verify, each with the owner's OK. Both -Verify runs gate every environment before a BFF carrying 092 deploys there (079 for dev). Before that deploy, count Stored Files on invoices of Secure records (expected 0) and record it.</constraint>
+    <constraint source="root §10">No new service or registration; publish-size delta recorded; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (5.1, 5.2, 9.1)</file>
+      <file>projects/ebilling-r1/tasks/089-assignment-override-service.poml (the same registration for two other tables)</file>
+      <file>projects/ebilling-r1/notes/090-file-store-service.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Secure-family registration of a leaf child" location="the sprk_invoiceapproval entries in SecureChildLineage.cs, config/secure-record-owner-role.json, RecordCreatorPerson.StampedChildTables, the census">Copy their shape.</pattern>
+      <pattern name="Reconciler test fixture" location="tests/unit/Sprk.Bff.Api.Tests/Services/Access/SecureChildReconcilerGateDecisionRecordTests.cs, TestInfrastructure/SecureChildReconcilerFixtures.cs">Re-owned on Secure and on Unsecure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">git fetch; merge origin/master; confirm 088, 089 and 090 are ancestors of HEAD; confirm sprk_storedfile.sprk_createdbyperson exists on dev (metadata read); grep every Stored File create at HEAD.</step>
+    <step order="1">The registration in one change and the owner pin test.</step>
+    <step order="2">Reconciler test: an invoice's Stored File re-owned on Secure and back on Unsecure; a Procedure-source and an export Stored File never reached.</step>
+    <step order="3">With the owner's OK: the probe, both -Apply runs with -Verify, the pre-deploy count. Notices to uac-r2 before and after.</step>
+    <step order="4">dotnet build; unit tests, ArchTests, the Pester pin; publish-size delta; /conflict-check; notes in projects/ebilling-r1/notes/086-storedfile-secure-child.md.</step>
+    <step order="5">code-review, adr-check, two adversarial passes (tenant isolation), uac-r2 review; then TASK-INDEX.md status cell `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any part of the registration cannot land in the same PR as the others, STOP (a subset fails SecureFamilyConsistencyTests or the census).</trigger>
+    <trigger>If sprk_createdbyperson is missing on sprk_storedfile, STOP (088 creates it).</trigger>
+    <trigger>If the probe's create SUCCEEDS, delete the probe row, record it and STOP; ask uac-r2.</trigger>
+    <trigger>If the reconciler or lineage cannot ignore Stored Files whose sprk_invoice is null without a change to SecureChildReconciler, STOP and ask uac-r2.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The invoice family and its guards exist (013, uac-r2); grep finds sprk_storedfile in none of SecureChildLineage, the role JSON, StampedChildTables or the census.</existing>
+    <extension>Only existing lists and guards gain one entry each, plus one reconciler test file; no new service, registration, table or endpoint.</extension>
+    <cost-of-doing-nothing>Dataverse refuses a Stored File create owned by the Secure team (0x80040299), so every submission on a Secure matter fails at commit; and an invoice file on a matter made Secure later stays readable outside the wall.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Set-SecureRecordOwnerRolePrivileges.ps1, Set-ChildRecordCreatorPersonSchema.ps1 (owner OK); Invoke-Pester for the script pin</tool>
+    <tool name="dataverse-mcp">the probe (owner OK), metadata reads, the count</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SecureChildLineage.cs, RecordCreatorPerson.cs, config/secure-record-owner-role.json, scripts/Set-ChildRecordCreatorPersonSchema.ps1</output>
+    <output type="test">the test files in relevant-files, including tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1</output>
+    <output type="docs">projects/ebilling-r1/notes/086-storedfile-secure-child.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SecureChildLineage has sprk_storedfile with exactly one lineage column, sprk_invoice → sprk_invoice (negative: no source, Procedure Version or export lookup); sprk_storedfile is in neither OwnershipParentEntities nor OWNERSHIP_CHILD_TABLES.</criterion>
+    <criterion testable="true">The Stored File row of an invoice under a Secure matter, a Secure project and a Secure work assignment is owned by the resolver's answer for that core record, resolved once per transaction (negative: never the caller's team when the core is Secure); a resolver refusal writes nothing.</criterion>
+    <criterion testable="true">Reconciler: Secure re-owns the invoice's Stored Files, Unsecure moves them back; a Stored File with no sprk_invoice is never reached.</criterion>
+    <criterion testable="true">SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests, the census tests (ChildTables, Routed, PersonBearingWriters), ChildRecordCreatorPersonSchemaAgreementTests and the Pester pin pass with sprk_storedfile; removing its role row fails SecureFamilyConsistencyTests and removing its lineage entry fails the reconciler test (seeding proofs, recorded).</criterion>
+    <criterion testable="true">GuardedPrivileges is unchanged; sprk_storedfile is on the separate NFR-05 list.</criterion>
+    <criterion testable="true">Notes record the probe's verbatim refusal, the -Apply / -Verify outputs, the owner's OK with dates, the pre-deploy count and the hard-deny statement; no delete code was added.</criterion>
+    <criterion testable="true">dotnet build exits 0; publish-size delta recorded; no package; /conflict-check run.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rewritten for EB-D-148 (model 13, row 086: "What remains: secure child registration for invoice Stored Files"). The rate-card secure-family work of the old 086 is dropped with D-120 / 085's re-key. Two adversarial passes (tenant isolation). ontology-r1 088 gate 2026-10-22, K-d: on dev, one enabled flagged-external user is in the 'Spaarke' business unit, which is one of 088's six -ReaderBusinessUnits, so that user has column read on Stored File columns. The user has no table privilege until this task; the same exposure exists today on the 8 secured sprk_document columns. This task (and UAC 191) must keep External Collaborator and flagged-external users off the sprk_storedfile table privilege; add a must-not-fire test for a flagged-external caller.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

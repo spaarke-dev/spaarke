@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0428",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0428","generator_id":"gen_eval_set.py@1 F-0428","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0428.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Calloway & Cranmer LLP","firm_invoice_number":"INV-2026-06484","invoice_date":"2025-04-03","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"43312-0004","po_number":"PO-4577363","fees_total":4622.0,"expenses_total":209.39,"adjustments_total":0.0,"total_due":4831.39,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Whitfield","title":"Associate","rate":295.0,"billed_as":"EW"},{"name":"Ivan Yilmaz","title":"Partner","rate":625.0,"billed_as":"IY"},{"name":"Mei Whitfield","title":"Associate","rate":285.0,"billed_as":"MW"},{"name":"Sofia Santoro","title":"Paralegal","rate":170.0,"billed_as":"SS"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-03","timekeeper":"MW","timekeeper_name":"Mei Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":285.0,"amount":427.5,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-05","timekeeper":"SS","timekeeper_name":"Sofia Santoro","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":170.0,"amount":425.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-10","timekeeper":"EW","timekeeper_name":"Emeka Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":295.0,"amount":413.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-11","timekeeper":"MW","timekeeper_name":"Mei Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":285.0,"amount":85.5,"narrative":"Research appealability issues in the lease dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-11","timekeeper":"EW","timekeeper_name":"Emeka Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":295.0,"amount":354.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-11","timekeeper":"SS","timekeeper_name":"Sofia Santoro","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":170.0,"amount":204.0,"narrative":"Research appealability issues in the warranty claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-17","timekeeper":"IY","timekeeper_name":"Ivan Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":625.0,"amount":1625.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-18","timekeeper":"EW","timekeeper_name":"Emeka Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":295.0,"amount":59.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-21","timekeeper":"MW","timekeeper_name":"Mei Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":285.0,"amount":256.5,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-28","timekeeper":"MW","timekeeper_name":"Mei Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":285.0,"amount":684.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-28","timekeeper":"EW","timekeeper_name":"Emeka Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":295.0,"amount":88.5,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":63.45,"amount":190.35,"narrative":"Overnight courier to Solano Freight counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":9.52,"amount":19.04,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["896 Harbor Road","Portland","Tax ID 65-6974421"],"template":"T15","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2023-11-28","matter_close":"2025-06-29","matter_budget":44325.0,"approved_timekeepers":["Emeka Whitfield","Mei Whitfield","Katya Okafor","Sofia Santoro","Ivan Yilmaz"],"invoice_received_date":"2025-04-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0184",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0184","generator_id":"gen_eval_set.py@1 F-0184","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0184.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Oakhurst Zeller PC","firm_invoice_number":"INV-2025-90503","invoice_date":"2026-10-25","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"49190-0032","po_number":"PO-4513247","fees_total":6312.5,"expenses_total":49.32,"adjustments_total":0.0,"total_due":6361.82,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Nakamura","title":"Paralegal","rate":180.0,"billed_as":"AN"},{"name":"Dalia Okafor","title":"Associate","rate":385.0,"billed_as":"DO"},{"name":"Daniel Nakamura","title":"Senior Associate","rate":450.0,"billed_as":"DN"},{"name":"Hannah Lockhart","title":"Associate","rate":350.0,"billed_as":"HL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-01","timekeeper":"HL","timekeeper_name":"Hannah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":350.0,"amount":437.5,"narrative":"Research standard for provisional remedies concerning the employment claim","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-07","timekeeper":"HL","timekeeper_name":"Hannah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":350.0,"amount":350.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-20","timekeeper":"DO","timekeeper_name":"Dalia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":385.0,"amount":577.5,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-21","timekeeper":"AN","timekeeper_name":"Anders Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":270.0,"amount":405.0,"narrative":"Attend case management conference in the insurance coverage issue","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-24","timekeeper":"HL","timekeeper_name":"Hannah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":350.0,"amount":787.5,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-27","timekeeper":"DN","timekeeper_name":"Daniel Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.75,"rate":450.0,"amount":1237.5,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-27","timekeeper":"DO","timekeeper_name":"Dalia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":385.0,"amount":770.0,"narrative":"Review expert qualifications and prior testimony for the lease dispute","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-27","timekeeper":"DO","timekeeper_name":"Dalia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":510.0,"amount":382.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-28","timekeeper":"AN","timekeeper_name":"Anders Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":180.0,"amount":450.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-29","timekeeper":"DN","timekeeper_name":"Daniel Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":450.0,"amount":112.5,"narrative":"Update document review protocol and coding panel for the warranty claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-07-29","timekeeper":"DN","timekeeper_name":"Daniel Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":450.0,"amount":225.0,"narrative":"Research standard for provisional remedies concerning the supply agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-11-12","timekeeper":"DO","timekeeper_name":"Dalia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":385.0,"amount":577.5,"narrative":"Draft witness list in the regulatory inquiry","codes":["L210","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":17.18,"amount":17.18,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6.31,"amount":6.31,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-07-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":41.0,"rate":0.63,"amount":25.83,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["552 Pine Street","Phoenix","Tax ID 77-5014546"],"template":"T15","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-05-10","matter_close":"2026-10-29","matter_budget":50447.0,"approved_timekeepers":["Hannah Lockhart","Daniel Nakamura","Anders Nakamura","Dalia Okafor","Peter Carmichael"],"invoice_received_date":"2026-10-26"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"line","line_refs":[12],"consequence":"Flag"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

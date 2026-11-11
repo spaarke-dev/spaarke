@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151" project="ebilling-r1">
+  <metadata>
+    <title>Mark Paid and export UI</title>
+    <phase>6 Export and index (WP6) — wave W6-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One small transition endpoint through the existing lifecycle service plus a UI over 150's endpoints; the surface choice is escalated before building.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following: DataGrid code-page host contract or a model-driven command, and a Finance route copying 150's authorization.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>150</deps>
+    <tags>frontend, bff, dataverse</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Give finance users a surface to (a) select Approved, not-yet-exported invoices and create an AP export batch through 150's endpoints, and (b) mark a Sent to AP invoice as Paid (FR-42, only Sent to AP to Paid, finance role) through a new Mark Paid route that calls the lifecycle service — using the smallest surface consistent with existing UI, chosen with the owner first.</prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Spaarke DataGrid framework, model-driven commands, Fluent v9 and ASP.NET Core Minimal APIs.</role>
+
+  <goal>A Mark Paid route that allows only Sent to AP to Paid for finance-authorized callers; a finance UI listing export candidates and Sent to AP invoices with Create export batch and Mark Paid actions; any new view, configuration row or page is recorded for 153 to deploy and sync; ui-tests pass including dark mode.</goal>
+
+  <context>
+    <background>Spec FR-42 (acceptance: only Sent to AP to Paid allowed), FR-41 (selection rules enforced server-side by 150), FR-06 / I-3 (payment is the full approved total, one payment, never reopened), NFR-13. 150 provides GET candidates, POST export-batches and GET batch (routes in 150's notes) and the agreed finance authorization. 014 provides InvoiceLifecycleService. Existing invoice UI: sprk_invoicespage (src/solutions/sprk_invoicespage/src/main.tsx) is a Matter-scoped drill-through on DataGridPageShell (config d021827b-..., parentContextFilter on sprk_matter) — not an AP queue. DataGrid host contract: docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md (section 3 for pages with custom command handlers). Grid configurations are sprk_gridconfiguration rows deployed by scripts/Deploy-AllDataGridConsumers.ps1. Code pages follow .claude/patterns/webresource/full-page-custom-page.md and register the Navigator side pane (docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoicePaymentEndpoints.cs (Mark Paid)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/integration/auth/Finance/MarkPaidAuthorizationTests.cs</file>
+      <file role="new">src/solutions/ApExport/ (only if the owner chooses option A in the escalation)</file>
+      <file role="canonical-reference">src/solutions/sprk_invoicespage/src/main.tsx (DataGridPageShell usage)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridPageShell.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="150" status="pending">Export endpoints and finance authorization</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-42, ADR-002">Mark Paid only through InvoiceLifecycleService; any statuscode other than Sent to AP returns 409 with a stable code; Paid is never reversed by this route.</constraint>
+    <constraint source="ADR-008, ADR-019, 040">Mark Paid route: the same finance authorization 150 uses plus Write on the invoice; ProblemDetails with stable codes; RequireEbillingEnabled().</constraint>
+    <constraint source="FR-41">The UI never filters for correctness only on the client: it shows 150's candidate list and surfaces 150's 400 / 409 reasons per invoice.</constraint>
+    <constraint source="ADR-021, ADR-012">Fluent v9 and shared components (DataGrid framework, DataGridPageShell or DataGrid, FormModal for confirmations); dark mode via the shell; no new npm package.</constraint>
+    <constraint source="project CLAUDE.md section 3">Do not edit src/dataverse/solutions/SpaarkeMaster/** here. New views, ribbon commands, web resources, sitemap entries or grid configuration rows are created in dev and listed in notes for 153, which syncs them into solution source.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene for the Mark Paid route: placement BFF, no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md (option B only)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataGrid code page shell" location="src/solutions/sprk_invoicespage/src/main.tsx">Thin shell over DataGridPageShell with a configId; visual anchor for option A.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Resolve the UI-surface escalation with the owner before any UI work; record the choice.</step>
+    <step order="1">Mark Paid route POST /api/finance/invoices/{invoiceId}/mark-paid (directional) calling the lifecycle service; tests: Sent to AP to Paid 200; Approved, In Review, Paid, Rejected, Returned to Firm each 409; 401; 403 without finance authorization; 503 when off.</step>
+    <step order="2">UI per the chosen option: an "Approved — ready for export" list with multi-select and Create export batch (shows the batch result: count, total, files), and a "Sent to AP" list with Mark Paid (confirmation via FormModal). Error states show 150's per-invoice reason codes.</step>
+    <step order="3">Create any view, grid configuration row, command or web resource in dev; list each with its id for 153.</step>
+    <step order="4">Build (npm install --legacy-peer-deps --no-audit --no-fund; npm run build) and run the ui-tests below in dev; dotnet build and dotnet test green; publish-size delta recorded.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations, the chosen surface and the component list for 153 in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>UI surface choice (brief leaves it open): before building, raise 🔔 Human Input Required with (A) a small code page src/solutions/ApExport/ hosting the shared DataGrid with two configurations and custom commands (recommended: no ribbon XML, reuses the DataGrid framework, deploys as one web resource); (B) two sprk_invoice views plus ribbon commands calling the BFF from a small JS web resource (ribbon-edit, solution-source change in 153); (C) extend sprk_invoicespage (not recommended: it is a Matter-scoped drill-through). Record the owner's choice.</trigger>
+    <trigger>If 150's finance authorization decision is not recorded in its notes, STOP: do not invent a second authorization rule.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceLifecycleService (014) performs the transition; 150's export endpoints; sprk_invoicespage and DataGridPageShell for grids; spec section 11 row "Review / approval / export / rule endpoints". No Mark Paid route exists (grep "mark-paid|MarkPaid" in src finds none).</existing>
+    <extension>The route is a thin caller of the lifecycle service in its own endpoints file; the UI reuses the DataGrid framework rather than a new grid; sprk_invoicespage is not extended because it is scoped to one matter.</extension>
+    <cost-of-doing-nothing>Finance users have no way to start an export or record payment, so invoices stop at Approved / Sent to AP (FR-41, FR-42 fail; success criterion 7 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Create export batch">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={matter-management-app-id}</url>
+      <steps>
+        <step>Open the export surface as a finance user</step>
+        <step>Select two Approved invoices and choose Create export batch</step>
+        <step>Verify the result shows count, total and two files, and both invoices now appear under Sent to AP</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>Batch created; invoices move to Sent to AP; no console errors.</expected>
+    </test>
+    <test name="Mark Paid">
+      <steps>
+        <step>Select a Sent to AP invoice and choose Mark Paid, confirm in the dialog</step>
+        <step>Try Mark Paid on an Approved invoice (if the surface allows selecting it)</step>
+      </steps>
+      <expected>First invoice becomes Paid; the second shows the 409 reason and stays Approved.</expected>
+    </test>
+    <test name="Non-finance user">
+      <steps>
+        <step>Open the surface as a user without the finance authorization and attempt both actions</step>
+      </steps>
+      <expected>Actions are refused with the 403 message; no state changes.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the app to dark mode and open both lists and the confirmation dialog</step>
+        <step>Verify backgrounds, text and icons use theme tokens</step>
+      </steps>
+      <expected>No white backgrounds or black text in dark mode; all colours from Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="npm">install, build</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/InvoicePaymentEndpoints.cs; the chosen UI surface</output>
+    <output type="test">tests/integration/auth/Finance/MarkPaidAuthorizationTests.cs</output>
+    <output type="docs">Task notes: chosen surface, components created in dev for 153</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Mark Paid succeeds only from Sent to AP; every other status returns 409 with a stable code and no change.</criterion>
+    <criterion testable="true">Mark Paid: 401 unauthenticated, 403 without the finance authorization, 503 ebilling.disabled when off.</criterion>
+    <criterion testable="true">The UI creates a batch only through 150's POST and shows 150's per-invoice refusal reasons.</criterion>
+    <criterion testable="true">Every dev component the UI needs (view, configuration row, command, web resource, sitemap entry) is listed with its id in notes for 153; no SpaarkeMaster file is edited.</criterion>
+    <criterion testable="true">ui-tests pass, including dark mode.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points: FinanceModule.cs and the Finance endpoint-mapping call site. If option A is chosen, the new code page registers the Navigator side pane as a standard build step (root CLAUDE.md section 17).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

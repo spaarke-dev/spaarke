@@ -39,6 +39,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
 /// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
 /// rows reach the model still runs as the user.
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>: an external caller's invoice-family record (an invoice, or a row derived from
+/// one) whose invoice the (a') predicate hides answers like a missing one. It can only HIDE a record the user's own read
+/// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>Registration</b>: <c>sprk_analysistool</c> row
@@ -81,6 +85,8 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     private readonly ISystemUserIdentityResolver _identityResolver;
     /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseDescribeHandler(
         IDataverseUserClient dataverse,
@@ -88,7 +94,8 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        AppOnlyDocumentNarrowing narrowDocuments)
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -96,6 +103,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
@@ -367,9 +375,11 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         var guardCommunication = false;
         var guardDocument = false;
         var guardDerived = false;
+        var guardInvoice = false;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
-             ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName)) &&
+             ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName) ||
+             ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName)) &&
             await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                 _httpContextAccessor, _callerResolver, _identityResolver, ct).ConfigureAwait(false))
         {
@@ -381,6 +391,11 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             {
                 // Task 188 slice C (F-C1): an analysis or analysis output follows the documents it derives from.
                 guardDerived = true;
+            }
+            else if (ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName))
+            {
+                // ebilling-r1 task 098 ((a')): an invoice-family record follows its invoice.
+                guardInvoice = true;
             }
             else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
             {
@@ -416,7 +431,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         {
             // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
             // record below, so the answer never tells an external caller that a hidden record exists.
-            if ((guardCommunication || guardDocument || guardDerived) &&
+            if ((guardCommunication || guardDocument || guardDerived || guardInvoice) &&
                 recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
             {
                 return RecordNotVisible(tool, startedAt);
@@ -427,11 +442,17 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         // ISS-010 (task 078): the task 065 rule on the one record — flag explicitly false AND a thread that reads Open
         // now; for a document, THE external document predicate (task 188). A hidden record answers with
         // the same code and message as a guarded not-found above; a read fault throws (no data).
-        if (guardCommunication || guardDocument || guardDerived)
+        if (guardCommunication || guardDocument || guardDerived || guardInvoice)
         {
             var record = recordResponse.Body!.Value;
             bool visible;
-            if (guardCommunication)
+            if (guardInvoice)
+            {
+                // ebilling-r1 task 098 ((a')): hidden when its invoice (directly or through its invoice line) is hidden or
+                // undecidable; the hide-only seam reads the links and the predicate app-only by id. A read fault throws.
+                visible = !(await _hideInvoiceFamily(logicalName, new[] { recordId }, ct).ConfigureAwait(false)).Contains(recordId);
+            }
+            else if (guardCommunication)
             {
                 var threadId = ExternalCallerCommunicationGuard.ThreadIdOf(record);
                 visible = ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) && threadId != Guid.Empty &&

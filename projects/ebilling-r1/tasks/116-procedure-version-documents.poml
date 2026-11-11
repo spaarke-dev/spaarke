@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="116" project="ebilling-r1">
+  <metadata>
+    <title>Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
+    <gate>081, 085 and 090 merged; 080's live schema carries sprk_procedureversion.sprk_notconverted (memo; see escalation); uac-r2 reviews the two new routes before merge; no live writes (the column-removal script runs read-only here)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the drafting job, two write paths and a code page; adds two caller-authorized routes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration over more than three files and consumers with an idempotency contract to re-key.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits 085's RateCardImportService/Endpoints, RuleSetService.cs (081, 117) and 081's ProcedureEndpoints.cs. Run after 085; 117 rebases.</parallel-reason>
+    <deps>081, 085, 090</deps>
+    <tags>bff-api, api, rules, job, storage, frontend, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Move every reader and writer of a Procedure document onto the Procedure Version's Stored File (notes/procedure-and-file-model.md 7.2 "Drafting", 12 rows 075, 019/076/077, 078): drafting keyed per version reading its file; the rule-set upload and the rate-card workbook become the version's file; no code uses sprk_ruleset.sprk_sourcedocument or sprk_ratecard.sprk_sourcedocument; a read-only script prepares the column removal.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ADR-004 jobs, RuleSetService, the rate-card import and 090's file store.</role>
+
+  <goal>Drafting, its marker, compensation and source are per Procedure Version; a version gets its file through one BFF route; ProcedureLibraryContainerId has no reader outside 092's plumbing; the criteria below pass.</goal>
+
+  <context>
+    <background>Code (verified 2026-10-21, none on master): BillingRuleDraftJobHandler keys BuildJob (:77-86) and the lock (:100) on the rule set, short-circuits on AlreadyDrafted (:126; the model cites :119-130) and downloads from SPE (:256). RuleSetService: CreateAsync (:367) reads ProcedureLibraryContainerId (:372), uploads (:416) and writes sprk_sourcedocument (:451); GetDraftSourceAsync reads it (:614) and the container (:621); RemoveUntouchedDraftsAsync (:663), AddDraftsAsync (:820), code prefix BRD- (:270), marker sprk_notconverted on the set (:912); RuleSetColumns (:320); RuleSetDetail.SourceDocumentId (:90, :588). RateCardImportService: container (:158), upload and unlinked sprk_document (:228-255), sprk_ratecard.sprk_sourcedocument (:299), RateCardImportResult.SourceDocumentId (:23). RuleSetEndpoints POST / (:65) and /{id}/draft (:81). RuleReview callers: App.tsx :84-98, RuleSetDetailView.tsx :321, reviewActions.ts :215, ruleSetApi.ts :80, :88, :242-288.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BillingRuleDraftJobHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RateCardImportService.cs; Api/Finance/RateCardImportEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/RuleSetEndpoints.cs (two routes removed); Api/Finance/ProcedureEndpoints.cs (081's; two routes added); tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="modify">src/solutions/RuleReview/src/App.tsx, components/RuleSetDetailView.tsx, components/ProposalsGrid.tsx (empty text), services/reviewActions.ts, services/ruleSetApi.ts, __tests__/*; delete components/NewRuleSetModal.tsx</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingFormsViews.ps1 (:89, :112)</file>
+      <file role="new">scripts/ebilling/Remove-EbillingSourceDocumentColumns.ps1</file>
+      <file role="modify">tests: BillingRuleDraft*Tests, RuleSetService*Tests, RateCardImport*Tests, RuleSetEndpointsTests (tests/unit/Sprk.Bff.Api.Tests/), tests/integration/seam/Finance/BillingRuleDraftSeamTests.cs, ProcedureEndpointsTests</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 7.2, 12 (075)">Job payload { procedureVersionId, callerObjectId }; SubjectId, IdempotencyKey and lock key use the version id; JobType unchanged; a payload without procedureVersionId is Poisoned.</constraint>
+    <constraint source="model 7.2, 4.1">Source = the version's one Servable Procedure-source Stored File, read through 090's OpenForProcessingAsync: Pending → transient; Malicious → Poisoned; none, Missing or two Servable → 422 ruleset.source_missing. No ISpeFileOperations in the handler.</constraint>
+    <constraint source="model 7.2, O-24">Drafting runs only for a Draft version of a Procedure whose Area is Billing: another status → 409 procedure_version.not_draft; another Area → 400 procedure.not_billing. Rules go into the Procedure's rule set as Proposed, Off policies whose versions carry sprk_procedureversion and sprk_publishstate Draft; BRD- codes and per-set numbering stay.</constraint>
+    <constraint source="model 7.2 (idempotency per version)">Marker = sprk_procedureversion.sprk_notconverted, written last; AlreadyDrafted reads it. RemoveUntouchedDraftsAsync keeps today's rule and considers only policy versions of this version; a policy with a current version is never removed (081's copy-forward drafts survive). RuleSetDetail.NotConverted reads the highest-numbered version's marker.</constraint>
+    <constraint source="model 5.3, 3.1 I-P5, 4.3">Two routes in ProcedureEndpoints.cs, on 081's group (099's step-0 flag): POST /api/finance/procedures/{procedureId}/versions/{versionId}/draft (202; BillingAdminAuthorization.DraftRules() plus caller Write on the Procedure; 409 ruleset.already_drafted when marked) and PUT …/versions/{versionId}/file (multipart; 081's write authorization). A version of another Procedure answers the unknown-id 404.</constraint>
+    <constraint source="model 3.2 (one file per version), 4.2 (write-once)">The file route uploads through 090's UploadForCallerAsync (parent sprk_procedureversion, purpose Procedure source), size limit EbillingOptions.MaxSubmissionFileSizeMb (413 procedure_version.file_too_large). Draft versions only, else 409 procedure_version.not_draft. Replace: the new file flips Servable first, then the old row is set Removed; the response carries the new file id.</constraint>
+    <constraint source="model 7.2 (rate cards), 12 (078)">After 085's checks, ImportAsync stores the workbook as the version's source file through UploadForCallerAsync (same replace rule) AFTER the card, rates and timekeepers; a failed file write runs today's row compensation. SourceDocumentId becomes SourceFileId. No SpeFileStore, sprk_document or container read remains.</constraint>
+    <constraint source="model 12 (019/076/077)">Retired: POST /api/finance/rulesets and POST /api/finance/rulesets/{ruleSetId}/draft, RuleSetService.CreateAsync, RuleSetCreateRequest, RuleSetCreated, RuleSetDetail.SourceDocumentId. Rule sets are created only by 081 (Procedure) and 089 (record-scoped). RuleReview loses its New rule set action and modal and its Draft rules button and api calls; nothing else in the page changes.</constraint>
+    <constraint source="model 12 (sprk_sourcedocument)">No file under src/server, src/solutions or tests names sprk_sourcedocument for sprk_ruleset or sprk_ratecard (088's sprk_storedfile column stays); Deploy-EbillingFormsViews.ps1 drops it from both forms. SpaarkeMaster XML (Entity.xml and main forms of both tables) is not edited: 079 re-syncs it.</constraint>
+    <constraint source="project CLAUDE.md §5, 080 (no existing column deleted)">Column removal is NOT in 080 (it never deletes a column); it is a follow-up schema step. Remove-EbillingSourceDocumentColumns.ps1 (copy Remove-EbillingInvoiceLineItem.ps1) is read-only by default (non-null counts, forms, views, RetrieveDependenciesForDelete, verdict READY/BLOCKED); -Delete -OwnerApproval removes both lookups only on READY and refuses (exit 2) while any row holds a value. Here it runs read-only; -Delete runs after 079 deploys this BFF and forms, with the owner's OK. Never delete sprk_document rows or SPE containers (O-13).</constraint>
+    <constraint source="project">Not here: 085's import re-key; removing ProcedureLibraryContainerId from options (092); 084's UI; serving the file (090).</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">No new service, interface or package; publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3.2, 4, 7.2, 12)</file>
+      <file>projects/ebilling-r1/tasks/075-rule-draft-action.poml, 081-procedure-version-service.poml, 085-ratecard-procedure-version.poml, 090-file-store-service.poml</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Guarded column removal" location="scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1">Inventory first, -Delete with -OwnerApproval, refuse on data.</pattern>
+      <pattern name="Multipart route" location="RuleSetEndpoints.CreateRuleSet (:209)">Size check before buffering; move it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. 081, 085, 090 ancestors of HEAD; read notes/090-file-store-service.md; check the marker column is live.</step>
+    <step order="1">RuleSetService: draft source, marker, compensation and AddDraftsAsync per version; CreateAsync and DTOs retired; NotConverted read.</step>
+    <step order="2">Job handler re-keyed; tests (redelivery, lock, compensation, source states).</step>
+    <step order="3">The two routes; RuleSetEndpoints routes removed; ledger.</step>
+    <step order="4">RateCardImportService file step; tests.</step>
+    <step order="5">RuleReview removals; npm install --legacy-peer-deps --no-audit --no-fund, test, build.</step>
+    <step order="6">Forms script; removal script; run it read-only on dev and record the verdict.</step>
+    <step order="7">Build, test, publish-size delta, /conflict-check; code-review, adr-check, one adversarial pass; uac-r2 review.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]". Notes in projects/ebilling-r1/notes/116-procedure-version-documents.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_procedureversion.sprk_notconverted does not exist (080 did not add it), STOP and raise 🔔 Human Input Required: the column belongs in 080's P3 before its live run; do not keep the marker on the rule set.</trigger>
+    <trigger>If 090's API cannot list a parent's files by purpose or set a row Removed, STOP and report to 090's owner.</trigger>
+    <trigger>If the owner wants RuleReview to keep a create or draft action before 084 Part B, STOP and ask.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Drafting and import are changed in place; 090's UploadForCallerAsync has no route; CreateRuleSet, the only upload route, is removed.</existing>
+    <extension>The routes extend 081's ProcedureEndpoints; the marker goes on the version, not the rule set, because a set spans versions; the script copies 011's.</extension>
+    <cost-of-doing-nothing>081's publish needs a Servable source file nothing can write; v2 can never be drafted (the set's marker says drafted); 092 cannot retire the Procedure Library key.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">the files in relevant-files</output>
+    <output type="test">the test files in relevant-files</output>
+    <output type="docs">projects/ebilling-r1/notes/116-procedure-version-documents.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Drafting a Draft Billing version reads its source file through 090 and stores Proposed, Off rules under that version (publishstate Draft); a redelivery after the marker calls no model; v2 drafts although v1 is drafted.</criterion>
+    <criterion testable="true">Negative: no source file, Missing, or two Servable source files → 422 ruleset.source_missing; Pending → transient; Malicious → Poisoned; non-Draft version → 409 procedure_version.not_draft; Ontology Area → 400; a payload without procedureVersionId → Poisoned.</criterion>
+    <criterion testable="true">Compensation removes an earlier run's untouched drafts of this version only; a copy-forward draft (policy with a current version) and a draft under another version are kept.</criterion>
+    <criterion testable="true">Both routes refuse flagged-external, no systemuser row and a flag-read fault before any read; no Write or no privilege → 403; another Procedure's version → unknown-id 404; file route: non-Draft 409, oversize 413.</criterion>
+    <criterion testable="true">File replace: after a second upload the new row is Servable and the old row Removed; a failed flip leaves the old row Servable.</criterion>
+    <criterion testable="true">Rate-card import stores the workbook as the version's source file and returns SourceFileId; a failed file write leaves no card, rate or timekeeper; no SpeFileStore or sprk_document call is made.</criterion>
+    <criterion testable="true">POST /rulesets and /rulesets/{id}/draft are gone; grep sprk_sourcedocument in src/server and tests finds only sprk_storedfile uses; grep ProcedureLibraryContainerId in src/server finds only FinanceOptions, its validator and GraphModule.</criterion>
+    <criterion testable="true">RuleReview builds and its tests pass with no create or draft call and no sourceDocumentId field.</criterion>
+    <criterion testable="true">The removal script's read-only dev run is recorded with its verdict and writes nothing.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered tests and full ArchTests pass; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="RuleReview without create and draft">On dev after 079: the list loads with no "New rule set"; a detail has no "Draft rules"; Accept, Reject, Edit, Publish unchanged; dark mode unchanged.</test>
+  </ui-tests>
+
+  <notes>Once merged, 092's Procedure Library escalation clears. 079 deploys this with WP3.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

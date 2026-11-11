@@ -117,7 +117,7 @@ The engine writes to the existing ADR-024 regarding family — it **never introd
 | **Pending Review** | 100000001 | No field winner, or top confidence < `0.50` |
 | **Unresolved** | 100000002 | Legacy value; never written by R4, treated as Pending Review |
 | **Suggested** | 100000003 | Has winners but not auto-file-eligible (includes any AI-derived field, or kill-switch OFF) — writes suggested fields for review |
-| **Ambiguous** | 100000004 | 2+ distinct targets on the same field each ≥ the resolved threshold (conflict) — **no writes** |
+| **Ambiguous** | 100000004 | 2+ distinct targets on the same field each ≥ the resolved threshold (conflict) — **no write on that field**; other, unconflicted core fields are still written. A field where exactly one target is **caller-supplied** (the Office add-in save's record) is not a conflict: the caller's target wins it and the others stay review candidates (#2412) |
 
 ### 5.1 Noisy-OR reinforcement
 

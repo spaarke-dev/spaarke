@@ -841,10 +841,11 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
-    public async Task ResolveOwner_ForAChildOfAUserOwnedDocumentFiledToAnOrdinaryMatter_KeepsThePrimaryParentsUnit()
+    public async Task ResolveOwner_ForAChildOfAUserOwnedDocumentFiledToAnOrdinaryMatter_FollowsTheDocumentsFiling()
     {
-        // Nothing changes for a child of ordinary records: the ancestors only take part in the SECURE decision, and the
-        // ordinary answer is still the primary parent's own unit.
+        // UAC task 194b (I-6, "a content row of a user-owned but FILED parent follows the parent's filing, not its creator"):
+        // before 194b the ordinary answer was the user-owned document's own unit (its creator's, GeneralBu), so an analysis of
+        // a document filed to a BU1 matter landed in the creator's unit. The document's filing decides now.
         var documentId = Guid.NewGuid();
         var directory = Directory()
             .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: false, owningTeam: ChildTeam)
@@ -855,7 +856,7 @@ public class RecordOwnershipResolverTests
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
             CancellationToken.None);
 
-        resolution.OwningTeamId.Should().Be(GeneralTeam);
+        resolution.OwningTeamId.Should().Be(ChildTeam);
     }
 
     [Fact]
@@ -1242,6 +1243,67 @@ public class RecordOwnershipResolverTests
 
         resolution.OwningTeamId.Should().Be(ChildTeam);
         directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
+    }
+
+    [Theory(DisplayName = "194b R (A5) must fire: a Signal's or a Decision Record's filing is its writer's — a generic re-file (into isolation, or between ordinary records) is refused before anything is read or written")]
+    [InlineData("sprk_decisionrecord", "sprk_project", true)]
+    [InlineData("sprk_decisionrecord", "sprk_matter", false)]
+    [InlineData("sprk_signal", "sprk_matter", true)]
+    [InlineData("sprk_signal", "sprk_matter", false)]
+    public async Task Reparent_OfASignalOrADecisionRecord_IsRefused_BeforeAnyReadOrWrite(string table, string column, bool toSecure)
+    {
+        var (recordId, target) = (Guid.NewGuid(), toSecure ? SecureProjectId : MatterId);
+        var targetTable = toSecure ? "sprk_project" : "sprk_matter";
+        if (toSecure && column == "sprk_matter")
+            (target, targetTable) = (MatterId, "sprk_matter");
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, toSecure ? SecureBu : ChildBu, isSecure: toSecure ? true : null,
+                owningTeam: toSecure ? SecureNamedTeam : ChildTeam)
+            .WithRecord(table, recordId, GeneralBu, owningTeam: GeneralTeam);
+        var applied = false;
+        var request = new RecordReparent
+        {
+            EntityLogicalName = table,
+            RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?> { [column] = new EntityReference(targetTable, target) },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        resolution.Reason.Should().Be(RecordOwnershipContext.WriterOwnedFilingRefusal);
+        applied.Should().BeFalse("refused before the change is written");
+        directory.QueriedEntities.Should().BeEmpty("refused before anything is read");
+        directory.RecordQueries.Should().BeEmpty();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "194b R (A5) must not fire: a generic re-file of another child table (an event) still moves and settles its owner")]
+    public async Task Reparent_OfAnEvent_StillMoves()
+    {
+        var (eventId, otherMatter) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_event", eventId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", otherMatter) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_event",
+            RecordId = eventId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_event", eventId, ChildTeam));
     }
 
     [Fact]
@@ -3271,7 +3333,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
-        resolution.OwningTeamId.Should().Be(GeneralTeam, "an ordinary analysis takes its primary parent's unit");
+        resolution.OwningTeamId.Should().Be(ChildTeam,
+            "an ordinary analysis takes its primary parent's unit, and a user-owned FILED document answers with its filing (194b, I-6)");
         var parentReads = directory.RecordQueries.Where(q => q.EntityName is "sprk_document" or "sprk_matter").ToList();
         parentReads.Where(q => q.EntityName == "sprk_document" && q.ColumnSet.AllColumns)
             .Select(q => (Guid)q.Criteria.Conditions.Single().Values.Single())
@@ -3421,16 +3484,16 @@ public class RecordOwnershipResolverTests
     /// <summary>Out of the secure project, onto the ordinary matter.</summary>
     private static RecordReparent MoveToOrdinaryMatter(
         Guid documentId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? caller) => new()
-    {
-        EntityLogicalName = "sprk_document",
-        RecordId = documentId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_project"] = null,
-            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = null,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_ByAFullAccessHolderOnThatRoot_IsApplied_AndReassigned()
@@ -3481,10 +3544,11 @@ public class RecordOwnershipResolverTests
     }
 
     /// <summary>
-    /// #2273: a child of a table that carries <c>sprk_createdbyperson</c> but that the BFF does not stamp (ebilling task 080
-    /// created the column UNSECURED on its procedure tables), filed under the secure project.
+    /// #2273: a child of a table that the BFF does not stamp, filed under the secure project, whose <c>sprk_createdbyperson</c>
+    /// (if any) is therefore not trusted. Master merge (ebilling-r1): not <c>sprk_procedure</c>, which ebilling task 081 now
+    /// stamps (RecordCreatorPerson.StampedChildTables); <c>sprk_agreement</c> is an ownership-parent child the BFF does not stamp.
     /// </summary>
-    private const string UnstampedChildTable = "sprk_procedure";
+    private const string UnstampedChildTable = "sprk_agreement";
 
     private static (FakeDirectory Directory, Guid RowId) SecureUnstampedChildWorld(Dictionary<string, object> columns)
     {
@@ -3502,7 +3566,8 @@ public class RecordOwnershipResolverTests
     }
 
     private static RecordReparent MoveUnstampedChildToOrdinaryMatter(Guid rowId) => MoveToOrdinaryMatter(rowId, CallerHolding(Collaborate))
-        with { EntityLogicalName = UnstampedChildTable };
+        with
+    { EntityLogicalName = UnstampedChildTable };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_OnATableTheBffDoesNotStamp_AForgedCreatorPerson_IsNotAdmitted()
@@ -4029,15 +4094,15 @@ public class RecordOwnershipResolverTests
 
     private static RecordReparent MoveMessageTo(
         Guid messageId, Guid matterId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller caller) => new()
-    {
-        EntityLogicalName = "sprk_communication",
-        RecordId = messageId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OfASecureBuRowWhoseSecureRootCannotBeNamed_ByAFullAccessNonCreator_IsRefusedUnverifiable()
@@ -4169,7 +4234,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(SomeoneElse) },
+                with
+            { RequestedBy = RecordRequester.Of(SomeoneElse) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4184,7 +4250,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.CreatedByPerson.Should().Be(CallerUserId);
@@ -4202,7 +4269,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4223,7 +4291,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "an unknown person is not a reason to refuse the row");
@@ -4237,7 +4306,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.IsRefused.Should().BeTrue();
@@ -4298,12 +4368,60 @@ public class RecordOwnershipResolverTests
     // ---- Lineage depth limit (task 146 b2, verifier LOW) ----
 
     [Fact]
-    public async Task ResolveOwner_WhenTheUnownedFilingChainIsDeeperThanTheLineageLimit_Refuses_NeverAnswersOrdinary()
+    public async Task ResolveOwner_WhenTheUnownedFilingChainIsDeeperThanTheLookThroughLimit_AndEndsOnASecureMatter_AnswersSecure()
     {
-        // Six user-owned documents, each filed to the next; the last is filed to a SECURE matter beyond the read limit.
-        // Read as ordinary, the first would be handed the general team — the chain refuses instead.
+        // Six user-owned documents, each filed to the next; the last is filed to a SECURE matter beyond the look-through
+        // limit. Fix round R (A3): at the bound the look-through stops and the lineage walk (its own bound) reads on to the
+        // secure matter — secure-if-any answers the Secure team. Before A3 this refused, so the chain never moved in.
         var ids = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid()).ToArray();
         var directory = Directory().WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam);
+        DocumentChain(directory, ids);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", ids[0]) }),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheUnownedFilingChainIsDeeperThanTheLookThroughLimit_AndEndsOnAnOrdinaryMatter_Refuses_NeverAnswersOrdinary()
+    {
+        // The same chain on an ORDINARY matter: the answer would be ordinary, which needs the primary's business unit the
+        // look-through did not reach — it refuses, never the general team.
+        var ids = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid()).ToArray();
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+        DocumentChain(directory, ids);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", ids[0]) }),
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("the primary's business unit is past the look-through limit");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.Reason.Should().Contain("levels");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheUnownedFilingChainIsDeeperThanBothLimits_Refuses_NeverAnswersOrdinary()
+    {
+        // Twelve user-owned documents ending on a SECURE matter past the lineage walk's bound as well: the secure ancestor
+        // is never read, so the chain refuses rather than answer ordinary.
+        var ids = Enumerable.Range(0, 12).Select(_ => Guid.NewGuid()).ToArray();
+        var directory = Directory().WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam);
+        DocumentChain(directory, ids);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", ids[0]) }),
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("an unread filing above both limits might be secure");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.Reason.Should().Contain("levels");
+    }
+
+    private static void DocumentChain(FakeDirectory directory, Guid[] ids)
+    {
         for (var i = 0; i < ids.Length; i++)
         {
             var filing = i + 1 < ids.Length
@@ -4312,14 +4430,6 @@ public class RecordOwnershipResolverTests
             directory.WithRecord("sprk_document", ids[i], GeneralBu, owningTeam: null,
                 extra: new() { ["sprk_parentdocument"] = filing });
         }
-
-        var resolution = await Build(directory).ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", ids[0]) }),
-            CancellationToken.None);
-
-        resolution.IsRefused.Should().BeTrue("an unread filing above the limit might be secure");
-        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
-        resolution.Reason.Should().Contain("levels");
     }
 
     [Fact]
@@ -4347,6 +4457,551 @@ public class RecordOwnershipResolverTests
     // =====================================================================================
     // Harness
     // =====================================================================================
+
+    // ── UAC task 194b: one deterministic primary; a user-owned FILED primary child is looked through ──────────────
+
+    [Theory]
+    [InlineData(true)]  // the project lookup comes first in the row's attributes: before 194b it was the primary
+    [InlineData(false)]
+    public async Task Reparent_TakesTheTablesPrimary_WhateverTheAttributeOrder(bool projectFirst)
+    {
+        // An event filed under an ordinary project (GeneralBu) and re-filed to a matter in ChildBu. An event's primary order
+        // (SecureChildLineage) names sprk_regardingmatter before sprk_regardingproject, so the matter decides, both ways round.
+        var eventId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var project = new KeyValuePair<string, object>("sprk_regardingproject", new EntityReference("sprk_project", projectId));
+        var matter = new KeyValuePair<string, object>("sprk_regardingmatter", new EntityReference("sprk_matter", OtherOrdinaryMatterId));
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_project", projectId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_event", eventId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new Dictionary<string, object>(projectFirst ? new[] { project, matter } : new[] { matter, project }));
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_event",
+            RecordId = eventId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the event's primary is its matter, whatever order its lookups come back in");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_APrimaryChildChainThatLoops_Refuses_NeverOrdinary()
+    {
+        // Two user-owned documents filed under each other, filed under nothing else: the look-through of the primary is bounded
+        // (MaxLineageDepth) and REFUSES past it. Before 194b the answer was the first document's creator's unit.
+        var (a, b) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_document", a, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_parentdocument"] = new EntityReference("sprk_document", b) })
+            .WithRecord("sprk_document", b, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_parentdocument"] = new EntityReference("sprk_document", a) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", a) }), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("a look-through past its bound never answers ordinary");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Theory(DisplayName = "194b R (A3) must fire: a primary that loops (event ↔ communication, document ↔ document) on a SECURE matter stops looking through at the revisit and answers the Secure team — never a refusal")]
+    [InlineData("sprk_event", "sprk_regardingcommunication", "sprk_communication", "sprk_regardingevent", "sprk_regardingmatter", "sprk_regardingmatter")]
+    [InlineData("sprk_document", "sprk_parentdocument", "sprk_document", "sprk_parentdocument", "sprk_matter", "sprk_matter")]
+    public async Task ResolveOwner_APrimaryLoopOnASecureMatter_AnswersTheSecureTeam(
+        string tableA, string aToB, string tableB, string bToA, string aMatter, string bMatter)
+    {
+        var (a, b, secureMatter) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_matter", secureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord(tableA, a, GeneralBu, owningTeam: null, extra: new()
+            {
+                [aToB] = new EntityReference(tableB, b),
+                [aMatter] = new EntityReference("sprk_matter", secureMatter),
+            })
+            .WithRecord(tableB, b, GeneralBu, owningTeam: null, extra: new()
+            {
+                [bToA] = new EntityReference(tableA, a),
+                [bMatter] = new EntityReference("sprk_matter", secureMatter),
+            });
+
+        foreach (var primary in new[] { new RecordOwnershipParent(tableA, a), new RecordOwnershipParent(tableB, b) })
+        {
+            var resolution = await Build(directory).ResolveOwnerAsync(RecordOwnershipContext.ForParents(new[] { primary }), CancellationToken.None);
+
+            resolution.OwningTeamId.Should().Be(SecureNamedTeam, "secure-if-any over what the loop is filed under: the secure matter");
+        }
+    }
+
+    [Fact(DisplayName = "194b R (A3) must not fire: the same event ↔ communication loop on an ORDINARY matter refuses — its ordinary unit needs the primary the loop never settles")]
+    public async Task ResolveOwner_APrimaryLoopOnAnOrdinaryMatter_Refuses()
+    {
+        var (e, c) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_event", e, GeneralBu, owningTeam: null, extra: new()
+            {
+                ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", c),
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            })
+            .WithRecord("sprk_communication", c, GeneralBu, owningTeam: null, extra: new()
+            {
+                ["sprk_regardingevent"] = new EntityReference("sprk_event", e),
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_event", e) }), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("an ordinary answer would need the looping primary's business unit");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.Reason.Should().Contain("loops back");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_AnUnfiledUserOwnedPrimaryChild_KeepsItsOwnUnit()
+    {
+        // Must-not-fire: a user-owned document filed under nothing keeps today's answer (its own business unit).
+        var documentId = Guid.NewGuid();
+        var directory = Directory().WithRecord("sprk_document", documentId, ChildBu, owningTeam: null);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+    }
+
+    // ── Owner amendment 2026-10-29: a person-owned project filed by its BFF-managed pair belongs to the record it names ──
+
+    /// <summary>A person-owned, ordinary project in the root unit (GeneralBu) whose ADR-024 pair names
+    /// <paramref name="pairId"/> (text) typed by <paramref name="typeRef"/>; no pair when <paramref name="pairId"/> is null.</summary>
+    private static FakeDirectory WithPersonOwnedProject(FakeDirectory directory, Guid projectId, string? pairId, Guid? typeRef)
+    {
+        var extra = new Dictionary<string, object>();
+        if (pairId is not null)
+            extra["sprk_regardingrecordid"] = pairId;
+        if (typeRef is { } type)
+            extra["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", type);
+        return directory.WithRecord("sprk_project", projectId, GeneralBu, isSecure: false, owningTeam: null, extra: extra);
+    }
+
+    /// <summary>A <c>sprk_recordtype_ref</c> row naming <paramref name="logicalName"/>.</summary>
+    private static FakeDirectory WithRecordType(FakeDirectory directory, Guid typeRef, string logicalName) =>
+        directory.WithRecord("sprk_recordtype_ref", typeRef, null,
+            extra: new() { ["sprk_recordlogicalname"] = logicalName });
+
+    private static Task<RecordOwnerResolution> AskAboutTheProject(FakeDirectory directory, Guid projectId, bool asContent) =>
+        Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_project", projectId) })
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+            CancellationToken.None);
+
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project filed by its pair answers with the unit of the matter the pair names — as a plain parent and on the content path")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_APersonOwnedProjectFiledByItsPair_TakesThePairMattersUnit(bool asContent)
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            projectId, MatterId.ToString("D"), typeRef);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam,
+            $"a project belongs to its core record: the unit of the matter its pair names, never its own ({GeneralTeam:D})");
+    }
+
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must not fire: a person-owned project filed under nothing (no pair) keeps its own unit — on both paths")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_AnUnfiledPersonOwnedProject_KeepsItsOwnUnit(bool asContent)
+    {
+        var projectId = Guid.NewGuid();
+        var directory = WithPersonOwnedProject(
+            Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), projectId, null, null);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.IsOwned.Should().BeTrue("a core record is never content: it is never answered \"keep the creator\"");
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "filed under nothing: its own business unit");
+    }
+
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project whose pair cannot be told is refused (ParentUnresolved) — never read as unfiled")]
+    [InlineData("not-a-guid", true, true)]
+    [InlineData("matter", false, true)]
+    [InlineData("matter", true, false)]
+    public async Task ResolveOwner_APersonOwnedProjectWithAnUnresolvablePair_Refuses(string pairText, bool withType, bool typeNamesATable)
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+        if (typeNamesATable)
+            directory = WithRecordType(directory, typeRef, "sprk_matter");
+        directory = WithPersonOwnedProject(directory, projectId, pairText == "matter" ? MatterId.ToString("D") : pairText,
+            withType ? typeRef : null);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent: false);
+
+        resolution.IsRefused.Should().BeTrue("a pair that names a record that cannot be told is no answer (fail closed)");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Theory(DisplayName = "Fix round (B-K2/K3) must not fire: a person-owned project with NO pair is never looked through — its own unit decides and its filing is never read, on the plain and the content path")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_APersonOwnedProjectWithNoPair_IsNeverLookedThrough(bool asContent)
+    {
+        // A project is filed only through its pair: another lookup (here a matter in another unit) never files it.
+        var projectId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_project", projectId, GeneralBu, isSecure: false, owningTeam: null,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "a project with no pair is filed under nothing: its own business unit");
+        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_project" && q.ColumnSet.AllColumns,
+            "a project with no pair is never looked through, so its filing is never read");
+    }
+
+    [Theory(DisplayName = "Fix round (B-K1) must fire: a child write under a person-owned project whose pair names a DELETED record is owned with the project's own unit — the project is no longer filed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_UnderAProjectWhosePairNamesADeletedRecord_TakesTheProjectsOwnUnit(bool asContent)
+    {
+        var (projectId, typeRef, deleted) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(WithRecordType(Directory(), typeRef, "sprk_matter"),
+            projectId, deleted.ToString("D"), typeRef);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.IsOwned.Should().BeTrue($"the pair's record is gone, so the project is filed under nothing ({resolution.Reason})");
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "the project's own business unit");
+    }
+
+    [Fact(DisplayName = "Fix round (B-K1) must not fire: a pair naming a record that exists but cannot be read propagates the fault — never read as unfiled")]
+    public async Task ResolveOwner_UnderAProjectWhosePairRecordFaults_PropagatesTheFault()
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            projectId, MatterId.ToString("D"), typeRef).WithUnreadable("sprk_matter");
+
+        var act = () => AskAboutTheProject(directory, projectId, asContent: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a fault is not an answer");
+    }
+
+    [Fact(DisplayName = "Owner amendment 2026-10-29 must not fire: a person-owned WORK ASSIGNMENT's pair is never followed — it keeps its own unit and its pair's type is never read")]
+    public async Task ResolveOwner_APersonOwnedWorkAssignmentsPair_IsNeverFollowed()
+    {
+        var typeRef = Guid.NewGuid();
+        var directory = WithWorkAssignment(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            new()
+            {
+                ["sprk_regardingrecordid"] = MatterId.ToString("D"),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
+            });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "a work assignment's pair is text any user with Write can set: never a filing");
+        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_recordtype_ref", "its pair's type is never read");
+    }
+
+    // ── Owner decision 2026-10-29: a person-owned work assignment that is filed belongs to its matter, then its project ──
+
+    private static readonly Guid WorkAssignmentId = Guid.Parse("2a2a2a2a-1029-4029-8029-000000000001");
+
+    /// <summary>A work assignment in the root unit (GeneralBu), person-owned unless <paramref name="owningTeam"/> is given,
+    /// holding <paramref name="filing"/>.</summary>
+    private static FakeDirectory WithWorkAssignment(
+        FakeDirectory directory, Dictionary<string, object> filing, bool isSecure = false, Guid? owningTeam = null) =>
+        directory.WithRecord("sprk_workassignment", WorkAssignmentId, GeneralBu, isSecure: isSecure, owningTeam: owningTeam,
+            extra: filing);
+
+    /// <summary>The question with the work assignment first: as a plain parent, or as the content path asks it (the gate
+    /// writer, a review: <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/>).</summary>
+    private static Task<RecordOwnerResolution> AskAboutTheWorkAssignment(FakeDirectory directory, bool asContent) =>
+        Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_workassignment", WorkAssignmentId) })
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+            CancellationToken.None);
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must fire: a filed person-owned work assignment answers with its matter's unit — as a plain parent and on the content (gate) path")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_AFiledUserOwnedWorkAssignment_TakesItsMattersUnit(bool asContent)
+    {
+        var directory = WithWorkAssignment(
+            Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam),
+            new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam,
+            $"a work assignment belongs to its core record: the matter's unit, never its own ({GeneralTeam:D})");
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must not fire: a person-owned work assignment filed under nothing keeps its own unit — on both paths, never the content path's kept creator")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_AnUnfiledUserOwnedWorkAssignment_KeepsItsOwnUnit(bool asContent)
+    {
+        var directory = WithWorkAssignment(Directory(), new());
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent);
+
+        resolution.IsOwned.Should().BeTrue("a core record is never content: it is never answered \"keep the creator\"");
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "filed under nothing: its own business unit");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderASecureMatter_IsTheSecureTeam(bool asContent)
+    {
+        var directory = WithWorkAssignment(
+            Directory().WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam),
+            new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam, "secure-if-any over what it is filed under");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a work assignment flagged secure but not isolated stays in the secure check on the content path — refused, never its matter's team")]
+    public async Task ResolveOwner_OnTheContentPath_AWorkAssignmentFlaggedSecureButNotIsolated_Refuses()
+    {
+        var directory = WithWorkAssignment(
+            Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam),
+            new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }, isSecure: true);
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: true);
+
+        resolution.IsRefused.Should().BeTrue("a core record stays in the secure check");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+    }
+
+    [Fact(DisplayName = "A faulted read of a person-owned work assignment's event propagates — never an answer, never a refusal (as a fault reading the row itself does)")]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderAnEventThatCannotBeRead_PropagatesTheFault()
+    {
+        var directory = WithWorkAssignment(
+            Directory().WithUnreadable("sprk_event"),
+            new() { ["sprk_regardingevent"] = new EntityReference("sprk_event", Guid.NewGuid()) });
+
+        var act = () => AskAboutTheWorkAssignment(directory, asContent: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderAMatterThatDoesNotExist_Refuses()
+    {
+        var directory = WithWorkAssignment(
+            Directory(), new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.IsRefused.Should().BeTrue("the matter it is filed under cannot be read");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderAUserOwnedInvoiceOfAMatter_TakesTheMattersUnit()
+    {
+        var invoiceId = Guid.NewGuid();
+        var directory = WithWorkAssignment(
+            Directory()
+                .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+                .WithRecord("sprk_invoice", invoiceId, FakeDirectory.CustomerChildBu, owningTeam: null,
+                    extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) }),
+            new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoiceId) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the invoice's matter is the work assignment's core record");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentOverAnUnownedChainPastTheLimit_Refuses_NeverOrdinary()
+    {
+        // Work assignment → event → communication → event → … (each user-owned, none naming a matter until the last): past
+        // MaxLineageDepth the look-through stops, and an ordinary answer would need a primary it never settled.
+        var chain = Enumerable.Range(0, RecordOwnershipResolver.MaxLineageDepth + 2).Select(_ => Guid.NewGuid()).ToArray();
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+        for (var i = 0; i < chain.Length; i++)
+        {
+            var (table, column, nextTable) = i % 2 == 0
+                ? ("sprk_event", "sprk_regardingcommunication", "sprk_communication")
+                : ("sprk_communication", "sprk_regardingevent", "sprk_event");
+            var filing = i + 1 < chain.Length
+                ? new Dictionary<string, object> { [column] = new EntityReference(nextTable, chain[i + 1]) }
+                : new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) };
+            directory.WithRecord(table, chain[i], GeneralBu, owningTeam: null, extra: filing);
+        }
+
+        WithWorkAssignment(directory, new() { ["sprk_regardingevent"] = new EntityReference("sprk_event", chain[0]) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.IsRefused.Should().BeTrue("the primary's business unit is past the look-through limit");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.Reason.Should().Contain("levels");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ATeamOwnedWorkAssignment_IsNotLookedThrough()
+    {
+        var directory = WithWorkAssignment(
+            Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam),
+            new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }, owningTeam: GeneralTeam);
+
+        foreach (var asContent in new[] { false, true })
+        {
+            var resolution = await AskAboutTheWorkAssignment(directory, asContent);
+
+            resolution.OwningTeamId.Should().Be(GeneralTeam, "a team-owned work assignment's owner already is its answer");
+        }
+
+        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_workassignment" && q.ColumnSet.AllColumns,
+            "a team-owned work assignment's filing is never read");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a person-owned MATTER asked first on the content path is a core record — its own unit, never the kept creator")]
+    public async Task ResolveOwner_OnTheContentPath_AUserOwnedMatter_TakesItsOwnUnit()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: null);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ContentOf("sprk_matter", MatterId), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "a core record is never content: its own business unit decides");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a person-owned MATTER flagged secure but not isolated stays in the secure check on the content path — refused")]
+    public async Task ResolveOwner_OnTheContentPath_AUserOwnedMatterFlaggedSecureButNotIsolated_Refuses()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, isSecure: true, owningTeam: null);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ContentOf("sprk_matter", MatterId), CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated, "a core record stays in the secure check");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a person-owned work assignment filed only under a team-owned event in unit B whose matter is in unit A takes unit A, as creation does")]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderOnlyATeamOwnedEventOfAMatterInAnotherUnit_TakesTheMattersUnit()
+    {
+        var eventId = Guid.NewGuid();
+        var directory = WithWorkAssignment(
+            Directory()
+                .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+                .WithRecord("sprk_event", eventId, FakeDirectory.CustomerChildBu, owningTeam: FakeDirectory.CustomerChildTeam,
+                    extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }),
+            new() { ["sprk_regardingevent"] = new EntityReference("sprk_event", eventId) });
+
+        foreach (var asContent in new[] { false, true })
+        {
+            var resolution = await AskAboutTheWorkAssignment(directory, asContent);
+
+            resolution.OwningTeamId.Should().Be(ChildTeam,
+                $"the event's matter is the work assignment's core record — never the event's unit ({FakeDirectory.CustomerChildTeam:D})");
+        }
+    }
+
+    /// <summary>A person-owned work assignment filed only under an invoice of the matter (ChildBu), and an event about to be
+    /// filed under it (or asked about directly).</summary>
+    private static (FakeDirectory Directory, Guid InvoiceId, Guid EventId) AWorkAssignmentUnderAnInvoiceOfTheMatter()
+    {
+        var (invoiceId, eventId) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithWorkAssignment(
+            Directory()
+                .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+                .WithRecord("sprk_invoice", invoiceId, FakeDirectory.CustomerChildBu, owningTeam: FakeDirectory.CustomerChildTeam,
+                    extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) })
+                .WithRecord("sprk_event", eventId, GeneralBu, owningTeam: GeneralTeam),
+            new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoiceId) });
+        return (directory, invoiceId, eventId);
+    }
+
+    /// <summary>The re-file of <paramref name="eventId"/> under the work assignment.</summary>
+    private static RecordReparent FileTheEventUnderTheWorkAssignment(Guid eventId) => new()
+    {
+        EntityLogicalName = "sprk_event",
+        RecordId = eventId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentId),
+        },
+    };
+
+    [Theory(DisplayName = "#2143 round 3 (K1) must fire: what a person-owned work assignment's invoice belongs to is a committed read on the re-file path, and NoLock on a create path")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveOwner_TheInvoiceAWorkAssignmentIsFiledUnder_IsReadCommittedOnlyOnTheRefilePath(bool refile)
+    {
+        var (directory, _, eventId) = AWorkAssignmentUnderAnInvoiceOfTheMatter();
+
+        RecordOwnerResolution resolution;
+        if (refile)
+        {
+            var request = FileTheEventUnderTheWorkAssignment(eventId);
+            resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+        }
+        else
+        {
+            resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+        }
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the invoice's matter is the work assignment's core record");
+        var intermediateReads = directory.RecordQueries
+            .Where(q => q.EntityName == "sprk_invoice" && !q.ColumnSet.AllColumns && q.ColumnSet.Columns.Contains("sprk_matter"))
+            .ToList();
+        intermediateReads.Should().NotBeEmpty("what the invoice belongs to is read");
+        intermediateReads.Should().OnlyContain(q => q.NoLock == !refile,
+            refile ? "every parent fact on the re-file path is a committed read" : "the create paths keep their NoLock reads");
+    }
+
+    [Theory(DisplayName = "A faulted read of what a person-owned work assignment's invoice belongs to propagates on the resolver's paths, as a fault reading the row itself does — never a ParentUnresolved refusal")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveOwner_WhenTheInvoiceAWorkAssignmentIsFiledUnderFaults_PropagatesTheFault(bool refile)
+    {
+        var (directory, _, eventId) = AWorkAssignmentUnderAnInvoiceOfTheMatter();
+        directory.WithUnreadable("sprk_invoice");
+
+        Func<Task> act = refile
+            ? () =>
+            {
+                var request = FileTheEventUnderTheWorkAssignment(eventId);
+                return Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+            }
+        : () => AskAboutTheWorkAssignment(directory, asContent: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
+    }
+
+    [Fact(DisplayName = "Control: an invoice a person-owned work assignment names that does NOT exist is not a fault — nothing is thrown")]
+    public async Task ResolveOwner_WhenTheInvoiceAWorkAssignmentIsFiledUnderDoesNotExist_DoesNotThrow()
+    {
+        var directory = WithWorkAssignment(
+            Directory(), new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.IsOwned.Should().BeFalse("a parent that cannot be found never yields an ordinary owner");
+    }
 
     private static RecordOwnershipResolver Build(FakeDirectory directory) => directory.Resolver();
 

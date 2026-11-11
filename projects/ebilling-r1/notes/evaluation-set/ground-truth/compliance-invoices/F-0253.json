@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0253",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0253","generator_id":"gen_eval_set.py@1 F-0253","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0253.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Ingersoll and Zeller LLP","firm_invoice_number":"INV-2026-61634","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"20247-0030","po_number":null,"fees_total":8837.75,"expenses_total":293.84,"adjustments_total":0.0,"total_due":9131.59,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Santoro","title":"Partner","rate":865.0,"billed_as":"ES"},{"name":"Emeka Zielinski","title":"Of Counsel","rate":745.0,"billed_as":"EZ"},{"name":"Imani Dunleavy","title":"Legal Assistant","rate":215.0,"billed_as":"ID"},{"name":"Naomi Sandoval","title":"Paralegal","rate":255.0,"billed_as":"NS"},{"name":"Tomas Fairweather","title":"Senior Associate","rate":565.0,"billed_as":"TF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-03","timekeeper":"ID","timekeeper_name":"Imani Dunleavy","timekeeper_title":"Legal Assistant","title":"LA","hours":2.9,"rate":215.0,"amount":623.5,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-03","timekeeper":"ES","timekeeper_name":"Emeka Santoro","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":865.0,"amount":1470.5,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-09","timekeeper":"NS","timekeeper_name":"Naomi Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":255.0,"amount":663.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-10","timekeeper":"TF","timekeeper_name":"Tomas Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":565.0,"amount":452.0,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-10","timekeeper":"TF","timekeeper_name":"Tomas Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":565.0,"amount":452.0,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-12","timekeeper":"EZ","timekeeper_name":"Emeka Zielinski","timekeeper_title":"Of Counsel","title":"O/C","hours":1.8,"rate":745.0,"amount":1341.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-12","timekeeper":"NS","timekeeper_name":"Naomi Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":255.0,"amount":382.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-13","timekeeper":"NS","timekeeper_name":"Naomi Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":255.0,"amount":382.5,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-25","timekeeper":"ES","timekeeper_name":"Emeka Santoro","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":865.0,"amount":2249.0,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-30","timekeeper":"ES","timekeeper_name":"Emeka Santoro","timekeeper_title":"Partner","title":"Ptr","hours":0.95,"rate":865.0,"amount":821.75,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":23.09,"amount":69.27,"narrative":"Overnight courier to Larkspur Medical counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":62.02,"amount":186.06,"narrative":"Overnight courier to Orchard Row Brands counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":33.0,"rate":0.69,"amount":22.77,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-06-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":7.87,"amount":15.74,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["425 Harbor Road","Boston","Tax ID 92-9985569"],"template":"T21","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-22","matter_close":"2025-09-28","matter_budget":61526.0,"approved_timekeepers":["Emeka Santoro","Tomas Fairweather","Emeka Zielinski","Naomi Sandoval","Naomi Santoro","Imani Dunleavy"],"invoice_received_date":"2025-07-11"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[5],"consequence":"Disallow","related_line_refs":[4]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

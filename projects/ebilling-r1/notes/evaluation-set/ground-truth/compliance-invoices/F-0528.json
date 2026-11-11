@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0528",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0528","generator_id":"gen_eval_set.py@1 F-0528","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0528.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Eastlake & Zeller LLP","firm_invoice_number":"INV-2025-94524","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"82984-0009","po_number":"PO-4585149","fees_total":2476.5,"expenses_total":2522.39,"adjustments_total":0.0,"total_due":4998.89,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Ramanathan","title":"Associate","rate":180.0,"billed_as":"DR"},{"name":"Farah Delacroix","title":"Associate","rate":205.0,"billed_as":"FD"},{"name":"Katya Voss","title":"Partner","rate":440.0,"billed_as":"KV"},{"name":"Naomi Marchetti","title":"Paralegal","rate":120.0,"billed_as":"NM"},{"name":"Naomi Rosenthal","title":"Partner","rate":335.0,"billed_as":"NR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-03","timekeeper":"NM","timekeeper_name":"Naomi Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":120.0,"amount":300.0,"narrative":"Draft answer and affirmative defenses for trial in the employment claim","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-07","timekeeper":"NM","timekeeper_name":"Naomi Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":120.0,"amount":120.0,"narrative":"Attend hearing on mediation statement in the regulatory inquiry","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-08","timekeeper":"FD","timekeeper_name":"Farah Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":205.0,"amount":574.0,"narrative":"Revise requests for production after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-15","timekeeper":"KV","timekeeper_name":"Katya Voss","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":440.0,"amount":440.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the employment claim","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-20","timekeeper":"NM","timekeeper_name":"Naomi Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":120.0,"amount":228.0,"narrative":"Prepare fact witness for testimony regarding the regulatory inquiry","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-27","timekeeper":"DR","timekeeper_name":"Dalia Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":180.0,"amount":144.0,"narrative":"Prepare examination outlines for trial in the distribution agreement","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-28","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":335.0,"amount":502.5,"narrative":"Prepare case assessment memorandum regarding the employment claim and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-29","timekeeper":"NM","timekeeper_name":"Naomi Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":120.0,"amount":168.0,"narrative":"Research standard for new trial in the lease dispute","codes":["L460","A102"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-10-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":703.0,"rate":0.08,"amount":56.24,"narrative":"Photocopies - 703 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-10-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2466.15,"amount":2466.15,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["841 Lakeshore Drive","Phoenix","Tax ID 56-4476957"],"template":"T21","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-01-07","matter_close":"2026-01-29","matter_budget":44995.0,"approved_timekeepers":["Katya Voss","Naomi Rosenthal","Imani Ashdown","Farah Delacroix","Naomi Marchetti","Dalia Ramanathan"],"invoice_received_date":"2025-11-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

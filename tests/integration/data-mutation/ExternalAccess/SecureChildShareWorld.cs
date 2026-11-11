@@ -38,6 +38,15 @@ internal sealed class SecureChildShareWorld
 
     public static readonly Guid SomeUser = Guid.Parse("8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c");
 
+    /// <summary>UAC task 194b R4b-2c (owner round 136): the restricted-content owner team — named, non-default, in the
+    /// CUSTOMER's top business unit (<see cref="CustomerBu"/>, the root's direct child), no members.</summary>
+    public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
+    /// <summary>R4b-2c: the customer's top business unit (a direct child of the root, as dev's "Spaarke Business Unit 1")
+    /// and its default team.</summary>
+    public static readonly Guid CustomerBu = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c3");
+    public static readonly Guid CustomerTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c4");
+
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
 
@@ -88,12 +97,24 @@ internal sealed class SecureChildShareWorld
     {
         var world = new SecureChildShareWorld { OwnerTeam = secureTeam, OwnerTeamBusinessUnit = secureBu };
         world.Add("businessunit", GeneralBu, ("name", "Spaarke"));
-        world.Add("businessunit", secureBu, ("name", SecureBuName));
+        // R4b-2: the general unit is the ROOT business unit (no parent); the Secure Record unit sits under it.
+        world.Add("businessunit", secureBu, ("name", SecureBuName), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
         world.Team(GeneralTeam, GeneralBu, "Spaarke", isDefault: true, teamType: 0);
         world.Team(SecureDefaultTeam, secureBu, SecureBuName, isDefault: true, teamType: 0);
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
         world.Team(secureTeam, secureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
+        // R4b-2c: the customer's top unit, beside the Secure Record unit, holds the restricted-content owner team.
+        world.Add("businessunit", CustomerBu, ("name", "Spaarke Business Unit 1"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
+        world.Team(CustomerTeam, CustomerBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        // R4b-4 (A-F2): an ACCESS team and a GROUP team with the restricted-content name, before the real one, so a team
+        // query that dropped teamtype = 0 (Owner) matches two rows (or a decoy first).
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 1);
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 2);
+        world.Team(RestrictedContentTeam, CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 0);
         world.User(SomeUser, GeneralBu);
         return world;
     }
@@ -172,8 +193,23 @@ internal sealed class SecureChildShareWorld
     {
         _failingTables.Clear();
         _failingIdListReads.Clear();
+        _failingLikeReads.Clear();
         return this;
     }
+
+    private readonly HashSet<string> _failingLikeReads = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>UAC task 194b R4b-2c (F3c): makes every query of one table with a text match (<c>LIKE</c>, in any filter) throw —
+    /// the Decision Record steps read — while its other queries still answer.</summary>
+    public SecureChildShareWorld FailingLikeReadsOf(string table)
+    {
+        _failingLikeReads.Add(table);
+        return this;
+    }
+
+    /// <summary>True when <paramref name="filter"/> or a filter below it holds a <c>LIKE</c> condition.</summary>
+    internal static bool HasLike(FilterExpression filter) =>
+        filter.Conditions.Any(c => c.Operator == ConditionOperator.Like) || filter.Filters.Any(HasLike);
 
     /// <summary>
     /// Makes every read of ONE row by its id throw (task 149 r1: a lineage fault on one record — the walk's single-row
@@ -604,9 +640,11 @@ internal sealed class SecureChildShareWorld
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
-    /// <summary>The REAL synchronizer over this world and the given share table.</summary>
-    public SecureChildShareSynchronizer Synchronizer(FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null)
-        => SynchronizerOver(() => this, shares, noAccessGuard);
+    /// <summary>The REAL synchronizer over this world and the given share table (and, when given, a logger to read).</summary>
+    public SecureChildShareSynchronizer Synchronizer(
+        FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
+        => SynchronizerOver(() => this, shares, noAccessGuard, logger);
 
     /// <summary>
     /// The REAL synchronizer over whichever world <paramref name="current"/> answers at query time — for a shared host
@@ -614,9 +652,10 @@ internal sealed class SecureChildShareWorld
     /// by default one that walls nobody (<see cref="NobodyWalled"/>).
     /// </summary>
     public static SecureChildShareSynchronizer SynchronizerOver(
-        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null)
+        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
         => new(EntitiesOver(current).Object, shares, noAccessGuard ?? NobodyWalled(), Configuration(),
-            NullLogger<SecureChildShareSynchronizer>.Instance);
+            logger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
 
     /// <summary>
     /// Task 143's REAL guard over flags that call every record NOT secure — so it answers
@@ -640,6 +679,10 @@ internal sealed class SecureChildShareWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        // 194b: a single-row read (the record-type catalog row a Signal's or Decision Record's core pair names).
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(current().Retrieve(table, id, columns)));
         entities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
@@ -679,7 +722,9 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
         Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
-        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -691,7 +736,11 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
-            accessCacheInvalidator, threads, ownerPrivileges, relocator);
+            accessCacheInvalidator, threads, ownerPrivileges, relocator,
+            coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
+            people: AssignedAccessTestDoubles.Representation(links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()), // 194b F1-c: the To Do job's predicate (nobody linked); task 193: through ContactUserRepresentation
+            recordShares: shares, // uac-r2 task 198 Part D: the Restricted filing bar's share seam, as the host composes it
+            directMessageOwnerTeam: directMessageOwnerTeam); // task 198 Part C: the Direct participants' re-grant after a re-file
     }
 
     /// <summary>
@@ -788,6 +837,8 @@ internal sealed class SecureChildShareWorld
         }
         if (_failingTables.Contains(query.EntityName))
             throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+        if (_failingLikeReads.Contains(query.EntityName) && HasLike(query.Criteria))
+            throw new InvalidOperationException($"Test: a text match on {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
@@ -829,6 +880,10 @@ internal sealed class SecureChildShareWorld
             .OrderBy(r => r.Id)
             .ToList();
 
+        // uac-r2 task 198 fix round 1 (R4): a query's own order is honoured, as Dataverse does (the id order above is the tie-break).
+        if (query.Orders.Count > 0)
+            matched = matched.OrderBy(r => r, new OrderComparer(query.EntityName, query.Orders)).ToList();
+
         if (query.TopCount is { } top)
             matched = matched.Take(top).ToList();
 
@@ -852,6 +907,38 @@ internal sealed class SecureChildShareWorld
         }
 
         return answer;
+    }
+
+    /// <summary>Orders rows by a query's <see cref="OrderExpression"/>s (a missing value sorts first, as a null does in Dataverse).</summary>
+    private sealed class OrderComparer(string table, IEnumerable<OrderExpression> orders) : IComparer<Entity>
+    {
+        private readonly List<OrderExpression> _orders = orders.ToList();
+
+        public int Compare(Entity? x, Entity? y)
+        {
+            foreach (var order in _orders)
+            {
+                var result = CompareValues(Value(x!, order.AttributeName), Value(y!, order.AttributeName));
+                if (result != 0)
+                    return order.OrderType == OrderType.Descending ? -result : result;
+            }
+
+            return 0;
+        }
+
+        private object? Value(Entity row, string attribute) =>
+            attribute == table + "id" ? row.Id : row.Attributes.TryGetValue(attribute, out var value) ? value : null;
+
+        private static int CompareValues(object? a, object? b) => (a, b) switch
+        {
+            (null, null) => 0,
+            (null, _) => -1,
+            (_, null) => 1,
+            (OptionSetValue o, OptionSetValue p) => o.Value.CompareTo(p.Value),
+            (EntityReference r, EntityReference s) => r.Id.CompareTo(s.Id),
+            (IComparable c, _) => c.CompareTo(b),
+            _ => 0,
+        };
     }
 
     private Entity Project(Entity row, ColumnSet columns)

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-added-fee.schema.json",
+  "title": "AddedFee billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = AddedFee (ebilling-r1 task 115; procedure-and-file-model.md 6.3, O-16). 12. An added fee (late fee, administrative fee, interest, other) is within its allowance: not allowed, a cap (an amount, or a percent of the invoice's other lines), or allowed after N days. The schema describes all three; PolicyVersionValidator refuses 'notAllowed' and 'afterDays' (rule_form_not_supported) until extraction returns a per-line fee kind and the due date, so only 'cap' is evaluated. A cap names the codes of the fee's lines and exactly one of capAmount and capPercent. Parameters only: no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "feeKind", "allowance"],
+  "properties": {
+    "type": {
+      "const": "AddedFee"
+    },
+    "feeKind": {
+      "description": "The kind of added fee the rule is about: lateFee, administrativeFee, interest or other.",
+      "enum": ["lateFee", "administrativeFee", "interest", "other"]
+    },
+    "allowance": {
+      "description": "notAllowed (the fee may not be billed), cap (at most capAmount or capPercent), or afterDays (allowed only afterDays days after the due date). Only cap is evaluated today.",
+      "enum": ["notAllowed", "cap", "afterDays"]
+    },
+    "feeCodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/code"
+      },
+      "description": "cap: the expense codes of the invoice lines that carry this fee."
+    },
+    "capAmount": {
+      "description": "cap: the most the fee lines may total on one invoice, in the invoice currency. More than 0.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000000
+    },
+    "capPercent": {
+      "description": "cap: the most the fee lines may total, as a percent of the invoice's other lines. More than 0, at most 100.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 100
+    },
+    "afterDays": {
+      "description": "afterDays: the fee is allowed only this many days after the invoice due date. 1 to 3650.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "allowance": {
+            "const": "cap"
+          }
+        },
+        "required": ["allowance"]
+      },
+      "then": {
+        "required": ["feeCodes"],
+        "oneOf": [
+          {
+            "required": ["capAmount"]
+          },
+          {
+            "required": ["capPercent"]
+          }
+        ],
+        "not": {
+          "required": ["afterDays"]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "allowance": {
+            "const": "afterDays"
+          }
+        },
+        "required": ["allowance"]
+      },
+      "then": {
+        "required": ["afterDays"],
+        "not": {
+          "anyOf": [
+            {
+              "required": ["feeCodes"]
+            },
+            {
+              "required": ["capAmount"]
+            },
+            {
+              "required": ["capPercent"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "allowance": {
+            "const": "notAllowed"
+          }
+        },
+        "required": ["allowance"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": ["feeCodes"]
+            },
+            {
+              "required": ["capAmount"]
+            },
+            {
+              "required": ["capPercent"]
+            },
+            {
+              "required": ["afterDays"]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$",
+      "description": "A code identifier from the resolved code set (e.g. a UTBMS expense code such as E101). The identifier only: descriptions are reference data."
+    }
+  }
+}

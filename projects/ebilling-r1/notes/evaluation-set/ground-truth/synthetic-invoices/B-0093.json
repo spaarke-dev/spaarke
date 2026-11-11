@@ -1,0 +1,21 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"B-0093",
+ "set":"B",
+ "meta":{"title":"Synthetic invoice B-0093","generator_id":"gen_eval_set.py@1 B-0093","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/B-0093.pdf"},"spike":false,"label_method":"generator","profile":{"quality_mix":"mixed","hour_increment":0.1,"code_mode_requested":"task_activity"}},
+ "header":{"firm":"Fenwick Ambrose PC","firm_invoice_number":"INV-2026-97587","invoice_date":"2025-11-03","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"86634-0035","po_number":null,"fees_total":1904.5,"expenses_total":193.68,"adjustments_total":-95.23,"total_due":2002.95,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Lockhart","title":"Associate","rate":330.0,"billed_as":"CL"},{"name":"Hannah Wickham","title":"Senior Associate","rate":405.0,"billed_as":"HW"},{"name":"Priya Okafor","title":"Associate","rate":310.0,"billed_as":"PO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-01","timekeeper":"PO","timekeeper_name":"Priya Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":310.0,"amount":248.0,"narrative":"Various tasks regarding matter.","codes":["L140","A111"],"page":2,"narrative_style":"vague"},
+  {"n":2,"line_type":"fee","date":"2025-10-06","timekeeper":"PO","timekeeper_name":"Priya Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":310.0,"amount":62.0,"narrative":"Correspondence.","codes":["L130","A108"],"page":2,"narrative_style":"vague"},
+  {"n":3,"line_type":"fee","date":"2025-10-17","timekeeper":"HW","timekeeper_name":"Hannah Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":405.0,"amount":364.5,"narrative":"Legal research.","codes":["L190","A108"],"page":2,"narrative_style":"vague"},
+  {"n":4,"line_type":"fee","date":"2025-10-20","timekeeper":"CL","timekeeper_name":"Cyrus Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":330.0,"amount":495.0,"narrative":"Internal conference with Cyrus Lockhart regarding strategy for the insurance coverage issue","codes":["L210","A105"],"page":2,"narrative_style":"internal"},
+  {"n":5,"line_type":"fee","date":"2025-10-28","timekeeper":"CL","timekeeper_name":"Cyrus Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":330.0,"amount":363.0,"narrative":"Conference with client regarding budget variance for the insurance coverage issue","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-30","timekeeper":"PO","timekeeper_name":"Priya Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":310.0,"amount":372.0,"narrative":"Review and organize incoming production from Larkspur Medical for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2025-10-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":64.56,"amount":193.68,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"adjustment","date":null,"timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":null,"rate":null,"amount":-95.23,"narrative":"Courtesy discount","codes":[],"page":2,"narrative_style":"clear"}
+ ],
+ "intended_codes":{"1":["L140","A111"],"2":["L130","A108"],"3":["L190","A108"],"4":["L210","A105"],"5":["L150","A106"],"6":["L140","A104"],"7":["E107"],"8":[]},
+ "document":{"letterhead":["773 Lakeshore Drive","Phoenix","Tax ID 72-8064173"],"template":"T21","scan_noise":true,"scan":{"style":"scan","dpi":200,"skew_deg":0.31,"noise":12,"blur":0.34,"stamp":false,"jpeg_quality":55},"bundled":false,"bundle":null,"timekeeper_source":"column","rate_source":"line","title_source":"legend","codes_printed":"full","grouping":"none","hours_format":"dec2","expenses_layout":"separate","page_total_rows":true,"summary_first":true,"orientation":"P","features":["adjustment_line","no_po"],"pages":2,"bundle_parts":[{"part":"invoice","pages":2}],"invoice_first_page":1,"invoice_pages":2}
+}

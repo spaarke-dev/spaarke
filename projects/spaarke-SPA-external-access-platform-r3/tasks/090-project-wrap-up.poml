@@ -4,7 +4,7 @@
     <title>Project wrap-up (gates, test-diet, close-out)</title>
     <phase>Wrap-up</phase>
     <gate>after all other tasks (073 may remain blocked — record it)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Mandatory wrap-up: code-review + adr-check over all project code</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -79,7 +79,13 @@
     <criterion testable="true">projects/INDEX.md shows the project's final status.</criterion>
   </acceptance-criteria>
 
-  <notes>Mandatory final task.</notes>
+  <notes>Mandatory final task. Completed 2026-11-03 (record: notes/task-090-notes.md).
+- Review: one full adversarial pass over the 75 core auth files found three items. Finding 1 (registration showed retry for operator-only 500s) was fixed in 85fbba3f64. Finding 2 (invite to a WorkforceHome contact wrote a false collision flag) was fixed in fa8a0c0c97 with the owner's approval. Finding 3 (a stale comment) was fixed. K1-K4 are recorded as known limits.
+- Tests: test diet done in 06d4d176d9 (32 moves, 1 rewrite, Stopwatch removed). The full suites' failures were all load: BFF isolated re-runs 3,444/3,445 and 380/380, and the last test passed 5/5 alone (#2543). The SPA's failing files passed 465/465.
+- BFF hygiene: publish 39.308 MB, +0.006 MB against a fresh master build; no vulnerable packages.
+- Repo cleanup done. Lessons recorded; the owner approved promoting two (FAILURE-MODES G-24; TEST-ARCHITECTURE §3).
+- README graduation 12/12 plus the quality line. The hand-off table gives each open issue a home. Auth doc filed as #2534.
+- Rework: the finding 2 change needed one more implementer round (owner decision mid-task); there were no failed fix rounds.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

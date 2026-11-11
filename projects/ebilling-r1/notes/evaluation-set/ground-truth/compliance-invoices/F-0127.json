@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0127",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0127","generator_id":"gen_eval_set.py@1 F-0127","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0127.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Pryce and Whitcombe LLP","firm_invoice_number":"INV-2025-57217","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"63617-0039","po_number":"PO-4560240","fees_total":5200.0,"expenses_total":1789.95,"adjustments_total":0.0,"total_due":6989.95,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Associate","rate":430.0,"billed_as":"CO"},{"name":"Elena Okafor","title":"Associate","rate":410.0,"billed_as":"EO"},{"name":"Ingrid Nwosu","title":"Associate","rate":390.0,"billed_as":"IN"},{"name":"Ingrid Ramanathan","title":"Paralegal","rate":230.0,"billed_as":"IR"},{"name":"Katya Ramanathan","title":"Paralegal","rate":215.0,"billed_as":"KR"},{"name":"Katya Zielinski","title":"Of Counsel","rate":650.0,"billed_as":"KZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-04","timekeeper":"KZ","timekeeper_name":"Katya Zielinski","timekeeper_title":"Of Counsel","title":"O/C","hours":0.4,"rate":650.0,"amount":260.0,"narrative":"Review and summarize deposition transcript of Larkspur Medical witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-08","timekeeper":"IR","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":230.0,"amount":184.0,"narrative":"Review opposing brief in response to settlement proposal","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-08","timekeeper":"IN","timekeeper_name":"Ingrid Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":390.0,"amount":1170.0,"narrative":"Meet and confer with counsel for Orchard Row Brands regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-15","timekeeper":"EO","timekeeper_name":"Elena Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":410.0,"amount":533.0,"narrative":"Photocopied exhibits and assembled binders","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-08-20","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":430.0,"amount":989.0,"narrative":"Meet and confer with counsel for Quarry Lane Partners regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-20","timekeeper":"KR","timekeeper_name":"Katya Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":215.0,"amount":107.5,"narrative":"Attend deposition of Pacifica Telecom corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-22","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.95,"rate":430.0,"amount":408.5,"narrative":"Prepare outline for deposition of Alder & Finch Ltd witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-25","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":430.0,"amount":645.0,"narrative":"Research authority for notice of deposition","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-25","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":430.0,"amount":688.0,"narrative":"Review and summarize deposition transcript of Bluepine Holdings witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-25","timekeeper":"KR","timekeeper_name":"Katya Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":215.0,"amount":43.0,"narrative":"Draft settlement proposal to Meridian Foods","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-27","timekeeper":"KR","timekeeper_name":"Katya Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":215.0,"amount":172.0,"narrative":"Meet and confer with counsel for Caldera Energy regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-08-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":908.21,"amount":908.21,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":881.74,"amount":881.74,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["107 Peachtree Way","Seattle","Tax ID 85-3507646"],"template":"T11","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-01","matter_close":"2025-11-29","matter_budget":52959.0,"approved_timekeepers":["Ingrid Ramanathan","Elena Okafor","Katya Zielinski","Ingrid Nwosu","Katya Ramanathan","Clara Okafor"],"invoice_received_date":"2025-09-05"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

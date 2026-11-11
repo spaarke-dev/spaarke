@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ebilling-r1">
+  <metadata>
+    <title>sprk_invoiceapproval schema</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new table, an N:N relationship and a new script file; no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-table schema script with an exact column list and canonical exemplars for entity, lookup and N:N creation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the new Dataverse table sprk_invoiceapproval (the approval portion: invoice × core record) in dev with an idempotent Web API script, including FR-05 core-record fields, the Decision Record lookup and a queryable store of eligible approvers, then document it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting, N:N relationships and the ADR-024 dual-field pattern. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingApprovalSchema.ps1 exists and has been run against spaarkedev1 (second run: no change); a metadata read shows sprk_invoiceapproval with the columns, lookups and N:N relationship in the steps; docs/data-model/sprk_invoiceapproval.md describes it.</goal>
+
+  <context>
+    <background>spec.md FR-11 (invoice, core record, status Pending / Approved / Rejected / Returned, approved amount, decision record, eligible approvers resolved at acceptance; one portion per invoice in R1) and FR-05. FR-35: the invoice appears in each eligible approver's "Invoices to review" view (task 029 builds the view; task 103 resolves approvers). D-33: approvers come from the core record's assignment fields, which are lookups to contact (verified: src/dataverse/solutions/SpaarkeMaster/Other/Relationships/Contact.xml holds sprk_AssignedAttorney1 and sprk_AssignedToInternal); contact.sprk_systemuser links a person to a user, which lets a view filter on the current user.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingApprovalSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_invoiceapproval.md</file>
+      <file role="modify">docs/data-model/INDEX.md (one row under "Entity Documentation — Financial")</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1 (entity + attributes + entity-scoped PublishXml)</file>
+      <file role="canonical-reference">scripts/Deploy-PrecedentEntity.ps1:471 (ManyToManyRelationshipMetadata create)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:585 (MSCRM.SolutionUniqueName header)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:116-122 (sprk_regarding{core} column names)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md section 2 (resolver lengths, relationship shape)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Parallel with 012 and 020; the sprk_invoice and sprk_decisionrecord tables already exist in dev.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task writes ONE script, scripts/ebilling/Deploy-EbillingApprovalSchema.ps1, runs it only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, checks existence before every create and publishes with an entity-scoped PublishXml.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029). Additive only; destructive changes need explicit owner OK.</constraint>
+    <constraint source="ADR-024">Entity-specific lookups sprk_regardingmatter, sprk_regardingproject, sprk_regardingworkassignment plus the five resolver fields; one populated per row (server-enforced by 013).</constraint>
+    <constraint source="ADR-002">No plugin, business rule or flow resolves or enforces eligible approvers; task 103 owns that server-side.</constraint>
+    <constraint source="project">docs/data-model/INDEX.md is a shared append point: re-read before editing and add only this table's row.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema via Web API</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Dual-field columns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + discovery">Declare RIGOR LEVEL: STANDARD. Read spec FR-11, FR-35, FR-05 and D-33 / D-40. Describe sprk_invoiceapproval in dev (expect absent) and confirm sprk_matter.sprk_assignedattorney1 targets contact.</step>
+    <step order="1" name="Table + columns">Script scripts/ebilling/Deploy-EbillingApprovalSchema.ps1 from the Deploy-ChartDefinitionEntity.ps1 helpers. User/team-owned table sprk_invoiceapproval (display "Invoice Approval"), primary name sprk_name (text 200). Columns: sprk_approvalstatus (local choice Pending, Approved, Rejected, Returned; default Pending); sprk_approvedamount (currency); sprk_eligibleresolvedon (date and time, when eligible approvers were last resolved); sprk_decidedon (date and time).</step>
+    <step order="2" name="Lookups">OneToMany (Delete = RemoveLink, others NoCascade): sprk_invoice → sprk_invoice (required); sprk_decisionrecord → sprk_decisionrecord; sprk_decidedby → contact; sprk_regardingmatter → sprk_matter; sprk_regardingproject → sprk_project; sprk_regardingworkassignment → sprk_workassignment; sprk_regardingrecordtype → sprk_recordtype_ref. Resolver text: sprk_regardingrecordid (100), sprk_regardingrecordname (200), sprk_regardingrecordnumber (100), sprk_regardingrecordurl (500, Url).</step>
+    <step order="3" name="Eligible approvers">N:N relationship sprk_invoiceapproval_eligibleapprover_contact between sprk_invoiceapproval and contact (the eligible approver persons). This is the store task 103 writes and the "Invoices to review" view (task 029) filters through contact.sprk_systemuser.</step>
+    <step order="4" name="Run">Header MSCRM.SolutionUniqueName = SpaarkeMaster on every create. -WhatIf, real run, second run reports no change.</step>
+    <step order="5" name="Verify">Metadata read (Attributes, ManyToOneRelationships, ManyToManyRelationships); record names in task notes.</step>
+    <step order="6" name="Docs">docs/data-model/sprk_invoiceapproval.md (format of docs/data-model/sprk_invoice.md) plus one INDEX.md row; state the N:N purpose.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="8">Record any deviation in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the D-33 assignment fields on Matter, Project or Work Assignment in dev do not all target contact, STOP and escalate: the eligible-approver store target depends on it.</trigger>
+    <trigger>If task 012 chose different entity-specific lookup names for the invoice family, STOP and align with the main session before creating lookups.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Decision Record gate fields on sprk_decisionrecord (Entities/sprk_DecisionRecord/Entity.xml: sprk_ConfirmedBy, sprk_DecidedOn); no approval table exists (git grep sprk_invoiceapproval outside projects/ finds nothing).</existing>
+    <extension>No — Decision Records are append-only history written when a decision is made; they cannot hold pending state or the set of people who may still decide (spec section New Components).</extension>
+    <cost-of-doing-nothing>The worklist cannot show whose decision an invoice awaits (FR-35), eligible approvers cannot be re-resolved before a decision (FR-11), and multi-matter invoices later need restructuring.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="mcp-dataverse">describe for pre-validation and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingApprovalSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_invoiceapproval.md</output>
+    <output type="docs">docs/data-model/INDEX.md (one row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A metadata read of sprk_invoiceapproval in spaarkedev1 lists every column and lookup in steps 1-2 with the stated types and the four sprk_approvalstatus values.</criterion>
+    <criterion testable="true">The N:N relationship to contact exists, and a test association of one contact to one test approval row in dev succeeds (test rows removed afterwards).</criterion>
+    <criterion testable="true">sprk_invoice is required: creating a row without it is refused.</criterion>
+    <criterion testable="true">A second run of the script reports no change; -WhatIf makes no change.</criterion>
+    <criterion testable="true">No file under src/dataverse/solutions/SpaarkeMaster/ is modified.</criterion>
+    <criterion testable="true">docs/data-model/sprk_invoiceapproval.md and its INDEX.md row exist.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec says "eligible approvers resolved at acceptance (per spec)" without a shape. An N:N to contact is chosen over a JSON column because a view can filter an N:N through contact.sprk_systemuser for the current user, and JSON cannot be filtered.
+    sprk_decidedby / sprk_decidedon follow design.md section data model ("approver") so the worklist can show who decided without reading the Decision Record.
+    Open for 013 / uac-r2 (not this task): secure-record family membership and sprk_createdbyperson for this table.
+  
+
+    COMPLETED 2026-10-15. Script run against spaarkedev1 (WhatIf, apply, second run: no change). Full evidence, deviations and the class check: projects/ebilling-r1/notes/021-invoiceapproval-schema.md.
+    Deviation: sprk_invoice is SystemRequired (ApplicationRequired is not enforced on API writes, so the acceptance criterion failed with it). Defects filed: DEF-009 (#1939), DEF-010 (#1940), DEF-011 (#1941). D-33 escalation did not fire (all approver assignment lookups target contact).
+    rework: fix-round-1 task 021
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -90,9 +90,13 @@ public sealed class SecureRootFilingGate
     /// for <paramref name="creatorSystemUserId"/>. A host without the inheritance refuses a create that files the row under
     /// anything (fail closed); a create that files it under nothing is ordinary and costs no scope.
     /// </summary>
+    /// <remarks>Task 049 fix round 2: <paramref name="secureRequested"/> (the creator asked for the record to be secure) plans
+    /// it into isolation whatever it is filed under (<see cref="SecureRootInheritance.PlanCreateAsync"/>), so such a create
+    /// always asks the inheritance, even when it files the row under nothing.</remarks>
     public async Task<SecureRootCreatePlan> PlanCreateAsync(
         string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct,
-        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null,
+        bool secureRequested = false)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!SecureRootInheritance.Inherits(table))
@@ -114,7 +118,7 @@ public sealed class SecureRootFilingGate
                 SecureRootInheritance.SecureFlagRefusalText));
         }
 
-        if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
+        if (!secureRequested && !materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
             return SecureRootCreatePlan.Ordinary;
 
         using var scope = _scopeFactory.CreateScope();
@@ -122,16 +126,44 @@ public sealed class SecureRootFilingGate
         if (inheritance is null)
         {
             _logger.LogError(
-                "[SECURE-INHERIT] A new {Table} is filed under a record, and this host cannot check whether that record is " +
-                "secure (SecureRootInheritance is not registered). Refused (fail closed).", table);
+                "[SECURE-INHERIT] A new {Table} is filed under a record or asked to be secure, and this host cannot plan a " +
+                "secure create (SecureRootInheritance is not registered). Refused (fail closed).", table);
             return new SecureRootCreatePlan(
                 RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
                     "whether the record it would be filed under is secure cannot be checked here, so it was not created"),
                 false, null, Array.Empty<SecureFilingParent>());
         }
 
-        return await inheritance.PlanCreateAsync(table, materialized, creatorSystemUserId, ct, callerMayFileUnder)
+        return await inheritance.PlanCreateAsync(table, materialized, creatorSystemUserId, ct, callerMayFileUnder, secureRequested)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: the matters and projects a work assignment's owner question must name when it is filed only
+    /// under an invoice or event — <c>SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync</c>, the derivation the un-secure cascade names its parents by. A row that holds a typed matter or project, or no
+    /// intermediate, adds nothing and costs no scope. A host without the inheritance answers unverifiable (fail closed), as
+    /// <see cref="PlanCreateAsync"/> does.
+    /// </summary>
+    internal async Task<SecureRootInheritance.OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct)
+    {
+        var intermediates = SecureRootInheritance.OwnerIntermediatesOf(table, lookups);
+        if (intermediates.Count == 0)
+            return SecureRootInheritance.OwnerFilingThroughIntermediates.None;
+
+        using var scope = _scopeFactory.CreateScope();
+        var inheritance = scope.ServiceProvider.GetService<SecureRootInheritance>();
+        if (inheritance is null)
+        {
+            _logger.LogError(
+                "[SECURE-INHERIT] A {Table} is filed under an invoice or event, and this host cannot read what that record belongs " +
+                "to (SecureRootInheritance is not registered). Refused (fail closed).", table);
+            return new SecureRootInheritance.OwnerFilingThroughIntermediates(
+                Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(),
+                "what the record it is filed under belongs to cannot be read here");
+        }
+
+        return await inheritance.OwnerLookupsThroughIntermediatesAsync(table, intermediates, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -141,14 +173,15 @@ public sealed class SecureRootFilingGate
     /// cannot have planned an isolated create) or a fault answers a failed result naming the record.
     /// </summary>
     public async Task<SecureRootInheritResult> CompleteIsolatedCreateAsync(
-        string table, Guid recordId, Guid creatorSystemUserId, string? traceId)
+        string table, Guid recordId, Guid creatorSystemUserId, string? traceId, bool secureFromCreation = false)
     {
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var inheritance = scope.ServiceProvider.GetRequiredService<SecureRootInheritance>();
             return await inheritance.CompleteIsolatedCreateAsync(
-                    table, recordId, creatorSystemUserId, traceId ?? Guid.NewGuid().ToString("N"), CancellationToken.None)
+                    table, recordId, creatorSystemUserId, traceId ?? Guid.NewGuid().ToString("N"), CancellationToken.None,
+                    secureFromCreation)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

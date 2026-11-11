@@ -58,6 +58,15 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         Guid DocDirect, Guid? DocRelated, Guid Event, Guid TodoUnderDocument, Guid Communication, Guid Memo, Guid MessageInDirectThread,
         Guid UnfiledDocument, Guid OtherRecordsDocument, Guid DirectThread, Guid ChildRoot, Guid ChildRootsTodo)
     {
+        /// <summary>
+        /// GitHub #2560: a rule (<c>sprk_policy</c>, a HARD-DENY table) filed under the record — a matter only, the one
+        /// record a rule is filed under — in a family seeded outside isolation (the provisioning direction). Mirrored at
+        /// Read only, whatever the record's share carries. Not seeded for the unsecure direction: a hard-deny row leaving
+        /// isolation goes to the customer's restricted-content team, which this fixture's root business unit cannot give
+        /// (R4b-2c refuses it, fail closed); RestrictedContentReconcileTests covers that move.
+        /// </summary>
+        public Guid? Policy { get; init; }
+
         /// <summary>The children the transition must move.</summary>
         public IEnumerable<(string Table, Guid Id)> Children()
         {
@@ -69,6 +78,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             yield return ("sprk_communication", Communication);
             yield return ("sprk_memo", Memo);
             yield return ("sprk_communication", MessageInDirectThread);
+            if (Policy is { } policy)
+                yield return ("sprk_policy", policy);
         }
 
         /// <summary>The rows the transition must never write.</summary>
@@ -100,7 +111,10 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             Event: Guid.NewGuid(), TodoUnderDocument: Guid.NewGuid(), Communication: Guid.NewGuid(), Memo: Guid.NewGuid(),
             MessageInDirectThread: Guid.NewGuid(),
             UnfiledDocument: Guid.NewGuid(), OtherRecordsDocument: Guid.NewGuid(), DirectThread: Guid.NewGuid(),
-            ChildRoot: Guid.NewGuid(), ChildRootsTodo: Guid.NewGuid());
+            ChildRoot: Guid.NewGuid(), ChildRootsTodo: Guid.NewGuid())
+        {
+            Policy = rootTable == "sprk_matter" && !childrenIsolated ? Guid.NewGuid() : null,
+        };
 
         void Child(string table, Guid id, params (string, string, Guid)[] lookups)
         {
@@ -121,6 +135,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         else
             world.UserOwnedChild("sprk_communication", family.Communication, (regarding, rootTable, rootId));
         Child("sprk_memo", family.Memo, (regarding, rootTable, rootId));
+        if (family.Policy is { } policy)
+            Child("sprk_policy", policy, ("sprk_matter", rootTable, rootId));
 
         // A message on the record, in a per-user Direct thread: the message is the record's child; the thread is not.
         world.UserOwnedChild("sprk_communicationthread", family.DirectThread);
@@ -164,7 +180,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _ => "workassignment",
     };
 
-    private static int MirrorOf(string rightsCsv) => RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(rightsCsv));
+    private static int MirrorOf(string childTable, string rightsCsv) =>
+        RecordShareLevels.ChildMirrorMask(childTable, RecordShareLevels.MaskForRightsCsv(rightsCsv));
 
     private static async Task<JsonElement> JsonOf(HttpResponseMessage response)
     {
@@ -210,15 +227,19 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             .PostAsJsonAsync(ProvisionRoute, new { recordType = RecordType(rootTable), recordId = rootId });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        var creatorMirror = MirrorOf(ProvisionProjectEndpoint.CreatorAccessRights);
         foreach (var (table, id) in family.Children())
         {
             _fixture.ChildWorld.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(SecureTeam),
                 $"{table} {id} is an existing child of the record now secure");
             _fixture.SharesOn(id).Should().Equal(
-                new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = creatorMirror },
+                new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = MirrorOf(table, ProvisionProjectEndpoint.CreatorAccessRights) },
                 "a child's sharees are exactly the record's, at the record's rights (Share included since round 91)");
         }
+
+        // GitHub #2560, as Dataverse stores it (Read = 1): the rule carries Read only; an ordinary child carries more.
+        if (family.Policy is { } policy)
+            _fixture.SharesOn(policy).Should().Equal(new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = 1 });
+        _fixture.SharesOn(family.DocDirect)[DataversePrincipalRef.User(Creator)].Should().NotBe(1, "an ordinary child keeps the full mirror");
 
         AssertDecoysUntouched(family, decoysBefore);
 
@@ -755,6 +776,44 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.ShareMaskOf(usersOwn, Outsider).Should().NotBe(0, "a share on an ordinary row is not the mirror's");
         _fixture.OwnerOfCascadeChild(location).Should().Be(DataversePrincipalRef.User(Creator),
             "a repeat unsecure is no transition for the record's own SharePoint rows");
+    }
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): an Unsecure HOLDS a Decision Record whose question is incomplete (its sprk_steps lists no
+    /// Signals) on the Secure team — and takes the matter's mirror off it as it does a released child's, so the colleague the
+    /// matter was shared with keeps no access through it. Holding only removes access: the call completes and reports it.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_HoldsADecisionRecordWithAnIncompleteQuestion_RemovesItsMirror_AndReportsItHeld()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_matter", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        var world = _fixture.ChildWorld;
+        var catalog = Guid.NewGuid();
+        world.Add("sprk_recordtype_ref", catalog, ("sprk_recordlogicalname", "sprk_matter"));
+        var record = Guid.NewGuid();
+        world.SecureChild("sprk_decisionrecord", record,
+            ("sprk_matter", "sprk_matter", rootId), ("sprk_regardingmatter", "sprk_matter", rootId));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", catalog));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordid", rootId.ToString("D"));
+        world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", rootId.ToString("D"));
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        _fixture.SeedShare(record, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(UnsecureRoute, new { recordType = RecordType("sprk_matter"), recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureTeam), "held, never moved out");
+        _fixture.SharesOn(record).Should().BeEmpty("the colleague keeps no access through the held record");
+        _fixture.IsSecureOf(rootId).Should().BeFalse("the Unsecure completes");
+        var children = (await JsonOf(response)).GetProperty("children");
+        children.GetProperty("held").GetInt32().Should().Be(1);
+        var held = children.GetProperty("heldRecords").EnumerateArray().Should().ContainSingle().Subject;
+        held.GetProperty("table").GetString().Should().Be("sprk_decisionrecord");
+        held.GetProperty("id").GetGuid().Should().Be(record);
+        held.GetProperty("reason").GetString().Should().Contain("incomplete");
     }
 
     /// <summary>

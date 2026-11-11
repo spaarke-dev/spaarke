@@ -86,6 +86,18 @@ The owner chose to discuss the process before anything is sent.
   - **F1-c:** if the email can't be identified (no Message-ID, a failed Graph read, or no communication), `from-email` refuses with a retryable "try again" and saves nothing. The Invoice view shows a retry, and suggests the internal upload route if it keeps failing.
 - ebilling lists our re-save gap #2209 (ISS-022) as a known limit.
 
+**Shared attachment-marking component (agreed with ebilling-r1, 2026-10-21).** The owner decided that Submit Invoice also goes into the Spaarke email UI (ebilling task 118: the toolbar button, flagged attachments and an Email Review Invoice tab, on the from-document route 094). Both surfaces use one marking UI:
+- **Who and where:** ebilling 118 builds it in `Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/`, exported as a file subpath (`@spaarke/communication-components/invoice-attachment-marking`). We consume it through a webpack and jest alias plus a type shim, never the barrel (task 100 rule). We review their PR.
+- **What it is:** controlled and free of I/O. It takes `attachments` (opaque id, fileName, contentType, sizeBytes, suggestedInvoice, disabledReason), `value`/`onChange` (invoice | supporting | skip), `mode` (new | correction | supporting-only) and `disabled`. Two pure functions, `defaultInvoiceMarking` and `validateInvoiceMarking`, hold the "exactly one invoice" rule. It takes no submit callback: each host owns its route (the add-in's is from-email 095).
+- **Default for the other attachments: 'supporting'. Owner decision 2026-10-21**, which replaces our 'skip' proposal; ebilling was told to change the 118 POML. Attachments that can't be submitted (with a disabledReason) still default to 'skip'.
+- **Our Invoice task is created only once 095 is built** (owner decision 2026-10-21: wait). Send ebilling the task number then. ebilling froze 095's request and response shapes at model §9.1 v5.9 FINAL; any change comes to us before it merges (in their 095 POML).
+- **Adopted in the 118 POML** (`e028569e79`): our props exactly, and a source-scan test that refuses barrel, Xrm, Office, fetch and service imports in that folder. We are a reviewer on its PR.
+- **Order:**
+  1. the component merges;
+  2. 095 is deployed;
+  3. our Invoice view adopts it and removes Invoice from Save and quick-create in the same add-in release;
+  4. ebilling 096 removes the server legs one release later.
+
 **Work for this project (not yet a task)**, once ebilling's endpoint contract exists:
 - the Invoice view and ribbon button;
 - removing Invoice from Save and quick-create;

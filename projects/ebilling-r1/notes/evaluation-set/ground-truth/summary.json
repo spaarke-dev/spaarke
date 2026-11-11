@@ -1,0 +1,6 @@
+{
+ "generator":"gen_eval_set.py@1",
+ "base_seed":20261015,
+ "set_B":{"invoices":150,"templates_used":24,"scan_noise":48,"bundled":14,"max_pages":26,"largest":"B-0150","non_usd":20,"lines":3762,"spike_subset":["B-0001","B-0002","B-0003","B-0004","B-0005","B-0006","B-0007","B-0008","B-0009","B-0010","B-0011","B-0012","B-0013","B-0014","B-0015","B-0016","B-0017","B-0018","B-0019","B-0020","B-0021","B-0022","B-0023","B-0024","B-0026","B-0031","B-0043","B-0055","B-0067","B-0079","B-0091","B-0103","B-0115","B-0127","B-0139","B-0149","B-0150"]},
+ "set_F":{"seeded_invoices":300,"clean_invoices":300,"seeded_violations":875,"by_rule_type":{"AiObservation":71,"ApprovedRate":104,"ApprovedTimekeeper":48,"CoreRecordWindow":48,"DailyHoursCap":63,"Duplicate":94,"ExpenseRule":77,"InvoiceAge":73,"NonBillableActivity":80,"RequiredData":92,"TimeIncrement":125},"rule_sets":["RS-01","RS-02","RS-03","RS-04","RS-05","RS-06"],"lines":8707}
+}

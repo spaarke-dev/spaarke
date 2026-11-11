@@ -1,62 +1,53 @@
 # Current Task State — `spaarkeai-word-add-in-r1`
 
-> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery; the pre-2026-10-21 state, including the Console run log, is archived in `notes/handoff-history/2026-10.md`).
+> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
 
-> **Last Updated**: 2026-10-21 (by context-handoff): task 130 signed off, auto-merge pending CI; eBilling invoice flow decided.
+> **Last Updated**: 2026-11-06 (fm 030a content read sent; dev BFF 20669df6a9 live; #2552 held).
 
-## ⚡ Quick Recovery (READ THIS FIRST)
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No code task active. **130 ✅** (#2177, `4e36c1929d`) and **131 ✅** (#2182, `733c65063c`) merged 2026-10-21; C:\wt131 removed. Open: 042 (UAT), 125 (guest live check), 090 (wrap-up). |
-| **Status** | 130 is live on the dev BFF (`84291ecea8`); 131 is not yet. The owner gave the go (2026-10-21) to deploy in coordination with the other projects. |
-| **Next Action** | 1. When a dev BFF containing `733c65063c` is live (R3's or UAC's next routine deploy; check its ProductVersion), redeploy the Outlook add-in (`/office-addins-deploy`) so 131's notice shows. Before that, merge master into the work branch.<br>2. When R3 sends the owner's two .eml save times or subjects, read the sprk_document rows back and report them to UAC and R3.<br>3. Owner live checks (below), then 090. |
+| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev; unified package **1.1.4** uploaded by the owner 2026-11-03 (Invoice pane tab; Submit Invoice / Create To Do ribbon buttons removed). |
+| **Open PR** | **#2552 draft, HOLD** (C:\wt185f, `feat/invoice-optional-firm`, head 6af195647d): optional firm (ebilling EB-D-185) + "Submit it again." sentences for the 095c-4 transient Failed codes. Merge only after ebilling sends the master SHA of the dev BFF deploy carrying 095c-2..4. Then: merge master into the branch, `gh pr ready 2552`, wait for every check, `gh pr merge 2552 --auto --merge`, confirm the SWA deploy, owner retest (no-firm submit + correction of it), remove C:\wt185f with Remove-WorktreeSafe. |
+| **Live dev BFF** | **20669df6a9 since 2026-11-06T16:44:51Z** (deployed by uac-r2; rollback 0f53e053bf; server gate PASS to 17:14:51Z). No Office or Finance server change since d763dc120e. |
+| **Owner checks open** | On whatever build is live: (1) an Office save filed to a matter, (2) an Office save with no related record, (3) one Submit Invoice from an email. Then read `sprk_document` rows created after the live time (`sprk_searchindexcompletedon`, `sprk_searchindexname`) and the invoice submission, invoice and line rows; send the result to uac-r2. None made yet (checked after 16:44:51Z). |
+| **Last merge to master** | **PR #2604 MERGED** 2026-11-06 as bcdc0e0069 (project records only; Router, client lint and every other check pass; Tier 1/2 skipped as docs-only). Main checkout fast-forwarded to it. Issue #945 commented; board Tasks Completed corrected 127 → 126 (042 is 🔄; the old count read the ✅ in its dependency cell). |
+| **Next Action** | Wait for: the owner's three checks; ebilling's 095c SHA (#2552); fm's answer on OFFICE_010 and the 030b PR for a content read before its dev deploy (030a read done); ebilling's 095a/095b/151e PR + SHA (banner, invoice Files section). |
 
-## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
-- Every Office email-derived `sprk_document` (the .eml, each attachment child, a single attachment, the worker fallback) is created linked to its `sprk_communication`, or Restricted. Restricted carries `sprk_accessinheritance` = `AccessInheritance.OwnNarrowing(Restricted)` in the same create (UAC 189); the stager refuses a value without its record.
-- Guards: `DocumentCreateStagesCommunicationFieldsGuardTests` (stager call; outcome at all 3 sites; only `ApplyEmailCommunicationOutcome` sets the record, compound assignment included); 189's `DocumentAccessPermissionWriterGuardTests` (the stager listed; UNSEEN-alias check; Key widened). Write-path registry I-19.
-- Gates: full Office/ChildAccessPermission filter 749/0/7; ArchTests 1225/1225 (`65b4f5f468`); the pass 1/2 fixes re-run on their scope.
-- **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
+## Decisions and alignment (2026-11-04 to 11-06)
+- **W3 create paths** (owner 2026-11-06, fm decisions.md, UAC-r2 reviewed): see project `CLAUDE.md` "Create paths follow fm's W3 direction" and the spec ADR Tensions row. fm confirmed the 030b "existing id refused" guard covers creates only; the version save (`existingDocumentId` + `isNewVersion`) and the re-file (`documentId`) get must-not-fire tests.
+- **fm 030a** (Office To Do through the service): built, in fm review (content read of fe8e8913e6 sent 2026-11-06: OK). Its To Do refusal is **403** OFFICE_009 `source_record_inaccessible`, now ending "or choose a different person to assign it to"; an assignee contact needs AppendTo (Core User has it). The pane pins nothing and shows the server detail under the catalog title, so no pane change. A To Do created with no assignee needs no pane notice (the confirmation never shows an assignee). OFFICE_010 stays 403; fm's fix round gives its transient kinds the detail "…could not be created right now, and nothing was saved. Try again in a moment…". No `retryable` extension (declined: the pane has no reader for it). Pane fix found while answering: after a failed create the To Do form left Save disabled until Cancel cleared the input; now Save stays available after an error (CreateTodoView `canCreate`, test pins the retry). Waiting on the 030b PR.
+- **Roles** (owner): Office Add In User needs Core User and is for licensed core users only; Basic User becomes Read-only on `sprk_*` (fm 046c, live apply by uac-r2). The four service and demo accounts do not get the add-in role (2026-11-05). The five add-in holders who lacked Core User were given it (2026-11-06, read back on dev); every add-in role holder now has Core User or System Administrator.
+- **ebilling contract** (#2552): `"firm": null` prefill accepted; "Firm: none" kept (ebilling confirmed); §12 reviewer refusals not on any pane route; 082c-3 `warning` is SPA-only, no pane impact.
 
-## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+84291ecea8`** since 2026-10-21 16:42:49Z (deployed by R3 on our OK and the owner's go; contains #2177 / task 130, 077, and `a10e814d02`; healthz 200; `sprk_accessinheritance` confirmed before the swap). Task 131 (#2182) is NOT in it. R3 reads App Insights at 30 min for the stager refusal ("created with its sprk_accessinheritance record"). UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
-- **Console `sprk_spaarkeai`:** `deploy-spaarke-ai.yml` auto-publishes on every master push touching SpaarkeAi or the shared UI packages; read `modifiedon` to know which build is live. Default landing tab is Worklist (ontology data change 2026-10-17; Daily Briefing is in the Workspaces dropdown).
-- The add-ins are current (`05356cbf7`).
+## Deploy OKs given (newest first; history in git log)
+- 2026-11-06 20669df6a9: checked after uac-r2's before-notice; POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
+- 2026-11-05 0f6618094b: content OK; the owner held it and it shipped inside 20669df6a9.
+- 2026-11-05 0f53e053bf, 2026-11-04 909754869f, 2026-11-03 d763dc120e: content OK; each carried the owner-checks condition above.
+- Dev BFF deploys run through uac-r2 (`spaarke-wt-unified-access-control-r2-20`): requests, peer OKs and after-notices go there; the owner gives the go per build in its session (`docs/procedures/dev-bff-deploy-coordination.md`).
 
-## eBilling (ebilling-r1, owner-requested review): decisions recorded in `notes/ebilling-r1-review-2026-10-21.md`
-- Decided and sent: K5 race fixed by A + B; internal-only, Restricted and Private-thread sources allowed with isolation carried. The Outlook invoice flow:
-  - an explicit Invoice mark;
-  - corrections are resubmissions, refused after Approved/Sent to AP/Paid;
-  - a separate Invoice task-pane view with a "Submit Invoice" ribbon button;
-  - Invoice removed from Save and quick-create;
-  - Matter/Project/Work Assignment (Agreement in ebilling R2);
-  - the .eml always saved to the core record;
-  - no LEDES.
-- ebilling's `POST /api/finance/invoice-submissions/from-email` contract includes our four changes (their model v5.5 §9.1, `8c65b3bd89`):
-  - step 0 refuses with 422 when a marked file isn't in the request;
-  - the .eml id comes from the job's artifact, and filing step A runs through the refile path;
-  - the known limits are recorded;
-  - our key and removal order are adopted.
-  Not built; it waits on the owner finalizing ebilling's model.
-- **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create (the add-in side goes first, or in the same release as ebilling's server-side removal), the email-only .eml save. Create a task when ebilling's contract is final.
+## Submit Invoice (task 133): state
+- Already-submitted banner (#2533) shows nothing until ebilling 095a is on dev (404 → today's form). Backfill for older submissions (incl. 0d67bcc9 and INV-792345.3/.4) is ebilling's, with the owner's OK.
+- Invoice form Files section and "Source email" link: ebilling 151e. No approve UI until ebilling 110/111/112 (no interim path).
+- Owner retest still open: INV-012.2 / correction UAT.
+- **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
-## Filed 2026-10-21
-- **ISS-022 / #2209:** the `/office/save` re-save gap (the email save key excludes the attachment selection, so re-saving to add attachments is answered "already saved"). Filed on the owner's go; next-round, no task yet.
-- **ebilling v5.7 (`ef9b1a9e9b`)** took our fix for finding the .eml, and the owner chose F1-a(i) and F1-c. Both are recorded in `notes/ebilling-r1-review-2026-10-21.md`: they shape the future Invoice view (show a retry; suggest internal upload). No reply owed.
+## Peers (SendMessage by session name)
+- uac-r2 `spaarke-wt-unified-access-control-r2-20` (dev BFF deploys, roles); ebilling `spaarke-wt-ebilling-r1-7b` / `-c7`; field-mapping `spaarke-wt-field-mapping-server-write-pa-69`; ontology `spaarke-wt-spaarke-ontology-platform-r1-38`.
 
-## Waiting on the owner (live checks)
-- UAT: 042 (full); 080 (Test User 1 opens a matter-filed document they saved, then Index and document To Do); 121 (email save: Message-ID, link to an existing communication, an unfiled communication gets filed, "Related to" cards); 127 (grids: Matter Documents footer `v1.1.85`, no `[AppInsightsService]` warning, VisualHost, App Insights `customEvents`, Daily Briefing); 078 (one Word-on-the-web run plus the desktop Word build number). Fix what they report.
-- PCF re-sync: MatterHeader 1.0.22; RecordHeader 1.1.12; Communication form timeline and actions; the document relationship viewer opens.
-- A9: a licensed B2B guest signs in from their own company's desktop Office and Word.
-- SPA-r3 waits on the owner's Ralph Dewey sign-in retest; pass the result on.
-- Then 090 wrap-up (`/test-diet`), after UAT.
+## Gotchas (this session)
+- Use `git commit -F <file>`; git under the Bash tool hangs, so use PowerShell.
+- Remote refs are shared by every worktree: another session's fetch can move `origin/master` mid-task. Re-check `git rev-list --count HEAD..origin/master` right before a merge or PR.
+- `Gated jest suites (office-addins)` is NOT required: wait for it before relying on a merge.
+- `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module.
+- A fresh worktree needs `npm run build` in `src/client/shared/Spaarke.Auth` before office-addins tsc (gitignored `dist`).
 
-## Blocked / waiting on others
-- SPA-r3 (A9): workforce-contact sign-in tasks not built.
-- customer-provisioning-orchestration-r1: T186 awaits the owner's OK.
-
-## Open owner items / later
-- Main checkout `C:\code_files\spaarke` refused a fast-forward earlier (untracked `tests/Spaarke.ArchTests/WebResourceMirrorParity.baseline.txt`, 4 modified tracked files, possibly another session's work). Left untouched for the owner.
-- Optional: reassign the 3 pre-task-146 app-owned dev events (#1034 comment). A Dataverse write; needs the owner's go.
-- Filed follow-ups (other owners): #1464, #1468–#1471, #1476, #1477, #1505, #1540, #1551, #1591, #1832, #2172.
-- C:\wtqa1906 is left for the owner.
+## Owner items (open)
+- Prod Entra: register the add-in's `brk-…://addins.spaarke.com` redirect on prod `1958aec2` (dev has it; offered via az with a go).
+- Teams admin: reject the duplicate "Spaarke portal" submission `5d88b948…` (keep `60055573…`); then tell R3 and legal-ai-accelerator.
+- Request Too Long follow-ups on the owner's machine.
+- Excel/PowerPoint add-in (no go yet); UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; a named user's retest for R3; 090 wrap-up (`/test-diet`).
+- Post-deploy check (UAC #2468): a child-BU user's unfiled Outlook save; read back the `sprk_document` owner and BU.
+- Main checkout `C:\code_files\spaarke`: leave its uncommitted files alone. C:\wtqa1906 is the owner's.
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.

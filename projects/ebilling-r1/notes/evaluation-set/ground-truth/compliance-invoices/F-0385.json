@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0385",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0385","generator_id":"gen_eval_set.py@1 F-0385","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0385.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Kingsley and Forsythe LLP","firm_invoice_number":"INV-2026-39849","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"14570-0023","po_number":"PO-4534095","fees_total":3488.0,"expenses_total":381.32,"adjustments_total":0.0,"total_due":3869.32,"currency":"USD"},
+ "timekeepers":[{"name":"Imani Nakamura","title":"Associate","rate":305.0,"billed_as":"IN"},{"name":"Marcus Voss","title":"Associate","rate":280.0,"billed_as":"MV"},{"name":"Tomas Galbraith","title":"Legal Assistant","rate":120.0,"billed_as":"TG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-08","timekeeper":"IN","timekeeper_name":"Imani Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":305.0,"amount":457.5,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-11","timekeeper":"IN","timekeeper_name":"Imani Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":305.0,"amount":640.5,"narrative":"Research appealability issues in the distribution agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-13","timekeeper":"TG","timekeeper_name":"Tomas Galbraith","timekeeper_title":"Legal Assistant","title":"LA","hours":1.7,"rate":120.0,"amount":204.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-14","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":280.0,"amount":756.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-20","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":280.0,"amount":448.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-20","timekeeper":"IN","timekeeper_name":"Imani Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":305.0,"amount":366.0,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-21","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":280.0,"amount":616.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":331.87,"amount":331.87,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-08-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":202.0,"rate":0.1,"amount":20.2,"narrative":"Photocopies - 202 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":29.25,"amount":29.25,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["25 Market Street","Seattle","Tax ID 39-3078316"],"template":"T08","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-28","matter_close":"2025-11-29","matter_budget":40477.0,"approved_timekeepers":["Marcus Voss","Tomas Galbraith","Emeka Nakamura","Imani Nakamura","Aisha Nwosu","Nadia Esposito"],"invoice_received_date":"2025-09-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

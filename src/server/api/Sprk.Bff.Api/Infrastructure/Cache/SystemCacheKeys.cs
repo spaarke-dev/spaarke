@@ -80,8 +80,9 @@ public static class SystemCacheKeys
     /// <c>{InstanceName}scheduler:lease:{jobId}</c>.
     /// Justification: a scheduled job runs for the whole BFF, not for a tenant; like <see cref="IdempotencyLock"/>
     /// the lock must be tenant-agnostic so any instance can take and release it.
-    /// <para>Second site, same key family (unified-access-control-r2 task 143, catalogued in r2): the No Access
-    /// enforcer's per-record removal lock, <c>Infrastructure/ExternalAccess/NoAccessShareEnforcer.cs</c>. Raw key:
+    /// <para>Second site, same key family (unified-access-control-r2 task 143, catalogued in r2): the per-record removal
+    /// lock defined by <c>Infrastructure/ExternalAccess/NoAccessShareEnforcer.cs</c> (<c>RecordLockId</c>), taken by the No
+    /// Access enforcer, the Restricted remover, <c>/unshare-user</c> and the create's queued Assigned-To grant. Raw key:
     /// <c>{InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}</c>. A keyed mutex over the same store, never
     /// a job's dispatch key (no job id starts with <c>no-access-enforce:</c>); it serializes owner S5's "someone else keeps
     /// access" check across instances, so it must be tenant-agnostic for the same reason. The reuse is a recorded §6.5
@@ -134,7 +135,7 @@ public static class SystemCacheKeys
 
     /// <summary>
     /// Dataverse entity-metadata schema cache (org-wide; one BFF per org per ADR-029).
-    /// Site: <c>Services/Dataverse/MetadataService.cs</c>. Raw key: <c>sdap:dv:entitymetadata:{logicalName}</c>.
+    /// Site: <c>Services/Dataverse/MetadataService.cs</c>. Raw key: <c>sdap:dv:entitymetadata:v2:{logicalName}</c>.
     /// Justification: entity metadata is org-wide configuration; tenant-scoping would
     /// defeat the purpose of the schema cache.
     /// </summary>

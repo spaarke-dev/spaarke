@@ -4,7 +4,7 @@
     <title>W7 deploy to dev + live Family check (BFF via R3 batch, PCF, code page, web resource)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>072, 074, 038 complete (075 ships with 040, owner 2026-10-28); owner go for the BFF deploy in R3's session</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching; live verification of an access-safe read path.</rigor-reason>
     <model-tier>sonnet</model-tier>

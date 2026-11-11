@@ -79,6 +79,8 @@ interface CommunicationSuggestionsWire {
 /** The engine's shared review model, plus the per-candidate filing access the suggestions route returned. */
 interface SuggestionsModel {
   model: PrimaryReviewModel;
+  /** The engine declined to choose (status Ambiguous, or a candidate in conflict) — #2412. */
+  ambiguous: boolean;
   filingAccess?: Record<string, boolean>;
 }
 
@@ -256,7 +258,10 @@ async function fetchModel(internetMessageId: string | undefined): Promise<Sugges
   // names are folded into the model's `targetName` (the field it is designed to receive). Filing access
   // (task 084) is NOT folded in — it rides alongside and is applied when mapping to the picker's shape.
   const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
-  return { model, ...(response.filingAccess ? { filingAccess: response.filingAccess } : {}) };
+  // The engine declined to choose: 2+ high-confidence targets on one field (status Ambiguous).
+  const ambiguous =
+    response.suggestions.status === 'Ambiguous' || response.suggestions.candidates.some(c => c.conflict);
+  return { model, ambiguous, ...(response.filingAccess ? { filingAccess: response.filingAccess } : {}) };
 }
 
 export async function fetchEnginePreSelection(
@@ -264,7 +269,12 @@ export async function fetchEnginePreSelection(
 ): Promise<EnginePreSelection | null> {
   const fetched = await fetchModel(internetMessageId);
   if (!fetched) return null;
-  const { model, filingAccess } = fetched;
+  const { model, filingAccess, ambiguous } = fetched;
+
+  // #2412: when the engine declined to choose, its top candidate is a guess between conflicting records. Quick Save
+  // files without showing the user, and the server takes the target it sends as the user's own choice (caller-supplied
+  // wins its field), so a guess here would be filed. No pre-selection: Quick Save saves unfiled.
+  if (ambiguous && !model.primary) return null;
 
   const predictedCandidate = model.primary ?? model.candidates[0];
   if (!predictedCandidate) return null;

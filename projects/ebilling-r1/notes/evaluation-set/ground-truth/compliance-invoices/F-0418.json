@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0418",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0418","generator_id":"gen_eval_set.py@1 F-0418","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0418.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Quimby and Cranmer LLP","firm_invoice_number":"INV-2026-32215","invoice_date":"2026-02-04","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"30985-0020","po_number":"PO-4533795","fees_total":4260.0,"expenses_total":1015.35,"adjustments_total":0.0,"total_due":5275.35,"currency":"USD"},
+ "timekeepers":[{"name":"Imani Halloran","title":"Associate","rate":305.0,"billed_as":"IH"},{"name":"Ivan Carmichael","title":"Senior Associate","rate":490.0,"billed_as":"IC"},{"name":"Ivan Eriksen","title":"Associate","rate":315.0,"billed_as":"IE"},{"name":"Sofia Lockhart","title":"Legal Assistant","rate":135.0,"billed_as":"SL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-02","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":305.0,"amount":381.25,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-09","timekeeper":"IC","timekeeper_name":"Ivan Carmichael","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.25,"rate":490.0,"amount":1102.5,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-12","timekeeper":"IC","timekeeper_name":"Ivan Carmichael","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":490.0,"amount":122.5,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-13","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":305.0,"amount":228.75,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2026-01-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":168.54,"amount":168.54,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-16","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":305.0,"amount":762.5,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-19","timekeeper":"IC","timekeeper_name":"Ivan Carmichael","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":490.0,"amount":245.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-20","timekeeper":"IE","timekeeper_name":"Ivan Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":315.0,"amount":551.25,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-20","timekeeper":"IE","timekeeper_name":"Ivan Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":315.0,"amount":78.75,"narrative":"Draft notice of appeal and docketing statement for the lease dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-22","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":305.0,"amount":76.25,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-28","timekeeper":"SL","timekeeper_name":"Sofia Lockhart","timekeeper_title":"Legal Assistant","title":"LA","hours":0.75,"rate":135.0,"amount":101.25,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-28","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":305.0,"amount":610.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":846.81,"amount":846.81,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["39 Pine Street","Seattle","Tax ID 71-7497182"],"template":"T09","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-02-03","matter_close":"2026-05-01","matter_budget":46101.0,"approved_timekeepers":["Ivan Eriksen","Dalia Eriksen","Sofia Lockhart","Ivan Carmichael","Hector Brennan","Leila Nwosu","Imani Halloran"],"invoice_received_date":"2026-02-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

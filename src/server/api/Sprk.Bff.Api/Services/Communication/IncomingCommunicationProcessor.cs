@@ -64,6 +64,12 @@ public sealed class IncomingCommunicationProcessor
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): verifies the <see cref="ServerSendMarker"/> of a server-only send. Null (a bare test ctor): no
+    /// message is treated as one, so every message is processed as before.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? _trackingTokenSigner;
+
+    /// <summary>
     /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
     /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
     /// </summary>
@@ -91,8 +97,10 @@ public sealed class IncomingCommunicationProcessor
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
         CommunicationParticipantIndexer? participantIndexer = null,
-        CommunicationArrivedProducer? arrivedProducer = null)
+        CommunicationArrivedProducer? arrivedProducer = null,
+        Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? trackingTokenSigner = null)
     {
+        _trackingTokenSigner = trackingTokenSigner;
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -300,10 +308,16 @@ public sealed class IncomingCommunicationProcessor
         // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
         // association so an email whose matter/project name appears only in the attachment still matches.
         // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
-        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send is checked FIRST, and its attachment text is not a match signal,
+        // so the export files cannot file this copy under a record named inside them (that record's readers would read the email).
+        var verifiedServerSend = await IsVerifiedServerSendAsync(message, mailboxEmail, graphMessageId, ct);
+        if (!verifiedServerSend)
+        {
+            envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        }
 
         // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
-        var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
+        var (decision, owner, filingFields, inquiryReply) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
 
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
@@ -354,35 +368,8 @@ public sealed class IncomingCommunicationProcessor
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
 
-        // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
-        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
-        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
-        // The row was created with the owner this decision resolved, so this writes only the association fields, status
-        // and provenance — no reparent re-derivation is needed.
-        if (filingFields is null)
-        {
-            try
-            {
-                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-            }
-            catch (Exception ex)
-            {
-                // Association resolution failure is non-fatal
-                _logger.LogWarning(
-                    ex,
-                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                    "GraphMessageId: {GraphMessageId}",
-                    communicationId, graphMessageId);
-            }
-        }
-
-        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
-        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
-        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
-        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
-        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
-        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
-        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct);
+        // ── Steps 4.5 and 4.6 (with 4.6b) ──
+        await FileAndThreadNewRecordAsync(communicationId, envelope, graphMessageId, decision, filingFields, inquiryReply, ct);
 
         // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
         // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
@@ -434,7 +421,16 @@ public sealed class IncomingCommunicationProcessor
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
-        var shouldProcessAttachments = account is null || account.AutoCreateRecords;
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send (this server sent these exact files, which are already stored
+        // on their own record) files no attachment document and archives no .eml (checked before step 3.6). Anything unverified is processed as before.
+        if (verifiedServerSend)
+        {
+            _logger.LogInformation(
+                "Verified server-only send: attachment text match, attachment documents and .eml archive skipped | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+
+        var shouldProcessAttachments = !verifiedServerSend && (account is null || account.AutoCreateRecords);
         if (shouldProcessAttachments && message.HasAttachments == true
             && message.Attachments is { Count: > 0 })
         {
@@ -460,7 +456,7 @@ public sealed class IncomingCommunicationProcessor
         // an unset flag (null) is the intended default and archives. An unresolved account (null) also
         // defaults to archiving. Decision lives in CommunicationAccount.ShouldArchiveIncoming() so the
         // default-on contract is pinned by unit test. No historical mail is backfilled (forward-only).
-        if (account?.ShouldArchiveIncoming() ?? true)
+        if (!verifiedServerSend && (account?.ShouldArchiveIncoming() ?? true))
         {
             try
             {
@@ -476,7 +472,7 @@ public sealed class IncomingCommunicationProcessor
                     communicationId, graphMessageId);
             }
         }
-        else
+        else if (!verifiedServerSend)
         {
             _logger.LogInformation(
                 "EML archival skipped: ArchiveIncomingOptIn is disabled for account {Mailbox} | " +
@@ -652,16 +648,20 @@ public sealed class IncomingCommunicationProcessor
     /// creator (E1). A failure to build them HOLDS the email like an undeterminable filing.
     /// </returns>
     internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner,
-            Dictionary<string, object>? FilingFields)>
+            Dictionary<string, object>? FilingFields, bool InquiryReply)>
         ResolveInboundFilingAsync(
             NormalizedMessage envelope, CommunicationAccount? account, string graphMessageId, CancellationToken ct)
     {
         AssociationDecision decision;
+        bool inquiryReply;
         Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
         try
         {
             decision = await _associationResolver.EvaluateAsync(
                 envelope, new AssociationContext { Account = account }, ct);
+            // Ontology task 176 (D-216): a reply filed to an INQUIRY is filed under its matter too — before the owner is
+            // asked, so a matter that became secure owns it. A read that fails throws here and the email is HELD.
+            (decision, inquiryReply) = await FileInquiryReplyUnderItsMatterAsync(decision, graphMessageId, ct);
             ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -687,12 +687,12 @@ public sealed class IncomingCommunicationProcessor
 
         if (!owner.IsOwned)
         {
-            return (decision, owner, null);
+            return (decision, owner, null, inquiryReply);
         }
 
         try
         {
-            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct));
+            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct), inquiryReply);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -711,12 +711,158 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
+    /// Ontology task 176 (D-216): when <paramref name="decision"/> files the email to a service request that is an INQUIRY
+    /// (<c>sprk_direction</c> = Outbound, written by <c>BudgetInquiryExecutor</c>), the inquiry's matter is added to its regarding
+    /// writes, so the reply sits under the matter (its thread, its owner, its access) beside the inquiry.
+    /// </summary>
+    /// <remarks>
+    /// Fail closed, presence-aware: the request is read live; a fault (including the column being absent from the environment)
+    /// or a null row THROWS, which the caller holds as <see cref="RecordOwnerRefusal.ParentUndetermined"/> — never a row filed
+    /// to the request alone. A row read with no matter (an explicit null; the SDK omits null columns), a request that is not an
+    /// inquiry, an Ambiguous decision or a decision that already names a matter files as today. Ids only in logs.
+    /// </remarks>
+    /// <returns>The decision to file, and whether the email is a reply to an inquiry with a matter (step 4.6b keeps such a reply
+    /// internal-only).</returns>
+    private async Task<(AssociationDecision Decision, bool InquiryReply)> FileInquiryReplyUnderItsMatterAsync(
+        AssociationDecision decision, string graphMessageId, CancellationToken ct)
+    {
+        if (decision.Status == AssociationStatusCodes.Ambiguous
+            || !decision.RegardingWrites.TryGetValue(InquiryRequestLookup, out var serviceRequest)
+            || serviceRequest.Id == Guid.Empty)
+        {
+            return (decision, false);
+        }
+
+        var row = await _genericEntityService.RetrieveAsync(
+                InquiryRequestEntity, serviceRequest.Id, [InquiryDirectionColumn, InquiryMatterLookup], ct)
+            ?? throw new InvalidOperationException(
+                "The service request the email is filed to returned no row, so whether it is an inquiry with a matter is unknown.");
+
+        if (row.GetAttributeValue<OptionSetValue>(InquiryDirectionColumn)?.Value
+            != Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor.DirectionOutbound)
+        {
+            return (decision, false);
+        }
+
+        if (!row.Attributes.TryGetValue(InquiryMatterLookup, out var value)
+            || value is not EntityReference { Id: var matterId }
+            || matterId == Guid.Empty)
+        {
+            return (decision, false);
+        }
+
+        if (decision.RegardingWrites.TryGetValue(InquiryMatterLookup, out var filed))
+        {
+            if (filed.Id != matterId)
+            {
+                _logger.LogWarning(
+                    "Reply to inquiry {ServiceRequestId} is already filed to matter {FiledMatterId}, not the inquiry's matter "
+                    + "{InquiryMatterId}; its filing is kept | GraphMessageId: {GraphMessageId}",
+                    serviceRequest.Id, filed.Id, matterId, graphMessageId);
+            }
+
+            // Review round 2, item 4: the service request stays the denormalized primary, as on the send.
+            return (decision with { PrimaryRegardingField = InquiryRequestLookup }, true);
+        }
+
+        var writes = new Dictionary<string, EntityReference>(decision.RegardingWrites, StringComparer.OrdinalIgnoreCase)
+        {
+            [InquiryMatterLookup] = new EntityReference("sprk_matter", matterId),
+        };
+
+        // Review round 2, item 6: the matter the reply is now filed under is listed with what it is filed under, so the review
+        // surface (which reads per-candidate "written") shows it. Deterministic: it is the inquiry's own matter, read live.
+        var matterCandidate = new CandidateTrace
+        {
+            Field = InquiryMatterLookup,
+            TargetEntity = "sprk_matter",
+            TargetId = matterId.ToString("D"),
+            ReinforcedConfidence = 1.0,
+            DeterministicConfidence = 1.0,
+            Written = true,
+            Conflict = false,
+            Contributors =
+            [
+                new ContributorTrace
+                {
+                    Rung = InquiryMatterContributor,
+                    Confidence = 1.0,
+                    Provenance = $"the matter of inquiry {serviceRequest.Id:D} (D-216)",
+                },
+            ],
+        };
+
+        _logger.LogInformation(
+            "Reply to inquiry {ServiceRequestId} is filed under its matter {MatterId} too (D-216) | GraphMessageId: {GraphMessageId}",
+            serviceRequest.Id, matterId, graphMessageId);
+        return (decision with
+        {
+            RegardingWrites = writes,
+            // Review round 2, item 4: the service request stays the denormalized primary (sprk_regardingrecordid / name /
+            // type), as on the send; the matter is the extra typed lookup. Not a reorder of the global priority list.
+            PrimaryRegardingField = InquiryRequestLookup,
+            Provenance = decision.Provenance with { Candidates = [.. decision.Provenance.Candidates, matterCandidate] },
+        }, true);
+    }
+
+    /// <summary>The provenance contributor name for the matter a reply to an inquiry is filed under (review round 2, item 6).</summary>
+    internal const string InquiryMatterContributor = "InquiryMatter";
+
+    private const string InquiryRequestEntity = "sprk_servicerequest";
+    private const string InquiryRequestLookup = "sprk_regardingservicerequest";
+    private const string InquiryMatterLookup = "sprk_regardingmatter";
+    private const string InquiryDirectionColumn = "sprk_direction";
+
+    /// <summary>
+    /// Steps 4.5 and 4.6 (with 4.6b) for a newly created inbound row, exactly as <see cref="ProcessAsync"/> runs them after
+    /// the create: the association evaluated in step 3.7, then the thread and the internal-only floor. <c>internal</c> so a
+    /// test composes it with the real <see cref="ResolveInboundFilingAsync"/> (ontology task 176, review round 2 item 1): the
+    /// inquiry-reply flag that keeps the reply internal-only travels from the filing to step 4.6b only through here.
+    /// </summary>
+    internal async Task FileAndThreadNewRecordAsync(
+        Guid communicationId, NormalizedMessage envelope, string graphMessageId, AssociationDecision decision,
+        Dictionary<string, object>? filingFields, bool inquiryReply, CancellationToken ct)
+    {
+        // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
+        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
+        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
+        // The row was created with the owner this decision resolved, so this writes only the association fields, status
+        // and provenance — no reparent re-derivation is needed.
+        if (filingFields is null)
+        {
+            try
+            {
+                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+            }
+            catch (Exception ex)
+            {
+                // Association resolution failure is non-fatal
+                _logger.LogWarning(
+                    ex,
+                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                    "GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+
+        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
+        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
+        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
+        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
+        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
+        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
+        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct, keepInternalOnly: inquiryReply);
+    }
+
+    /// <summary>
     /// Steps 4.6 and 4.6b: resolves the email's thread (best-effort, non-fatal) and then lowers
     /// <c>sprk_isinternalonly</c> (written <c>true</c> at create) where the thread and the parent allow it. <c>internal</c>
-    /// so the writer tests drive it from an envelope (task 065 fix round 3).
+    /// so the writer tests drive it from an envelope (task 065 fix round 3). Ontology task 176 (D-216): a reply to an inquiry
+    /// (<paramref name="keepInternalOnly"/>) is never lowered.
     /// </summary>
     internal async Task ResolveThreadAndShareabilityAsync(
-        Guid communicationId, NormalizedMessage envelope, string graphMessageId, CancellationToken ct)
+        Guid communicationId, NormalizedMessage envelope, string graphMessageId, CancellationToken ct,
+        bool keepInternalOnly = false)
     {
         Guid? resolvedThreadId = null;
         if (_threadResolver is not null)
@@ -730,6 +876,9 @@ public sealed class IncomingCommunicationProcessor
                         ChannelType = CommunicationType.Email,
                         Direction = CommunicationDirection.Incoming,
                         Message = envelope,
+                        // Ontology task 176 (D-216): a reply to an inquiry that CREATES its thread creates it Private. A join
+                        // leaves the thread as it is; the reply stays internal-only below either way.
+                        CreatePrivate = keepInternalOnly,
                     },
                     ct);
             }
@@ -751,7 +900,13 @@ public sealed class IncomingCommunicationProcessor
         // Cancellation is caught here, like MessagingIngestor does (fix round 5): the row exists, so it stays internal-only
         // (true) and processing completes. Letting it escape made the retry dedup on the Graph message id and return early,
         // and nothing would ever lower the row.
-        if (resolvedThreadId is not null)
+        if (resolvedThreadId is not null && keepInternalOnly)
+        {
+            _logger.LogInformation(
+                "Reply to an inquiry stays internal-only (D-216) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+        else if (resolvedThreadId is not null)
         {
             try
             {
@@ -878,7 +1033,7 @@ public sealed class IncomingCommunicationProcessor
     /// <summary>
     /// Processes incoming email attachments: filters signature images, uploads to SPE,
     /// and creates sprk_communicationattachment records.
-    /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
+    /// Asks IEmailAttachmentProcessor.ShouldFilterAttachment which attachments to skip.
     /// </summary>
     /// <summary>
     /// Extracts bounded plain text from the message's attachments and returns the envelope with
@@ -968,6 +1123,60 @@ public sealed class IncomingCommunicationProcessor
                 "Attachment text extraction step failed (non-fatal) | GraphMessageId: {GraphMessageId}; " +
                 "proceeding with subject/body match only", graphMessageId);
             return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): true only when the message carries exactly one <see cref="ServerSendMarker.HeaderName"/> header whose
+    /// token this server signed for exactly the file attachments the message carries. A message without the header costs nothing extra; a
+    /// forged, copied-onto-other-files or unreadable marker, a non-file attachment, or any fault is false (processed as before).
+    /// </summary>
+    internal async Task<bool> IsVerifiedServerSendAsync(Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        var markers = ServerSendMarker.MarkerValues(message.InternetMessageHeaders?.Select(h => (h.Name, h.Value)));
+        if (markers.Count == 0 || _trackingTokenSigner is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (message.Attachments is { } listed && listed.Any(a => a is not FileAttachment))
+            {
+                return false;
+            }
+
+            // EVERY listed file, not only those that came with bytes (uac-r2 re-check F4): a file left out of the digest would let a message
+            // with the copied header, the batch files and one more file verify, and that file would then never be filed.
+            var files = (message.Attachments ?? []).OfType<FileAttachment>().ToList();
+            if ((files.Count == 0 && message.HasAttachments == true) || files.Any(f => f.ContentBytes is not { Length: > 0 }))
+            {
+                // Listed as having attachments but some or all came without bytes: fetch the whole collection, as the attachment step does.
+                var fetched = await _graphClientFactory.ForApp().Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                if (fetched?.Value is { } all && all.Any(a => a is not FileAttachment))
+                {
+                    return false;
+                }
+
+                // A paged collection would leave the files beyond page 1 out of the digest: not verified (uac-r2 re-check, limit 1).
+                if (fetched?.OdataNextLink is not null)
+                {
+                    return false;
+                }
+
+                files = (fetched?.Value ?? []).OfType<FileAttachment>().ToList();
+            }
+
+            // A file still without bytes is passed as such: the digest is then null and the marker is not honoured.
+            return await ServerSendMarker.IsVerifiedAsync(
+                _trackingTokenSigner, markers, files.Select(f => (f.Name, f.ContentBytes)), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Server-send marker check failed; the message is processed as any other | GraphMessageId: {GraphMessageId}", graphMessageId);
+            return false;
         }
     }
 
@@ -1105,7 +1314,7 @@ public sealed class IncomingCommunicationProcessor
                 // attachments — image001.png is the canonical case — from silently replacing each other:
                 // UploadSmallAsync is Graph's path-keyed simple PUT, which takes no conflictBehavior and
                 // unconditionally overwrites. Uniqueness therefore has to survive the flattening, so it
-                // moves into the name (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+                // moves into the name (as in UploadFinalizationWorker's attachment upload).
                 // SANITIZED 2026-08-29: `fileName` is `attachment.Name` off a Graph message — an
                 // ATTACKER-INFLUENCED value, since anyone who can send this mailbox an email chooses it. A
                 // '/' in an attachment name would make Graph create that folder inside the container, so an
@@ -1332,35 +1541,7 @@ public sealed class IncomingCommunicationProcessor
             communicationId, spePath);
 
         // Create sprk_document record linking to the archived file
-        var senderEmail = message.From?.EmailAddress?.Address;
-        var recipientEmails = message.ToRecipients?
-            .Where(r => r.EmailAddress?.Address is not null)
-            .Select(r => r.EmailAddress!.Address!)
-            .ToArray();
-
-        var document = new DataverseEntity("sprk_document")
-        {
-            ["sprk_documentname"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
-            ["sprk_filename"] = emlResult.FileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
-            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
-            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
-            ["sprk_graphitemid"] = fileHandle?.Id,
-            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileHandle?.Id, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
-            ["sprk_graphdriveid"] = driveId,
-            ["sprk_isemailarchive"] = true,
-            ["sprk_emailsubject"] = message.Subject ?? "(No Subject)",
-            ["sprk_emaildirection"] = new OptionSetValue(100000000), // Received
-        };
-
-        if (!string.IsNullOrEmpty(senderEmail))
-            document["sprk_emailfrom"] = senderEmail;
-        if (recipientEmails is { Length: > 0 })
-            document["sprk_emailto"] = string.Join("; ", recipientEmails);
-        if (message.ReceivedDateTime.HasValue)
-            document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
-
-        ApplyOwner(document, owner); // task 146 — owned like its communication
+        var document = ArchivedEmlDocument(message, emlResult.FileName, communicationId, fileHandle?.Id, driveId, owner);
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -1386,6 +1567,48 @@ public sealed class IncomingCommunicationProcessor
             }
             await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
+    }
+
+    /// <summary>
+    /// THE archived <c>.eml</c> document of an inbound communication (task 146): it names its communication
+    /// (<c>sprk_relatedcommunication</c>) and is owned exactly as the communication is (<see cref="ApplyOwner"/>). UAC task 194b
+    /// fix round, slice 3: one builder, which the existing-row parity test calls — so the lookups the reconciler later asks
+    /// about are the ones this writer writes.
+    /// </summary>
+    internal static DataverseEntity ArchivedEmlDocument(
+        Message message, string fileName, Guid communicationId, string? fileItemId, string driveId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner)
+    {
+        var senderEmail = message.From?.EmailAddress?.Address;
+        var recipientEmails = message.ToRecipients?
+            .Where(r => r.EmailAddress?.Address is not null)
+            .Select(r => r.EmailAddress!.Address!)
+            .ToArray();
+
+        var document = new DataverseEntity("sprk_document")
+        {
+            ["sprk_documentname"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
+            ["sprk_filename"] = fileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
+            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_graphitemid"] = fileItemId,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileItemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+            ["sprk_graphdriveid"] = driveId,
+            ["sprk_isemailarchive"] = true,
+            ["sprk_emailsubject"] = message.Subject ?? "(No Subject)",
+            ["sprk_emaildirection"] = new OptionSetValue(100000000), // Received
+        };
+
+        if (!string.IsNullOrEmpty(senderEmail))
+            document["sprk_emailfrom"] = senderEmail;
+        if (recipientEmails is { Length: > 0 })
+            document["sprk_emailto"] = string.Join("; ", recipientEmails);
+        if (message.ReceivedDateTime.HasValue)
+            document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
+
+        ApplyOwner(document, owner); // task 146 — owned like its communication
+        return document;
     }
 
     /// <summary>
@@ -1481,7 +1704,6 @@ public sealed class IncomingCommunicationProcessor
             // the caller (avoids a per-attachment refetch) so matter-scoped RAG returns this correspondence
             // (was null). Best-effort/non-fatal (NFR-04): null when no representable regarding is set.
             ParentEntity: parentEntity,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));
 

@@ -1,27 +1,18 @@
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Services.Email;
 
 /// <summary>
-/// Processes email attachments by filtering signature images and small files,
-/// uploading valid attachments to SPE, and creating Dataverse document records.
+/// Filters email attachments: signature images, small images and blocked extensions. It creates
+/// nothing; the inbound pipeline (IncomingCommunicationProcessor) asks it before it creates an
+/// attachment document.
 /// </summary>
 public class EmailAttachmentProcessor : IEmailAttachmentProcessor
 {
-    private readonly SpeFileStore _speFileStore;
-    private readonly IDocumentDataverseService _documentService;
     private readonly EmailProcessingOptions _options;
     private readonly ILogger<EmailAttachmentProcessor> _logger;
-
-    // Document type for email attachment (Dataverse optionset value)
-    private const int DocumentTypeEmailAttachment = 100000007;
-
-    // Relationship type for email attachment
-    private const int RelationshipTypeEmailAttachment = 100000000;
 
     private readonly Regex[] _signaturePatterns;
 
@@ -38,21 +29,10 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         "image/png", "image/gif", "image/jpeg", "image/jpg", "image/bmp", "image/webp"
     };
 
-    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
-
     public EmailAttachmentProcessor(
-        SpeFileStore speFileStore,
-        IDocumentDataverseService documentService,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<EmailProcessingOptions> options,
         ILogger<EmailAttachmentProcessor> logger)
     {
-        _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
-        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
-        // unified-access-control-r2 task 146: an attachment document is owned by its parent email document's team and
-        // the record it is associated with (secure-if-any) — the named Secure team for a secure record. This writer has
-        // NO acting user (the resolver's remarks name it), so with no parent at all the document is not created.
-        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -62,81 +42,6 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         _signaturePatterns = _options.SignatureImagePatterns
             .Select(p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, _options.SignatureImageRegexTimeout))
             .ToArray();
-    }
-
-    public async Task<AttachmentProcessingResult> ProcessAttachmentsAsync(
-        ProcessAttachmentsRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (request.Attachments.Count == 0)
-        {
-            _logger.LogDebug("No attachments to process for email {EmailId}", request.EmailId);
-            return AttachmentProcessingResult.Succeeded(0, 0, [], []);
-        }
-
-        _logger.LogInformation(
-            "Processing {Count} attachments for email {EmailId}",
-            request.Attachments.Count, request.EmailId);
-
-        var processedDocuments = new List<AttachmentDocumentRecord>();
-        var filteredAttachments = new List<FilteredAttachmentInfo>();
-        var failedCount = 0;
-
-        foreach (var attachment in request.Attachments)
-        {
-            try
-            {
-                // Check if attachment should be filtered
-                if (ShouldFilterAttachment(attachment.FileName, attachment.SizeBytes, attachment.ContentType))
-                {
-                    var reason = GetFilterReason(attachment.FileName, attachment.SizeBytes, attachment.ContentType);
-                    filteredAttachments.Add(new FilteredAttachmentInfo
-                    {
-                        FileName = attachment.FileName,
-                        Reason = reason,
-                        SizeBytes = attachment.SizeBytes
-                    });
-
-                    _logger.LogDebug(
-                        "Filtered attachment '{FileName}' for email {EmailId}: {Reason}",
-                        attachment.FileName, request.EmailId, reason);
-                    continue;
-                }
-
-                // Process the attachment
-                var document = await ProcessSingleAttachmentAsync(
-                    request, attachment, cancellationToken);
-
-                if (document != null)
-                {
-                    processedDocuments.Add(document);
-                }
-                else
-                {
-                    failedCount++;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Failed to process attachment '{FileName}' for email {EmailId}",
-                    attachment.FileName, request.EmailId);
-                failedCount++;
-            }
-        }
-
-        _logger.LogInformation(
-            "Attachment processing complete for email {EmailId}: " +
-            "{Processed} processed, {Filtered} filtered, {Failed} failed",
-            request.EmailId, processedDocuments.Count, filteredAttachments.Count, failedCount);
-
-        return AttachmentProcessingResult.Succeeded(
-            request.Attachments.Count,
-            filteredAttachments.Count,
-            processedDocuments,
-            filteredAttachments);
     }
 
     public bool ShouldFilterAttachment(string fileName, long sizeBytes, string? contentType)
@@ -199,208 +104,5 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         // Check size threshold (convert KB to bytes)
         var minSizeBytes = _options.MinImageSizeKB * 1024;
         return sizeBytes < minSizeBytes;
-    }
-
-    private string GetFilterReason(string fileName, long sizeBytes, string? contentType)
-    {
-        var extension = Path.GetExtension(fileName);
-        if (BlockedExtensions.Contains(extension))
-            return $"Blocked file extension: {extension}";
-
-        if (IsSignatureImage(fileName))
-            return "Matches signature image pattern";
-
-        if (IsSmallImage(fileName, sizeBytes, contentType))
-            return $"Small image ({sizeBytes} bytes < {_options.MinImageSizeKB}KB threshold)";
-
-        return "Unknown filter reason";
-    }
-
-    private async Task<AttachmentDocumentRecord?> ProcessSingleAttachmentAsync(
-        ProcessAttachmentsRequest request,
-        EmailAttachmentDto attachment,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug(
-            "Processing attachment '{FileName}' ({Size} bytes) for email {EmailId}",
-            attachment.FileName, attachment.SizeBytes, request.EmailId);
-
-        // Generate unique filename to avoid conflicts
-        var uniqueFileName = GenerateUniqueFileName(attachment.FileName);
-
-        // Upload to SPE
-        string? graphItemId;
-        try
-        {
-            // Reset stream position if possible
-            if (attachment.Content.CanSeek)
-            {
-                attachment.Content.Position = 0;
-            }
-
-            // Named as what it IS — the whole upload path — and sanitized at the call. Redundant with
-            // GenerateUniqueFileName above and deliberately so: sanitizing is idempotent, and this is the
-            // line that stays correct if the name's provenance ever changes. Enforced by
-            // tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs.
-            var uploadPath = SpeUploadPath.SanitizeFileName(uniqueFileName);
-
-            var uploadResult = await _speFileStore.UploadSmallAsync(
-                request.DriveId,
-                uploadPath,
-                attachment.Content,
-                cancellationToken);
-
-            graphItemId = uploadResult?.Id;
-
-            if (string.IsNullOrEmpty(graphItemId))
-            {
-                _logger.LogWarning(
-                    "SPE upload returned no item ID for attachment '{FileName}'",
-                    attachment.FileName);
-                return null;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to upload attachment '{FileName}' to SPE",
-                attachment.FileName);
-            return null;
-        }
-
-        // Create Dataverse document record
-        string documentIdStr;
-        Guid documentId;
-        try
-        {
-            // Task 146: owned by the team the ONE resolver names over the parent email document and the associated
-            // record (secure-if-any). A REFUSAL returns null — this method's per-attachment failure contract — and
-            // creates no row (the bytes above are already in the container this request named, as on any record
-            // failure). A Dataverse fault falls to the catch below, the same contract.
-            var associatedLogicalName = string.IsNullOrWhiteSpace(request.AssociatedEntityType)
-                ? null
-                : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(request.AssociatedEntityType);
-            var owner = await _ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
-                {
-                    request.ParentDocumentId != Guid.Empty
-                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.ParentDocumentId)
-                        : null,
-                    associatedLogicalName is not null && request.AssociatedEntityId is { } associatedId
-                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(associatedLogicalName, associatedId)
-                        : null,
-                }),
-                cancellationToken);
-            if (!owner.IsOwned)
-            {
-                _logger.LogWarning(
-                    "Attachment '{FileName}' document NOT created: no owner — {Reason} ({Code}) (task 146).",
-                    attachment.FileName, owner.Reason, owner.RefusalCode);
-                return null;
-            }
-
-            // Create initial document record
-            var createRequest = new CreateDocumentRequest
-            {
-                Name = attachment.FileName,
-                ContainerId = request.ContainerId,
-                Description = $"Email attachment from email {request.EmailId}",
-                OwningTeamId = owner.OwningTeamId,
-            };
-
-            documentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
-
-            if (!Guid.TryParse(documentIdStr, out documentId))
-            {
-                _logger.LogError(
-                    "Invalid document ID returned from Dataverse: {DocumentId}",
-                    documentIdStr);
-                return null;
-            }
-
-            // Update with file info, parent relationship, and metadata
-            var updateRequest = new UpdateDocumentRequest
-            {
-                FileName = uniqueFileName,
-                FileSize = attachment.SizeBytes,
-                MimeType = attachment.ContentType,
-                GraphItemId = graphItemId,
-                GraphDriveId = request.DriveId,
-                HasFile = true,
-                DocumentType = DocumentTypeEmailAttachment,
-                RelationshipType = RelationshipTypeEmailAttachment,
-                ParentDocumentLookup = request.ParentDocumentId
-            };
-
-            // Set entity association if provided
-            if (request.AssociatedEntityId.HasValue && !string.IsNullOrEmpty(request.AssociatedEntityType))
-            {
-                // Shared map. This copy accepted ONLY logical names, so an attachment whose parent
-                // carried the friendly "matter" was filed nowhere — see DocumentAssociationMap.
-                if (!DocumentAssociationMap.TryApply(
-                        updateRequest, request.AssociatedEntityType, request.AssociatedEntityId))
-                {
-                    _logger.LogWarning(
-                        "Entity type {EntityType} has no sprk_document lookup — attachment document " +
-                        "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo.",
-                        request.AssociatedEntityType);
-                }
-            }
-
-            await _documentService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);
-
-            _logger.LogInformation(
-                "Created document record {DocumentId} for attachment '{FileName}'",
-                documentId, attachment.FileName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to create Dataverse record for attachment '{FileName}'",
-                attachment.FileName);
-            // Note: File is already uploaded to SPE but we couldn't create the record
-            // Could implement cleanup here if needed
-            return null;
-        }
-
-        // Note: AI processing is triggered from PCF on document upload, not as background job
-        // The AnalysisOrchestrationService requires user context (OBO authentication)
-        if (request.QueueForAiProcessing)
-        {
-            _logger.LogDebug(
-                "Document {DocumentId} marked for AI processing (will be triggered from PCF)",
-                documentId);
-        }
-
-        return new AttachmentDocumentRecord
-        {
-            DocumentId = documentId,
-            FileName = attachment.FileName,
-            SizeBytes = attachment.SizeBytes,
-            GraphItemId = graphItemId,
-            ContentType = attachment.ContentType
-        };
-    }
-
-    /// <summary>
-    /// The uniqueness precedent the 2026-08-28 flattening copied everywhere else: collision safety lives in
-    /// the FILE NAME, never in a folder segment, because <c>UploadSmallAsync</c> is Graph's path-keyed simple
-    /// PUT and replaces silently.
-    /// </summary>
-    /// <remarks>
-    /// SANITIZED 2026-08-29. The result goes straight into the SPE upload path, and
-    /// <c>attachment.FileName</c> comes off a RECEIVED email, so it is attacker-influenced. Sanitizing
-    /// BEFORE the extension split matters: <c>Path.GetExtension("a/b.pdf")</c> is host-OS-dependent, so
-    /// splitting first and sanitizing after would produce a different name on Linux than on Windows.
-    /// </remarks>
-    private static string GenerateUniqueFileName(string originalFileName)
-    {
-        var safeName = SpeUploadPath.SanitizeFileName(originalFileName);
-        var extension = Path.GetExtension(safeName);
-        var nameWithoutExtension = Path.GetFileNameWithoutExtension(safeName);
-
-        // Add timestamp to ensure uniqueness
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
-        return $"{nameWithoutExtension}_{timestamp}{extension}";
     }
 }

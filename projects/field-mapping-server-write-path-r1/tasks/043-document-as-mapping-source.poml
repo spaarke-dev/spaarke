@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>A Document is a field-mapping source: the caller's Read on the document decides, through the Document access path (owner 2026-11-04)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>031 merged to master</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api (MappingSourceReadProbe, MappingSourceCallerMask, the push source check, the analysis create response); a caller Read decision (tags bff-api, security).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive caller Read decision on a new source table, shared by three paths, with the external-caller document narrowing; UAC-r2 reviews.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AnalysisEndpoints.cs (031) and the mapping-source helpers that RecordCreationService calls; runs after 031 merges and does not overlap 044/045's files except through RecordCreationService's callers.</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, security, field-mapping, testing</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make sprk_document a usable field-mapping source. When the mapping source is a Document, the caller's Read on it is asked through the Document access path (FinanceAuthorizationFilter.DocumentEntitySet, the probe the document routes use), and a caller who is not an internal systemuser is also narrowed by InternalPlaneDocumentNarrowing. If the caller can read the document and may create (or, on push, update) the target, the document's mapped values are copied, fill-only, as for any other source. On the analysis create route, the mapping warnings are returned to the caller, not only logged.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, field mapping and caller-context authorization. Security fails closed. Follow ADRs strictly.</role>
+  <goal>A Document to Analysis profile maps on analysis create (the 031 route), through the caller mask, and on push from a document, for a caller who can read the document; a caller who cannot, or an external caller the narrowing does not show the document to, gets no mapped values and the one uniform warning. EntityAccessFilter's map is unchanged.</goal>
+
+  <context>
+    <background>Owner decision 2 of 2026-11-04 (notes/decisions.md, last section): "if the user can read the document and may create or update the analysis, the document's values map." Found in 031 (notes/task-031-notes.md, "Finding that needs an owner decision"). All three readers resolve the source's entity set through EntityAccessFilter.TryResolveEntitySet, the association lockstep map, which holds no sprk_document entry, so a document source ends in MappingSourceRead.Unavailable today: MappingSourceReadProbe.CheckCallerReadAsync (~:150), MappingSourceCallerMask.ApplyAsync (~:120) and FieldMappingEndpoints.AuthorizePushSourceAsync (~:814). Line numbers are at master 0d4aa87ee0; re-grep.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceReadProbe.cs (CheckCallerReadAsync ~:142-174: a document branch before the TryResolveEntitySet miss)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs (ApplyAsync ~:120: the same entity-set answer for a document)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (AuthorizePushSourceAsync ~:808-830: the same document branch)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (CreateAnalysis, as merged by 031: return outcome.Warnings in the 201 body)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/CreateAnalysisRequest.cs (CreateAnalysisResponse ~:25: an optional warnings member, omitted when empty)</file>
+      <file role="modify">tests/integration/auth/FieldMapping/MappingSourceReadProbeTests.cs and tests/integration/auth/FieldMapping/MappingSourceCallerMaskTests.cs</file>
+      <file role="modify">tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.TypedRoutes.cs (031's document-source test: flip it from "maps nothing" to "maps")</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs DocumentEntitySet (~:313) and AnalysisAuthorizationFilter.AttachDocumentCheck (~:781): the Document access path the analysis routes already ask</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/InternalPlaneDocumentNarrowing.cs (ForCallerAsync ~:57, NarrowForExternalCallerAsync ~:143, IsExternalOrUnknownCallerAsync ~:202): THE external document narrowing; reuse, never copy its rule</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs ~:305-307: how a route returns outcome.Warnings in its 201 body (omitted when empty)</file>
+      <file role="canonical-reference">tests/integration/auth/UnifiedAccessControl/AssociationTypeLockstepTests.cs: must stay green unchanged</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="required">The analysis create route creates through RecordCreationService with a mapping request; its document-source test pins today's outcome.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-043 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 031's merge), then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner 2026-11-04">Scope of the change: a branch for sprk_document only, in the three readers named above. EntityAccessFilter's map (and so TryResolveEntitySet) is NOT changed: it is the association lockstep map that upload, record-route and Compose authorization share (AssociationTypeLockstepTests stays green with unchanged assertions).</constraint>
+    <constraint source="FR-04 / NFR-01">Every non-allowed outcome for a document source (not readable as the caller, not shown by the narrowing, missing, a faulted probe or narrowing, no caller token) gives the same MappingSourceRead.Unavailable and the same SourceUnavailableWarning text; no refusal; the document is never read app-only before the caller's Read (and, for an external caller, the narrowing) has allowed it. The probe is GetCallerRightsForAuthorizationGateAsync under the existing "read" key, so a denied and an unknown id take the same work.</constraint>
+    <constraint source="UAC-r2 task 188">A caller who is not a resolved internal systemuser maps from a document only when InternalPlaneDocumentNarrowing shows it; a narrowing fault shows none. The rule is reused through its existing methods, not re-implemented.</constraint>
+    <constraint source="FR-08">The create and push still need the caller's own permission on the target (Create on the analysis; Write on the pushed child, as push asks today). This task adds no new privilege question and no exemption.</constraint>
+    <constraint source="NFR-07">Every refusal on every route keeps its code, status and words. The analysis 201 body gains only an optional warnings member (absent when empty, the ChildRecordEndpoints shape); existing fields are unchanged.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/auth/**, tests/integration/seam/**, tests/integration/contract/**, tests/Spaarke.ArchTests/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**; no Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="ADR-010">No new DI registration or interface; the helpers stay static.</constraint>
+    <constraint source="CLAUDE.md §10">Placement and publish delta: see notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-031-notes.md (the finding)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-04 owner decisions)</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare FULL rigor; /conflict-check for AnalysisEndpoints.cs, FieldMappingEndpoints.cs and the two FieldMapping helpers.</step>
+    <step order="1">Write AC1-AC6 tests failing first (the 031 seam test flipped; probe and mask cases for a document source; push from a document).</step>
+    <step order="2">Add ONE document entity-set answer shared by the three readers (FinanceAuthorizationFilter.DocumentEntitySet for sprk_document), used only where TryResolveEntitySet misses; every other table resolves exactly as today.</step>
+    <step order="3">Add the external narrowing for a document source. Where the route already ran AttachDocumentCheck and the narrowing on the same document id (analysis create), reuse that decision rather than asking twice; elsewhere call the narrowing's existing method.</step>
+    <step order="4">Return the create's warnings in the analysis 201 body.</step>
+    <step order="5">Build; verify-suites.sh and ArchTests; publish delta; CVE.</step>
+    <step order="6">Two adversarial passes (security tag), then the diff to UAC-r2 for its review. Fix every finding. Record in notes/task-043-notes.md.</step>
+    <step order="7">After merge: TASK-INDEX `✅ [done]`; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a document source cannot be supported without adding sprk_document to EntityAccessFilter's map, or without a new DI registration, interface or service, STOP and escalate (owner + UAC-r2).</trigger>
+    <trigger>If the narrowing cannot be reached from the service's mapping step without HttpContext and the route's decision cannot be passed in through the existing RecordCreationRequest shape, STOP and escalate with the options.</trigger>
+    <trigger>If any existing refusal code, status or word, or any AssociationTypeLockstepTests assertion, would change, STOP and escalate (NFR-07).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">The five src files in relevant-files</output>
+    <output type="test">The test files in relevant-files (KEEP paths)</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-043-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: analysis create through the 031 route with a Document to Analysis profile, the caller holding Read on the document: the profile's values are on the created analysis, fill-only (a value the request sends wins), and the warnings list is empty.</criterion>
+    <criterion testable="true">AC2 (negative): the same create where the caller cannot read the document, where the document does not exist, and where the probe faults: no mapped value, exactly one SourceUnavailableWarning, the analysis is still created (201) or refused exactly as today by the route filter; the three warnings are byte-identical, and the document is not read app-only (asserted by call order).</criterion>
+    <criterion testable="true">AC3 (negative): a caller who is not an internal systemuser, where the narrowing does not show the document, and where the narrowing faults: no mapped value and the same single warning. Where the narrowing shows it, AC1's outcome.</criterion>
+    <criterion testable="true">AC4: MappingSourceCallerMask on a document source returns the caller-readable mapped columns (a field-secured one the caller cannot read is not copied), the same as for any other table.</criterion>
+    <criterion testable="true">AC5: push from a document source: a caller with Read on the document (and narrowed when external) pushes the Manual Refresh rules to the children the push already selects; a caller without Read gets push's existing uniform 404 with nothing read or written.</criterion>
+    <criterion testable="true">AC6: the analysis 201 body carries the create's warnings (the RecordCreationWarning list) when there are any and no warnings member when there are none; every other field and every refusal of the route is unchanged.</criterion>
+    <criterion testable="true">AC7 (must-not-fire): for every table in EntityAccessFilter's map, the three readers give the same decisions as before (existing suites green with unchanged assertions); AssociationTypeLockstepTests is unchanged and green; a table that is neither in the map nor sprk_document is still EntityTypeNotAuthorizable.</criterion>
+    <criterion testable="true">AC8: BFF build 0 errors, 0 warnings; verify-suites.sh and ArchTests (incl. MappingSourceCallerMaskGuardTests) pass; publish delta against a fresh master build and the CVE result are recorded; UAC-r2's verdict line is in the PR.</criterion>
+    <criterion testable="true">Test scope: AC1-AC7 only; anything beyond needs a one-line reason in the notes. One seeding proof: remove the narrowing call once and show AC3 fails (recorded, reverted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10, bff-extensions.md): a modification of three existing static readers and one existing route in the BFF, where the create-time mapping and the push already run; no new endpoint, service, registration, package or background work; expected publish delta ≈ 0, measured against a fresh master build; CVE check run.
+§11: modify-only. The document branch reuses FinanceAuthorizationFilter.DocumentEntitySet and InternalPlaneDocumentNarrowing. If a shared helper method is added for the three readers, answer the three questions in the notes.
+API contract: the analysis create response gains an optional warnings member (additive). The Analysis wizard's display of it belongs to task 028.
+Release note: a Document to Analysis field-mapping profile now applies on analysis create and push for a user who can read the document.
+Added 2026-11-04 from owner decision 2 (after the 031 review).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

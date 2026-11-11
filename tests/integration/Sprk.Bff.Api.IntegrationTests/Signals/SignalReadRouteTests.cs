@@ -337,6 +337,214 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         AllItems(await OkAsync(world, Bob)).Should().BeEmpty();
     }
 
+    // Task 044 fix (ontology D-210): a no-core row the caller's read returned is confirmed by ONE batched app-only read of the pair.
+    // A row whose stored pair is present (whole or half) is left out, as an unreadable core is; a failed read leaves out every no-core row.
+
+    [Fact]
+    public async Task NoCoreRows_AreConfirmedByOneBatchedAppOnlyReadOfThePairColumns_AndAGenuineNoPairRowStays()
+    {
+        var world = new World();
+        var todos = Enumerable.Range(0, 3).Select(_ => world.Todo(owner: Alice, readers: [Alice])).ToList();
+        var signals = todos.Select(t => world.Signal(Do, core: null, subject: (TodoType, t))).ToList();
+
+        var body = await OkAsync(world, Alice);
+
+        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().BeEquivalentTo(signals);
+        world.SignalPairReads.Should().ContainSingle("one batched query, never one read per row")
+            .Which.Ids.Should().BeEquivalentTo(signals);
+        world.SignalPairReads[0].Columns.Should().BeEquivalentTo(["sprk_corerecordtype", "sprk_corerecordid"]);
+    }
+
+    public static IEnumerable<object?[]> HiddenPairs() => [[true, true], [true, false], [false, true]];
+
+    [Theory]
+    [MemberData(nameof(HiddenPairs))]
+    public async Task ADoRowWhosePairTheCallersReadDoesNotReturn_IsLeftOut_NeverOwnerOnly(bool typeHalf, bool idHalf)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Bob]);
+        var todo = world.Todo(owner: Alice, readers: [Alice]);
+        var hidden = world.Signal(Do, core: null, subject: (TodoType, todo));
+        world.StoredPairOnly[hidden] = (typeHalf ? MatterType : null, idHalf ? m : null);
+        var genuine = world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+
+        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().Equal(genuine);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the app-only read returned one; left out", StringComparison.Ordinal));
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains(m.ToString("D"), StringComparison.OrdinalIgnoreCase)
+            || w.Contains(hidden.ToString("D"), StringComparison.OrdinalIgnoreCase), "no id or column value in the message text");
+    }
+
+    // Fix round 2: a fault of the pair read answers 503 Unavailable, as the worklist's other steps do: never a shorter list presented as
+    // complete (uac-r2 F4-b, task 150). One summary warning with the count, never one per row.
+
+    [Fact]
+    public async Task WhenTheAppOnlyPairReadFaults_TheWorklistIs503_NeverAShorterList_WithOneSummaryWarning()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Signal(Decide, core: (MatterType, m));
+        for (var i = 0; i < 3; i++)
+        {
+            world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        }
+
+        world.FaultPairRead = true;
+        _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "a fault is not a denial: the list would be shorter than the caller's");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id)
+            .Should().Be(1, "one summary warning, never one per row");
+        _factory.Logs.Warnings.Should().ContainSingle(w => w.Contains("app-only read of the core-record pair faulted", StringComparison.Ordinal))
+            .Which.Should().Contain("for 3 no-core rows");
+    }
+
+    [Fact]
+    public async Task ARequestedCancellationDuringTheAppOnlyPairRead_Propagates()
+    {
+        var world = new World();
+        world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        using var cts = new CancellationTokenSource();
+        world.OnPairRead = () =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        };
+        _factory.World = world;
+        world.ActingAs = Alice;
+
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<SignalReadService>();
+        var read = () => service.ReadAsync(WorklistSet.Lanes, new ClaimsPrincipal(new ClaimsIdentity("test")), cts.Token);
+
+        await read.Should().ThrowAsync<OperationCanceledException>("a requested cancellation is not a fault");
+        world.SignalPairReads.Should().ContainSingle("the cancellation came from the pair read");
+    }
+
+    // Fix round 2: the pair read succeeds but does not return a requested row: that row is left out, the others are listed.
+    // Must fire on a leftover loop that runs only on a fault (it would list the omitted row).
+    [Fact]
+    public async Task ARowThePairReadDoesNotReturn_IsLeftOut_TheOthersAreListed_AndTheReadFailedEventIsLogged()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.Add(signals[1]);
+        _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
+
+        var body = await OkAsync(world, Alice);
+
+        Ids(body).Should().BeEquivalentTo([signals[0], signals[2]]);
+        world.SignalPairReads.Should().ContainSingle().Which.Ids.Should().Contain(signals[1], "the row was asked for and not returned");
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("did not return the row; left out", StringComparison.Ordinal));
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains(signals[1].ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "no id in the message text");
+    }
+
+    // Fix round 3 (pass-2 K1): a pair read that succeeds but returns NONE of the ids it asked for means the service read cannot see the
+    // rows, so the list would be incomplete: 503, the same outcome and reason a faulted read answers, with one count-only warning.
+    // Must fire on the leftover loop alone (it would drop every row of the chunk and answer 200 with a shorter list).
+    [Fact]
+    public async Task WhenTheOnlyPairReadChunkReturnsNoneOfItsRows_TheWorklistIs503_WithOneCountOnlyWarning()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.UnionWith(signals);
+        _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "none of the requested rows came back: the list would be incomplete");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        world.SignalPairReads.Should().ContainSingle();
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1, "one summary warning, never one per row");
+        _factory.Logs.Warnings.Should().ContainSingle(w => w.Contains("returned none of 3 requested rows", StringComparison.Ordinal))
+            .Which.Should().NotContain(signals[0].ToString("D"), "counts only, no id");
+    }
+
+    [Fact]
+    public async Task WhenTheSecondPairReadChunkReturnsNoneOfItsRow_TheWorklistIs503()
+    {
+        var world = new World();
+        for (var i = 0; i < 101; i++)
+        {
+            world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        }
+
+        world.PairReadOmitsFirst[2] = int.MaxValue; // the second read (1 id) comes back empty
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "a chunk the service read cannot see makes the list incomplete");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(100, 1);
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1);
+    }
+
+    // Control (must not fire): some but not all of a chunk's ids come back (a Signal deleted between the two reads) is still a dropped row,
+    // never a 503 for the whole Worklist.
+    [Fact]
+    public async Task OneMissingIdAmongSeveralReturned_IsStillADroppedRow_Not503()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.Add(signals[1]);
+
+        var body = await OkAsync(world, Alice);
+
+        Ids(body).Should().BeEquivalentTo([signals[0], signals[2]]);
+    }
+
+    [Fact]
+    public async Task OneMissingIdInTheFirstOfTwoChunks_IsStillADroppedRow_Not503()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 101)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmitsFirst[1] = 1; // chunk 1 returns 99 of its 100; chunk 2 returns its 1
+
+        var body = await OkAsync(world, Alice);
+
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(100, 1);
+        var dropped = world.SignalPairReads[0].Ids[0];
+        Ids(body).Should().HaveCount(100).And.NotContain(dropped).And.BeEquivalentTo(signals.Where(s => s != dropped));
+    }
+
+    // Fix round 2: IdChunk (100) ids per pair read. 101 rows are two reads (100 + 1) and all 101 are listed; 100 rows are one read.
+    // Must fire on a query of only the first chunk (row 101 would be unconfirmed, so left out).
+    [Theory]
+    [InlineData(100, new[] { 100 })]
+    [InlineData(101, new[] { 100, 1 })]
+    public async Task ThePairReadIsChunked_AtIdChunkIds_AndEveryChunkIsRead(int rowCount, int[] expectedChunks)
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, rowCount)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+
+        var body = await OkAsync(world, Alice);
+
+        Ids(body).Should().BeEquivalentTo(signals, "every no-core row the pair reads confirm is listed");
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(expectedChunks);
+        world.SignalPairReads.SelectMany(r => r.Ids).Should().BeEquivalentTo(signals, "each row is asked for exactly once");
+    }
+
     [Fact]
     public async Task DoRowWithAnUntypedSubject_IsJudgedByWhicheverDoTableHoldsIt()
     {
@@ -1014,19 +1222,19 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         reads.Should().HaveCount(2);
         reads.Select(r => Regex.Matches(r, "'[0-9a-f-]{36}'").Count).Should().BeEquivalentTo([200, 1]);
 
-        // More than 200 distinct tracking numbers (across two vendor orgs): chunks of 200 and 1, never one read per org.
-        var numbers = new World();
-        var m3 = numbers.Matter(readers: [Alice]);
+        // More than 200 same-invoice repeats (#2294): their events and their invoices are read in chunks of 200 and 1, never one by one.
+        var repeats = new World();
+        var m3 = repeats.Matter(readers: [Alice]);
         for (var i = 0; i < 201; i++)
         {
-            var org = i % 2 == 0 ? VendorOrg : OtherVendorOrg;
-            var currentInOrg = numbers.Invoice([Alice], org);
-            numbers.Submission([Alice], org, $"C-{i}", numbers.Invoice([Alice], org));
-            BillingSignal(numbers, m3, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"C-{i}"));
+            var own = repeats.Invoice([Alice], VendorOrg, matter: m3);
+            BillingSignal(repeats, m3, (BillingEventType, repeats.BillingEvent([Alice], own)), SameInvoiceEvidence($"C-{i}"));
         }
 
-        AllItems(await OkAsync(numbers, Alice)).Should().OnlyContain(i => i.GetProperty("sentence").GetString() == QuotedSentence);
-        numbers.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(2, "201 numbers: chunks of 200 and 1");
+        AllItems(await OkAsync(repeats, Alice)).Should().OnlyContain(i => i.GetProperty("sentence").GetString() == QuotedSentence);
+        repeats.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(2, "201 events: chunks of 200 and 1");
+        repeats.Requests.Count(r => r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)).Should().Be(2, "201 invoices: chunks of 200 and 1");
+        repeats.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal), "no number is looked up");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1035,23 +1243,37 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
     private static readonly Guid BillingEventType = Guid.Parse("11111111-0000-0000-0000-000000000009");
     private static readonly Guid VendorOrg = Guid.Parse("0f0f0f0f-0000-0000-0000-000000000001");
-    private static readonly Guid OtherVendorOrg = Guid.Parse("0f0f0f0f-0000-0000-0000-000000000002");
     private const string EarlierNumber = "INV-77.1";
     private const string QuotedSentence = "Invoice INV-90 duplicates INV-77.1.";
     private const string DuplicateTitle = "Duplicate invoice";
 
-    // The four D-176 reads, by path prefix: the earlier-invoice readability read, the current invoice's vendor org, the billing event's
-    // invoice and the submission. The Decide-lane subject read of sprk_invoice (sprk_invoiceid,sprk_highpriority) matches none of them.
+    // The D-176 reads, by path prefix: the earlier-invoice readability read, the billing event's invoice and that invoice's core record
+    // (DEF-043). #2294: no submission is read and no tracking number is looked up (SubmissionRead, InvoiceVendorOrgRead: never sent).
+    // The Decide-lane subject read of sprk_invoice (sprk_invoiceid,sprk_highpriority) matches none of them.
     private const string EarlierInvoiceRead = "sprk_invoices?$select=sprk_invoiceid&";
-    private const string CurrentInvoiceRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_vendororg_value&";
+    private const string InvoiceVendorOrgRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_vendororg_value&";
     private const string BillingEventRead = "sprk_billingevents?";
+    private const string InvoiceCoreRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_matter_value,";
     private const string SubmissionRead = "sprk_invoicesubmissions?";
+
+    /// <summary>ebilling's reason code for a line that repeats an earlier line of the SAME invoice (BillingReasonCodes.DuplicateOfEarlierLine).</summary>
+    private const string SameInvoiceReason = "duplicate.line_same_invoice";
+
+    /// <summary>D-176: a current invoice and its one submission. The submission's readers default to the invoice's. #2294: no read of
+    /// the submission is made; it is here so a number would resolve if anything looked it up.</summary>
+    private static Guid CurrentInvoice(World world, Guid[] readers, Guid vendorOrg, Guid[]? submissionReaders = null, Guid? matter = null)
+    {
+        var invoice = world.Invoice(readers, vendorOrg, matter);
+        world.Submission(submissionReaders ?? readers, vendorOrg, $"CUR-{invoice:N}", invoice);
+        return invoice;
+    }
 
     /// <summary>A visible Duplicate's evidence as ebilling's mapper writes it (BillingFindingSignalMapper, work/ebilling-r1): the reason-set
     /// fingerprint (no detail), the reason with its rendered sentence, the current invoice's number, and the duplicateOf references.</summary>
-    private static string DuplicateEvidence(Guid? earlierInvoice, string? trackingNumber = EarlierNumber, int? earlierLine = null)
+    private static string DuplicateEvidence(
+        Guid? earlierInvoice, string? trackingNumber = EarlierNumber, int? earlierLine = null, string reason = "duplicate_invoice_number")
     {
-        var lines = BillingEvidence();
+        var lines = BillingEvidence(reason);
         if (trackingNumber is not null)
         {
             lines.Add(new() { ["kind"] = "billing.reference", ["ref"] = "duplicateOf.trackingNumber", ["tier"] = "Fact", ["text"] = trackingNumber });
@@ -1070,12 +1292,17 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         return JsonSerializer.Serialize(lines);
     }
 
-    private static List<Dictionary<string, object?>> BillingEvidence() =>
+    /// <summary>#2294: a same-invoice repeat as ebilling writes it: the line's OWN invoice's tracking number and the earlier line's index,
+    /// no invoice id, and the reason <see cref="SameInvoiceReason"/>.</summary>
+    private static string SameInvoiceEvidence(string ownNumber = "INV-90.1") =>
+        DuplicateEvidence(null, ownNumber, earlierLine: 2, reason: SameInvoiceReason);
+
+    private static List<Dictionary<string, object?>> BillingEvidence(string reason = "duplicate_invoice_number") =>
     [
         new() { ["kind"] = "billing.reasonset", ["ref"] = "duplicate_invoice_number|Flag", ["tier"] = "Fact" },
         new()
         {
-            ["kind"] = "billing.reason", ["ref"] = "duplicate_invoice_number", ["tier"] = "Fact", ["text"] = QuotedSentence,
+            ["kind"] = "billing.reason", ["ref"] = reason, ["tier"] = "Fact", ["text"] = QuotedSentence,
             ["source"] = "sprk_policyversion:7e57a5e5-0000-0000-0000-000000000001",
         },
         new()
@@ -1186,32 +1413,125 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         Item(body, s).GetProperty("evidenceRefs").GetString().Should().NotContain(readable.ToString("D"));
     }
 
+    // #2294 / DEF-043: a Duplicate identified only by a tracking number (no duplicateOf.invoiceId) shows the generic withheld sentence,
+    // whatever the number would resolve to; a same-invoice repeat is the one exception (below). No number is ever looked up.
+
     [Fact]
-    public async Task D176_ATrackingNumberOnly_IsResolvedThroughTheOneSubmissionOfTheCurrentInvoicesVendorOrg()
+    public async Task D176_2294_ANumberOnlyDuplicate_IsWithheld_EvenWhenTheNumberWouldResolveToAnInvoiceTheCallerReads()
     {
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var current = world.Invoice([Alice], VendorOrg);
-        var readable = world.Invoice([Alice], VendorOrg);
-        var unreadable = world.Invoice([Bob], VendorOrg);
-        world.Submission([Alice], VendorOrg, "N-1", readable);
-        world.Submission([Alice], VendorOrg, "N-2", unreadable);
-        world.Submission([Alice], VendorOrg, "N-4", readable);
-        world.Submission([Alice], VendorOrg, "N-4", readable);
-        world.Submission([Bob], VendorOrg, "N-5", readable);
-        var signal = new[] { "N-1", "N-2", "N-3", "N-4", "N-5" }
-            .ToDictionary(n => n, n => BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(null, n)));
-        // Any other subject type with only a tracking number has no current invoice to scope the number by (POML D-176 resolution).
+        var other = world.Matter(readers: [Alice]);
+        // N-1 names one submission, of the current invoice's firm, whose invoice Alice reads: the old lookup would have shown it.
+        world.Submission([Alice], VendorOrg, "N-1", world.Invoice([Alice], VendorOrg, matter: m));
+        var currentOnSignalsMatter = CurrentInvoice(world, [Alice], VendorOrg, matter: m);
+        var currentOnOtherMatter = CurrentInvoice(world, [Alice], VendorOrg, matter: other);
+        var invoiceSubject = BillingSignal(world, m, (NotCoreType, currentOnSignalsMatter), DuplicateEvidence(null, "N-1"));
+        // Ontology F1(a): an invoice subject on another core record than the Signal's shows no detail either.
+        var invoiceSubjectOnAnotherCore = BillingSignal(world, m, (NotCoreType, currentOnOtherMatter), DuplicateEvidence(null, "N-1"));
+        var lineFromAPriorSubmission = BillingSignal(
+            world, m, (BillingEventType, world.BillingEvent([Alice], currentOnSignalsMatter)),
+            DuplicateEvidence(null, "N-1", reason: "duplicate.line_prior_submission"));
         var onMatter = BillingSignal(world, m, (MatterType, m), DuplicateEvidence(null, "N-1"));
+        // A same-invoice repeat whose reasons also name another Duplicate reason is not a same-invoice repeat: withheld.
+        var mixedReasons = world.Signal(Decide, core: (MatterType, m), subject: (BillingEventType, world.BillingEvent([Alice], currentOnSignalsMatter)),
+            title: DuplicateTitle, sentence: QuotedSentence, evidence: MixedReasonEvidence());
+        // Must not fire: the same request still shows a same-invoice repeat and an id-carrying Duplicate.
+        var sameInvoice = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], currentOnSignalsMatter)), SameInvoiceEvidence());
+        var byId = BillingSignal(world, m, (NotCoreType, currentOnSignalsMatter), DuplicateEvidence(world.Invoice([Alice], VendorOrg)));
 
         var body = await OkAsync(world, Alice);
-        ShouldKeepTheEarlierInvoice(body, signal["N-1"], storedLines: 4);
-        ShouldWithholdTheEarlierInvoice(body, signal["N-2"], "N-2"); // resolves to an invoice Alice cannot read
-        ShouldWithholdTheEarlierInvoice(body, signal["N-3"], "N-3"); // no submission
-        ShouldWithholdTheEarlierInvoice(body, signal["N-4"], "N-4"); // two submissions: ambiguous
-        ShouldWithholdTheEarlierInvoice(body, signal["N-5"], "N-5"); // a submission Alice cannot read
+        ShouldWithholdTheEarlierInvoice(body, invoiceSubject, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, invoiceSubjectOnAnotherCore, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, lineFromAPriorSubmission, "N-1");
         ShouldWithholdTheEarlierInvoice(body, onMatter, "N-1");
-        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(1, "one submission read per vendor org");
+        Item(body, mixedReasons).GetProperty("sentence").GetString().Should().Be(EarlierInvoiceReadability.WithheldSentence);
+        ShouldKeepTheEarlierInvoice(body, sameInvoice, storedLines: 5);
+        ShouldKeepTheEarlierInvoice(body, byId, storedLines: 5);
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal), "no number is looked up");
+        world.Requests.Should().NotContain(r => r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal));
+    }
+
+    /// <summary>A line Duplicate whose reasons name the same-invoice repeat AND a prior-submission repeat: not a same-invoice repeat.</summary>
+    private static string MixedReasonEvidence()
+    {
+        var lines = BillingEvidence(SameInvoiceReason);
+        lines.Add(new() { ["kind"] = "billing.reason", ["ref"] = "duplicate.line_prior_submission", ["tier"] = "Fact", ["text"] = QuotedSentence });
+        lines.Add(new() { ["kind"] = "billing.reference", ["ref"] = "duplicateOf.trackingNumber", ["tier"] = "Fact", ["text"] = "INV-90.1" });
+        return JsonSerializer.Serialize(lines);
+    }
+
+    // DEF-043 (#2294): sprk_billingevent.sprk_invoice is not refused (D-96's detach sequence writes it through the generic paths), so a
+    // same-invoice repeat's own invoice counts only when it is filed under the Signal's FROZEN core record (sprk_corerecordtype/sprk_corerecordid).
+
+    [Fact]
+    public async Task D176_DEF043_ASameInvoiceRepeat_IsShownOnlyWhenItsOwnInvoiceIsReadableAndOnTheSignalsCoreRecord()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var other = world.Matter(readers: [Alice]);
+        var onSignalsMatter = world.Invoice([Alice], VendorOrg, matter: m);
+        var onOtherMatter = world.Invoice([Alice], VendorOrg, matter: other);
+        var noCore = world.Invoice([Alice], VendorOrg);
+        var twoCores = world.Invoice([Alice], VendorOrg, matter: m);
+        world.Records[twoCores].Columns["_sprk_project_value"] = Guid.NewGuid();
+        var matching = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], onSignalsMatter)), SameInvoiceEvidence());
+        var rePointed = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], onOtherMatter)), SameInvoiceEvidence());
+        var invoiceWithNoCore = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], noCore)), SameInvoiceEvidence());
+        var invoiceWithTwoCores = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], twoCores)), SameInvoiceEvidence());
+        var lineWithNoInvoice = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], null)), SameInvoiceEvidence());
+        var unreadable = BillingSignal(
+            world, m, (BillingEventType, world.BillingEvent([Alice], world.Invoice([Bob], VendorOrg, matter: m))), SameInvoiceEvidence());
+        // A same-invoice repeat about the invoice itself (never written so) has no line, so no own invoice: withheld.
+        var onInvoice = BillingSignal(world, m, (NotCoreType, onSignalsMatter), SameInvoiceEvidence());
+
+        var body = await OkAsync(world, Alice);
+        ShouldKeepTheEarlierInvoice(body, matching, storedLines: 5);
+        ShouldWithholdTheEarlierInvoice(body, rePointed, "INV-90.1");
+        ShouldWithholdTheEarlierInvoice(body, invoiceWithNoCore, "INV-90.1");
+        ShouldWithholdTheEarlierInvoice(body, invoiceWithTwoCores, "INV-90.1");
+        ShouldWithholdTheEarlierInvoice(body, lineWithNoInvoice, "INV-90.1");
+        ShouldWithholdTheEarlierInvoice(body, unreadable, "INV-90.1");
+        ShouldWithholdTheEarlierInvoice(body, onInvoice, "INV-90.1");
+        world.Requests.Count(r => r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)).Should().Be(1, "one batched core-record read");
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal), "no number is looked up");
+    }
+
+    [Theory]
+    [InlineData(BillingEventRead, "500")]
+    [InlineData(BillingEventRead, "401")]
+    [InlineData(BillingEventRead, "429")]
+    [InlineData(BillingEventRead, "unparseable")]
+    [InlineData(BillingEventRead, "throw")]
+    [InlineData(BillingEventRead, "403")]
+    [InlineData(InvoiceCoreRead, "500")]
+    [InlineData(InvoiceCoreRead, "401")]
+    [InlineData(InvoiceCoreRead, "429")]
+    [InlineData(InvoiceCoreRead, "unparseable")]
+    [InlineData(InvoiceCoreRead, "throw")]
+    [InlineData(InvoiceCoreRead, "403")]
+    public async Task D176_DEF043_WhenALineReadFaultsIsThrottledOrIsUnreadable_TheLineDuplicateIsNotShown(string read, string fault)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var earlier = world.Invoice([Alice], VendorOrg);
+        var lineInvoice = world.Invoice([Alice], VendorOrg, matter: m);
+        var line = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), SameInvoiceEvidence());
+        var byId = BillingSignal(world, m, (NotCoreType, world.Invoice([Alice], VendorOrg)), DuplicateEvidence(earlier));
+        world.PathFaults[read] = fault;
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, line, "INV-90.1");
+        if (fault == "403")
+        {
+            // No Read on the table is a verdict about those rows, not a fault: a Duplicate that needs no such read keeps its detail.
+            ShouldKeepTheEarlierInvoice(body, byId, storedLines: 5);
+        }
+        else
+        {
+            // A fault shows no Duplicate at all.
+            ShouldWithholdTheEarlierInvoice(body, byId, earlier.ToString("D"));
+        }
     }
 
     [Theory]
@@ -1277,7 +1597,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         EvidenceOf(body, billing).Single(l => RefOf(l) == "duplicate_invoice_number|Flag").TryGetProperty("withheld", out _).Should().BeFalse();
         Item(body, plain).GetProperty("sentence").GetString().Should().Be("The budget is over by 10%.");
         world.Requests.Should().NotContain(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)
-            || r.StartsWith(CurrentInvoiceRead, StringComparison.Ordinal)
+            || r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal)
+            || r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)
             || r.StartsWith(SubmissionRead, StringComparison.Ordinal)
             || r.StartsWith(BillingEventRead, StringComparison.Ordinal));
     }
@@ -1286,19 +1607,20 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     public async Task D176_ALineLevelRepeatOfAnEarlierLine_IsKeptWhenTheCallerReadsItsEventAndInvoice_AndWithheldWhenNotTheEvent()
     {
         // DuplicateOfEarlierLine: the tracking number is the line's OWN invoice's, with the earlier line's index and no invoice id.
+        // #2294: judged by the caller's Read of that own invoice (bounded by the Signal's core record), never by a number lookup.
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var current = world.Invoice([Alice], VendorOrg);
-        world.Submission([Alice], VendorOrg, "INV-90.1", current);
+        var current = world.Invoice([Alice], VendorOrg, matter: m);
         var readableEvent = world.BillingEvent([Alice], current);
         var unreadableEvent = world.BillingEvent([Bob], current);
-        var kept = BillingSignal(world, m, (BillingEventType, readableEvent), DuplicateEvidence(null, "INV-90.1", earlierLine: 2));
-        var withheld = BillingSignal(world, m, (BillingEventType, unreadableEvent), DuplicateEvidence(null, "INV-90.1", earlierLine: 2));
+        var kept = BillingSignal(world, m, (BillingEventType, readableEvent), SameInvoiceEvidence());
+        var withheld = BillingSignal(world, m, (BillingEventType, unreadableEvent), SameInvoiceEvidence());
 
         var body = await OkAsync(world, Alice);
         ShouldKeepTheEarlierInvoice(body, kept, storedLines: 5);
         ShouldWithholdTheEarlierInvoice(body, withheld, "INV-90.1");
         world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1);
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1321,36 +1643,40 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
-    public async Task D176_ReadsAreBatched_OneOfEachPerRequest_AndOneSubmissionReadPerChunkOf200Numbers_AcrossVendorOrgs()
+    public async Task D176_ReadsAreBatched_OneOfEachPerRequest_AndNoSubmissionRead()
     {
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var signals = new List<Guid>();
+        var shown = new List<Guid>();
+        var numberOnly = new List<Guid>();
         for (var i = 0; i < 8; i++)
         {
             var current = world.Invoice([Alice], VendorOrg);
-            signals.Add(BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(world.Invoice([Alice], VendorOrg))));
+            shown.Add(BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(world.Invoice([Alice], VendorOrg))));
 
-            var org = i % 2 == 0 ? VendorOrg : OtherVendorOrg;
-            var currentInOrg = world.Invoice([Alice], org);
-            world.Submission([Alice], org, $"A-{i}", world.Invoice([Alice], org));
-            signals.Add(BillingSignal(world, m, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"A-{i}")));
+            var currentWithSubmission = CurrentInvoice(world, [Alice], VendorOrg);
+            world.Submission([Alice], VendorOrg, $"A-{i}", world.Invoice([Alice], VendorOrg));
+            numberOnly.Add(BillingSignal(world, m, (NotCoreType, currentWithSubmission), DuplicateEvidence(null, $"A-{i}")));
 
-            var lineInvoice = world.Invoice([Alice], VendorOrg);
-            world.Submission([Alice], VendorOrg, $"B-{i}", world.Invoice([Alice], VendorOrg));
-            signals.Add(BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), DuplicateEvidence(null, $"B-{i}")));
+            var lineInvoice = world.Invoice([Alice], VendorOrg, matter: m);
+            shown.Add(BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), SameInvoiceEvidence($"B-{i}")));
         }
 
         var body = await OkAsync(world, Alice);
-        foreach (var s in signals)
+        foreach (var s in shown)
         {
             Item(body, s).GetProperty("sentence").GetString().Should().Be(QuotedSentence, "Alice reads every earlier invoice");
         }
 
+        foreach (var s in numberOnly)
+        {
+            Item(body, s).GetProperty("sentence").GetString().Should().Be(EarlierInvoiceReadability.WithheldSentence, "#2294: a number is never looked up");
+        }
+
         world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1);
-        world.Requests.Count(r => r.StartsWith(CurrentInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
-        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(1, "two vendor orgs, one submission read");
-        world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
+        world.Requests.Count(r => r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)).Should().Be(1, "one core-record read for the line invoices");
+        world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1, "the earlier ids and the line invoices share one read");
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal));
 
         // More than 200 earlier invoices: In lists of at most 200 ids.
         var many = new World();
@@ -2046,7 +2372,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         world.ActingAs = actingAs;
         using var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test");
-        return await client.GetAsync(Route + query);
+        var response = await client.GetAsync(Route + query);
+        world.PairReadShapeViolations.Should().BeEmpty("the app-only pair read is one In condition on sprk_signalid (fix round 3)");
+        return response;
     }
 
     private async Task<JsonElement> OkAsync(World world, Guid actingAs, string query = "")
@@ -2179,8 +2507,13 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         }
 
         /// <summary>D-176: an invoice the readers read as themselves, in <paramref name="vendorOrg"/>.</summary>
-        public Guid Invoice(Guid[] readers, Guid vendorOrg) =>
-            Record("sprk_invoice", readers, new() { ["_sprk_vendororg_value"] = vendorOrg, ["sprk_highpriority"] = false });
+        public Guid Invoice(Guid[] readers, Guid vendorOrg, Guid? matter = null) =>
+            Record("sprk_invoice", readers, new()
+            {
+                ["_sprk_vendororg_value"] = vendorOrg,
+                ["sprk_highpriority"] = false,
+                ["_sprk_matter_value"] = matter,
+            });
 
         /// <summary>D-176: a billing event (an invoice line) of <paramref name="invoice"/>.</summary>
         public Guid BillingEvent(Guid[] readers, Guid? invoice) =>
@@ -2190,7 +2523,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public Guid Submission(Guid[] readers, Guid vendorOrg, string trackingNumber, Guid? invoice) =>
             Record("sprk_invoicesubmission", readers, new()
             {
-                ["_sprk_vendororg_value"] = vendorOrg, ["sprk_trackingnumber"] = trackingNumber, ["_sprk_invoice_value"] = invoice,
+                ["_sprk_vendororg_value"] = vendorOrg,
+                ["sprk_trackingnumber"] = trackingNumber,
+                ["_sprk_invoice_value"] = invoice,
             });
 
         public Guid Matter(Guid[] readers, string? name = null, string? number = null, bool highPriority = false, Guid? assignedToInternal = null) =>
@@ -2379,11 +2714,61 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             ZoneCodeOfUser[user] = EasternZoneCode;
         }
 
+        /// <summary>Task 044 fix (D-210): the pair the BFF's own read returns for a Signal whose caller-read row carries none (a pair the
+        /// caller's read does not return). Absent: the app-only read returns the row's own pair.</summary>
+        public Dictionary<Guid, (Guid? Type, Guid? Id)> StoredPairOnly { get; } = [];
+
+        /// <summary>Task 044 fix: every app-only <c>sprk_signal</c> query (ids, columns), to prove the re-read is one batched query.</summary>
+        public List<(Guid[] Ids, string[] Columns)> SignalPairReads { get; } = [];
+
+        /// <summary>Task 044 fix: the app-only pair read throws, like a Dataverse timeout (other app-only Signal reads are unaffected).</summary>
+        public bool FaultPairRead { get; set; }
+
+        /// <summary>Task 044 fix round 2: the app-only pair read succeeds but does not return these Signals (deleted between reads).</summary>
+        public HashSet<Guid> PairReadOmits { get; } = [];
+
+        /// <summary>Task 044 fix round 2: runs on each app-only pair read before it answers (a test cancels the request here).</summary>
+        public Action? OnPairRead { get; set; }
+
+        /// <summary>Fix round 3: for the Nth (1-based) app-only pair read, the first K requested ids are not returned. <c>int.MaxValue</c>
+        /// returns none of them (a chunk the service read cannot see); a small K is a row deleted between the two reads.</summary>
+        public Dictionary<int, int> PairReadOmitsFirst { get; } = [];
+
+        /// <summary>Fix round 3: how the worklist's pair read was shaped when it was not the one In condition on the Signal id. The route
+        /// helpers assert this is empty after every request, because the service turns a throw inside the fake into a 503.</summary>
+        public List<string> PairReadShapeViolations { get; } = [];
+
         public EntityCollection AppOnly(QueryExpression q)
         {
+            HashSet<Guid> readOmits = [];
             if (q.EntityName == "sprk_policy")
             {
                 lock (PolicyReads) PolicyReads.Add(q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray());
+            }
+
+            if (q.EntityName == "sprk_signal" && q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]))
+            {
+                Guid[] requested;
+                int readNumber;
+                lock (SignalPairReads)
+                {
+                    requested = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray();
+                    SignalPairReads.Add((requested, [.. q.ColumnSet.Columns]));
+                    readNumber = SignalPairReads.Count;
+                }
+
+                // Fix round 3: the pair read is ONE In condition on sprk_signalid. Recorded, not thrown: the service answers a throw as a 503.
+                if (q.Criteria.Conditions.Count != 1 || q.Criteria.Conditions[0].AttributeName != "sprk_signalid"
+                    || q.Criteria.Conditions[0].Operator != ConditionOperator.In)
+                {
+                    lock (PairReadShapeViolations)
+                        PairReadShapeViolations.Add("expected one In condition on sprk_signalid, got: " + string.Join("; ",
+                            q.Criteria.Conditions.Select(c => $"{c.AttributeName} {c.Operator}")));
+                }
+
+                if (PairReadOmitsFirst.TryGetValue(readNumber, out var omitFirst)) readOmits.UnionWith(requested.Take(omitFirst));
+                OnPairRead?.Invoke();
+                if (FaultPairRead) throw new TimeoutException("app-only read of the pair timed out");
             }
 
             if (q.EntityName == "sprk_policy" && FaultPolicyReadFrom > 0 && PolicyReads.Count >= FaultPolicyReadFrom)
@@ -2391,6 +2776,23 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             if (FaultAppOnlyTables.Contains(q.EntityName)) throw new TimeoutException($"app-only read of {q.EntityName} timed out");
             switch (q.EntityName)
             {
+                case "sprk_signal" when q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]):
+                    var pairs = new EntityCollection();
+                    foreach (var (id, _, row) in Signals.Where(s => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid" && c.Values.Contains(s.Id))))
+                    {
+                        if (PairReadOmits.Contains(id) || readOmits.Contains(id)) continue;
+
+                        var stored = new Entity("sprk_signal", id);
+                        var (type, core) = StoredPairOnly.TryGetValue(id, out var hidden)
+                            ? hidden
+                            : (row.GetValueOrDefault("_sprk_corerecordtype_value") as Guid?,
+                               Guid.TryParse(row.GetValueOrDefault("sprk_corerecordid") as string, out var c) ? c : (Guid?)null);
+                        if (type is { } t) stored["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+                        if (core is { } cid) stored["sprk_corerecordid"] = cid.ToString("D");
+                        pairs.Entities.Add(stored);
+                    }
+
+                    return pairs;
                 case "businessunit":
                     return SecureTeamExists
                         ? new EntityCollection([new Entity("businessunit", SecureBuId) { ["name"] = SecureRecordOwnerTeam.DefaultBusinessUnitName }])
@@ -2472,6 +2874,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                     "500" => DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom"),
                     "401" => DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.AccessDenied, "token expired"),
                     "403" => DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied"),
+                    "429" => DataverseUserResponse.Fail(429, DataverseUserClientErrorCodes.RateLimited, "throttled"),
                     "unparseable" => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { rows = 1 })),
                     "throw" => throw new TimeoutException("read timed out"),
                     _ => throw new ArgumentOutOfRangeException(nameof(path), fault, "unknown fault"),
@@ -2524,6 +2927,19 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 // D-176: like Dataverse, evaluate the tracking-number In list (a JSON array, text compared without regard to case) and,
                 // when present, the vendor-org In list. A doubled-quote literal would be a 400 on Dataverse, so it is a 400 here.
                 var odata = Uri.UnescapeDataString(path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..]);
+                var byInvoice = Regex.Match(odata, @"^Microsoft\.Dynamics\.CRM\.In\(PropertyName='sprk_invoice',PropertyValues=\[([^\]]*)\]\)$");
+                if (byInvoice.Success)
+                {
+                    // UAC review F4: a current invoice's submissions, by the LOGICAL name of their invoice lookup.
+                    var invoiceIds = Regex.Matches(byInvoice.Groups[1].Value, "'([0-9a-f-]{36})'").Select(m => Guid.Parse(m.Groups[1].Value)).ToHashSet();
+                    var picked = path[(path.IndexOf("$select=", StringComparison.Ordinal) + 8)..path.IndexOf("&$filter", StringComparison.Ordinal)].Split(',');
+                    var ofInvoices = Records.Where(r => r.Value.Table == table && r.Value.Readers.Contains(me2))
+                        .Where(r => r.Value.Columns.GetValueOrDefault("_sprk_invoice_value") is Guid g && invoiceIds.Contains(g))
+                        .Select(r => picked.ToDictionary(c => c, c => c == $"{table}id" ? r.Key : r.Value.Columns.GetValueOrDefault(c)))
+                        .ToList();
+                    return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = ofInvoices }));
+                }
+
                 if (odata.Contains("''", StringComparison.Ordinal))
                     return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.ServiceError, "Invalid JSON. A comma character ',' was expected in scope 'Array'.");
                 var marker = "In(PropertyName='sprk_trackingnumber',PropertyValues=";
@@ -2694,6 +3110,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     {
         public System.Collections.Concurrent.ConcurrentQueue<string> Warnings { get; } = new();
 
+        /// <summary>The EventId of each Warning, in the order logged (task 044 fix round 2 pins the pair-read events by id).</summary>
+        public System.Collections.Concurrent.ConcurrentQueue<EventId> WarningEvents { get; } = new();
+
         public ILogger CreateLogger(string categoryName) => new Logger(this);
 
         public void Dispose()
@@ -2708,7 +3127,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
-                if (logLevel >= LogLevel.Warning) owner.Warnings.Enqueue(formatter(state, exception));
+                if (logLevel >= LogLevel.Warning)
+                {
+                    owner.Warnings.Enqueue(formatter(state, exception));
+                    owner.WarningEvents.Enqueue(eventId);
+                }
             }
         }
     }

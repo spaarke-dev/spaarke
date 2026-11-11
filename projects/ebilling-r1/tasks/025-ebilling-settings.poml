@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ebilling-r1">
+  <metadata>
+    <title>eBilling settings table and BFF settings reader</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New table plus a small new BFF reader (new .cs files, DI registration) with an explicit reference implementation; brief sets STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema script plus a cached Dataverse reader copying DataverseAllowedIndexesProvider; complete spec, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema, bff</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Create the audited singleton Dataverse table sprk_ebillingsetting (FR-48, D-59) in dev with range-checked columns and a seeded default row, and add a BFF reader IEbillingSettingsReader that returns typed settings with a short cache and typed defaults when no row exists.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting, auditing, and .NET 10 Minimal API services with caching. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingSettingsSchema.ps1 has created and seeded sprk_ebillingsetting in spaarkedev1 (second run: no change); IEbillingSettingsReader / EbillingSettingsReader / EbillingSettings exist in the BFF, registered in AddFinanceModule, with unit tests; docs/data-model describes the table.</goal>
+
+  <context>
+    <background>spec.md FR-48: singleton table, admin form, auditing on; default approver roles per core-record type (seeded Assigned Attorney 1 + Assigned To Internal for Matter, Project and Work Assignment, D-54), reliability threshold 0.90, combined-confidence weights and caps (D-47), related-work window ± 7 days, coding chunk size 25; read by the BFF with a short cache. Acceptance: a second row is refused; a changed threshold takes effect on the next submission without a deployment; out-of-range values refused on save; every change in audit history. Consumers add: default code set Litigation (FR-22 step 5, task 018 / 047), AP export mapping (FR-41, D-56, task 150), firm-notice AI toggle (FR-50, task 131). The admin form is built by task 029.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingSettingsSchema.ps1</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/IEbillingSettingsReader.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EbillingSettingsReader.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Models/EbillingSettings.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/EbillingSettingsReaderTests.cs</file>
+      <file role="new">docs/data-model/sprk_ebillingsetting.md</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point: one registration)</file>
+      <file role="modify">docs/data-model/INDEX.md (one row)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/DataverseAllowedIndexesProvider.cs:56 and :105-110 (Dataverse config read, IMemoryCache short TTL, documented cache rationale)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs:73 (RetrieveMultipleAsync)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:275 and :567 (IsAuditEnabled on table and columns), :585 (MSCRM.SolutionUniqueName)</file>
+      <file role="canonical-reference">scripts/Create-BackgroundJobEntity.ps1:289 (alternate key)</file>
+      <file role="canonical-reference">scripts/Create-ScopeCapabilityFields.ps1:197 (multi-select on a global choice)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Uses the dev global choice sprk_billingapproverrole (exists per D-33; task 024 brings it into source). The default code-set lookup needs sprk_billingcodeset from task 018 (parallel); see step 2.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The schema script runs only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, checks existence before every create, uses entity-scoped PublishXml, and seeds the default row only when no row exists (never overwrites an admin edit).</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** and do not build the form here (task 029).</constraint>
+    <constraint source="ADR-002">Singleton and range rules are enforced by platform metadata only (alternate key, column min / max) — no plugin, business rule or flow.</constraint>
+    <constraint source="bff-extensions.md">Every addition to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md: placement stated in the PR (in BFF, Finance module), publish-size delta measured against a fresh master build, no new HIGH CVE, no new package.</constraint>
+    <constraint source="ADR-010">The reader is registered once inside AddFinanceModule (Infrastructure/DI/FinanceModule.cs), unconditionally; re-read the file before editing and add only this registration.</constraint>
+    <constraint source="ADR-009">The cache is IMemoryCache with an absolute TTL of at most 60 seconds, documented in the class remarks as an ADR-009 exception (environment-wide configuration row, no tenant context in background jobs) exactly as DataverseAllowedIndexesProvider documents its cache; no authorization decision is cached.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse settings table and cached BFF reader</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Service registration" location=".claude/patterns/api/service-registration.md">Register inside the feature module.</pattern>
+      <pattern name="Test architecture" location="docs/standards/TEST-ARCHITECTURE.md">Unit test placement and style; mock IGenericEntityService.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + discovery">Declare RIGOR LEVEL: STANDARD. Read FR-48, D-47, D-54, D-56, D-59. Check in dev: organization-level auditing is on; sprk_billingapproverrole global choice values (task 024 notes if done); whether sprk_billingcodeset exists.</step>
+    <step order="1" name="Table">Script scripts/ebilling/Deploy-EbillingSettingsSchema.ps1: organization-owned table sprk_ebillingsetting (display "eBilling Settings"), audit enabled on the table and every custom column, primary name sprk_name. Singleton: required local choice sprk_singleton with exactly one option "Default" (default value set) and alternate key sprk_ebillingsetting_singleton on it — a second row cannot be saved.</step>
+    <step order="2" name="Columns">Multi-select on global sprk_billingapproverrole: sprk_matterapproverroles, sprk_projectapproverroles, sprk_workassignmentapproverroles. Decimal (precision 2, min 0, max 1): sprk_reliabilitythreshold; weights sprk_weightanalyzer, sprk_weightarithmetic, sprk_weightreferencematch, sprk_weightselfreport; caps sprk_arithmeticfailcap, sprk_referencemissingcap (maximum combined confidence when that check fails). Whole number: sprk_relatedworkwindowdays (0-90), sprk_codingchunksize (1-200). sprk_apexportmapping (multiline 100000, JSON). sprk_firmnoticeaienabled (yes / no). Lookup sprk_defaultcodeset → sprk_billingcodeset only when that table exists; otherwise print SKIPPED (task 029 re-runs the script after 018).</step>
+    <step order="3" name="Seed">Last phase: if no row exists, create one with: approver roles Assigned Attorney 1 + Assigned To Internal for all three types; threshold 0.90; window 7; chunk size 25; firm notice AI on; AP mapping = the D-56 default column set as JSON (one row per invoice; lines[] for JSON); weights and caps = provisional values written in task notes and flagged for task 046 / 161 calibration; default code set = Litigation when the set exists. Run -WhatIf, real run, second run no change.</step>
+    <step order="4" name="Reader">EbillingSettings (immutable record with typed defaults equal to the seed), IEbillingSettingsReader.GetAsync(ct), EbillingSettingsReader: one RetrieveMultipleAsync on sprk_ebillingsetting, map columns, cache via IMemoryCache (TTL ≤ 60 s). No row → typed defaults plus one warning log. A Dataverse read failure propagates (no silent default). Register in AddFinanceModule.</step>
+    <step order="5" name="Tests">EbillingSettingsReaderTests: row mapped (incl. multi-select and missing optional lookup); no row → defaults; second call within TTL makes no second Dataverse call; after TTL a changed value is returned; read failure propagates.</step>
+    <step order="6" name="Build + size">dotnet build src/server/api/Sprk.Bff.Api/ and the unit tests green; publish-size delta per .claude/rules/bff-hygiene.md item 4; dotnet list package --vulnerable.</step>
+    <step order="7" name="Docs">docs/data-model/sprk_ebillingsetting.md (columns, ranges, singleton mechanism, seed values) and an INDEX.md row.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="9">Record deviations and the provisional weight / cap values in projects/ebilling-r1/notes/ and this task's notes. Per D-69 they are owner-accepted as provisional and are validated in 161 / 162 and at UAT (163).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If organization-level auditing is off in dev, STOP and ask the owner before changing an organization setting.</trigger>
+    <trigger>If the platform does not accept an alternate key on a single-option choice, STOP and present alternatives (for example a required text column with a fixed value plus a key); do not add a plugin.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Configuration/*Options.cs (for example Configuration/FinanceOptions.cs) are appsettings-bound; no Dataverse settings table exists for Finance (Entities/ has sprk_ExternalServiceConfig and sprk_SPEContainerTypeConfig for other features only).</existing>
+    <extension>No — appsettings change only by deployment, are not admin-editable and are not audited, which D-59 / FR-48 require.</extension>
+    <cost-of-doing-nothing>The rejection threshold, confidence weights and approver defaults need a deployment to change (owner requires tunable, D-47 / D-59), and an empty sprk_billingapproverrole has no default to resolve to (FR-14).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingSettingsSchema.ps1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/IEbillingSettingsReader.cs, EbillingSettingsReader.cs, Models/EbillingSettings.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/EbillingSettingsReaderTests.cs</output>
+    <output type="docs">docs/data-model/sprk_ebillingsetting.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">In dev, creating a second sprk_ebillingsetting row is refused by the platform (recorded).</criterion>
+    <criterion testable="true">In dev, saving sprk_reliabilitythreshold = 1.5 or sprk_codingchunksize = 0 is refused; saving 0.85 succeeds (restore 0.90 afterwards).</criterion>
+    <criterion testable="true">In dev, a changed value appears in the row's audit history (recorded).</criterion>
+    <criterion testable="true">The seeded row carries the values in step 3; a second script run leaves an admin-edited value unchanged and reports no change.</criterion>
+    <criterion testable="true">EbillingSettingsReader returns the row's values, typed defaults when no row exists, a cached value within the TTL, the changed value after the TTL, and propagates a Dataverse failure — each covered by a unit test.</criterion>
+    <criterion testable="true">The reader is registered once in AddFinanceModule; dotnet build is green and all unit tests pass.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Table name sprk_ebillingsetting is chosen here (spec names no table). Brief listed "ADR-014 cache rules"; ADR-014 is AI caching, so the reader follows ADR-009 with the IMemoryCache exception pattern of DataverseAllowedIndexesProvider / ConsumerRoutingService.
+    AP mapping, firm-notice toggle and default code set are not in FR-48's list; they come from FR-41 / D-56, FR-50 and FR-22 and are added now because later tasks have no solution-sync step.
+    "Caps" in D-47 are undefined; interpreted as a ceiling on combined confidence when the arithmetic check fails or no reference-data match exists. Task 046 confirms or changes the interpretation.
+    FinanceModule.cs is a shared append point.
+
+    COMPLETED 2026-10-15 (parallel mode: TASK-INDEX.md and current-task.md left to the main session). Full notes: projects/ebilling-r1/notes/025-ebilling-settings.md.
+    - Dev (spaarkedev1): sprk_ebillingsetting created and seeded by scripts/ebilling/Deploy-EbillingSettingsSchema.ps1; re-run: created 0, changed 0, skipped 23, no publish. Second row refused (0x80060892); threshold 1.5 / -0.1, chunk size 0 and window 91 refused; 0.85 saved and restored to 0.90; both changes in the audit history; an admin-edited value survives a re-run.
+    - Column deviation: the whole-number window column is sprk_relatedwindowdays (typo in the first dev run; a rename would delete a column, which needs owner OK). Consumers read EbillingSettings.RelatedWorkWindowDays.
+    - Provisional values (D-69): weights analyzer 0.50, arithmetic 0.25, reference match 0.15, self-report 0.10; caps arithmetic-fail 0.50, reference-missing 0.80. Calibrated in 161 / 162 / 163; task 046 confirms "cap" = ceiling on combined confidence.
+    - BFF: IEbillingSettingsReader / EbillingSettingsReader / EbillingSettings registered once in AddFinanceModule (singleton, 30 s IMemoryCache, ADR-009 exception on the class). 8 new tests; Finance / DI suites 263 passed; ArchTests 1045 passed. ADR-010 1:1 ceiling raised 159 -> 160 with a documented seam justification (merge with other branches that raise it: sum the additions).
+    - Publish size vs fresh origin/master: 37.10 -> 37.12 MB (+0.023 MB incl. earlier eBilling tasks; this task alone +0.006 MB); framework-dependent linux-x64, Release, PDBs included, Compress-Archive Optimal, 192 files each. No new package, no vulnerable package.
+    - §11 answers (existing / extension / cost of doing nothing) for every new surface: notes/025-ebilling-settings.md section 5.
+    - Docs: docs/data-model/sprk_ebillingsetting.md (+ INDEX row), scripts/README.md eBilling Scripts entry.
+
+    rework: fix-round-2 task 025
+  
+Main session 2026-10-15: the window column keeps the name sprk_relatedwindowdays (not sprk_relatedworkwindowdays as written in step 1). Technical decision, not an owner question: nothing outside this POML names the column, consumers read EbillingSettings.RelatedWorkWindowDays, and renaming would mean deleting a column for no behavioural gain.
+</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

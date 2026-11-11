@@ -775,3 +775,31 @@ Tokens were held in memory only and never printed. There was no Key Vault read o
 - **(O-187-6) This build is the SPA-r3 work branch, not master.** It contains `8a1f3bb11` and the 064 fix, but not master's three later, unrelated BFF changes (#1867, #1884). The next master deploy carries the same `ExternalDataService.cs`.
 
 **Clean-up:** none needed. Nothing was created or changed.
+
+## PR #2007 / #2005 live gate (2026-10-16) — PASS (server side)
+
+Run 14:42Z against spaarke-bff-dev and spaarkedev1, on R3 build `1.0.0+a6d30891a` (deployed 14:39–14:41Z). That build contains #2007 `96d5b16c2` and R3's fold of its home bind onto #2007's store method, reviewed CLEAN.
+
+**Writes and identities:** the only write was the BFF's idempotent admin `POST /invite` for the bound CIAM Test User. Identities: admin (System Administrator, so its reads of the secured columns are authoritative). Tokens were held in memory only. The hash was reported only as null or non-null. Script and log: session scratchpad `gate2007/`.
+
+- **G0 build:** Kudu OneDeploy `f8ee5958…` finished at 14:40:33Z. `Sprk.Bff.Api.dll` is 19,102,720 B, SHA-256 `e4fa5502…`. All five #2007-only literals are present:
+  - the column-missing fallback warning;
+  - the "re-read is not an active, unbound contact" mark refusal;
+  - the "no longer an active, unbound contact" detail;
+  - `=(cleared)`;
+  - `invite mark`.
+  `/healthz` returned 200.
+- **G1, the invariant census:**
+  - 19 contacts are bound. **0 are bound AND holding a hash.**
+  - 0 contacts hold a hash, and 0 hold a marker.
+  - So no legacy row breaks "a bound contact never holds an unused hash", and no data repair is needed.
+- **G2, the idempotent invite on a bound contact:**
+  - `POST /invite` returned 200 `AlreadyProvisioned`.
+  - The contact is unchanged: versionnumber 26691587, no marker, no hash.
+  - My first attempt sent no record target and got 403 `delegation_target_unresolved`. That is the delegation gate refusing, as designed; it is not a regression.
+- **G3, App Insights after the deploy:**
+  - Only the two expected `[EXT-INVITE]` lines.
+  - No `[ID-BIND]` warning or error, and no column-missing fallback.
+  - The only exception is #1830's known "Invalid hostname for this tenancy".
+
+**Not run here:** a live bind that consumes a code (workforce, systemuser or CIAM). It needs a real sign-in after a fresh invite, so it stays on the owner checklist §12. The unit, integration and seeding proofs cover it.

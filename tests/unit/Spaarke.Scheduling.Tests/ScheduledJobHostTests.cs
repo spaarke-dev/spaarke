@@ -16,11 +16,11 @@ public class ScheduledJobHostTests
     private static ScheduledJobHostOptions FastOptions(
         TimeSpan? drainTimeout = null,
         TimeSpan? refreshInterval = null) => new()
-    {
-        RefreshInterval = refreshInterval ?? TimeSpan.FromMilliseconds(200),
-        ShutdownDrainTimeout = drainTimeout ?? TimeSpan.FromSeconds(2),
-        MaxLoopSleep = TimeSpan.FromMilliseconds(200)
-    };
+        {
+            RefreshInterval = refreshInterval ?? TimeSpan.FromMilliseconds(200),
+            ShutdownDrainTimeout = drainTimeout ?? TimeSpan.FromSeconds(2),
+            MaxLoopSleep = TimeSpan.FromMilliseconds(200)
+        };
 
     /// <summary>
     /// Options for virtual-clock tests: tick often, refresh rarely.

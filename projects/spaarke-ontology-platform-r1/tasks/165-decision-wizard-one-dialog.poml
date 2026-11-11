@@ -4,7 +4,7 @@
     <title>Decision wizard keeps ONE dialog open from launch to close (no close and reopen on load, item move or record) (UAT round 1 re-check)</title>
     <phase>11 UAT</phase>
     <gate>startable (owner UAT re-check 2026-10-28, check 2; "fix found defects now", 2026-10-05)</gate>
-    <status>pr-open-awaiting-review</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a shared component (`WizardShell`, used by every Spaarke wizard) and the decision wizard (.tsx); modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,4 +90,7 @@
       <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-28">
+    One dialog from launch to close. `WizardShell` gains an optional `resetKey` prop. It is additive: with the prop absent, every existing WizardShell test passes unchanged. On a resetKey change the step state resets in place: a render-phase RESET via `buildInitialShellState` and a content fragment keyed by resetKey. Focus moves to the content only when focus was lost, never out of a confirm or side pane (re-check F2, `ac314c0845`). `DecisionWizard` renders one `WizardShell` for loading, error, ready and recorded. Review: Opus pass F1-a (a late pick landed in the wrong item) and F1-b (focus fell to the body) were fixed in round 1. The Sonnet re-check found F2, which was fixed and mutant-proven. 295 Wizard and DecisionWizard tests pass; tsc is clean. PR #2388 merged to docs (`472d87b091`), then docs→master #2391 (`b445886fed`). The Console auto-deployed to dev, run 40704903667 (14:23Z). Owner UAT 2026-10-28, round 2 item 1: the modal opens with no "two screens" issue.
+  </completion>
 </task>

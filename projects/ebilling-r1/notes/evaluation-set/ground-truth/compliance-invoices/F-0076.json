@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0076",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0076","generator_id":"gen_eval_set.py@1 F-0076","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0076.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ostrander & Zeller LLP","firm_invoice_number":"INV-2025-08511","invoice_date":"2025-12-01","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"76682-0031","po_number":"PO-4561042","fees_total":6007.5,"expenses_total":1439.45,"adjustments_total":0.0,"total_due":7446.95,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Oyelaran","title":"Paralegal","rate":215.0,"billed_as":"Oyelaran, E."},{"name":"Leila Nakamura","title":"Senior Associate","rate":490.0,"billed_as":"Nakamura, L."},{"name":"Priya Sandoval","title":"Paralegal","rate":190.0,"billed_as":"Sandoval, P."},{"name":"Victor Santoro","title":"Associate","rate":335.0,"billed_as":"Santoro, V."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-07","timekeeper":"Oyelaran, E.","timekeeper_name":"Elena Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":215.0,"amount":215.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-10","timekeeper":"Oyelaran, E.","timekeeper_name":"Elena Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":215.0,"amount":107.5,"narrative":"Update document review protocol and coding panel for the warranty claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-26","timekeeper":"Oyelaran, E.","timekeeper_name":"Elena Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":215.0,"amount":107.5,"narrative":"Review and analyze requests for production received from Summit Ridge Homes","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-28","timekeeper":"Oyelaran, E.","timekeeper_name":"Elena Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":215.0,"amount":161.25,"narrative":"Review expert report served by Larkspur Medical","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-13","timekeeper":"Nakamura, L.","timekeeper_name":"Leila Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.25,"rate":490.0,"amount":1102.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-21","timekeeper":"Nakamura, L.","timekeeper_name":"Leila Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":490.0,"amount":245.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-24","timekeeper":"Nakamura, L.","timekeeper_name":"Leila Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.25,"rate":490.0,"amount":612.5,"narrative":"Ran conflict check for new party","codes":["L120","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":8,"line_type":"fee","date":"2025-11-28","timekeeper":"Nakamura, L.","timekeeper_name":"Leila Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":490.0,"amount":122.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-10","timekeeper":"Sandoval, P.","timekeeper_name":"Priya Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":190.0,"amount":522.5,"narrative":"Draft motion to compel to Summit Ridge Homes","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-13","timekeeper":"Sandoval, P.","timekeeper_name":"Priya Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":190.0,"amount":47.5,"narrative":"Draft witness list in the warranty claim","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-06","timekeeper":"Santoro, V.","timekeeper_name":"Victor Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":335.0,"amount":837.5,"narrative":"Draft notice of deposition to Solano Freight","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-12","timekeeper":"Santoro, V.","timekeeper_name":"Victor Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":335.0,"amount":670.0,"narrative":"Meet and confer with counsel for Larkspur Medical regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-11-21","timekeeper":"Santoro, V.","timekeeper_name":"Victor Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":335.0,"amount":335.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-11-26","timekeeper":"Santoro, V.","timekeeper_name":"Victor Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":335.0,"amount":921.25,"narrative":"Prepare production set and cover correspondence for service on Tidewater Retail","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-11-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1439.45,"amount":1439.45,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["314 Commerce Avenue","Chicago","Tax ID 39-8809942"],"template":"T24","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-03-30","matter_close":"2026-02-28","matter_budget":54787.0,"approved_timekeepers":["Priya Sandoval","Elena Oyelaran","Leila Nakamura","Gideon Zielinski","Victor Santoro"],"invoice_received_date":"2025-12-03"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[7],"consequence":"Disallow"}
+ ],
+ "seeded_violations":1
+}

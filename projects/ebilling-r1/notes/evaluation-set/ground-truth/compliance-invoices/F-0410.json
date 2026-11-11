@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0410",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0410","generator_id":"gen_eval_set.py@1 F-0410","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0410.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Maddox & Ellison LLP","firm_invoice_number":"INV-2025-45091","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"42374-0025","po_number":"PO-4546895","fees_total":4306.0,"expenses_total":68.41,"adjustments_total":0.0,"total_due":4374.41,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Hargrove","title":"Legal Assistant","rate":150.0,"billed_as":"DH"},{"name":"Hector Carmichael","title":"Partner","rate":560.0,"billed_as":"HC"},{"name":"Imani Esposito","title":"Associate","rate":270.0,"billed_as":"IE"},{"name":"Leila Carmichael","title":"Of Counsel","rate":460.0,"billed_as":"LC"},{"name":"Naomi Dunleavy","title":"Associate","rate":340.0,"billed_as":"ND"},{"name":"Yusuf Castellanos","title":"Associate","rate":265.0,"billed_as":"YC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-02","timekeeper":"YC","timekeeper_name":"Yusuf Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":265.0,"amount":106.0,"narrative":"Meet and confer with counsel for Bluepine Holdings regarding discovery dispute","codes":["L350","A107"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-03","timekeeper":"ND","timekeeper_name":"Naomi Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":340.0,"amount":748.0,"narrative":"Prepare production set and cover correspondence for service on Harbor Point Capital","codes":["L320","A110"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-03","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":270.0,"amount":81.0,"narrative":"Research case law supporting motion to compel","codes":["L240","A102"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-05","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":270.0,"amount":189.0,"narrative":"Attend deposition of Tidewater Retail corporate representative","codes":["L330","A109"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-09","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":270.0,"amount":81.0,"narrative":"Attend deposition of Orchard Row Brands corporate representative","codes":["L330","A109"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-13","timekeeper":"HC","timekeeper_name":"Hector Carmichael","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":560.0,"amount":1232.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-13","timekeeper":"ND","timekeeper_name":"Naomi Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":340.0,"amount":646.0,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350","A107"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-16","timekeeper":"DH","timekeeper_name":"Dmitri Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":0.9,"rate":150.0,"amount":135.0,"narrative":"Prepare outline for deposition of Quarry Lane Partners witness","codes":["L330","A101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-19","timekeeper":"DH","timekeeper_name":"Dmitri Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":0.3,"rate":150.0,"amount":45.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-20","timekeeper":"LC","timekeeper_name":"Leila Carmichael","timekeeper_title":"Of Counsel","title":"O/C","hours":0.8,"rate":460.0,"amount":368.0,"narrative":"Review documents produced by Alder & Finch Ltd for responsiveness","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-25","timekeeper":"IE","timekeeper_name":"Imani Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":270.0,"amount":675.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":["L350","A107"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-03-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.55,"amount":7.55,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":30.43,"amount":60.86,"narrative":"Overnight courier to Larkspur Medical counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["499 Congress Boulevard","Minneapolis","Tax ID 80-6184607"],"template":"T21","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-03-02","matter_close":"2026-06-29","matter_budget":42497.0,"approved_timekeepers":["Naomi Voss","Imani Esposito","Dmitri Hargrove","Hector Carmichael","Leila Carmichael","Yusuf Castellanos","Naomi Dunleavy"],"invoice_received_date":"2026-04-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

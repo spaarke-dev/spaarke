@@ -40,6 +40,15 @@ public sealed record RungMatch
     public RungKind Rung { get; init; }
 
     /// <summary>
+    /// True when the caller named this target: the Office add-in save's record, the only producer of
+    /// <see cref="AssociationContext.CallerSuppliedRegarding"/> (<c>EmailUploadCaptureService.BuildContext</c>). It is the user's own filing choice, not an
+    /// inference, so it wins its field: another high-confidence target on the same field (e.g. a signed tracking
+    /// token for a different record in a forwarded email) stays a review candidate and does not make the field
+    /// Ambiguous (#2412). A rung kind cannot say this: the tracking-token rung is also <see cref="RungKind.ExplicitReference"/>.
+    /// </summary>
+    public bool CallerSupplied { get; init; }
+
+    /// <summary>
     /// Optional content category resolved by a structural detector (rung 3) — e.g. <c>event</c>,
     /// <c>invoice</c>, <c>esign-completion</c>, <c>court-notice</c>. Metadata for task 015 / W5
     /// Responsive Intelligence; not persisted by the deterministic rungs.

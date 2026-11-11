@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0470",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0470","generator_id":"gen_eval_set.py@1 F-0470","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0470.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Sutherland and Beckett LLP","firm_invoice_number":"INV-2026-56130","invoice_date":"2026-09-04","billing_period_start":"2026-08-01","billing_period_end":"2026-08-31","firm_matter_reference":"61216-0032","po_number":"PO-4502996","fees_total":3353.5,"expenses_total":928.94,"adjustments_total":0.0,"total_due":4282.44,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Hargrove","title":"Paralegal","rate":150.0,"billed_as":"BH"},{"name":"Ingrid Sandoval","title":"Partner","rate":515.0,"billed_as":"IS"},{"name":"Jordan Whitfield","title":"Associate","rate":295.0,"billed_as":"JW"},{"name":"Katya Whitfield","title":"Legal Assistant","rate":125.0,"billed_as":"KW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-08-04","timekeeper":"BH","timekeeper_name":"Beatrix Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":150.0,"amount":405.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-08-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":878.3,"amount":878.3,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-08-11","timekeeper":"KW","timekeeper_name":"Katya Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":125.0,"amount":62.5,"narrative":"Review draft expert disclosure for the warranty claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-08-12","timekeeper":"IS","timekeeper_name":"Ingrid Sandoval","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":515.0,"amount":1287.5,"narrative":"Prepare examination outlines for trial in the data incident","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-08-13","timekeeper":"JW","timekeeper_name":"Jordan Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":295.0,"amount":88.5,"narrative":"Review draft expert disclosure for the licensing dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-08-17","timekeeper":"BH","timekeeper_name":"Beatrix Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":150.0,"amount":375.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-08-18","timekeeper":"IS","timekeeper_name":"Ingrid Sandoval","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":515.0,"amount":309.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-08-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":12.66,"amount":50.64,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-08-26","timekeeper":"JW","timekeeper_name":"Jordan Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":295.0,"amount":826.0,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["154 Federal Plaza","Dallas","Tax ID 21-6005433"],"template":"T09","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-04-04","matter_close":"2026-11-29","matter_budget":42129.0,"approved_timekeepers":["Ingrid Sandoval","Katya Whitfield","Katya Mbeki","Jordan Whitfield","Beatrix Hargrove"],"invoice_received_date":"2026-09-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

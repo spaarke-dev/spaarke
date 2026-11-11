@@ -1,6 +1,7 @@
 /**
- * Task 133 slice A must be INERT in the deployed pane: the Invoice view opens only from the ribbon's
- * `?action=submitInvoice` (App `initialAction`); the default pane and every tab lead nowhere near it.
+ * Task 133: the Invoice view is the pane's Invoice tab (package 1.1.4, owner UAT 2026-11-03), offered on a received
+ * email (`canGetAttachments`); a cached older manifest's ribbon `?action=submitInvoice` (App `initialAction`) still
+ * opens it. The default pane opens on Save.
  *
  * Views are doubled to see which one App renders (harness mirrors `App.emailIdentity.test.tsx`).
  */
@@ -12,6 +13,7 @@ import { getAvailableTabs } from '../components/TaskPaneNavigation';
 import * as SaveViewModule from '../components/views/SaveView';
 import * as InvoiceViewModule from '../components/views/InvoiceView';
 import * as CreateTodoViewModule from '../components/views/CreateTodoView';
+import { resolveEmailIdentity } from '../services/documentIdentityService';
 
 jest.mock('@shared/services', () => ({
   authService: {
@@ -36,11 +38,22 @@ jest.mock('../hooks', () => ({
   ...jest.requireActual('../hooks'),
   useLinkedTodosForCommunication: () => ({ count: 0, isLoading: false, error: null }),
 }));
-// Records the shell's `showNavigation` on every render (the tab bar), to see when App hides it.
+// Records the shell's `showNavigation` on every render (the tab bar), to see when App hides it, and the capabilities
+// App hands the tab bar (which tabs show).
 const mockShellNavigation: Array<boolean | undefined> = [];
+const mockShellTabCapabilities: Array<Record<string, unknown> | undefined> = [];
 jest.mock('../components/TaskPaneShell', () => ({
-  TaskPaneShell: ({ children, showNavigation }: { children: ReactNode; showNavigation?: boolean }) => {
+  TaskPaneShell: ({
+    children,
+    showNavigation,
+    tabCapabilities,
+  }: {
+    children: ReactNode;
+    showNavigation?: boolean;
+    tabCapabilities?: Record<string, unknown>;
+  }) => {
     mockShellNavigation.push(showNavigation);
+    mockShellTabCapabilities.push(tabCapabilities);
     return children;
   },
 }));
@@ -60,7 +73,7 @@ const SaveView = SaveViewModule.SaveView as unknown as jest.Mock;
 const InvoiceView = InvoiceViewModule.InvoiceView as unknown as jest.Mock;
 const CreateTodoView = CreateTodoViewModule.CreateTodoView as unknown as jest.Mock;
 
-function outlookAdapter(): IHostAdapter {
+function outlookAdapter(over: { canGetAttachments?: boolean } = {}): IHostAdapter {
   return {
     isInitialized: () => true,
     initialize: jest.fn(),
@@ -69,7 +82,7 @@ function outlookAdapter(): IHostAdapter {
     getItemType: () => 'email',
     getHostType: () => 'outlook',
     getCapabilities: () => ({
-      canGetAttachments: true,
+      canGetAttachments: over.canGetAttachments ?? true,
       canGetRecipients: true,
       canGetSender: true,
       canGetDocumentContent: false,
@@ -99,25 +112,60 @@ let fetchSpy: jest.Mock;
 beforeEach(() => {
   jest.clearAllMocks();
   mockShellNavigation.length = 0;
+  mockShellTabCapabilities.length = 0;
   fetchSpy = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' }));
   global.fetch = fetchSpy as unknown as typeof fetch;
 });
 
-describe('App — the Invoice view is reachable only through ?action=submitInvoice (task 133)', () => {
+describe('App — the Invoice view: the Invoice tab, and a cached ?action=submitInvoice (task 133)', () => {
   it('initialAction "submitInvoice" renders the Invoice view and not the Save tab', async () => {
     render(<App hostAdapter={outlookAdapter()} initialAction="submitInvoice" />);
 
     await waitFor(() => expect(InvoiceView).toHaveBeenCalled());
     expect(SaveView).not.toHaveBeenCalled();
-    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections stay off.
+    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections are on (ebilling
+    // 097b/c/e live on dev) with their prefill.
     const props = InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0];
     expect(typeof props.onSubmit).toBe('function');
     expect(typeof props.loadFirms).toBe('function');
-    expect(props.correctionAvailable).toBeUndefined();
+    expect(props.correctionAvailable).toBe(true);
+    expect(typeof props.loadCorrectionPrefill).toBe('function');
     // Stable seams across re-renders: a new `loadFirms` would make the view reload the firms and drop the choice.
     const first = InvoiceView.mock.calls[0]![0];
     expect(props.loadFirms).toBe(first.loadFirms);
     expect(props.onSubmit).toBe(first.onSubmit);
+  });
+
+  it('passes the record the open email is filed to (the Save tab\'s "Filed to") to the Invoice view', async () => {
+    const MATTER_ID = '15f7ff99-6f64-f111-ab0c-7ced8ddc4cc6';
+    (resolveEmailIdentity as jest.Mock).mockResolvedValueOnce({
+      kind: 'resolved',
+      documentId: 'doc-1',
+      relatedRecord: {
+        entityType: 'sprk_matter',
+        id: MATTER_ID,
+        name: 'Patent',
+        displayName: 'Patent',
+        number: 'PAT-1',
+      },
+    });
+    const base = outlookAdapter();
+    const adapter = {
+      ...base,
+      getCapabilities: () => ({ ...base.getCapabilities(), canResolveEmailIdentity: true }),
+      getEmailIdentityKeys: async () => ({ internetMessageId: '<m1@x>' }),
+    } as unknown as IHostAdapter;
+    render(<App hostAdapter={adapter} initialAction="submitInvoice" />);
+
+    await waitFor(() =>
+      expect(InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0].filedRecord).toEqual({
+        id: MATTER_ID,
+        entityType: 'Matter',
+        logicalName: 'sprk_matter',
+        name: 'Patent',
+        displayInfo: 'PAT-1',
+      })
+    );
   });
 
   it('the default pane (no action) renders Save and no Invoice view', async () => {
@@ -161,10 +209,25 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
     expect(mockShellNavigation.every(shown => shown === true)).toBe(true);
   });
 
-  it('no tab offers the Invoice view, in either host', () => {
-    for (const host of ['outlook', 'word'] as const) {
-      const tabs = getAvailableTabs(host, { canEmailFromPane: true }).map(t => t.value);
-      expect(tabs).not.toContain('invoice');
-    }
+  it('App hands the tab bar canGetAttachments: a received email gets the Invoice tab', async () => {
+    render(<App hostAdapter={outlookAdapter()} />);
+    await waitFor(() => expect(SaveView).toHaveBeenCalled());
+    const caps = mockShellTabCapabilities[mockShellTabCapabilities.length - 1];
+    expect(caps).toMatchObject({ canGetAttachments: true });
+    expect(getAvailableTabs('outlook', caps).map(t => t.value)).toContain('invoice');
+  });
+
+  it('must-not-fire: an item without attachments access (compose) gets no Invoice tab', async () => {
+    render(<App hostAdapter={outlookAdapter({ canGetAttachments: false })} />);
+    await waitFor(() => expect(SaveView).toHaveBeenCalled());
+    const caps = mockShellTabCapabilities[mockShellTabCapabilities.length - 1];
+    expect(caps).toMatchObject({ canGetAttachments: false });
+    expect(getAvailableTabs('outlook', caps).map(t => t.value)).not.toContain('invoice');
+  });
+
+  it('must-not-fire: a stale ?action=submitInvoice where attachments cannot be read renders no Invoice view', async () => {
+    render(<App hostAdapter={outlookAdapter({ canGetAttachments: false })} initialAction="submitInvoice" />);
+    await waitFor(() => expect(mockShellNavigation.length).toBeGreaterThan(0));
+    expect(InvoiceView).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="133" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Outlook "Submit Invoice" view on ebilling's from-email route; Invoice leaves Save and "+ New"</title>
+    <phase>8 — UAT findings and cross-project fixes</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New add-in surface on a finance route (step 0 refuses flagged-external callers; all-or-nothing save + submission); removes an existing save target in both hosts; cross-project contract.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-project contract with ebilling-r1 and a staged release where a wrong merge order leaves Outlook with no way to file an invoice.</model-tier-reason>
+    <effort>high</effort>
+    <deps>130 (every email-derived document links to its communication; from-email's prerequisite), 132</deps>
+    <external-deps>ebilling-r1 095 (POST /api/finance/invoice-submissions/from-email; contract pinned in projects/ebilling-r1/notes/095-from-email-contract.md, binding, changes need our agreement) — slice C only. ebilling-r1 118's shared InvoiceAttachmentMarking component (file subpath @spaarke/communication-components/invoice-attachment-marking) — slice B.</external-deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SaveFlow, App routing and both manifests; staged release across three PRs.</parallel-reason>
+    <tags>office, office-addins, frontend, ebilling, unit-test</tags>
+  </metadata>
+  <prompt>Owner decisions 2026-10-21 (notes/ebilling-r1-review-2026-10-21.md, "Owner decisions after the discussion"): a separate Invoice task-pane view opened by a "Submit Invoice" ribbon button (like Create To Do); new invoice with the core record required (Matter, Project, Work Assignment); existing invoice: add supporting files, or submit a corrected invoice; one attachment explicitly marked Invoice, the rest Supporting (default) or Don't save; the email is always saved as its .eml, filed to the core record, with no attachment child Documents (the server does this inside from-email); Invoice is removed from the normal Save flow as a save target and from "+ New" quick-create; LEDES out of scope. Owner 2026-10-27: "if you can start now then proceed" — build now against ebilling's pinned contract; the release waits on a working from-email on dev (ebilling estimate ~2026-11-20).
+
+RELEASE RULE (binding). A push to master auto-deploys the add-in (deploy-office-addins.yml), and the add-in has no feature flags. So the work merges in three slices, each inert until the next:
+- Slice A (merge any time): the from-email client service and its contract types and tests, the Invoice view reachable ONLY through `?action=submitInvoice`, and the ribbon button in manifest.json and outlook-manifest.xml. Nothing in the deployed taskpane links to the view; the button appears only when the owner redeploys the manifest (the workflow does not deploy manifests).
+- Slice B (merge any time after ebilling's component merges): the view adopts InvoiceAttachmentMarking (alias + type shim, never the barrel; task 100 rule).
+- Slice C (merge ONLY when from-email answers end to end on dev, owner go): remove Invoice from Save (`allowedTypes` SaveFlow.tsx:2006, :2228 and the sprk_invoice target mapping :1515, :1050) and from "+ New" (CreateRecordForm Invoice leg), in the same add-in release; then tell ebilling so their 096 can remove the server legs one release later. The manifest redeploy is the owner's action at the same time.</prompt>
+  <steps mode="directional">
+    <step>Read the pinned contract (projects/ebilling-r1/notes/095-from-email-contract.md, on master or their branch) and §9.1 of their procedure-and-file-model.md. Any behaviour the contract does not pin is a question to ebilling, never a guess.</step>
+    <step>A1. Client service `invoiceSubmissionService.ts` (next to quickSaveHelpers.ts): builds the from-email body by REUSING the /office/save email payload builder (`buildEmailSaveRequest` / emailContentCapture; do not fork it), adds the core record, the marks (file name, size, content type as captured) and the idempotency key; maps every pinned reasonCode to a user message (errorMessages.ts pattern); follows progress as the contract says.</step>
+    <step>A2. Invoice view (`components/views/InvoiceView.tsx`, modelled on CreateTodoView.tsx and its `?action=createTodo` route in outlook/taskpane/index.tsx readInitialAction and App.tsx initialAction): modes New invoice (core record required: Matter, Project, Work Assignment) and Existing invoice (add supporting files, or a corrected invoice). Marking: Invoice exactly one, pre-selected when there is exactly one PDF; others Supporting; files the add-in cannot send (over 20 MB, past the 28 MB budget, cloud links) are shown disabled with a reason. A refusal shows its message; a permanent "email can't be identified" suggests the internal upload route; a retryable one offers retry.</step>
+    <step>A3. Ribbon button "Submit Invoice" in outlook/manifest.json and outlook-manifest.xml, copying the Create To Do button and runtime (`?action=submitInvoice`). Word gets no button (from-email needs an email; a Word document has none).</step>
+    <step>B1. When ebilling's InvoiceAttachmentMarking merges: replace the view's interim marking list with it (webpack + jest alias, type shim in shared/types, as spaarke-send-email-pane.d.ts does). Review their PR as agreed.</step>
+    <step>C0. Deploy order (review finding 14): the BFF with Work Assignment search must be live before the manifest redeploy shows the "Submit Invoice" button. On an older BFF `type=WorkAssignment` falls back to all five types, and the picker would list Matters and Accounts under the Work Assignment pill.</step>
+    <step>C1. With the owner's go once from-email works on dev: remove Invoice from Save and "+ New" (both hosts' shared SaveFlow), keep Invoice in Find and the Related-to card (reading an invoice is unchanged); live-check a new invoice, a supporting-files add and a correction on dev; then tell ebilling the release is out (their 096).</step>
+  </steps>
+  <goal>An Outlook user submits an invoice from an email in one action: the email is saved as its .eml to the Matter, Project or Work Assignment and the marked attachments become the invoice's files; Invoice is no longer a Save target or a "+ New" record; and no deployed add-in is ever left without a way to file an invoice.</goal>
+  <constraints>
+    <constraint>No server change in this task except ONE (amended 2026-10-27): Work Assignment added to `GET /api/office/search/entities` (OfficeSearchService's type map, OfficeSearchService.cs:298-300; today Matter, Project, Invoice, Account, Contact) so the core-record picker can find one. It must NOT make Work Assignment a new /office/save target or "+ New" type as a side effect. Its own PR with the §10 obligations (placement, publish-size delta vs fresh master, CVE check, tests); dev deploy via R3. The invoice server legs stay ebilling's (095 adds, 096 removes).</constraint>
+    <constraint>Slice C never merges before from-email answers on dev with the owner's go. Slices A and B must be inert in the deployed taskpane (no link, tab or menu reaches the view without the new manifest).</constraint>
+    <constraint>The request and response shapes are ebilling's pinned contract; a change goes through ebilling first (their 095 POML makes it binding).</constraint>
+    <constraint>Reuse the /office/save payload builder and attachment capture; no second copy of email capture.</constraint>
+    <constraint>Marks identify an attachment by file name, size and content type as captured; never a MIME ordinal. The RFC Message-ID, never the Exchange item id (task 121).</constraint>
+    <constraint>Office add-in: `npm run build` in src/client/office-addins; type-aware lint ratchet clean; new suites listed in ci-gated-suites.txt. Run jest with the CI layout (shared packages without their own node_modules), or two React copies fail every hook test.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Contract: the service's request body matches the pinned contract field for field (a jest test built from the contract's example), and every pinned reasonCode maps to a message (no generic fallback for a pinned code).</criterion>
+    <criterion testable="true">Must-fire: exactly one Invoice mark is required; with one PDF it is pre-selected; other attachments default to Supporting; a file the add-in cannot send cannot be marked Invoice or Supporting.</criterion>
+    <criterion testable="true">Must-fire: New invoice cannot be submitted without a Matter, Project or Work Assignment; Existing invoice offers add-supporting and correction.</criterion>
+    <criterion testable="true">Must-not-fire (slices A, B): the default taskpane (no ?action) renders no Invoice view entry; Save still offers Invoice until slice C.</criterion>
+    <criterion testable="true">Slice C: Save's target types and "+ New" offer Matter and Project only; Find and the Related-to card still show invoices.</criterion>
+    <criterion testable="false">Live on dev after slice C (owner go): a new invoice, a supporting-files add and a correction each end with the email saved once to the core record and the invoice's files present.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>CreateTodoView + `?action=createTodo` (view and ribbon pattern), buildEmailSaveRequest and emailContentCapture (payload), errorMessages.ts (reasonCode mapping), ebilling's InvoiceAttachmentMarking (marking UI).</existing>
+    <extension>The view is a new surface by owner decision (a separate Invoice view, not a Save option); every part under it extends an existing builder, mapper or pattern.</extension>
+    <cost-of-doing-nothing>Once ebilling 096 removes the server legs, Outlook has no way to file an invoice; until then the add-in creates blank invoices with no core record and saves invoice PDFs as Documents, both of which ebilling's model forbids (invoices are created only by submission, FR-17/FR-20).</cost-of-doing-nothing>
+  </justification>
+  <notes>2026-10-27: ebilling's InvoiceAttachmentMarking merged early (#2342, 5911eba1ff, split out as their 118a), so slices A and B are built as one. Contracts agreed: 095 from-email (projects/ebilling-r1/notes/095-from-email-contract.md, agreed at 717cf238d9; EB-D-160 re-attempt after Failed and invoice_not_pdf at fd70b8e1f6) and 123 supporting-file upload (123-upload-contract.md, fd70b8e1f6). Correction waits on ebilling 097; supporting files wait on ebilling 123.
+2026-10-27 slices A+B MERGED: server #2357 (68048b83d5; Work Assignment search, exact type-name match; not yet on dev, R3's next master deploy will carry it) and client #2359 (4ab7c1a9c1; inert until the owner redeploys the manifest). Review: one adversarial pass (16 items), fix round 1, scoped re-check (3 items), fix round 2; nothing F-class open. Known limit K2: the budget pre-check ignores the body and trusts Outlook's size; capture then refuses with the file and reason. Filed in passing: #2355 (ISS-025), #2356 (ISS-026). Remaining: supporting files (after ebilling 123), Correction (after ebilling 097), slice C (C0 deploy order, then C1).
+2026-10-27 build: the agent's work is split into branch -133-client (add-in) and branch -133-search (BFF, Work Assignment search). Publish size +0.0002 MB against a fresh master de38296499 (37.79 MB, 192/192 files, Compress-Archive Optimal); no package change; Office filter 955 passed. One adversarial review: 6 fix-now defects plus smaller ones; fix round 1 running.
+Created 2026-10-27 on the owner's go to start before ebilling 095 is built. ebilling timeline (2026-10-27): 095 code-complete ~11-13 earliest, ~11-20 realistic; they update at 094's merge. Word: Invoice as a Save target also goes from the Word pane in slice C (shared SaveFlow, and 096 removes the server leg for both hosts); Word gets no Invoice view — owner-visible, say so at slice C.</notes>
+</task>

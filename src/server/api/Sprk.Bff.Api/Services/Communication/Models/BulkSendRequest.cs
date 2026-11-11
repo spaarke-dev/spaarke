@@ -42,7 +42,8 @@ public sealed record BulkSendRequest
 
     /// <summary>
     /// Whether to archive each sent email as .eml in SharePoint Embedded.
-    /// Default false.
+    /// Default false. Ontology task 177 (D-217): each recipient's email whose created communication is filed to a record is
+    /// archived whatever this says; this flag still opts a record-less send in.
     /// </summary>
     public bool ArchiveToSpe { get; init; } = false;
 

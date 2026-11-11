@@ -31,7 +31,7 @@ internal enum RecordCreationRefusalKind
     /// <summary>The create collided with existing data (the autonumber's alternate key, every attempt). 409.</summary>
     Conflict,
 
-    /// <summary>Whether the create may stand could not be decided, and nothing is left. 500.</summary>
+    /// <summary>Whether the create may stand could not be decided (or a pre-write rule could not decide), and nothing is left. 500.</summary>
     Undecided,
 
     /// <summary>A check or the owner decision faulted before anything was written (fail closed, NFR-01). 503.</summary>
@@ -66,11 +66,19 @@ internal sealed record RecordCreationRefusal
     /// <summary>The payload is not a Dataverse Web API payload this service accepts.</summary>
     internal const string InvalidPayloadCode = "record_creation.invalid_payload";
 
-    /// <summary>The table has no entry in <see cref="RecordTableRules"/>: this service does not create it.</summary>
+    /// <summary>The table has no entry in <see cref="RecordTableRules"/>, or its entry is
+    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (task 042c fix round 4): this service does not create it.</summary>
     internal const string TableUnsupportedCode = "record_creation.table_unsupported";
 
     /// <summary>A check before the create faulted (an exception or timeout): nothing was created (NFR-01).</summary>
     internal const string CheckFailedCode = "record_creation.check_failed";
+
+    /// <summary>
+    /// Task 022 fix round 3: a value mapped from a secure source files the row, and the row's owner is not that source's secure
+    /// owner, so the value cannot be removed and the create is refused (400). The same request is refused again: create the row
+    /// as secure, or file it differently.
+    /// </summary>
+    internal const string MappingSourceSecureFilingCode = "record_creation.mapping_source_secure_filing";
 
     /// <summary>The owner decision faulted: nothing was created (UAC-r2 condition (b), "faulted → 503 owner_unavailable").</summary>
     internal const string OwnerUnavailableCode = "record_creation.owner_unavailable";
@@ -96,6 +104,19 @@ internal sealed record RecordCreationRefusal
     /// (500: the writer's defect, not the caller's input).
     /// </summary>
     internal const string ServerSetFilingLookupCode = "record_creation.server_set_filing_lookup";
+
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row cannot be derived from what it is filed
+    /// under, and a retry will not change that (its source names two roots, or no longer exists). Nothing written (400,
+    /// <see cref="RecordCreationRefusalKind.Invalid"/>).
+    /// </summary>
+    internal const string StampUnderivableCode = "record_creation.stamp_underivable";
+
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row could not be derived right now (a read
+    /// faulted). Nothing written (503, <see cref="RecordCreationRefusalKind.Unavailable"/>).
+    /// </summary>
+    internal const string StampUnavailableCode = "record_creation.stamp_unavailable";
 
     public RecordCreationRefusal(RecordCreationRefusalKind kind, string code, string detail)
     {

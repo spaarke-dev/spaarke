@@ -52,6 +52,12 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
     /// <summary>The person an object-id requester resolves to unless a test says otherwise.</summary>
     public static readonly Guid DefaultRequesterPersonId = Guid.Parse("0f0f0f0f-0146-4146-8146-000000000146");
 
+    /// <summary>
+    /// UAC task 194b R4-2: when set, answers a <see cref="ResolveOwnerAsync"/> question it returns non-null for (a test's
+    /// secure-if-any stand-in: the Secure team when the question names a given secure parent); otherwise the fixed answer.
+    /// </summary>
+    public Func<RecordOwnershipContext, RecordOwnerResolution?>? AnswerFor { get; set; }
+
     /// <summary>Every context the resolver was asked about, in order.</summary>
     public ConcurrentQueue<RecordOwnershipContext> Requests { get; } = new();
 
@@ -69,7 +75,7 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
     public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
     {
         Requests.Enqueue(context);
-        var answer = Answer(context.HasParent, context.WhenUnfiled);
+        var answer = AnswerFor?.Invoke(context) ?? Answer(context.HasParent, context.WhenUnfiled);
         return Task.FromResult(answer.IsRefused ? answer : answer with { CreatedByPerson = PersonOf(context.RequestedBy) });
     }
 

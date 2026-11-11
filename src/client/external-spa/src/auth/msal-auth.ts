@@ -790,18 +790,27 @@ function teamsTokenAuthority(cfg: TeamsWorkforceAuthConfig): string {
   }
 }
 
-/** Decode a base64url JWT payload's `tid` WITHOUT verifying the token: only ever used for a fail-closed tenant check. */
-function accessTokenTenantId(accessToken: string | undefined): string {
+/**
+ * Decode a base64url JWT payload WITHOUT verifying the token (null when it is not a JWT). Only ever used for fail-closed
+ * checks (the tenant) and the guest verdict; the BFF verifies the token.
+ */
+function accessTokenPayload(accessToken: string | undefined): Record<string, unknown> | null {
   try {
     const payload = accessToken?.split('.')[1];
-    if (!payload) return '';
+    if (!payload) return null;
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4));
-    const tid = (JSON.parse(json) as { tid?: unknown } | null)?.tid;
-    return typeof tid === 'string' ? tid.toLowerCase() : '';
+    const parsed: unknown = JSON.parse(json);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
-    return '';
+    return null;
   }
+}
+
+/** The access token payload's `tid` (lower-case; '' when it cannot be read). */
+function accessTokenTenantId(accessToken: string | undefined): string {
+  const tid = accessTokenPayload(accessToken)?.tid;
+  return typeof tid === 'string' ? tid.toLowerCase() : '';
 }
 
 /**
@@ -835,10 +844,83 @@ function assertTeamsResultTenant(result: AuthenticationResult | null | undefined
  * again would reload into the same 401. The caller shows the guest screen and makes NO BFF call.
  */
 export class TeamsGuestAccountError extends Error {
-  constructor() {
+  constructor(
+    /** Masked diagnostic for the guest screen ({@link TeamsGuestVerdict.detail}): no ids, names or addresses. */
+    public readonly detail?: string
+  ) {
     super('This Teams tab cannot be used with a guest account.');
     this.name = 'TeamsGuestAccountError';
   }
+}
+
+/**
+ * Whether the last successful Teams sign-in was a guest of the Teams tenant, and a masked `detail` saying why:
+ * `path=naa|popup acct=0|1|other|missing home=match|differs|unreadable|none ext=yes|no src=cache|fresh` (no ids, names or addresses).
+ */
+export interface TeamsGuestVerdict {
+  guest: boolean;
+  detail: string;
+}
+
+/**
+ * The guest verdict for a Teams token result. The token's own `acct` claim decides when it is present (`0` = a member of
+ * the issuing tenant; anything else = not a member): it is the claim the BFF's WorkforceHome scheme requires to be `0`, so
+ * the tab and the BFF agree. The host's account description (`homeAccountId`, `#EXT#`; {@link isTeamsGuestAccount}) decides
+ * only when the token carries no `acct`. On Teams desktop, members were shown the guest screen when the host-account check
+ * decided alone (task 071, 2026-10-29; cause not yet confirmed, `detail` is there to confirm it).
+ */
+function teamsGuestVerdict(
+  result: AuthenticationResult,
+  cfg: TeamsWorkforceAuthConfig,
+  path: 'naa' | 'popup'
+): TeamsGuestVerdict {
+  const raw = accessTokenPayload(result.accessToken)?.acct;
+  const acct =
+    raw === undefined || raw === null
+      ? 'missing'
+      : String(raw).trim() === '0'
+        ? '0'
+        : String(raw).trim() === '1'
+          ? '1'
+          : 'other';
+  const account = result.account;
+  const homePart = account?.homeAccountId?.split('.').pop();
+  const home = !account
+    ? 'none'
+    : !isTenantId(homePart)
+      ? 'unreadable'
+      : homePart.toLowerCase() === cfg.tenantId.toLowerCase()
+        ? 'match'
+        : 'differs';
+  const ext = typeof account?.username === 'string' && account.username.toUpperCase().includes('#EXT#') ? 'yes' : 'no';
+  const guest = acct === 'missing' ? isTeamsGuestAccount(account, cfg.tenantId) : acct !== '0';
+  return {
+    guest,
+    detail: `path=${path} acct=${acct} home=${home} ext=${ext} src=${result.fromCache ? 'cache' : 'fresh'}`,
+  };
+}
+
+/** The verdict of the last successful Teams token acquisition (null before the first). */
+let teamsWorkforceGuestVerdict: TeamsGuestVerdict | null = null;
+
+/** The guest verdict of the last successful Teams sign-in, or null before the first. Read by the host adapter's guest check. */
+export function getTeamsWorkforceGuestVerdict(): TeamsGuestVerdict | null {
+  return teamsWorkforceGuestVerdict;
+}
+
+/**
+ * A successful Teams token result: make ITS account the active one (always, so an account an earlier sign-in left active
+ * in the shared cache never stands in for this one) and record its guest verdict. Returns the access token.
+ */
+function recordTeamsSignIn(
+  instance: IPublicClientApplication,
+  result: AuthenticationResult,
+  cfg: TeamsWorkforceAuthConfig,
+  path: 'naa' | 'popup'
+): string {
+  if (result.account) instance.setActiveAccount(result.account);
+  teamsWorkforceGuestVerdict = teamsGuestVerdict(result, cfg, path);
+  return result.accessToken;
 }
 
 /**
@@ -964,13 +1046,9 @@ async function acquireBffTokenViaNaa(
       ? await instance.acquireTokenSilent({ ...request, account, ...(forceRefresh ? { forceRefresh: true } : {}) })
       : await instance.ssoSilent(request);
     assertTeamsResultTenant(result, cfg);
-    // Establish the active account once so useMsal()/useIsAuthenticated() (host adapter's
-    // MsalProvider) reflect the signed-in user immediately, and so the NEXT call above takes the
-    // fast acquireTokenSilent(account) branch instead of ssoSilent again.
-    if (!instance.getActiveAccount() && result.account) {
-      instance.setActiveAccount(result.account);
-    }
-    return result.accessToken;
+    // The result's account becomes the active one, so useMsal()/useIsAuthenticated() (host adapter's MsalProvider)
+    // reflect the signed-in user and the NEXT call above takes the fast acquireTokenSilent(account) branch.
+    return recordTeamsSignIn(instance, result, cfg, 'naa');
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
       // A background caller (the bell's poll) opens no popup.
@@ -978,10 +1056,7 @@ async function acquireBffTokenViaNaa(
       // Broker popup - Teams resolves this without a visible second login for a consented user.
       const result = await instance.acquireTokenPopup(request);
       assertTeamsResultTenant(result, cfg);
-      if (!instance.getActiveAccount() && result.account) {
-        instance.setActiveAccount(result.account);
-      }
-      return result.accessToken;
+      return recordTeamsSignIn(instance, result, cfg, 'naa');
     }
     throw err;
   }
@@ -1015,7 +1090,7 @@ async function acquireBffTokenViaPopup(
       });
       // A token for another tenant is not used: it falls through to the popup, whose result is checked again.
       assertTeamsResultTenant(result, cfg);
-      if (result.accessToken) return result.accessToken;
+      if (result.accessToken) return recordTeamsSignIn(instance, result, cfg, 'popup');
     } catch {
       // Fall through to the popup, as OfficeNaaStrategy._tryAcquireWith does.
     }
@@ -1033,10 +1108,7 @@ async function acquireBffTokenViaPopup(
   if (!result.accessToken) {
     throw new TeamsWorkforceAuthError('The MSAL popup returned no access token.');
   }
-  if (!instance.getActiveAccount() && result.account) {
-    instance.setActiveAccount(result.account);
-  }
-  return result.accessToken;
+  return recordTeamsSignIn(instance, result, cfg, 'popup');
 }
 
 /**

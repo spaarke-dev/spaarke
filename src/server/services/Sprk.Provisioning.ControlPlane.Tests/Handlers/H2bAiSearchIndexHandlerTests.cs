@@ -15,7 +15,11 @@
 //       verifier called against the stamp's own endpoint (H2a output) →
 //       Success + Cosmos state advances.
 //   T3  Idempotent no-op: run already has H2b CompletedPhase with matching
-//       key → Success (no seam called, no state mutation).
+//       key and the verified names recorded → Success (no seam called, no state mutation).
+//   T3b T186 follow-up (AiSearch allow-list): the same completed phase WITHOUT
+//       recorded names (or stale ones) → read-only re-verify + record; a failed
+//       re-verify fails and records nothing. Success paths record AiSearchIndexNames
+//       (T1); failure paths leave it unset (T9/T10/T11).
 //   T4  Missing tenantId (§4D I1): Failure(Resumable, missing-tenant-id) +
 //       no seam call + Cosmos marked Failed.
 //   T5  Requested index with no embedded schema (task 245b — indexVer is the
@@ -61,6 +65,12 @@ public sealed class H2bAiSearchIndexHandlerTests
     // Task 245b: H2b's idempotency version is the content version of the embedded schemas it applies.
     private static readonly string IndexVer = ComputeIndexVer(new FakeCanonicalIndexCatalog().CanonicalIndexNames);
 
+    private static readonly string[] ExpectedCanonicalNames =
+    [
+        "spaarke-files-index", "spaarke-discovery-index", "spaarke-records-index", "spaarke-rag-references",
+        "spaarke-insights-index", "spaarke-session-files", "spaarke-invoices-index",
+    ];
+
     private static string ComputeIndexVer(IEnumerable<string> names)
     {
         IndexSchemaSet.TryComputeVersion(names, out var version, out _).Should().BeTrue();
@@ -97,6 +107,10 @@ public sealed class H2bAiSearchIndexHandlerTests
         verifier.CallCount.Should().Be(1, "post-deploy verifier runs after provisioner");
         provisioner.LastRequest!.SearchEndpoint.Should().Be(StampEndpoint, "every stamp indexes its own AI Search service");
         provisioner.LastRequest.TenantId.Should().Be(TenantId, "§4D I1 — tenant flows through explicitly");
+
+        // T186 follow-up (AiSearch allow-list): the verified set is recorded for H4b (AiSearch__AllowedIndexes).
+        repo.LastWrittenRun.InterStepState.AiSearchIndexNames.Should().Equal(ExpectedCanonicalNames,
+            "the verifier checked all 7 canonical indexes, so all 7 — in catalog order — are what H2b records");
     }
 
     // ---------- T3 idempotency ----------
@@ -105,6 +119,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     public async Task Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
         var run = BuildRun();
+        run.InterStepState.AiSearchIndexNames = [.. ExpectedCanonicalNames];   // the first completion recorded it
         var expectedKey = H2bAiSearchIndexHandler.BuildIdempotencyKey(CustomerId, IndexVer);
         run.CompletedPhases.Add(new CompletedPhase
         {
@@ -126,6 +141,74 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
         provisioner.CallCount.Should().Be(0);
         verifier.CallCount.Should().Be(0);
+    }
+
+    // ---------- T3b idempotent skip of a phase that completed before AiSearchIndexNames existed ----------
+
+    private static ProvisioningRun BuildCompletedRunWithoutRecordedNames()
+    {
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H2b",
+            IdempotencyKey = H2bAiSearchIndexHandler.BuildIdempotencyKey(CustomerId, IndexVer),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = "prior-run",
+        });
+        return run;
+    }
+
+    [Fact]
+    public async Task Idempotent_CompletedPhaseWithoutRecordedNames_ReVerifiesAndRecordsThem_WithoutProvisioning()
+    {
+        // The ACME run: H2b completed before it recorded what it verified; H4b needs the set.
+        var run = BuildCompletedRunWithoutRecordedNames();
+        var repo = new FakeRepository(run, etag: "etag-3b");
+        var provisioner = FakeAiSearchIndexProvisioner.Success();
+        var verifier = FakeAiSearchIndexVerifier.Ok();
+        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(), provisioner, verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        ((HandlerResult.Success)result).IdempotencyKey.Should().Be(H2bAiSearchIndexHandler.BuildIdempotencyKey(CustomerId, IndexVer));
+        provisioner.CallCount.Should().Be(0, "nothing is re-applied — the read-only verifier is the only seam used");
+        verifier.CallCount.Should().Be(1);
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.InterStepState.AiSearchIndexNames.Should().Equal(ExpectedCanonicalNames);
+        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle("the phase record is not duplicated");
+        repo.LastWrittenRun.Status.Should().Be(RunStatus.Running);
+    }
+
+    [Fact]
+    public async Task Idempotent_CompletedPhaseWithoutRecordedNames_VerifierFindsDrift_FailsAndRecordsNothing()
+    {
+        var run = BuildCompletedRunWithoutRecordedNames();
+        var repo = new FakeRepository(run, etag: "etag-3c");
+        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
+            FakeAiSearchIndexProvisioner.Success(), FakeAiSearchIndexVerifier.Missing("spaarke-records-index"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.IndexProvisioningFailed);
+        repo.LastWrittenRun!.InterStepState.AiSearchIndexNames.Should().BeNull("a failed verify never records the set");
+    }
+
+    [Fact]
+    public async Task Idempotent_RecordedNamesDifferFromCatalog_ReVerifiesAndRefreshesThem()
+    {
+        var run = BuildCompletedRunWithoutRecordedNames();
+        run.InterStepState.AiSearchIndexNames = ["spaarke-files-index"];   // stale: the catalog has 7
+        var repo = new FakeRepository(run, etag: "etag-3d");
+        var verifier = FakeAiSearchIndexVerifier.Ok();
+        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(), FakeAiSearchIndexProvisioner.Success(), verifier);
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        verifier.CallCount.Should().Be(1);
+        repo.LastWrittenRun!.InterStepState.AiSearchIndexNames.Should().Equal(ExpectedCanonicalNames);
     }
 
     // ---------- T4 missing tenantId (§4D I1) ----------
@@ -270,6 +353,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.IndexProvisioningFailed);
         failure.Diagnostic.Should().Contain("exit 7");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.InterStepState.AiSearchIndexNames.Should().BeNull("a failed provision records no verified set");
     }
 
     [Fact]
@@ -314,6 +398,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.Diagnostic.Should().Contain("spaarke-files-index");
         failure.Diagnostic.Should().Contain("tenantId");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.InterStepState.AiSearchIndexNames.Should().BeNull("an invariant violation records no verified set");
     }
 
     // ---------- T11 verifier reports Missing (post-provisioner drift) ----------
@@ -335,6 +420,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.IndexProvisioningFailed);
         failure.Diagnostic.Should().Contain("spaarke-records-index");
         failure.Diagnostic.Should().Contain("drift");
+        repo.LastWrittenRun!.InterStepState.AiSearchIndexNames.Should().BeNull("a missing index records no verified set");
     }
 
     // ---------- T15 missing AiSearchEndpoint (H2a InterStepState blank), both models ----------

@@ -506,11 +506,18 @@ public class OfficeEmailEnricher
                     }
                     else
                     {
-                        // Regular attachment
-                        bodyBuilder.Attachments.Add(
+                        // Regular attachment. Base64 always (ebilling-r1 095 review F1): MimeKit otherwise sends a text/* part
+                        // 7-bit or quoted-printable and rewrites its CRLF/LF to the writer's newline format on write (the BFF
+                        // runs on Linux), so the bytes read back are not the bytes attached. A message/* part is a MessagePart,
+                        // which has no transfer encoding to set; a marked one is refused at step 0.
+                        var entity = bodyBuilder.Attachments.Add(
                             attachment.FileName,
                             contentBytes,
                             contentType);
+                        if (entity is MimePart part)
+                        {
+                            part.ContentTransferEncoding = ContentEncoding.Base64;
+                        }
                     }
                 }
                 catch (FormatException)
@@ -531,15 +538,19 @@ public class OfficeEmailEnricher
 
     /// <summary>
     /// Generates the human-readable name for the .eml file.
-    /// Format: YYYY-MM-DD_Subject.eml (subject max 80 chars, special chars removed). This is the name the document
-    /// is SHOWN under (<c>sprk_documentname</c>); <see cref="GenerateEmlNames"/> gives the name it is STORED under.
+    /// Format: YYYY-MM-DD_Name.eml, where Name is the typed <see cref="EmailMetadata.DocumentName"/> when there is one,
+    /// else the subject (max 80 chars, special chars removed). This is the name the document is SHOWN under
+    /// (<c>sprk_documentname</c>); <see cref="GenerateEmlNames"/> gives the name it is STORED under.
     /// </summary>
     public static string GenerateEmlFileName(EmailMetadata metadata)
     {
         var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
 
-        // Subject capped at 80 chars to leave room for the date prefix and the extension.
-        var sanitizedSubject = SpeUploadPath.SanitizeFileName(metadata.Subject, maxLength: 80);
+        // #2416: a typed Document Name names the file only; the subject stays the email's own everywhere else.
+        var name = string.IsNullOrWhiteSpace(metadata.DocumentName) ? metadata.Subject : metadata.DocumentName.Trim();
+
+        // Capped at 80 chars to leave room for the date prefix and the extension.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(name, maxLength: 80);
 
         return $"{datePrefix}_{sanitizedSubject}.eml";
     }
@@ -567,7 +578,10 @@ public class OfficeEmailEnricher
     public static (string DocumentName, string StoredFileName) GenerateEmlNames(EmailMetadata metadata)
     {
         var documentName = GenerateEmlFileName(metadata);
-        if (!metadata.IsNameSystemDerived)
+        // #2416: a blank typed DocumentName falls back to the subject, so that name is system-derived too. An older
+        // client sends no DocumentName at all and may have typed its Subject, so it keeps the flag's meaning.
+        var blankTypedName = metadata.DocumentName is not null && string.IsNullOrWhiteSpace(metadata.DocumentName);
+        if (!metadata.IsNameSystemDerived && !blankTypedName)
             return (documentName, documentName);
 
         var stem = documentName[..^".eml".Length];

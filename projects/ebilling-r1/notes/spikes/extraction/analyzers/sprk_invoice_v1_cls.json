@@ -1,0 +1,259 @@
+{
+  "analyzerId": "sprk_invoice_v1_cls",
+  "description": "SPIKE 005 classify experiment: copy of sprk_invoice_v1 with a classify activity-code field.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": true,
+    "enableOcr": true,
+    "enableLayout": true,
+    "enableFormula": false,
+    "enableFigureDescription": false,
+    "enableFigureAnalysis": false,
+    "chartFormat": "chartjs",
+    "tableFormat": "html",
+    "estimateFieldSourceAndConfidence": true,
+    "enableSegment": false,
+    "omitContent": false,
+    "segmentPerPage": false,
+    "annotationFormat": "markdown"
+  },
+  "models": {
+    "completion": "gpt-5.2",
+    "embedding": "text-embedding-3-large"
+  },
+  "processingLocation": "geography",
+  "tags": {
+    "project": "ebilling-r1",
+    "schemaVersion": "v1-cls",
+    "spike": "005"
+  },
+  "fieldSchema": {
+    "name": "SprkInvoiceV1",
+    "description": "Outside-counsel (law firm) invoice: header, fee time entries, expenses and timekeeper summary.",
+    "fields": {
+      "FirmName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Name of the law firm or outside counsel that issued the invoice (the biller, not the client being billed)."
+      },
+      "FirmInvoiceNumber": {
+        "type": "string",
+        "method": "extract",
+        "description": "The firm's own invoice number exactly as printed, keeping any prefix or punctuation. Often labelled Invoice No., Invoice #, Statement No. or Bill No."
+      },
+      "InvoiceDate": {
+        "type": "date",
+        "method": "extract",
+        "description": "Date the invoice was issued. Often labelled Invoice Date, Statement Date or Date."
+      },
+      "BillingPeriodStart": {
+        "type": "date",
+        "method": "generate",
+        "description": "First day of the billing period the invoice covers (for example the start of 'services rendered through', 'for the period' or 'fees from'). Leave empty if the invoice states no period."
+      },
+      "BillingPeriodEnd": {
+        "type": "date",
+        "method": "generate",
+        "description": "Last day of the billing period the invoice covers (for example 'services rendered through', 'for the period ending'). Leave empty if the invoice states no period."
+      },
+      "ClientName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Name of the client or party being billed, as addressed on the invoice."
+      },
+      "MatterName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Name or description of the matter the invoice is for, as printed (for example after 'Re:' or 'Matter:'). Leave empty if absent."
+      },
+      "FirmMatterReference": {
+        "type": "string",
+        "method": "extract",
+        "description": "The firm's own matter or client-matter reference exactly as printed. Often labelled Matter No., Matter Number, Client-Matter, File No., Our File or Client/Matter ID."
+      },
+      "PurchaseOrderAsQuoted": {
+        "type": "string",
+        "method": "extract",
+        "description": "Purchase order (PO) or authorization number the firm quotes on the invoice, exactly as printed. Leave empty if none is quoted."
+      },
+      "FeesTotal": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total professional fees on the invoice (the fee subtotal). Often labelled Total Fees, Professional Services, Fees or Total Professional Fees."
+      },
+      "ExpensesTotal": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total expenses on the invoice (the expense subtotal). Often labelled Total Expenses, Disbursements, Costs, Costs Advanced or Total Disbursements."
+      },
+      "AdjustmentsTotal": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total adjustments to the charges, such as discounts, write-offs, courtesy credits or fee reductions. Use a negative number when the document shows a reduction (minus sign or parentheses). Leave empty if there are none."
+      },
+      "TotalDue": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total amount due on this invoice (the current charges payable). Often labelled Total Due, Amount Due, Total Current Charges or Total Invoice. Do not use a prior balance or balance forward."
+      },
+      "Currency": {
+        "type": "string",
+        "method": "generate",
+        "description": "Three-letter ISO 4217 currency code of the invoice amounts (for example USD, CAD, GBP, EUR). Infer it from currency symbols or wording; use USD only if the invoice shows a dollar sign and nothing indicates another dollar currency."
+      },
+      "TimeEntries": {
+        "type": "array",
+        "method": "generate",
+        "description": "Fee time entries: one row per timekeeper time record in the fee detail table. The table is often titled Professional Services, Fees, Time Detail, Timekeeper Detail or Services Rendered. Include every row on every page; do not include expense rows or the timekeeper summary rows.",
+        "items": {
+          "type": "object",
+          "method": "generate",
+          "properties": {
+            "Date": {
+              "type": "date",
+              "method": "extract",
+              "description": "Date the work was performed, as shown on the time entry row."
+            },
+            "TimekeeperAsBilled": {
+              "type": "string",
+              "method": "extract",
+              "description": "The timekeeper (lawyer, paralegal) who did the work, exactly as shown on the row: name, or initials if only initials are shown."
+            },
+            "TitleAsBilled": {
+              "type": "string",
+              "method": "extract",
+              "description": "The timekeeper's title or classification as billed on the row (for example Partner, Associate, Paralegal) or the firm's classification code if only a code is shown. Leave empty if the row shows none."
+            },
+            "Hours": {
+              "type": "number",
+              "method": "extract",
+              "description": "Hours billed for this time entry (decimal hours as printed)."
+            },
+            "Rate": {
+              "type": "number",
+              "method": "extract",
+              "description": "Hourly rate applied to this time entry."
+            },
+            "Amount": {
+              "type": "number",
+              "method": "extract",
+              "description": "Fee amount for this time entry (hours times rate, as printed)."
+            },
+            "Narrative": {
+              "type": "string",
+              "method": "extract",
+              "description": "The full description of the work performed on this time entry. Keep the complete text even when it wraps across lines or pages."
+            },
+            "TaskCodeAsBilled": {
+              "type": "string",
+              "method": "extract",
+              "description": "The firm's task or phase code on this row exactly as billed (for example L110, B210). Leave empty if the row shows none."
+            },
+            "ActivityCodeAsBilled": {
+              "type": "string",
+              "method": "extract",
+              "description": "The firm's activity code on this row exactly as billed (for example A101, A104). Leave empty if the row shows none."
+            },
+            "ActivityCodeClassified": {
+              "type": "string",
+              "method": "classify",
+              "description": "The UTBMS activity code that best describes the work in this time entry's narrative, chosen from the list even when the row prints no activity code.",
+              "enum": ["A101", "A102", "A103", "A104", "A105", "A106", "A107", "A108", "A109", "A110", "A111", "A112"],
+              "enumDescriptions": {
+                "A101": "Plan and prepare for",
+                "A102": "Research",
+                "A103": "Draft/Revise",
+                "A104": "Review/Analyze",
+                "A105": "Communicate (within legal team)",
+                "A106": "Communicate (with client)",
+                "A107": "Communicate (opponents/other outside counsel)",
+                "A108": "Communicate (other external)",
+                "A109": "Appear For/Attend",
+                "A110": "Manage Data/Files/Documentation",
+                "A111": "Other",
+                "A112": "Billable Travel Time"
+              }
+            }
+          }
+        }
+      },
+      "Expenses": {
+        "type": "array",
+        "method": "generate",
+        "description": "Expense rows: one row per expense, cost or disbursement in the expense detail table. The table is often titled Expenses, Disbursements, Costs, Costs Advanced or Expense Detail. Include every row on every page; do not include fee time entries.",
+        "items": {
+          "type": "object",
+          "method": "generate",
+          "properties": {
+            "Date": {
+              "type": "date",
+              "method": "extract",
+              "description": "Date the expense was incurred, as shown on the row."
+            },
+            "Description": {
+              "type": "string",
+              "method": "extract",
+              "description": "Description of the expense exactly as shown on the row."
+            },
+            "Quantity": {
+              "type": "number",
+              "method": "extract",
+              "description": "Quantity or number of units (for example pages, miles). Leave empty if the row shows none."
+            },
+            "UnitCost": {
+              "type": "number",
+              "method": "extract",
+              "description": "Cost per unit as printed. Leave empty if the row shows none."
+            },
+            "Amount": {
+              "type": "number",
+              "method": "extract",
+              "description": "Total amount charged for this expense row."
+            },
+            "ExpenseCodeAsBilled": {
+              "type": "string",
+              "method": "extract",
+              "description": "The firm's expense code on this row exactly as billed (for example E101, E107). Leave empty if the row shows none."
+            }
+          }
+        }
+      },
+      "TimekeeperSummary": {
+        "type": "array",
+        "method": "generate",
+        "description": "Timekeeper summary: one row per timekeeper in the summary table that totals hours and fees by person, often titled Timekeeper Summary, Summary of Fees by Timekeeper, Attorney and Paralegal Summary or Professional Summary. Do not include the individual time entries. Leave the array empty if the invoice has no such summary.",
+        "items": {
+          "type": "object",
+          "method": "generate",
+          "properties": {
+            "Name": {
+              "type": "string",
+              "method": "extract",
+              "description": "Timekeeper name exactly as shown in the summary row."
+            },
+            "Title": {
+              "type": "string",
+              "method": "extract",
+              "description": "Timekeeper title or classification as shown in the summary row. Leave empty if none."
+            },
+            "Hours": {
+              "type": "number",
+              "method": "extract",
+              "description": "Total hours billed by this timekeeper, as shown in the summary row."
+            },
+            "Rate": {
+              "type": "number",
+              "method": "extract",
+              "description": "Hourly rate shown for this timekeeper in the summary row. Leave empty if none."
+            },
+            "Amount": {
+              "type": "number",
+              "method": "extract",
+              "description": "Total fees billed for this timekeeper, as shown in the summary row."
+            }
+          }
+        }
+      }
+    }
+  }
+}

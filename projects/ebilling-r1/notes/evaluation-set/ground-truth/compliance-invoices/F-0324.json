@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0324",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0324","generator_id":"gen_eval_set.py@1 F-0324","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0324.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Kestrel & Ambrose LLP","firm_invoice_number":"INV-2025-64152","invoice_date":"2026-02-03","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"51000-0027","po_number":"PO-4500408","fees_total":2214.5,"expenses_total":564.45,"adjustments_total":0.0,"total_due":2778.95,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Delacroix","title":"Associate","rate":215.0,"billed_as":"Delacroix, A."},{"name":"Jordan Pemberton","title":"Associate","rate":185.0,"billed_as":"Pemberton, J."},{"name":"Naomi Rosenthal","title":"Paralegal","rate":120.0,"billed_as":"Rosenthal, N."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-05","timekeeper":"Delacroix, A.","timekeeper_name":"Aisha Delacroix","timekeeper_title":"Associate","title":"Associate","hours":2.8,"rate":215.0,"amount":602.0,"narrative":"Review opposing brief in response to answer and affirmative defenses","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-12","timekeeper":"Rosenthal, N.","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.3,"rate":120.0,"amount":36.0,"narrative":"Prepare production set and cover correspondence for service on Quarry Lane Partners","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-16","timekeeper":"Pemberton, J.","timekeeper_name":"Jordan Pemberton","timekeeper_title":"Associate","title":"Associate","hours":1.4,"rate":185.0,"amount":259.0,"narrative":"Prepare production set and cover correspondence for service on Pacifica Telecom","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-16","timekeeper":"Rosenthal, N.","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.5,"rate":120.0,"amount":60.0,"narrative":"Prepare responses and objections to reply brief","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-20","timekeeper":"Delacroix, A.","timekeeper_name":"Aisha Delacroix","timekeeper_title":"Associate","title":"Associate","hours":1.4,"rate":215.0,"amount":301.0,"narrative":"Research case law supporting exhibit list","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-26","timekeeper":"Pemberton, J.","timekeeper_name":"Jordan Pemberton","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":185.0,"amount":148.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-29","timekeeper":"Delacroix, A.","timekeeper_name":"Aisha Delacroix","timekeeper_title":"Associate","title":"Associate","hours":2.9,"rate":215.0,"amount":623.5,"narrative":"Update document review protocol and coding panel for the employment claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-29","timekeeper":"Pemberton, J.","timekeeper_name":"Jordan Pemberton","timekeeper_title":"Associate","title":"Associate","hours":1.0,"rate":185.0,"amount":185.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-01-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":874.0,"rate":0.1,"amount":87.4,"narrative":"Photocopies - 874 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-01-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":99.92,"amount":99.92,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-01-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":235.38,"amount":235.38,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-01-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":47.25,"amount":141.75,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["103 Federal Plaza","Chicago","Tax ID 63-1395010"],"template":"T06","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-12-12","matter_close":"2026-05-01","matter_budget":36115.0,"approved_timekeepers":["Aisha Delacroix","Imani Wickham","Naomi Rosenthal","Tomas Thornbury","Jordan Pemberton","Nadia Quillen"],"invoice_received_date":"2026-02-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

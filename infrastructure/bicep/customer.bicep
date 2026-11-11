@@ -218,9 +218,18 @@ var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
 
+// Containers the stamp UAMI is granted Storage Blob Data Contributor on, each at container scope
+// (owner 2026-10-21, ebilling-r1 re-plan Q5: no account-scope data role). Inventory in
+// projects/ebilling-r1/notes/091-storage-provisioning.md §2: the BFF's only blob consumer today is
+// SessionFileBlobStore (+ the H13 keyless probe), on SessionFileStore:ContainerName, default
+// 'ai-chunks'. A new BFF blob consumer adds its container here, or its calls fail 403.
+var bffBlobContainerNames = ['ai-chunks']
+
+// The granted containers always exist, even if a caller overrides storageContainers without them.
 // When messaging is enabled for the boundary, ensure the dead-letter container exists in the
 // customer Storage account (reuse — §11 default-to-reuse; no separate storage account).
-var effectiveStorageContainers = deployAcsMessaging ? union(storageContainers, [acsDeadLetterContainerName]) : storageContainers
+var baseStorageContainers = union(storageContainers, bffBlobContainerNames)
+var effectiveStorageContainers = deployAcsMessaging ? union(baseStorageContainers, [acsDeadLetterContainerName]) : baseStorageContainers
 
 // ============================================================================
 // RESOURCE GROUP
@@ -247,6 +256,22 @@ module uami 'modules/uami.bicep' = {
   name: 'uami-${baseName}'
   params: {
     name: 'mi-spaarke-${customerId}-${environmentName}'
+    location: location
+    tags: tags
+  }
+}
+
+// Ontology writer identity (task 266 / #2605, ontology FR-21). The BFF's SignalWriter and DecisionRecordWriter
+// authenticate ONLY as this identity (Ontology__Writer__ManagedIdentityClientId, written by H4b from this module's
+// clientId); without it they fail closed and no Signal or Decision Record is ever written on the stamp. It is a
+// SEPARATE, least-privileged identity, never the stamp UAMI above (which is System Administrator in Dataverse):
+// it holds no Azure role and no Graph role (H13 T3), and in Dataverse only what H7b S24 grants. Attached to the
+// BFF site and its staging slot next to the stamp UAMI; keyVaultReferenceIdentity stays the stamp UAMI.
+module uamiOntologyWriter 'modules/uami.bicep' = {
+  scope: rg
+  name: 'uami-ontology-writer-${baseName}'
+  params: {
+    name: 'mi-spaarke-${customerId}-${environmentName}-ontology-writer'
     location: location
     tags: tags
   }
@@ -317,15 +342,16 @@ module storage 'modules/storage-account.bicep' = {
     containers: effectiveStorageContainers
     enableTestDocumentLifecycle: false
     // G-8 Batch 1 defect #13: grant the per-customer UAMI Storage Blob Data
-    // Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe) on this account. The
-    // invocation previously passed neither principal param, so the module's
-    // RBAC blocks never fired and blob access relied solely on the KV
-    // account-key fallback. Same T5-stable UAMI pattern as openAi/aiSearch/
-    // docIntelligence below.
+    // Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe). Same T5-stable UAMI
+    // pattern as openAi/aiSearch/docIntelligence below. Owner 2026-10-21
+    // (ebilling-r1 re-plan Q5): CONTAINER scope only, on bffBlobContainerNames —
+    // never on the account.
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    userAssignedIdentityContainerNames: bffBlobContainerNames
     // Keyless (owner D13, task 244): no shared-key access. Any caller uses the blob endpoint with an
-    // identity — the stamp UAMI holds Storage Blob Data Contributor (above); Event Grid dead-letters
-    // with its system topic's identity (acs-communication.bicep).
+    // identity — the stamp UAMI holds Storage Blob Data Contributor on its containers (above); Event
+    // Grid dead-letters with its system topic's identity, granted on the dead-letter container only
+    // (acs-communication.bicep).
     disableSharedKeyAccess: true
     tags: tags
   }
@@ -605,6 +631,7 @@ module bffApi 'modules/app-service.bicep' = {
     appServicePlanId: appServicePlan.outputs.planId
     location: location
     userAssignedIdentityResourceId: uami.outputs.id
+    additionalUserAssignedIdentityResourceIds: [uamiOntologyWriter.outputs.id]
     // G-8 Batch 1 defect #14: this invocation previously passed ZERO appSettings
     // — the Model 2 BFF booted with no config and no AZURE_CLIENT_ID UAMI pin,
     // so DefaultAzureCredential could not resolve the UAMI and the H9 health
@@ -696,6 +723,7 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
     location: location
     appServicePlanId: appServicePlan.outputs.planId
     userAssignedIdentityResourceId: uami.outputs.id
+    additionalUserAssignedIdentityResourceIds: [uamiOntologyWriter.outputs.id]
     tags: tags
   }
 }
@@ -916,6 +944,11 @@ output signalrSkuDeployed string = signalr.?outputs.signalrSku ?? ''
 output userAssignedIdentityResourceId string = uami.outputs.id
 output userAssignedIdentityObjectId string = uami.outputs.principalId
 output userAssignedIdentityClientId string = uami.outputs.clientId
+
+// Ontology writer UAMI (task 266 / #2605). H2a captures the client id; H4b writes it to both slots.
+output ontologyWriterIdentityResourceId string = uamiOntologyWriter.outputs.id
+output ontologyWriterIdentityObjectId string = uamiOntologyWriter.outputs.principalId
+output ontologyWriterIdentityClientId string = uamiOntologyWriter.outputs.clientId
 
 // --- App Service (BFF) — task 127 / Phase C. Output names are LOAD-BEARING: ArmDeploymentRunner.MapOutputs
 // (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---

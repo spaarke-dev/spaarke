@@ -746,10 +746,10 @@ public class CosmosProvisioningSecretGuardTests
     /// These MUST be properties, not fields — the guard scans <see cref="Type.GetProperties()"/>,
     /// so field-shaped samples would make every control pass vacuously.
     /// </summary>
-    private sealed class SampleKvReference     { public string? SecretName { get; set; } public string? KeyVaultName { get; set; } }
-    private sealed class SampleSecretCarrier   { public string? SecretName { get; set; } public string? Value { get; set; } }
+    private sealed class SampleKvReference { public string? SecretName { get; set; } public string? KeyVaultName { get; set; } }
+    private sealed class SampleSecretCarrier { public string? SecretName { get; set; } public string? Value { get; set; } }
     private sealed class SampleCleartextSecret { public string? ClientSecret { get; set; } }
-    private sealed class SampleBenignValueBag  { public string? Value { get; set; } public string? DisplayName { get; set; } }
+    private sealed class SampleBenignValueBag { public string? Value { get; set; } public string? DisplayName { get; set; } }
 
     [Fact(DisplayName = "FR-27 negative control: a pure secret REFERENCE (SecretName/KeyVaultName) is not an offender")]
     public void SecretReferenceSuffix_ExemptsPointerShapes()

@@ -322,7 +322,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Compose/ComposeService.cs:1515                   ReplaceFileContentAsUserAsync       CLIENT
     //   Services/DocumentCheckoutService.cs :: DeleteAsync (best-effort)  DeleteFileAsync          record
     //   Services/DocumentCheckoutService.cs :: DeleteFileOrRefuseAsync    DeleteFileAsync          record  <-- task 032
-    //   Services/Email/EmailAttachmentProcessor.cs:232            UploadSmallAsync                    DEAD
+    //   (Services/Email/EmailAttachmentProcessor.cs:232           — SINK DELETED, field-mapping-server-write-path-r1: was DEAD)
     //   Services/Office/OfficeStorageUploader.cs:54               UploadSmallAsync                    CLIENT  <-- NEW
     //   Services/Office/OfficeStorageUploader.cs:86               DeleteFileAsync                     record
     //   (Services/Workspace/MatterPreFillService.cs:334           — SINK RETIRED 2026-10-06, task 227f: in-memory only)
@@ -912,6 +912,39 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "correct source and a missing value THROWS rather than defaulting (ADR-003; ADR-045). This is "
             + "the one config read the model blesses; the others in this section are the stamp default, not archive."),
 
+        // ebilling-r1 task 092 deleted InvoiceSubmissionService's UploadSmallAsync and DeleteFileAsync sites (task 044): the submitted
+        // invoice PDF is staged in the Finance file store (a Stored File, procedure-and-file-model 9.1), never an SPE document.
+
+        new SinkSite("Services/Finance/RateCardImportService.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedConfig, "",
+            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
+            "ebilling-r1 task 078 (FR-29): the imported rate card workbook is stored in the internal-only Procedure Library "
+            + "container, whose drive id is read from FinanceOptions on the server and never from the request. No owning record "
+            + "exists at the moment of the write (the document row is created unlinked, DEF-015), so configuration is the only "
+            + "source; a missing value refuses the import with 503 before anything is written (ADR-003; ADR-028)."),
+
+        new SinkSite("Services/Finance/RateCardImportService.cs", "DeleteFileAsync", 1,
+            Provenance.ServerDerivedConfig, "",
+            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
+            "ebilling-r1 task 078 (FR-29): compensation only. It deletes the workbook this same call uploaded (the item id is the "
+            + "upload result, never client input) from the same server-configured Procedure Library drive when a later write in the "
+            + "import fails, so a failed import leaves no file behind (ADR-003; ADR-028)."),
+
+        new SinkSite("Services/Finance/RuleSetService.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedConfig, "",
+            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
+            "ebilling-r1 task 076 (FR-28): the source document of a rule set (guideline, rate card or internal procedure) is stored in "
+            + "the internal-only Procedure Library container, whose drive id is read from FinanceOptions on the server and never from "
+            + "the request. No owning record exists at the moment of the write (the document row is created unlinked, DEF-015), so "
+            + "configuration is the only source; a missing value refuses the create with 503 before anything is written (ADR-003; ADR-028)."),
+
+        new SinkSite("Services/Finance/RuleSetService.cs", "DeleteFileAsync", 1,
+            Provenance.ServerDerivedConfig, "",
+            "_finance.CurrentValue.ProcedureLibraryContainerId (Finance:ProcedureLibraryContainerId)",
+            "ebilling-r1 task 076 (FR-28): compensation only. It deletes the source document this same call uploaded (the item id is "
+            + "the upload result, never client input) from the same server-configured Procedure Library drive when a later write in the "
+            + "create fails, so a failed create leaves no file behind (ADR-003; ADR-028)."),
+
         new SinkSite("Api/Ai/ChatWordExportEndpoints.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
             "EmailProcessing:DefaultContainerId (task 227f retired the staging key read first)",
@@ -962,18 +995,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "communication id folded into a SANITIZED filename, so it can no longer mint folders."),
 
         // ---------------------------------------------------------------------------------------------
-        // Dead — expected to be deleted, not classified forever.
+        // Dead — expected to be deleted, not classified forever. None today: the last entry
+        // (Services/Email/EmailAttachmentProcessor.cs, its uncalled ProcessAttachmentsAsync upload) was
+        // deleted with that method by field-mapping-server-write-path-r1 (tasks 030b/034 cleanup).
         // ---------------------------------------------------------------------------------------------
-        new SinkSite("Services/Email/EmailAttachmentProcessor.cs", "UploadSmallAsync", 1,
-            Provenance.Dead, "083 (delete-rather-than-convert)",
-            "request.DriveId on ProcessAttachmentsRequest",
-            "EVIDENCE OF DEADNESS: IEmailAttachmentProcessor IS resolved in production, but only "
-            + "ShouldFilterAttachment is ever called (IncomingCommunicationProcessor.cs:901). "
-            + "ProcessAttachmentsAsync — the sole path to this sink, via the private "
-            + "ProcessSingleAttachmentAsync — has zero production callers; the inbound pipeline does its own "
-            + "upload through the task-075 resolver instead. A partially-live service with a dead write path "
-            + "is the hardest deadness to see, which is why the evidence is written down (ADR-003; "
-            + "ADR-045)."),
     };
 
     // =================================================================================================

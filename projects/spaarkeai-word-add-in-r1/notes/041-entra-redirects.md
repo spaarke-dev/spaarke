@@ -100,12 +100,15 @@ For a new add-in SWA at `<swa-host>`, register on that environment's add-in app 
 platform, exactly:
 
 - `brk-multihub://<swa-host>`
+- `brk-9199bf20-a13f-4107-85dc-02114787ef48://<swa-host>` (added 2026-11-03: the broker scheme Office asks for on
+  the web and in new Outlook, row 4 above on dev; without it the bridge fails with AADSTS700046)
 - `https://<swa-host>/auth-callback.html`
 
-Add only; never replace an existing entry. Then read the registration back and confirm both are present
+Add only; never replace an existing entry. Then read the registration back and confirm all are present
 alongside everything that was there before. `scripts/Register-EntraAppRegistrations.ps1` and
-`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 carry the operator procedure. The add-in derives the
-broker host from `window.location`, so **no code change is needed per environment** — only the registration.
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 carry the operator procedure. **No code change is needed
+per environment** — only the registration. Since 2026-11-03 the add-in's MSAL config carries only the https redirect
+(the Office host supplies the broker redirect over the bridge), and a broker failure falls back to the popup.
 
 ## 7. Deploy-workflow trigger — DECISION: `workflow_dispatch`, no file change
 

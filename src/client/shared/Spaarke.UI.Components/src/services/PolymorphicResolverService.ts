@@ -789,6 +789,31 @@ export async function applyResolverFields(
   };
 }
 
+/**
+ * For the UPDATE of a SAVED host: null `sprk_regardingrecordnumber` when {@link applyResolverFields} left it out.
+ *
+ * `applyResolverFields` skips the number when the new target has none (no catalog number field, or an empty value) —
+ * right for a CREATE, where there is nothing to overwrite, but on a re-regard it leaves the PREVIOUS target's number
+ * beside the new target's id, name and url (a matter's number on a contact). This nulls it so no number outlives the
+ * pair it described.
+ *
+ * Gated to hosts that carry the pair: the key is added only when the host has the `sprk_regardingrecordtype` lookup,
+ * because writing a column a host lacks makes Dataverse reject the whole update (HTTP 400). The number is the pair's
+ * fifth column, written by {@link applyResolverFields} on any host whose target has one, so the pair's presence is the
+ * signal this module already relies on. A number the payload already carries is never touched.
+ *
+ * @param payload       The assembled update payload (mutated in place).
+ * @param hostNavProps  Nav-props discovered for the host entity (the presence oracle).
+ */
+export function nullRecordNumberWhenTargetHasNone(
+  payload: Record<string, unknown>,
+  hostNavProps: INavPropEntry[]
+): void {
+  if (payload['sprk_regardingrecordnumber'] !== undefined) return;
+  if (!hostNavProps.some(n => n.columnName.toLowerCase() === 'sprk_regardingrecordtype')) return;
+  payload['sprk_regardingrecordnumber'] = null;
+}
+
 // ===========================================================================
 // FR-26 — Core-ancestor derivation (unified-access-control-r2, task 050)
 // ===========================================================================
@@ -947,6 +972,10 @@ export interface IIntermediateRootColumn {
  * - `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_analysis` — the four
  *   `sprk_regarding{core}` columns (the server's `StandardRootColumns()`).
  * - `sprk_invoice`, `sprk_budget` — typed `sprk_project` / `sprk_matter` lookups.
+ * - `sprk_billingevent` (the Invoice Line, ebilling-r1 task 026, D-94) — the
+ *   line's OWN core lookups only (typed `sprk_project` / `sprk_matter` and
+ *   `sprk_regardingworkassignment`), never its `sprk_invoice` (D-75). The server
+ *   refuses a line that names more than one; this preview derives what it names.
  * - `sprk_document` — the project / matter / work assignment links of the
  *   canonical document link vocabulary (`Spaarke.Dataverse.DocumentLinkFields`):
  *   the typed column and its `sprk_related*` twin. `sprk_relatedservicerequest`
@@ -989,6 +1018,10 @@ export const INTERMEDIATE_ROOT_COLUMNS: ReadonlyArray<IIntermediateRootColumn> =
   { intermediate: 'sprk_memo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
   { intermediate: 'sprk_invoice', column: 'sprk_project', rootEntity: 'sprk_project' },
   { intermediate: 'sprk_invoice', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_invoice', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_project', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
   { intermediate: 'sprk_document', column: 'sprk_matter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_relatedmatter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_project', rootEntity: 'sprk_project' },

@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0238",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0238","generator_id":"gen_eval_set.py@1 F-0238","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0238.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Holloway Whitcombe PC","firm_invoice_number":"LF0051933","invoice_date":"2026-06-02","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"33082-0020","po_number":"PO-4541847","fees_total":4562.5,"expenses_total":18.37,"adjustments_total":0.0,"total_due":4580.87,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Delacroix","title":"Legal Assistant","rate":125.0,"billed_as":"CD"},{"name":"Dalia Sandoval","title":"Associate","rate":395.0,"billed_as":"DS"},{"name":"Daniel Rosenthal","title":"Associate","rate":335.0,"billed_as":"DR"},{"name":"Farah Hargrove","title":"Paralegal","rate":200.0,"billed_as":"FH"},{"name":"Leila Eriksen","title":"Partner","rate":725.0,"billed_as":"LE"},{"name":"Yusuf Voss","title":"Senior Associate","rate":510.0,"billed_as":"YV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-11","timekeeper":"YV","timekeeper_name":"Yusuf Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":510.0,"amount":765.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-11","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":395.0,"amount":987.5,"narrative":"Attend case management conference in the vendor agreement","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-12","timekeeper":"CD","timekeeper_name":"Clara Delacroix","timekeeper_title":"Legal Assistant","title":"LA","hours":0.25,"rate":125.0,"amount":31.25,"narrative":"Update document review protocol and coding panel for the warranty claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-13","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":395.0,"amount":1086.25,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-17","timekeeper":"DR","timekeeper_name":"Daniel Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":335.0,"amount":502.5,"narrative":"Draft settlement term sheet for the construction contract","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-19","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":725.0,"amount":362.5,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-23","timekeeper":"CD","timekeeper_name":"Clara Delacroix","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":235.0,"amount":117.5,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-25","timekeeper":"FH","timekeeper_name":"Farah Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":200.0,"amount":350.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-25","timekeeper":"LE","timekeeper_name":"Leila Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":0.15,"rate":725.0,"amount":108.75,"narrative":"Review expert qualifications and prior testimony for the construction contract","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-06-12","timekeeper":"DR","timekeeper_name":"Daniel Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":335.0,"amount":251.25,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":167.0,"rate":0.11,"amount":18.37,"narrative":"Photocopies - 167 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["96 Pine Street","Minneapolis","Tax ID 83-4993261"],"template":"T19","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-11-09","matter_close":"2026-05-29","matter_budget":43323.0,"approved_timekeepers":["Dalia Sandoval","Daniel Rosenthal","Farah Hargrove","Clara Delacroix","Samuel Galbraith","Leila Eriksen"],"invoice_received_date":"2026-06-03"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[1],"consequence":"Reject"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"line","line_refs":[10],"consequence":"Flag"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

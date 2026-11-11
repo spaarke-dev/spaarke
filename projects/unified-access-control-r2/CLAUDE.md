@@ -135,7 +135,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - **Access changes take effect in minutes:** immediately on save, plus the "Update Access" ribbon, with background jobs ≤5 min as the safety net (R3/R4). The MDA Share/Unshare mirror to children is ≤2 min (round 11).
 - **Child inheritance:**
   - a child under two secure roots gets the INTERSECTION of their sharees (round 11);
-  - invoices follow their matter (round 10 item 11);
+  - invoices follow their ONE core record: matter, project or work assignment (ebilling D-28; refines round 10 item 11's "follow their matter", 2026-11-08);
   - communications inherit the parent's access permission (round 2 Q6).
   - To Do, Event, Communication and Document show their parent's `sprk_accesspermission`, written once in the shared stamp path and kept in step by the reconcile; a parentless child keeps its own value, recorded only, no new enforcement (round 81; owner may revisit).
 - **A child's access always follows its parent, both ways, locked while it has a parent** (round 84; replaces round 6 item 4's "no unsecure cascade"): a filed work assignment / project takes the parent's `sprk_issecure` and `sprk_accesspermission`; To Do / Event / Communication / Document take `sprk_accesspermission`; most restrictive across parents; enforcement uses the parent-derived value (computed from the filing chain, fail closed) until the stored flag catches up; a parentless record keeps its own. **Refined by round 87 (2026-10-09): the parent sets a FLOOR, not an equality.** A child inherits the parent's values; a user may set a child STRICTER by hand (same permissions as today; removing the extra strictness needs F3) but never looser than the parent; when the parent loosens, only INHERITED values follow it down, and values set on the child stay; a re-file never loosens; the lock covers Secure + Access Permission only (people grants and shares stay).
@@ -155,6 +155,11 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - **Upload binding:** an app-uploaded file attaches only for the user the BFF recorded as its uploader (171 hotfix, PR #1353).
 
 **Reconciliation:** `ExternalAccessReconciliationJob` writes on dev since round 79 (2026-10-08, after a 0-change report); it was report-only until then (round 7). R4 deactivates grants whose record is gone (round 71). In any other environment, explain plainly and confirm before setting `ExternalAccess:Reconciliation:WritesEnabled` or `Communication__OwnershipHoldAlertUserIds__0`.
+
+**Record family (round 130, #2362):** the structured family entity (`sprk_securefamily`) is deferred to the roadmap, not built in this project. Binding meanwhile:
+- family membership stays computable from stored data (the primary-parent rule, round 129; one filing root per project, task 195);
+- every ownership write goes through `RecordOwnershipResolver`;
+- new code tests isolation through one shared predicate keyed on the Secure Record BU, never a hard-coded team id, and reads families through field-mapping W7, never raw lookups.
 
 ## 4. Coordination
 
@@ -194,6 +199,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - **the BFF:** `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, from a FRESH short-path worktree of `origin/master`;
   - **web resources:** `scripts/Deploy-WebResourceInline.ps1`, then read back and compare the hash;
   - use `pac.cmd` (the bash `pac` shim does nothing) and run PowerShell scripts from inside `pwsh`.
+  - **While dev runs R3's build (BFF since 2026-10-16 12:59Z `2c2fed38d`; external SPA since 13:13Z, same commit):** never deploy master alone to either one. Message R3 (`spaarke-wt-spa-external-access-platform-49`) first. Deploy a build that contains the live one: run the ancestry check, live build must be an ancestor. For the SPA, dispatch `deploy-external-spa` from R3's branch, never from master, until R3 merges.
 - **Branches:**
   - task and fix work happens in fresh short-path worktrees from `origin/master`;
   - `work/unified-access-control-r2` holds notes and tasks and is merged from master periodically (last 2026-10-07);
@@ -255,6 +261,8 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - Python needs `PYTHONIOENCODING=utf-8`; scratchpad PowerShell stays ASCII under `pwsh`.
 - Count TASK-INDEX by its ASCII tokens (`[open]` `[wip]` `[done]` `[cancelled]` `[deferred]`); every row carries one.
 - Azure.Identity needs `AZURE_TOKEN_CREDENTIALS=dev`; the 034 canary needs `AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`.
+- **Master needs TWO required checks (2026-10-17): `Router` AND `Client lint (type-aware ratchet)`** (`gh api repos/spaarke-dev/spaarke/rules/branches/master`). A merge watcher must wait for every required check, not only Router, or `gh pr merge` fails with "base branch policy prohibits the merge". Client changes must pass `node scripts/quality/client-lint/client-lint.mjs check` (fix new `no-unnecessary-condition` findings; don't suppress them).
+- **Import every PCF/solution with `scripts/Import-SolutionScoped.ps1`, never a bare `pac solution import`.** A bare import leaves the `cc_…/bundle.js` web resources unpublished, so users keep getting the old bundle (2026-10-17: TrackingFieldTrio 1.0.50 stayed on 1.0.47 until a `-PublishOnly` run). Verify by the SERVED bundle's sha256 (`/WebResources/cc_<ns>.<control>/bundle.js`), not `customcontrols.version`.
 
 ## 7. Key documents
 

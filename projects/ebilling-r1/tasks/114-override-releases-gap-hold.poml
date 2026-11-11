@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="ebilling-r1">
+  <metadata>
+    <title>Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-F</phase>
+    <gate>082 (gap finding and hold) and 105 (Override server, in progress) merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which held invoices a privileged Override may release and what its Decision Record carries; .cs changes on an authorization-gated decision path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A scoped extension of 105's existing override path with an exact reference; the privilege check and the record path already exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>082, 105</deps>
+    <tags>bff, api, rules, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the D-24 / D-39 Override of task 105 release an invoice held only because no Procedure version is in force (082's gap finding, notes/procedure-and-file-model.md section 15 answer 3): a recorded human Override with a reason, its Decision Record written through the existing DecisionRecordWriter.WriteBillingDecisionAsync path, for that invoice only, creating no Procedure version and changing nothing for other invoices.</prompt>
+
+  <role>SPAARKE platform developer. Expert in SubmissionOverrideService (105), BillingDecisionRecorder (074) and the billing system findings (D-115, D-125).</role>
+
+  <goal>A privileged caller can override a gap-held internal submission with a reason; the invoice leaves the held set and can be approved; one Decision Record names the override, its reason and the gap it released; every other invoice with the same gap stays held; no Decision Record writer entry point is added.</goal>
+
+  <context>
+    <background>Model 7.1 (gap: blocking internal BILL-SYSTEM-SUBMISSION finding; "No procedure associated with this invoice"; the invoice cannot be approved until a check clears it), 15 answer 3 (an Override can release it). SubmissionOverrideService (Services/Finance/SubmissionOverrideService.cs, remarks :196-238) overrides a held submission (Rejected, reason Blocked, D-101): records override-submission through BillingDecisionRecorder (Services/Finance/BillingDecisionRecorder.cs:123 calls DecisionRecordWriter.WriteBillingDecisionAsync), then sets the submission Accepted / Overridden; blocking findings stay and read as Overridden. DecisionRecordWriter.WriteBillingDecisionAsync is public at Services/Signals/DecisionRecordWriter.cs:1303 (internal overload :1314). 082 defines the gap finding's reason code under BillingRuleCatalogue.SystemPolicyCode.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs; Services/Signals/DecisionRecordWriter.cs; Services/Signals/Billing/BillingSystemFindings.cs (082's gap reason)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/SubmissionOverrideServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 15 answer 3, D-24, D-39">The release is 105's Override and nothing else: the eBilling Override privilege (EbillingOverridePrivilege, fail closed), a mandatory reason, one person, internal-channel submissions only, under 105's per-invoice lock and retry rules. No new route and no new privilege.</constraint>
+    <constraint source="model 15 answer 3, D-100, D-101">The Decision Record goes through BillingDecisionRecorder → DecisionRecordWriter.WriteBillingDecisionAsync with the reason in the record and the released gap (Procedure and work date from the stored gap finding) in its values. No new public member on DecisionRecordWriter and no other writer call (a new entry point would need ontology-r1's owner review and the immutability ArchTest's CreateEntryPoints list).</constraint>
+    <constraint source="model 15 answer 3">For that invoice only: it creates no Procedure Version, no assignment, no override row and no Signal; other invoices held by the same gap stay held. The gap finding stays in the stored findings and reads as Overridden (FR-37, I-5).</constraint>
+    <constraint source="model 7.1">A held submission whose blocking findings include 082's gap finding is overridable exactly like any other blocked submission; an invoice that is not in 105's held set is refused with 105's existing codes.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">No new service or registration; publish-size delta; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 7.1, 15)</file>
+      <file>projects/ebilling-r1/tasks/105-override-server.poml</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Override path" location="src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs">Lock, preflight, record, then state change; copy, do not fork.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 105's notes and 082's notes: how the gap finding enters the held set for the internal channel, and what a 101 correction re-check does with a new gap.</step>
+    <step order="1">Admit the gap finding as an overridable blocking finding; add the gap values to the Decision Record request.</step>
+    <step order="2">Tests (criteria).</step>
+    <step order="3">dotnet build and test; publish-size delta.</step>
+    <step order="4">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="5">Record deviations in projects/ebilling-r1/notes/114-override-releases-gap-hold.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a gap hold can exist on an SPA-channel submission, or on an invoice whose submission is already Accepted (a gap raised by a 101 correction re-check), STOP and raise 🔔 Human Input Required: 105's Override covers only internal held submissions (D-24), and answer 3 does not say how those cases are released.</trigger>
+    <trigger>If recording the gap values needs a change to BillingDecisionRecordRequest or DecisionRecordWriter, STOP and ask ontology-r1.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/SubmissionOverrideServiceTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/114-override-releases-gap-hold.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A privileged override with a reason on an internal submission held only by a gap finding sets it Accepted / Overridden, releases the invoice to approval, and writes exactly one Decision Record through WriteBillingDecisionAsync carrying the reason, the Procedure and the work date of the gap.</criterion>
+    <criterion testable="true">The same override without the privilege, with a privilege-probe fault, or without a reason is refused with 105's codes and writes nothing (negative).</criterion>
+    <criterion testable="true">A second invoice held by the same gap stays held; no Procedure Version, assignment, override row or Signal is created (asserted on the mocked writes).</criterion>
+    <criterion testable="true">The gap finding is still in the stored findings and reads as Overridden.</criterion>
+    <criterion testable="true">The diff adds no public member to DecisionRecordWriter and no call to WriteAsync, WriteGateDecisionAsync or WriteConditionClearedAsync.</criterion>
+    <criterion testable="true">Publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Found while writing this task (not fixed here; ontology-r1 owns the test): DecisionRecordContextImmutabilityTests.CreateEntryPoints (tests/Spaarke.ArchTests/DecisionRecordContextImmutabilityTests.cs:197) lists WriteAsync, WriteGateDecisionAsync and WriteConditionClearedAsync but not WriteBillingDecisionAsync, although that public method creates records through CreateAsync (DecisionRecordWriter.cs:1369). Reported to the main session for filing. OWNER 2026-10-21 (re-plan Q4): an Override releases ANY held invoice, whatever the channel (SPA, internal, Outlook) and whatever raised the hold (including a 101 correction) — the master 'push it through', always recorded by its Decision Record through WriteBillingDecisionAsync. This answers both escalation triggers; the release is not limited to the no-version-in-force hold.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

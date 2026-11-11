@@ -46,6 +46,11 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
 /// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>, drops an external caller's invoice-family hit (an invoice, or a row derived from
+/// one: line, approval, submission, correction, external identifier, Stored File, Signal, Decision Record) whose invoice the
+/// (a') predicate hides. Same shape as the narrowing seam: it reads by id app-only and returns only a hide decision, so it can
+/// only HIDE a row the user's own search returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
@@ -77,6 +82,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     private readonly ISystemUserIdentityResolver _identityResolver;
     /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseSearchDataHandler(
         IDataverseUserClient dataverse,
@@ -84,7 +91,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        AppOnlyDocumentNarrowing narrowDocuments)
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -92,6 +100,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
@@ -282,6 +291,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var droppedHits = 0;
             var hiddenDocumentIds = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
+            var hiddenInvoiceFamilyRows = 0;
             DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
@@ -342,8 +352,28 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                         .ConfigureAwait(false);
                 }
 
+                // ebilling-r1 task 098 ((a')): for an external caller, an invoice-family hit whose invoice the predicate hides
+                // (or cannot decide) is dropped silently. One hide-only app-only call per family table on the page; a fault
+                // throws into the error result below (no data).
+                var hiddenFamily = new Dictionary<string, IReadOnlySet<Guid>>(StringComparer.OrdinalIgnoreCase);
+                var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)).ToList();
+                if (familyHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    foreach (var table in familyHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        hiddenFamily[table.Key] = await _hideInvoiceFamily(
+                            table.Key, table.Select(h => h.RecordId).Distinct().ToList(), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
                 foreach (var (hit, entityName, recordId) in hits)
                 {
+                    if (hiddenFamily.TryGetValue(entityName, out var hiddenRows) && hiddenRows.Contains(recordId))
+                    {
+                        hiddenInvoiceFamilyRows++;
+                        continue;
+                    }
+
                     if (narrowing is not null &&
                         ExternalCallerCommunicationGuard.IsDocumentTable(entityName) &&
                         !narrowing.IsVisible(recordId))
@@ -410,6 +440,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     ExternalCallerCommunicationGuard.DocumentTable,
                     narrowing!.HiddenSummary(hiddenDocumentIds), context.DecisionId);
+            }
+            if (hiddenInvoiceFamilyRows > 0)
+            {
+                // ADR-015: a reason code and a count only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "invoice-family", $"invoice_hidden={hiddenInvoiceFamilyRows}", context.DecisionId);
             }
             if (hiddenDerivedSources.Count > 0)
             {

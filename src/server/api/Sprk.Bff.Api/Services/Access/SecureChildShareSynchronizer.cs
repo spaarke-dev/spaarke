@@ -32,6 +32,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -93,6 +94,26 @@ public sealed record SecureChildShareSyncResult(
 
     /// <summary>Task 158 r1: the isolated parents the inherited mirror was taken from (every one shares each principal).</summary>
     public IReadOnlyList<(string Table, Guid Id)>? InheritedFrom { get; init; }
+
+    /// <summary>
+    /// GitHub #2560: direct shares found on a row of a hard-deny table carrying more than Read (each reported as
+    /// <c>HardDenyRowShareWiderThanRead</c>). Every one is narrowed to Read, or revoked, by the same run; one whose write did
+    /// not keep is found again by the next run.
+    /// </summary>
+    public int HardDenyWiderThanRead { get; init; }
+
+    /// <summary>
+    /// GitHub #2560: Secure-owned rows of a hard-deny table whose own shares could not be read, so whether one carries more
+    /// than Read is not known this run. The next run reads them again.
+    /// </summary>
+    public int HardDenyUnchecked { get; init; }
+
+    /// <summary>
+    /// GitHub #2560: Secure-owned rows of a hard-deny table this run does not mirror (under no secure root, or whose filing
+    /// could not be read) whose Read-only narrowing write or read-back failed. Any one makes the run
+    /// <see cref="SecureChildShareSyncStatus.Incomplete"/>; the next run narrows it again.
+    /// </summary>
+    public int HardDenyNarrowFailed { get; init; }
 
     /// <summary>Children in scope that do not yet match: <see cref="ChildrenNotUpdated"/> + <see cref="ChildrenHeld"/>.</summary>
     public int ChildrenLeftOutOfLine => ChildrenNotUpdated + ChildrenHeld;
@@ -223,14 +244,18 @@ public sealed record SecureRootsAbove(
 /// <remarks>
 /// <para><b>Which rows.</b> Rows owned by the Secure Record Owners team (task 144) of the child tables in
 /// <see cref="SecureChildLineage"/> — the rows task 146 makes secure. A row's secure roots are the Secure-team-owned
-/// project / matter / work-assignment rows reachable upward through its lookups: through Secure-team-owned children, and
+/// project / matter / work-assignment rows reachable upward through its lookups and, on a Signal or Decision Record, the core
+/// record its core record pair names (<see cref="SecureChildLineage.CorePairParent"/>): through Secure-team-owned children, and
 /// through children owned by a USER (a run-as-user, client-created or pre-146 row — looked through, as the ownership
 /// resolver does); never through a child owned by an ordinary team (its owner already decided it is not secure). Children
 /// of non-secure roots are never touched. Roots are never mirrored: a root's own shares are provisioning's and the share
 /// endpoints'.</para>
 /// <para><b>The mirror.</b> For each principal (system user or team) with a direct share on the root: the root's rights
 /// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete and Share,
-/// each only where the root share holds it; never Assign (Share since owner round 91, replacing round 11 item 4). A child under SEVERAL secure
+/// each only where the root share holds it; never Assign (Share since owner round 91, replacing round 11 item 4). A mirrored
+/// share on a hard-deny row (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable"/>)
+/// carries Read only (GitHub #2560; <see cref="RecordShareLevels.ChildMirrorMask"/> takes the child's table), so a wider
+/// share already on such a row is narrowed to Read like any other wider share. A child under SEVERAL secure
 /// roots gets the INTERSECTION: a principal must be shared on every one of them, at the lowest rights (owner round 11
 /// item 4, fail closed). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
 /// missing one is granted. Inherited-only POA rows (mask 0) are neither read as shares nor touched.</para>
@@ -332,14 +357,45 @@ public sealed class SecureChildShareSynchronizer
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (review pass 3): this environment's Secure Record owner team as
-    /// <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/> answers it — the
-    /// id, or none (no Secure Record business unit or team) with a refusal when it is ambiguous — for a caller that must
-    /// tell "not the Secure team" from "the Secure team cannot be told" (Repair's mapping-source gate fails closed on the
-    /// latter). <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
+    /// field-mapping-server-write-path-r1 task 016 (review pass 3), task 022 fix round 6: this environment's Secure Record
+    /// owner team for the mapping-source copy gate (<see cref="ResolveSecureOwnerTeamForCopyGateAsync"/>), for a caller that
+    /// must tell "not the Secure team" from "the Secure team cannot be told" (the gate fails closed on the latter).
+    /// <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
     /// </summary>
     internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
-        ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct);
+        ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct);
+
+    /// <summary>The refusal <see cref="ResolveSecureOwnerTeamForCopyGateAsync"/> gives when the Secure Record business unit
+    /// exists and holds no Secure Record owner team with the configured name.</summary>
+    internal const string SecureOwnerTeamNotFoundRefusal =
+        "the Secure Record business unit holds no Secure Record owner team with the configured name";
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022 fix round 6: the Secure Record owner team as the mapping-source copy gate
+    /// needs it, with "not set up" told apart from "set up but not found" — the rule the ownership resolver applies
+    /// (<c>RecordOwnershipResolver</c>: no Secure Record business unit means no secure owner; a business unit whose named
+    /// team is missing or not unique is a refusal):
+    /// <list type="bullet">
+    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/>
+    /// answers it;</item>
+    /// <item><c>(null, null)</c>: this environment has no Secure Record business unit, so no team can own a secure record;</item>
+    /// <item><c>(null, refusal)</c>: the business unit is ambiguous, or the named team is ambiguous, or the business unit
+    /// exists and holds no such team (<see cref="SecureOwnerTeamNotFoundRefusal"/>).</item>
+    /// </list>
+    /// A Dataverse fault propagates. The business unit is read a second time only when no team was found.
+    /// </summary>
+    internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamForCopyGateAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (team.TeamId is not null || team.Refusal is not null)
+            return team;
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return (null, "more than one business unit carries the Secure Record name");
+        return secureBu.Id is null ? (null, null) : (null, SecureOwnerTeamNotFoundRefusal);
+    }
 
     /// <summary>
     /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
@@ -540,8 +596,9 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>
-    /// Task 158 r1 (owner round 30): ONE parent's mirror — its direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>
-    /// — when it is ISOLATED (owned by the named Secure Record owner team). <see cref="ParentMirrorAnswer.Mirror"/> is
+    /// Task 158 r1 (owner round 30): ONE parent's mirror — its direct sharees at
+    /// <see cref="RecordShareLevels.InheritedRootMirrorMask"/>, what a secure ROOT filed under it inherits — when it is ISOLATED
+    /// (owned by the named Secure Record owner team). <see cref="ParentMirrorAnswer.Mirror"/> is
     /// <c>null</c> when the parent is not isolated. Task 158 r1c-v2 (round 39 item 1 — interpretation xiii reversed): a
     /// parent that reads NOT secure (its flag false: unsecured) or does not exist any more PASSES NOTHING ON
     /// (<see cref="ParentMirrorAnswer.PassesNothingOn"/>): every inherited share it passed on is ended by the reverse rule. A
@@ -579,7 +636,7 @@ public sealed class SecureChildShareSynchronizer
             return new ParentMirrorAnswer(
                 Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
                     .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
-                    .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                    .Select(p => (p.Key, Mask: RecordShareLevels.InheritedRootMirrorMask(p.Value)))
                     .Where(p => RecordShareLevels.CanRead(p.Mask))
                     .ToDictionary(p => p.Key, p => p.Mask),
                 Unreadable: false);
@@ -612,7 +669,22 @@ public sealed class SecureChildShareSynchronizer
     /// <see cref="SecureChildShareSyncStatus.Incomplete"/>. Removing access is never the unsafe direction, so nothing is
     /// re-checked before a revoke.</para>
     /// </remarks>
-    public async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    public Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: false, ct);
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): takes the mirrored shares off ONE child a pass that may release HOLDS in isolation (the
+    /// rule gives it an ordinary team, but <c>SecureChildReconciler</c> keeps it on the Secure Record owner team: K3, F1-d).
+    /// The record that isolated it no longer makes it secure, so its sharees lose access through it, exactly as a released
+    /// child's do (<see cref="RemoveMirrorAsync(string, Guid, CancellationToken)"/>); unlike a released child it stays on the
+    /// Secure team, readable by nobody until a Full Access holder or the next pass places it — an under-share, never an
+    /// over-share. A child no longer owned by the Secure team is not touched (another write placed it; the next pass decides it).
+    /// </summary>
+    public Task<SecureChildMirrorRemoval> RemoveHeldMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: true, ct);
+
+    private async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(
+        string childLogicalName, Guid childId, bool heldInIsolation, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         if (!SecureChildLineage.Children.TryGetValue(childLogicalName, out var table))
@@ -637,7 +709,16 @@ public sealed class SecureChildShareSynchronizer
             var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
             if (team.Refusal is { } refusal)
                 return new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Failed, 0, refusal);
-            if (team.TeamId is { } secureTeam && owningTeam == secureTeam)
+            if (heldInIsolation && (team.TeamId is not { } heldBy || owningTeam != heldBy))
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-SHARES] {Child} was held in isolation but is no longer owned by the Secure Record owner team; " +
+                    "its shares are NOT removed here (the next pass decides it).", child);
+                return new SecureChildMirrorRemoval(
+                    SecureChildShareSyncStatus.Incomplete, 0, $"{child} is no longer owned by the Secure Record owner team");
+            }
+
+            if (!heldInIsolation && team.TeamId is { } secureTeam && owningTeam == secureTeam)
             {
                 _logger.LogWarning(
                     "[SECURE-CHILD-SHARES] {Child} is still owned by the Secure Record owner team, so it is still isolated: its " +
@@ -711,8 +792,9 @@ public sealed class SecureChildShareSynchronizer
     /// the same one the mirror uses (<c>LineageOfAsync</c>): through Secure-team-owned and user-owned rows, never through an
     /// ordinary team's, at most <see cref="MaxLineageDepth"/> levels. That is the ownership resolver's own rule, so a row is
     /// placed under a root here exactly when the resolver would give it the Secure team. The rows' own owners do not matter.
-    /// Each row is passed as read, carrying its lineage lookups (<see cref="SecureChildLineage.Table.Lookups"/>) and owner
-    /// columns. A lookup the caller did not read counts as absent, so it can only leave a record out.
+    /// Each row is passed as read, carrying its lineage columns (<see cref="SecureChildLineage.Table.LineageColumns"/>: its
+    /// lookups and, on a Signal or Decision Record, its core record pair) and owner columns. A column the caller did not read
+    /// counts as absent, so it can only leave a record out.
     /// </summary>
     /// <remarks>
     /// The secure-child reconciliation job's recent-changes pass calls this (task 147). That pass is the L4 net for children
@@ -825,8 +907,10 @@ public sealed class SecureChildShareSynchronizer
     /// <summary>
     /// unified-access-control-r2 task 158 (owner round 6: "The parent's sharees can see it") — gives a secure work
     /// assignment or project that is FILED UNDER secure matters / projects (<paramref name="secureParents"/>) the internal
-    /// sharees of those parents, by this class's mirror rule: each parent sharee's rights restricted to
-    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (Share only where the root holds it, round 91; never Assign), the INTERSECTION when there are two
+    /// sharees of those parents, by this class's mirror rule for a ROOT (<see cref="RecordShareLevels.InheritedRootMirrorMask"/>):
+    /// each parent sharee's rights restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> (Share only where the root
+    /// holds it, round 91; never Assign; a root is never a hard-deny table, so the Read-only rule for hard-deny child rows,
+    /// GitHub #2560, does not apply), the INTERSECTION when there are two
     /// parents (owner round 11 item 4), a user the No Access list walls off the record or any parent dropped, an unverifiable
     /// wall held. Then the record's own children are brought into line with its shares (<see cref="SyncRootAsync"/>).
     /// </summary>
@@ -921,7 +1005,7 @@ public sealed class SecureChildShareSynchronizer
             {
                 var mirror = Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
                     .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
-                    .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                    .Select(p => (p.Key, Mask: RecordShareLevels.InheritedRootMirrorMask(p.Value)))
                     .Where(p => RecordShareLevels.CanRead(p.Mask))
                     .ToDictionary(p => p.Key, p => p.Mask);
 
@@ -1038,7 +1122,7 @@ public sealed class SecureChildShareSynchronizer
                 if (current == 0)
                 {
                     await _recordShare.GrantAccessAsync(
-                        entitySet, root.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, ct).ConfigureAwait(false);
+                        entitySet, root.Id, principal, RecordShareLevels.ChildMirrorRights(root.Table, mask).AccessRightsCsv, ct).ConfigureAwait(false);
                     granted++;
                 }
                 else
@@ -1265,7 +1349,7 @@ public sealed class SecureChildShareSynchronizer
     internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
     {
-        var secureBu = await ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
         if (secureBu.Id is not { } secureBuId)
@@ -1283,53 +1367,107 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>
-    /// WHICH business unit is the Secure Record BU, by id: the one named by <c>SecureRecord:BusinessUnitName</c>, read with
-    /// TOP 2 — <c>RecordOwnershipResolver.ResolveSecureBusinessUnitAsync</c>'s rule. Two matches are <c>Ambiguous</c> (the
-    /// caller refuses); none means this environment has no Secure Record BU, so no business unit is it. A Dataverse fault
-    /// propagates. Step 1 of <see cref="ResolveSecureOwnerTeamAsync"/>, and on its own the guard of
-    /// <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/> (UAC task 183), which refuses a row or a team in that
-    /// business unit — ANY team there, so the guard holds once each secure family has its own owner team (task 178).
-    /// </summary>
-    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
-    {
-        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
-        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
-        if (businessUnits.Count > 1)
-            return (null, true);
-        return businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty ? (null, false) : (businessUnits[0].Id, false);
-    }
-
-    /// <summary>
     /// <c>true</c> when the team's OWN row proves it is not the Secure Record owner team: another name, its business
     /// unit's default team, or not an Owner team — none of which <see cref="ResolveSecureOwnerTeamAsync"/> can ever
-    /// select. <c>false</c> means "it could be" (the full resolution decides), including a team row that is not found. A
-    /// Dataverse fault propagates.
+    /// select. <c>false</c> means "it could be" (the full resolution decides). Never throws for a Dataverse fault: a fault
+    /// answers <c>false</c>; cancellation of <paramref name="ct"/> propagates.
     /// </summary>
-    /// <remarks>Names compare trimmed and case-insensitively, as Dataverse's own <c>name</c> equality does. Any doubt
-    /// answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</remarks>
+    /// <remarks>
+    /// <para>The name is matched by Dataverse, never in code: the team is read with <c>name eq</c> the configured name, the
+    /// same condition <see cref="ResolveSecureOwnerTeamAsync"/> uses, so whatever Dataverse's collation treats as equal (case,
+    /// accents, trailing spaces) can never answer "another name".</para>
+    /// <para>When that read finds no row, "another name" is proven only by a configured team name that names a team:</para>
+    /// <list type="bullet">
+    /// <item>Secure settings PRESENT (<see cref="SecureSettingsConfigured"/>): <c>true</c> only when a non-default Owner team
+    /// carries the configured team name (the Secure team must carry it). When no team does, the answer is <c>false</c>: a wrong
+    /// team setting must never rule the real Secure team out. The business-unit setting does not bear on the name, and is not
+    /// read here (an ordinary owner is ruled out even while the Secure unit is unresolved, task 149 F7); a unit setting that
+    /// finds nothing is <see cref="IsSecureOwnerTeamAsync"/>'s "unknown".</item>
+    /// <item>Secure settings ABSENT (the compiled defaults apply): the team is read by id — <c>true</c> when it exists,
+    /// <c>false</c> when it is not found.</item>
+    /// </list>
+    /// <para>Any doubt answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</para>
+    /// </remarks>
     internal static async Task<bool> CannotBeSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
-        var query = new QueryExpression("team")
+        try
         {
-            ColumnSet = new ColumnSet("name", "isdefault", "teamtype"),
-            TopCount = 1,
-            NoLock = true,
-        };
-        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-        var team = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (team is null)
-            return false;
+            var named = new QueryExpression("team")
+            {
+                ColumnSet = new ColumnSet("isdefault", "teamtype"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            named.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+            var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (team is null)
+            {
+                if (SecureSettingsConfigured(configuration))
+                {
+                    // Another name proves "not the Secure team" only when the configured team name names a team: the Secure
+                    // team carries that name, so a name that finds no team proves nothing about the team that owns the row.
+                    var carrier = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                    carrier.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+                    carrier.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
+                    carrier.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
+                    return (await dataverse.RetrieveMultipleAsync(carrier, ct).ConfigureAwait(false)).Entities.Count > 0;
+                }
 
-        if (team.GetAttributeValue<string>("name") is { } name
-            && !string.Equals(name.Trim(), SecureRecordOwnerTeam.OwnerTeamName(configuration).Trim(), StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (team.GetAttributeValue<bool?>("isdefault") == true)
-            return true;
-        return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+                // The compiled defaults: another name when the team exists, unknown (false) when it does not.
+                var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+                return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0;
+            }
+
+            if (team.GetAttributeValue<bool?>("isdefault") == true)
+                return true;
+            return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return false; // doubt: the full resolution decides
+        }
     }
+
+    /// <summary>
+    /// Whether <paramref name="teamId"/> is the Secure Record owner team, for a caller that grants access or moves an owner on a
+    /// "not Secure" answer: <c>true</c> it is, <c>false</c> it is not, <c>null</c> it cannot be told (the caller grants or
+    /// moves nothing), with the reason. <see cref="CannotBeSecureOwnerTeamAsync"/> first, then
+    /// <see cref="ResolveSecureOwnerTeamAsync"/> and an id compare. A Dataverse fault in the resolution propagates.
+    /// </summary>
+    /// <remarks>
+    /// The resolution's "no Secure team" (no unit or no team under the names looked for) is read by
+    /// <see cref="SecureSettingsConfigured"/>: with the Secure settings ABSENT it is <c>false</c> (no record is secure in this
+    /// environment, as the compiled defaults find nothing — the behaviour before this rule); with them PRESENT it is
+    /// <c>null</c>, because the settings name a unit or team Dataverse does not find and the real Secure team may own the row.
+    /// </remarks>
+    internal static async Task<(bool? Secure, string? Undetermined)> IsSecureOwnerTeamAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
+    {
+        if (await CannotBeSecureOwnerTeamAsync(dataverse, configuration, teamId, ct).ConfigureAwait(false))
+            return (false, null);
+
+        var secure = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secure.Refusal is { } refusal)
+            return (null, refusal);
+        if (secure.TeamId is { } secureTeam)
+            return (secureTeam == teamId, null);
+        return SecureSettingsConfigured(configuration)
+            ? (null, "the configured Secure Record business unit or owner team was not found")
+            : (false, null);
+    }
+
+    /// <summary>
+    /// <c>true</c> when <c>SecureRecord:BusinessUnitName</c> or <c>SecureRecord:OwnerTeamName</c> is set (not blank) — the
+    /// environment names its Secure Record unit or team, so finding neither is a wrong setting, not "no secure records". Unset,
+    /// the compiled defaults apply (<see cref="SecureRecordOwnerTeam.DefaultBusinessUnitName"/>,
+    /// <see cref="SecureRecordOwnerTeam.DefaultOwnerTeamName"/>).
+    /// </summary>
+    internal static bool SecureSettingsConfigured(IConfiguration configuration) =>
+        !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.BusinessUnitNameConfigKey])
+        || !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.OwnerTeamNameConfigKey]);
 
     /// <summary>A root's owner team and flag, or <c>null</c> when the row does not exist. A fault propagates.</summary>
     private static async Task<RootFacts?> ReadRootFactsAsync(IGenericEntityService dataverse, RowRef root, CancellationToken ct)
@@ -1372,7 +1510,15 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>What one row says about its ownership and filing.</summary>
-    private sealed record Row(RowRef Ref, Guid? OwningTeam, bool UserOwned, IReadOnlyList<RowRef> Parents);
+    private sealed record Row(RowRef Ref, Guid? OwningTeam, bool UserOwned, IReadOnlyList<RowRef> Parents)
+    {
+        /// <summary>The core record pair (record type, core id) a Signal or Decision Record holds, when whole
+        /// (<see cref="SecureChildLineage.HoldsCorePair"/>); resolved during the walk, as its type needs a catalog read.</summary>
+        public (Guid Type, Guid Core)? CorePair { get; init; }
+
+        /// <summary>The row holds a malformed core record pair: its roots are undetermined.</summary>
+        public bool CorePairMalformed { get; init; }
+    }
 
     /// <summary>A root's ownership and flag.</summary>
     private sealed record RootFacts(Guid? OwningTeam, bool FlaggedSecure)
@@ -1384,6 +1530,22 @@ public sealed class SecureChildShareSynchronizer
     /// <summary>A child's secure roots, and why they are not fully known when they are not.</summary>
     private sealed record Lineage(IReadOnlySet<RowRef> SecureRoots, string? Undetermined);
 
+    /// <summary>
+    /// GitHub #2560: the drift finding of the share reconcile — the principal kind of each direct share on a row of a hard-deny
+    /// table (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable"/>) that carries
+    /// more than Read (<see cref="RecordShareLevels.HardDenyChildMirrorableMask"/>), ordered by principal id. Empty for any
+    /// other table, and for a hard-deny row whose shares are Read only. Kinds only: a finding never names a principal.
+    /// </summary>
+    internal static IReadOnlyList<DataversePrincipalKind> HardDenySharesWiderThanRead(
+        string table, IReadOnlyDictionary<DataversePrincipalRef, int> directShares) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(table)
+            ? directShares
+                .Where(p => (p.Value & ~RecordShareLevels.HardDenyChildMirrorableMask) != 0)
+                .OrderBy(p => p.Key.Id)
+                .Select(p => p.Key.Kind)
+                .ToList()
+            : [];
+
     /// <summary>One run's state: every read is cached for the run and nothing outlives it.</summary>
     private sealed class Run
     {
@@ -1394,10 +1556,19 @@ public sealed class SecureChildShareSynchronizer
         private readonly Dictionary<RowRef, Row> _secureChildren = new();
         private readonly Dictionary<RowRef, Row?> _otherRows = new();
         private readonly Dictionary<RowRef, RootFacts?> _roots = new();
-        private readonly Dictionary<RowRef, IReadOnlyDictionary<DataversePrincipalRef, int>?> _rootMirrors = new();
+        // Each root's direct share masks (its Secure team's own share left out), or null when they could not be read. The
+        // mirror is taken per CHILD from these (RecordShareLevels.ChildMirrorMask takes the child's table, GitHub #2560).
+        private readonly Dictionary<RowRef, IReadOnlyDictionary<DataversePrincipalRef, int>?> _rootShares = new();
         private readonly Dictionary<(RowRef Root, Guid User), SecureShareWallOutcome> _walls = new();
 
-        private int _granted, _changed, _revoked;
+        // The core table each record type a pair names maps to (null: not a core table), read once per run. A fault is not
+        // kept: it propagates as any parent read fault does, and the next run reads again.
+        private readonly Dictionary<Guid, string?> _coreTables = new();
+
+        // The record types already warned about this run as mapping to no core table (one warning per type per run).
+        private readonly HashSet<Guid> _unknownTypesWarned = new();
+
+        private int _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked;
 
         public Run(SecureChildShareSynchronizer owner, Guid secureTeamId, CancellationToken ct)
         {
@@ -1417,7 +1588,7 @@ public sealed class SecureChildShareSynchronizer
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Equal, _secureTeamId);
@@ -1438,7 +1609,7 @@ public sealed class SecureChildShareSynchronizer
         {
             var query = new QueryExpression(table.LogicalName)
             {
-                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                ColumnSet = new ColumnSet(WalkColumns(table)),
                 NoLock = true,
             };
             query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, id);
@@ -1475,22 +1646,24 @@ public sealed class SecureChildShareSynchronizer
 
                 foreach (var table in SecureChildLineage.Children.Values)
                 {
-                    // Every (lookup column, parent id) pair of this table that points into the previous level.
+                    // Every (lookup column, parent id) pair of this table that points into the previous level — and, on a
+                    // Signal or Decision Record, its core record pair naming a root of it (SecureChildLineage.CorePairMatches).
                     var pairs = table.Lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
-                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
+                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Value: (object)id)))
+                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier.Select(r => (r.Table, r.Id))))
                         .ToArray();
 
                     foreach (var chunk in pairs.Chunk(DescendantConditionsPerQuery))
                     {
                         var query = new QueryExpression(table.LogicalName)
                         {
-                            ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                            ColumnSet = new ColumnSet(WalkColumns(table)),
                             NoLock = true,
                         };
                         var anyParent = new FilterExpression(LogicalOperator.Or);
                         foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
-                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => p.Value).ToArray());
                         query.Criteria.AddFilter(anyParent);
 
                         foreach (var entity in await ReadAllPagesAsync(table, query).ConfigureAwait(false))
@@ -1601,6 +1774,14 @@ public sealed class SecureChildShareSynchronizer
         {
             foreach (var group in references.GroupBy(r => r.Table, StringComparer.Ordinal))
             {
+                // A core record pair's type the walk could not answer from the cache (one catalog read per type).
+                if (string.Equals(group.Key, SecureChildLineage.RecordTypeCatalogTable, StringComparison.Ordinal))
+                {
+                    foreach (var type in group)
+                        await CoreTableAsync(type.Id).ConfigureAwait(false);
+                    continue;
+                }
+
                 var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
                 foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
                 {
@@ -1665,9 +1846,9 @@ public sealed class SecureChildShareSynchronizer
             return row;
         }
 
-        /// <summary>The columns the walk reads of a child row: its lineage lookups and its owner.</summary>
+        /// <summary>The columns the walk reads of a child row: its lineage columns (lookups, and a core record pair) and its owner.</summary>
         private static string[] WalkColumns(SecureChildLineage.Table table) =>
-            table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
+            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
 
         private static Row ToRow(SecureChildLineage.Table table, Entity entity)
         {
@@ -1678,13 +1859,78 @@ public sealed class SecureChildShareSynchronizer
                     parents.Add(new RowRef(target, reference.Id));
             }
 
+            // A Signal's or Decision Record's core record pair, read by the ownership question's own rule; its type is resolved
+            // during the walk (a catalog read).
+            var pair = table.HoldsCorePair ? RecordOwnershipContext.CorePairOf(entity) : default;
             var owningTeam = entity.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
             var owningUser = entity.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id;
             return new Row(
                 new RowRef(table.LogicalName, entity.Id),
                 owningTeam is { } t && t != Guid.Empty ? t : null,
                 UserOwned: owningUser is { } u && u != Guid.Empty,
-                parents.Distinct().ToArray());
+                parents.Distinct().ToArray())
+            {
+                CorePair = pair.IsWhole ? (pair.TypeRef!.Value, pair.CoreId!.Value) : null,
+                CorePairMalformed = pair.Malformed,
+            };
+        }
+
+        /// <summary>
+        /// The core table a pair's record type names (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>: <c>null</c>
+        /// when it is not a core table), once per type per run. A fault, a missing catalog row included, propagates.
+        /// </summary>
+        private async Task<string?> CoreTableAsync(Guid type)
+        {
+            if (_coreTables.TryGetValue(type, out var known))
+                return known;
+
+            var table = await CoreAncestorResolver.CoreTableOfRecordTypeAsync(_owner._dataverse, type, _ct).ConfigureAwait(false);
+            _coreTables[type] = table;
+            return table;
+        }
+
+        /// <summary>
+        /// A row's parents for the walk: its lookups, and the root its core record pair names (<see cref="SecureChildLineage.CorePairParent"/>,
+        /// de-duplicated against the lookups). A malformed pair, or a type the catalog maps to no core table (a blank or non-core
+        /// table name: a data error, warned once per type per run), sets <paramref name="undetermined"/>; a service-request core
+        /// adds nothing (D-36). <paramref name="misses"/>: a type not in the run's cache is added (as a catalog reference) and the
+        /// pair is not followed; that walk is the prefetch's, whose answer decides nothing.
+        /// </summary>
+        private async Task<IReadOnlyList<RowRef>> ParentsOfAsync(Row row, HashSet<RowRef>? misses, Action<string> undetermined)
+        {
+            if (row.CorePairMalformed)
+            {
+                undetermined(SecureChildLineage.MalformedCorePair);
+                return row.Parents;
+            }
+
+            if (row.CorePair is not { } pair)
+                return row.Parents;
+
+            if (misses is not null && !_coreTables.ContainsKey(pair.Type))
+            {
+                misses.Add(new RowRef(SecureChildLineage.RecordTypeCatalogTable, pair.Type));
+                return row.Parents;
+            }
+
+            var coreTable = await CoreTableAsync(pair.Type).ConfigureAwait(false);
+            if (coreTable is null)
+            {
+                // The core tables are a closed set, so a type naming none is a data error: held, as the ownership question
+                // holds it (ForExistingRowAsync), and seen. The type id only: the row and its core are not named.
+                if (_unknownTypesWarned.Add(pair.Type))
+                {
+                    Log.LogWarning("[SECURE-CHILD-SHARES] Record type {RecordType} maps to no core record table in the " +
+                        "record-type catalog; every row whose core record pair names it is held.", pair.Type);
+                }
+
+                undetermined(SecureChildLineage.UnknownCoreRecordType);
+                return row.Parents;
+            }
+
+            return SecureChildLineage.CorePairParent(coreTable, pair.Core) is { } core
+                ? row.Parents.Append(new RowRef(core.Table, core.Id)).Distinct().ToArray()
+                : row.Parents;
         }
 
         // ── Lineage ────────────────────────────────────────────────────────────────────────────────────────────
@@ -1711,7 +1957,9 @@ public sealed class SecureChildShareSynchronizer
 
             async Task WalkAsync(Row current, int depth, HashSet<RowRef> path)
             {
-                foreach (var parent in current.Parents)
+                // Its lookups and the core record its pair names; a catalog fault propagates (the caller's read-fault path).
+                var parents = await ParentsOfAsync(current, misses, why => undetermined ??= why).ConfigureAwait(false);
+                foreach (var parent in parents)
                 {
                     if (path.Contains(parent))
                         continue; // a cycle (a document's current version points back at the document)
@@ -1768,48 +2016,57 @@ public sealed class SecureChildShareSynchronizer
         }
 
         /// <summary>
-        /// The child mirror of one root: principal → mirrored mask, or <c>null</c> when the root's shares could not be
-        /// read (the strict read). Principals whose mirror carries no Read are dropped.
+        /// The mirror of one root onto a row of <paramref name="childTable"/>: principal → mirrored mask, or <c>null</c> when
+        /// the root's shares could not be read (the strict read). Principals whose mirror carries no Read are dropped. The
+        /// root's shares are read once per run; the mirror is taken per child table (a hard-deny row gets Read only).
         /// </summary>
-        private async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> RootMirrorAsync(RowRef root)
+        private async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> RootMirrorAsync(RowRef root, string childTable)
         {
-            if (_rootMirrors.TryGetValue(root, out var cached))
-                return cached;
-
-            IReadOnlyDictionary<DataversePrincipalRef, int>? mirror;
-            try
+            if (!_rootShares.TryGetValue(root, out var shares))
             {
-                mirror = await ReadRootMirrorAsync(root).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
-            {
-                Log.LogWarning(ex,
-                    "[SECURE-CHILD-SHARES] The shares on secure root {Root} could not be read; no child that needs it is written.",
-                    root);
-                mirror = null;
+                try
+                {
+                    shares = await ReadRootSharesAsync(root).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex,
+                        "[SECURE-CHILD-SHARES] The shares on secure root {Root} could not be read; no child that needs it is written.",
+                        root);
+                    shares = null;
+                }
+
+                _rootShares[root] = shares;
             }
 
-            _rootMirrors[root] = mirror;
-            return mirror;
+            return shares is null ? null : MirrorOf(shares, childTable);
         }
 
-        /// <summary>One root's mirror from the strict read, uncached. Throws when the shares cannot be read.</summary>
-        private async Task<Dictionary<DataversePrincipalRef, int>> ReadRootMirrorAsync(RowRef root)
+        /// <summary>One root's direct share masks from the strict read, uncached, its Secure team's own share left out.
+        /// Throws when the shares cannot be read.</summary>
+        private async Task<Dictionary<DataversePrincipalRef, int>> ReadRootSharesAsync(RowRef root)
         {
             var shares = await _owner._recordShare.GetPrincipalAccessOrThrowAsync(root.Table, root.Id, _ct).ConfigureAwait(false);
             return DirectMasks(shares)
                 .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == _secureTeamId))
-                .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                .ToDictionary(p => p.Key, p => p.Value);
+        }
+
+        /// <summary>A root's share masks mirrored onto a row of <paramref name="childTable"/>
+        /// (<see cref="RecordShareLevels.ChildMirrorMask"/>); principals whose mirror carries no Read are dropped.</summary>
+        private static Dictionary<DataversePrincipalRef, int> MirrorOf(
+            IReadOnlyDictionary<DataversePrincipalRef, int> rootShares, string childTable) =>
+            rootShares
+                .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(childTable, p.Value)))
                 .Where(p => RecordShareLevels.CanRead(p.Mask))
                 .ToDictionary(p => p.Key, p => p.Mask);
-        }
 
         /// <summary>
         /// The intersection of the child's roots' mirrors, read FRESH (no run cache), or <c>null</c> when any root cannot be
         /// read. Consulted immediately before a grant or a widening, so a root unshare that landed after this run read its
         /// roots — the endpoint's own fan-out racing the scheduled reconcile — is not undone by a stale grant.
         /// </summary>
-        private async Task<Dictionary<DataversePrincipalRef, int>?> FreshDesiredAsync(Lineage lineage)
+        private async Task<Dictionary<DataversePrincipalRef, int>?> FreshDesiredAsync(Lineage lineage, string childTable)
         {
             Dictionary<DataversePrincipalRef, int>? desired = null;
             foreach (var root in lineage.SecureRoots)
@@ -1817,7 +2074,7 @@ public sealed class SecureChildShareSynchronizer
                 Dictionary<DataversePrincipalRef, int> mirror;
                 try
                 {
-                    mirror = await ReadRootMirrorAsync(root).ConfigureAwait(false);
+                    mirror = MirrorOf(await ReadRootSharesAsync(root).ConfigureAwait(false), childTable);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
                 {
@@ -1855,8 +2112,11 @@ public sealed class SecureChildShareSynchronizer
             var outside = 0;
             var faulted = 0;
 
-            // 1. Each secure child's roots; keep those in scope.
+            // 1. Each secure child's roots; keep those in scope. A hard-deny row this run does not mirror — its filing could
+            // not be read, or it is under no secure root — is still kept for the Read-only narrowing (GitHub #2560), which
+            // needs no root.
             var inScope = new List<(Row Row, Lineage Lineage)>();
+            var narrowOnly = new List<Row>();
             foreach (var row in _secureChildren.Values)
             {
                 Lineage lineage;
@@ -1866,12 +2126,14 @@ public sealed class SecureChildShareSynchronizer
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
                 {
-                    // A fault is not an answer: nothing is written on the child, and it counts as examined AND not updated
+                    // A fault is not an answer: nothing is mirrored on the child, and it counts as examined AND not updated
                     // (so "N of M" never has N > M). In a scoped run every candidate was found BELOW the root by the
                     // downward walk, so the fault is about one of the root's own related records.
                     Log.LogWarning(ex, "[SECURE-CHILD-SHARES] The filing of {Child} could not be read; it is not synchronized.", row.Ref);
                     faulted++;
                     notUpdated++;
+                    if (IsHardDeny(row.Ref.Table))
+                        narrowOnly.Add(row);
                     continue;
                 }
 
@@ -1881,18 +2143,20 @@ public sealed class SecureChildShareSynchronizer
                 if (lineage.SecureRoots.Count == 0 && lineage.Undetermined is null)
                 {
                     outside++;
+                    if (IsHardDeny(row.Ref.Table))
+                        narrowOnly.Add(row);
                     continue;
                 }
 
                 inScope.Add((row, lineage));
             }
 
-            // 2. Each child's current shares, batched per table.
+            // 2. Each child's current shares, batched per table (the narrow-only hard-deny rows with them).
             var current = new Dictionary<RowRef, IReadOnlyList<DataversePrincipalAccess>>();
             var unreadable = new HashSet<RowRef>();
-            foreach (var group in inScope.GroupBy(c => c.Row.Ref.Table))
+            foreach (var group in inScope.Select(c => c.Row).Concat(narrowOnly).GroupBy(r => r.Ref.Table))
             {
-                var ids = group.Select(c => c.Row.Ref.Id).ToArray();
+                var ids = group.Select(r => r.Ref.Id).ToArray();
                 try
                 {
                     var shares = await _owner._recordShare
@@ -1921,6 +2185,8 @@ public sealed class SecureChildShareSynchronizer
                 if (unreadable.Contains(row.Ref))
                 {
                     notUpdated++;
+                    if (IsHardDeny(row.Ref.Table))
+                        _hardDenyUnchecked++;
                     continue;
                 }
 
@@ -1934,19 +2200,50 @@ public sealed class SecureChildShareSynchronizer
                 }
             }
 
-            var status = notUpdated == 0 && held == 0
+            // 4. GitHub #2560: the hard-deny rows not mirrored above lose every right but Read. Their counts stay as step 1
+            // left them (outside secure roots, or not updated); only the share counters and the findings move. A narrowing
+            // that did not keep, or a row whose shares could not be read, leaves the run Incomplete: a row under no secure
+            // root is counted only as outside, so without this the run would answer Completed with a wider share left on it.
+            var narrowFailed = false;
+            var hardDenyNarrowFailed = 0;
+            foreach (var row in narrowOnly)
+            {
+                if (unreadable.Contains(row.Ref))
+                {
+                    _hardDenyUnchecked++;
+                    narrowFailed = true;
+                    continue;
+                }
+
+                var have = DirectMasks(current[row.Ref]);
+                ReportHardDenyWiderThanRead(row.Ref, have);
+                if (!await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false))
+                {
+                    hardDenyNarrowFailed++;
+                    narrowFailed = true;
+                }
+            }
+
+            var status = notUpdated == 0 && held == 0 && !narrowFailed
                 ? SecureChildShareSyncStatus.Completed
                 : SecureChildShareSyncStatus.Incomplete;
 
             Log.Log(
                 status == SecureChildShareSyncStatus.Completed ? LogLevel.Information : LogLevel.Warning,
                 "[SECURE-CHILD-SHARES] scope={Scope} status={Status} inScope={InScope} updated={Updated} unchanged={Unchanged} " +
-                "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} revoked={Revoked}",
+                "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} revoked={Revoked} " +
+                "hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked} " +
+                "hardDenyNarrowFailed={HardDenyNarrowFailed}",
                 scope?.ToString() ?? "all", status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside,
-                _granted, _changed, _revoked);
+                _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked, hardDenyNarrowFailed);
 
             return new SecureChildShareSyncResult(
-                status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside, _granted, _changed, _revoked, null);
+                status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside, _granted, _changed, _revoked, null)
+            {
+                HardDenyWiderThanRead = _hardDenyWiderThanRead,
+                HardDenyUnchecked = _hardDenyUnchecked,
+                HardDenyNarrowFailed = hardDenyNarrowFailed,
+            };
         }
 
         private enum ChildOutcome { Updated, Unchanged, NotUpdated, Held }
@@ -1954,13 +2251,29 @@ public sealed class SecureChildShareSynchronizer
         /// <summary>One child: compute the mirror, write the difference (revokes, narrowings, grants), read it back.</summary>
         private async Task<ChildOutcome> MirrorAsync(Row row, Lineage lineage, IReadOnlyList<DataversePrincipalAccess> shares)
         {
-            // The intersection of every secure root's mirror. A root whose shares cannot be read stops every write here.
+            var have = DirectMasks(shares);
+
+            // GitHub #2560: a mirrored share on a hard-deny row carries Read only, so a wider share found on one is reported
+            // (the table, the row id and the principal's kind — never a name) before anything else can stop this child. It is
+            // ended at Read, or revoked, on every path a child whose own shares were read takes: the plan below does it when
+            // the roots are read (held, stale fresh re-read and No Access refusal included — a pure narrowing needs neither
+            // the fresh re-check nor the No Access list, and a share without Read whose Read cannot be added is revoked); a
+            // root whose shares cannot be read narrows it to Read without the roots (NarrowHardDenyToReadAsync). A hard-deny
+            // row this run does not mirror at all is narrowed by SynchronizeAsync step 4; one whose shares could not be read
+            // is counted as unchecked.
+            ReportHardDenyWiderThanRead(row.Ref, have);
+
+            // The intersection of every secure root's mirror. A root whose shares cannot be read stops every write here but
+            // the Read-only narrowing of a hard-deny row.
             Dictionary<DataversePrincipalRef, int>? desired = null;
             foreach (var root in lineage.SecureRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
             {
-                var mirror = await RootMirrorAsync(root).ConfigureAwait(false);
+                var mirror = await RootMirrorAsync(root, row.Ref.Table).ConfigureAwait(false);
                 if (mirror is null)
+                {
+                    await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false);
                     return ChildOutcome.NotUpdated;
+                }
 
                 desired = desired is null
                     ? new Dictionary<DataversePrincipalRef, int>(mirror)
@@ -1973,7 +2286,6 @@ public sealed class SecureChildShareSynchronizer
 
             desired ??= new Dictionary<DataversePrincipalRef, int>();
             var heldBack = lineage.Undetermined is not null;
-            var have = DirectMasks(shares);
 
             var revokes = new List<DataversePrincipalRef>();
             var modifies = new List<(DataversePrincipalRef Principal, int Mask)>();
@@ -2025,7 +2337,7 @@ public sealed class SecureChildShareSynchronizer
             // is not added. Revokes and narrowings need no re-check — removing access is never the unsafe direction.
             if (grants.Count > 0 || modifies.Any(m => (m.Mask & ~have[m.Principal]) != 0))
             {
-                var fresh = await FreshDesiredAsync(lineage).ConfigureAwait(false);
+                var fresh = await FreshDesiredAsync(lineage, row.Ref.Table).ConfigureAwait(false);
                 if (fresh is null)
                 {
                     // Nothing is added from a stale read. A MIXED change (it adds some rights and removes others) keeps its
@@ -2094,22 +2406,41 @@ public sealed class SecureChildShareSynchronizer
             if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
                 return failed ? ChildOutcome.NotUpdated : heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
-            var entitySet = SecureChildLineage.Children[row.Ref.Table].EntitySet;
+            failed |= !await WriteAndReadBackAsync(row.Ref, have, revokes, modifies, grants).ConfigureAwait(false);
+
+            if (failed)
+                return ChildOutcome.NotUpdated;
+            return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+        }
+
+        /// <summary>
+        /// Writes one child's planned revokes, narrowings/widenings and grants, then reads it back: it must carry exactly
+        /// <paramref name="have"/> with the plan applied. <c>false</c> when a write failed or the read-back did not match.
+        /// </summary>
+        private async Task<bool> WriteAndReadBackAsync(
+            RowRef child,
+            IReadOnlyDictionary<DataversePrincipalRef, int> have,
+            IReadOnlyList<DataversePrincipalRef> revokes,
+            IReadOnlyList<(DataversePrincipalRef Principal, int Mask)> modifies,
+            IReadOnlyList<(DataversePrincipalRef Principal, int Mask)> grants)
+        {
+            var failed = false;
+            var entitySet = SecureChildLineage.Children[child.Table].EntitySet;
 
             foreach (var principal in revokes)
-                failed |= !await TryWriteAsync(row.Ref, "revoke", principal,
-                    () => _owner._recordShare.RevokeAccessAsync(entitySet, row.Ref.Id, principal, _ct), () => _revoked++);
+                failed |= !await TryWriteAsync(child, "revoke", principal,
+                    () => _owner._recordShare.RevokeAccessAsync(entitySet, child.Id, principal, _ct), () => _revoked++);
 
             foreach (var (principal, mask) in modifies)
-                failed |= !await TryWriteAsync(row.Ref, "modify", principal,
+                failed |= !await TryWriteAsync(child, "modify", principal,
                     () => _owner._recordShare.ModifyAccessAsync(
-                        entitySet, row.Ref.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, _ct),
+                        entitySet, child.Id, principal, RecordShareLevels.ChildMirrorRights(child.Table, mask).AccessRightsCsv, _ct),
                     () => _changed++);
 
             foreach (var (principal, mask) in grants)
-                failed |= !await TryWriteAsync(row.Ref, "grant", principal,
+                failed |= !await TryWriteAsync(child, "grant", principal,
                     () => _owner._recordShare.GrantAccessAsync(
-                        entitySet, row.Ref.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, _ct),
+                        entitySet, child.Id, principal, RecordShareLevels.ChildMirrorRights(child.Table, mask).AccessRightsCsv, _ct),
                     () => _granted++);
 
             // Read back: the child must now carry exactly the planned shares.
@@ -2122,22 +2453,70 @@ public sealed class SecureChildShareSynchronizer
             try
             {
                 var after = DirectMasks(await _owner._recordShare
-                    .GetPrincipalAccessOrThrowAsync(row.Ref.Table, row.Ref.Id, _ct).ConfigureAwait(false));
+                    .GetPrincipalAccessOrThrowAsync(child.Table, child.Id, _ct).ConfigureAwait(false));
                 if (after.Count != expected.Count || after.Any(p => !expected.TryGetValue(p.Key, out var m) || m != p.Value))
                 {
-                    Log.LogWarning("[SECURE-CHILD-SHARES] {Child} did not read back as its mirror after the writes.", row.Ref);
+                    Log.LogWarning("[SECURE-CHILD-SHARES] {Child} did not read back as its mirror after the writes.", child);
                     failed = true;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
             {
-                Log.LogWarning(ex, "[SECURE-CHILD-SHARES] {Child} could not be read back after the writes.", row.Ref);
+                Log.LogWarning(ex, "[SECURE-CHILD-SHARES] {Child} could not be read back after the writes.", child);
                 failed = true;
             }
 
-            if (failed)
-                return ChildOutcome.NotUpdated;
-            return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+            return !failed;
+        }
+
+        private static bool IsHardDeny(string table) =>
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(table);
+
+        /// <summary>
+        /// GitHub #2560: reports each direct share on a hard-deny row that carries more than Read
+        /// (<see cref="HardDenySharesWiderThanRead"/>) and counts it. The line names the table, the row id and the principal's
+        /// kind, never the principal.
+        /// </summary>
+        private void ReportHardDenyWiderThanRead(RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have)
+        {
+            foreach (var kind in HardDenySharesWiderThanRead(child.Table, have))
+            {
+                _hardDenyWiderThanRead++;
+                Log.LogWarning(
+                    "[SECURE-CHILD-SHARES] HardDenyRowShareWiderThanRead table={Table} id={Id} principalKind={PrincipalKind}: " +
+                    "a share on a hard-deny row carries more than Read; it will be narrowed to Read at most.",
+                    child.Table, child.Id, kind);
+            }
+        }
+
+        /// <summary>
+        /// GitHub #2560: the narrowing a hard-deny row gets when its secure roots are not known — under none, its filing
+        /// unreadable, or a root's shares unreadable. Every direct share carrying more than Read keeps only its Read
+        /// (<c>have &amp; Read</c>); one without Read is revoked. It only ever removes rights, so it needs neither the roots
+        /// nor the No Access list. Nothing is written on any other table. <c>false</c> when a write or the read-back failed.
+        /// </summary>
+        private async Task<bool> NarrowHardDenyToReadAsync(RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have)
+        {
+            if (!IsHardDeny(child.Table))
+                return true;
+
+            var revokes = new List<DataversePrincipalRef>();
+            var modifies = new List<(DataversePrincipalRef Principal, int Mask)>();
+            foreach (var (principal, mask) in have)
+            {
+                if ((mask & ~RecordShareLevels.HardDenyChildMirrorableMask) == 0)
+                    continue;
+                var narrowed = mask & RecordShareLevels.HardDenyChildMirrorableMask;
+                if (RecordShareLevels.CanRead(narrowed))
+                    modifies.Add((principal, narrowed));
+                else
+                    revokes.Add(principal);
+            }
+
+            if (revokes.Count == 0 && modifies.Count == 0)
+                return true;
+
+            return await WriteAndReadBackAsync(child, have, revokes, modifies, []).ConfigureAwait(false);
         }
 
         /// <summary>

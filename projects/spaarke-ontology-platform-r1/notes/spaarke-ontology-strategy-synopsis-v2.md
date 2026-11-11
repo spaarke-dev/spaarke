@@ -19,8 +19,8 @@
 > expected to fail it the same way budget variance did.
 
 **Status:** Strategy synopsis for discovery handoff
-**Version:** 2.2 — adds the platform statement (§1.4.0), the Policy object (§4.8), and the verified Microsoft IQ-family research; corrects the sequencing conclusion
-**Date:** 2026-09-19 (v2.0) · 2026-09-21 (v2.1, v2.2)
+**Version:** 2.3 — adds the October 2026 Microsoft platform refresh (§2.5b: Copilot for Legal, Cowork + plugin registry, Foundry / Work IQ / Dataverse / Fabric IQ deltas). v2.2 added the platform statement (§1.4.0), the Policy object (§4.8), and the verified Microsoft IQ-family research
+**Date:** 2026-09-19 (v2.0) · 2026-09-21 (v2.1, v2.2) · 2026-10-29 (v2.3, §2.5–§2.5b only)
 **Audience:** Claude Code (discovery + design analysis)
 **Source:** Strategy working session, Ralph / Claude
 
@@ -51,6 +51,15 @@
 > 6. **Dataverse audit is disqualified as the defensibility record** (§4.5) — five specific mechanical limits, not merely "no bitemporal query."
 >
 > **Also:** Legal Agent for Word is **still Frontier preview, not GA**, with playbook ingestion limited to local `.docx` upload + SharePoint (no DMS, no MCP) — D-n's clock is softer than v2.0 claimed. Entra Agent ID for Dataverse is **preview**, and delivers only the *access* half of authority.
+
+> **v2.3 change note (2026-10-29) — §2.5 / §2.5a / new §2.5b only; nothing else in the document was re-checked.** Microsoft shipped **Copilot for Legal** (GA 2026-10-15) and a cross-surface **plugin registry** (2026-09-30), and the researcher refresh found three v2.2 claims now wrong.
+>
+> **Corrected:**
+> 1. **D-n's clock has run out.** Legal Agent for Word never went GA on its own; it was folded into Copilot for Legal (Word plugin + Cowork plugin, 20+ legal skills, **included in the M365 Copilot licence**) and is being retired. The commoditized scope is wider than v2.2 said: playbook authoring, obligation-and-deadline extraction, cross-contract term comparison and chronologies — not just redlines. Playbooks are **still `.docx` only**.
+> 2. **Dataverse BYO-MCP / ISV MCP certification is NOT GA** (v2.2 said GA 2026-07-06). Learn still says preview; roadmap RM576752 targets **Dec 2026**. The primary distribution channel for the Spaarke MCP server is now the **M365 plugin registry** (skills + remote-MCP connector via Partner Center), not Dataverse certification.
+> 3. **Fabric IQ's ontology is no longer "thin"** — the new (still preview) ontology experience adds inheritance, named versions, NL rules, multi-source bindings and live querying. The L5 verdict holds, but on different grounds: no instance writes, no authority, no ledger, and the fixed-credential Dataverse shortcut.
+>
+> **Also:** "Business apps (preview)" in Cowork lets Copilot **read and write** custom Dataverse tables under the user's security roles — a potential bypass of the server-side write path (ADR-002) that needs checking against Spaarke's role design.
 
 ---
 
@@ -311,7 +320,7 @@ This is the section that changes build decisions. Between March and October 2026
 | **MCP first-party across the stack** — M365 Copilot declarative agents (GA 15 Dec 2025), Foundry Agent Service MCP tool (GA), **Dataverse MCP server** (`/api/mcp`, supports Claude Desktop/Code, VS Code, Copilot Studio), Power Apps MCP server, Work IQ MCP (GA 16 Jun 2026), MCP servers as Foundry IQ knowledge sources | Various, mostly GA | **L5** | 🚩 **An MCP server over the Spaarke ontology is the single highest-leverage integration artifact** — it reaches Copilot, Foundry, Copilot Studio, Agent Framework, Claude, and ChatGPT simultaneously |
 | **MAI model family** — MAI-Thinking-1 (reasoning, 35B, 256K ctx), MAI-Voice-1/2, MAI-Image-2.x, MAI-Transcribe-1/1.5/2. Positioned explicitly on cost/latency vs OpenAI | Mixed GA/preview through 2026 | L0/L4 | Cheaper first-party tier for high-volume low-differentiation calls (classification, extraction, transcription) — fits the existing tiered model-routing doctrine. **Note: "MAI-1" and "MAI-Vision" do not exist as shipping model names — do not plan around them.** |
 | **Microsoft–OpenAI partnership restructured away from exclusivity** | 28 Apr 2026 `[REPORTED]` | L0 | Azure OpenAI is no longer a moat; abstract the model layer |
-| **Microsoft Legal Agent for Word** — full-agreement analysis, clause/risk/obligation identification, **negotiation-ready redlines as native tracked changes**, review against **uploaded internal playbooks**, citation links. Built by acqui-hired Robin AI engineers. Requires M365 Copilot licence + Frontier enrolment | Announced 30 Apr 2026; worldwide Frontier preview 12 Jun 2026; **GA early Oct 2026** | **Product overlap** | 🚩🚩 **Playbook-based contract review with tracked-change redlines ships inside Word at Copilot-licence price in ~3 weeks.** This overlaps Spaarke's shipped NDA Analysis / Agreement Analysis module directly. |
+| **Microsoft Legal Agent for Word** — full-agreement analysis, clause/risk/obligation identification, **negotiation-ready redlines as native tracked changes**, review against **uploaded internal playbooks**, citation links. Built by acqui-hired Robin AI engineers. Requires M365 Copilot licence + Frontier enrolment | Announced 30 Apr 2026; worldwide Frontier preview 12 Jun 2026; **GA early Oct 2026** | **Product overlap** | 🚩🚩 **Playbook-based contract review with tracked-change redlines ships inside Word at Copilot-licence price in ~3 weeks.** This overlaps Spaarke's shipped NDA Analysis / Agreement Analysis module directly. **`[Superseded v2.3]` Shipped 2026-10-15 as Copilot for Legal, with wider scope — see §2.5b.** |
 
 **Two corrections to prior Spaarke materials this research surfaced:** `[VALIDATION NEEDED]`
 1. Project docs describe the AI layer as "Azure AI Foundry (knowledge grounding), Microsoft Copilot Studio (orchestration), Microsoft Agent Framework (execution)." With Agent Framework 1.0 GA and the documented Microsoft split (Copilot Studio = low-code/M365; Foundry + Agent Framework = pro-code/custom), **Copilot Studio should be described as a build-time authoring tool only** — which matches internal doctrine but not all published copy.
@@ -350,6 +359,8 @@ Announced Ignite **2025-11-18**. The ontology language is explicit: *"a shared, 
 | 6 | Gated actions w/ authority | ❌ **no instance write API at all.** "Actions" are Activator rules (Teams/email/Power Automate/pipeline) and the Operations agent — which executes **under its creator's identity**, approved via a Teams card |
 | 7 | Decision ledger | ❌ nearest equivalent is a per-agent activity log |
 
+> **`[Updated v2.3 — 2026-10-29]`** The **"new ontology experience"** (still preview; Learn overview 2026-10-16, bind-data 2026-10-20) changes rows 1, 2, 4 and 5: it adds **inheritance, namespaces, shared properties**, **named versions** (restore *replaces* the current definition), RDF/OWL import/export, natural-language rules, DAX metrics, **multi-source bindings**, and a "virtual layer" that queries live sources (graph materialisation opt-in; bind-data still says new rows need a manual refresh — contradictory). It honours OneLake security and source RLS/OLS/CLS, and `Decimal` now maps to double/string. Old experience retires 2027-01-31. **Unchanged:** REST is definition CRUD only, Update still overrides, **no instance writes**, no authority, no ledger, and the Dataverse shortcut is still read-only under a fixed sysadmin credential. Rows 6 and 7 stand; the verdict below stands on those grounds, not on "thin model". Declarative-agent manifest v1.9 added a `Fabric` capability, which makes an L5 projection more valuable as Copilot grounding.
+
 Note: the Fabric IQ overview page claims the ontology defines *"rules, and actions… agents understand what actions are available and how to invoke them."* **No how-to page backs it, and the REST API has only definition CRUD — no instance writes.** That marketing-versus-docs gap will surface in a sales conversation.
 
 **🚩 The Dataverse path is the disqualifying detail.** Bindings are **OneLake-only**. Dataverse reaches OneLake via Link to Fabric shortcuts, which are **read-only regardless of the user's permissions** and authorized by a **single fixed credential requiring system administrator** — *"all access to that shortcut is authorized using [the creator's] credential."* **Dataverse row-level security is stripped: everyone with lakehouse read sees every row.** In legal, where ethical walls partition the graph structurally (§4.6), that is disqualifying for anything authoritative — not a tuning problem. There is also no documented object-level security on ontology instances, and OneLake-security-enabled lakehouses are *excluded* from binding, removing the one Fabric RLS mechanism that might have helped. Worse, shortcut tables live in Dataverse Managed Lake while only **managed** lakehouse tables are bindable — so the practical path is probably a *second* copy into a managed table.
@@ -361,12 +372,66 @@ Note: the Fabric IQ overview page claims the ontology defines *"rules, and actio
 | Item | Corrected status |
 |---|---|
 | **Microsoft Agent Framework** | 1.0 GA **2026-04-02**; latest **1.22.0 (2026-09-18)**. rc1 → GA carried real breaking changes (`Microsoft.Agents.AI.AzureAI` → `…AI.Foundry`, structured-output rework, checkpointing decoupled, orchestration renames) and it has **broken roughly monthly since**. **Phase 0 item 12's "only a bump to 1.0 GA" is wrong** — this is a migration on a moving target. **Pin minor versions.** Upside: 1.22 shipped **Approval Binding replay**, worth evaluating against `ConfirmationPolicyEngine` (in-process only, so not a durable gate). SK support window is `[Reported]` only — no primary Microsoft statement exists |
-| **Legal Agent for Word** | **Still Frontier preview, NOT GA.** GA remains "early October 2026," already slipped once from September. Playbook ingestion is **local `.docx` upload + SharePoint only — no DMS, no MCP, in any Microsoft doc.** Tracked changes confirmed; desktop Word for Windows ≥ 2604; M365 Copilot licence; no admin off-switch. **D-n's clock is softer than v2.0 claimed**, and the surviving differentiation is safer: an agent that can only read playbooks from a file upload cannot bind a finding to a Matter, a Policy version, or an approval authority |
+| **Legal Agent for Word** | **`[Superseded v2.3 — folded into Copilot for Legal, GA 2026-10-15, Legal Agent being retired; §2.5b]`** **Still Frontier preview, NOT GA.** GA remains "early October 2026," already slipped once from September. Playbook ingestion is **local `.docx` upload + SharePoint only — no DMS, no MCP, in any Microsoft doc.** Tracked changes confirmed; desktop Word for Windows ≥ 2604; M365 Copilot licence; no admin off-switch. **D-n's clock is softer than v2.0 claimed**, and the surviving differentiation is safer: an agent that can only read playbooks from a file upload cannot bind a finding to a Matter, a Policy version, or an approval authority |
 | **Entra Agent ID for Dataverse** | **Public preview, not GA** (release plan said Aug 2026; not marked released). Full documented surface: an Entra agent identity → a Dataverse `systemuser` of a new **"Agent user"** type → **standard security roles** → audit attribution distinguishing agent from user. **No conditional authority, no value limits, no time-boxed delegation, no OBO semantics in Dataverse.** This is the **access** half; authority remains ours (§4.7.3) |
 | **Agent 365** | **GA 2026-05-01.** $15/user/mo standalone; M365 E7 $99/user/mo. Registration is **soft pressure, not a gate** — the registry surfaces an "Unmanaged agents" count visible to customer IT. Keep the Entra blueprint step cheap to add; do not treat as blocking |
-| **Dataverse MCP server** | **GA at `/api/mcp`**, 15 tools, **delegated-only**, metered since 2025-12-15. **Custom/ISV tools do NOT go on `/api/mcp`** — there is a preview **MCP management server** that creates per-environment MCP servers and adds tools from Dataverse **custom APIs**, plus **"Bring Your Own MCP" and an ISV MCP Certification program** (called GA 2026-07-06). **That is a distribution channel for the Spaarke MCP server that v2.0 did not account for** (§6.6) |
+| **Dataverse MCP server** | **GA at `/api/mcp`**, 15 tools, **delegated-only**, metered since 2025-12-15. **Custom/ISV tools do NOT go on `/api/mcp`** — there is a preview **MCP management server** that creates per-environment MCP servers and adds tools from Dataverse **custom APIs**, plus **"Bring Your Own MCP" and an ISV MCP Certification program** (called GA 2026-07-06). **That is a distribution channel for the Spaarke MCP server that v2.0 did not account for** (§6.6). **`[Corrected v2.3]` Not GA: Learn still preview, roadmap RM576752 "In development", GA target Dec 2026. The primary channel is now the M365 plugin registry (§2.5b).** |
 | **Dataverse semantic model (preview)** | Auto-provisioned with Dataverse Intelligence; semantic indexing + a curated glossary; regenerates every 12 h. **No API, no ALM/solution support, cannot be created, not consumed by `/api/mcp`, and polymorphic relationships are unsupported.** That last one matters most: polymorphic regarding is load-bearing for us (ADR-024, `CoreAncestorResolver`, `sprk_todo`'s 11-entity regarding, §4.7.1's Inquiry) — so the one Microsoft semantic layer sitting on Dataverse cannot see our most important edges |
-| **L1/L2 competition** | **None.** A deliberate search found no Microsoft business-concepts, knowledge-graph, or rules layer over Dataverse. **L1 and L2 remain entirely unclaimed.** |
+| **L1/L2 competition** | **None.** A deliberate search found no Microsoft business-concepts, knowledge-graph, or rules layer over Dataverse. **L1 and L2 remain entirely unclaimed.** **`[Refined v2.3]` L1 *vocabulary* is now contested in the analytical plane (Fabric IQ's new ontology experience); operational L1/L2 — bound, gated, cited — remains unclaimed.** |
+
+### 2.5b October 2026 refresh — Copilot for Legal, Cowork, plugin registry `[Added v2.3 — verified against Microsoft primary sources 2026-10-29]`
+
+Evidence and full source lists: `.claude/agent-memory/researcher/ms-copilot-for-legal-cowork-registry-2026-10-29.md`, `foundry-work-iq-delta-2026-10-29.md`, `dataverse-m365-copilot-platform-delta-2026-10-29.md`. Re-check after **Ignite, 17–20 Nov 2026** `[Reported]`.
+
+#### Microsoft Copilot for Legal `[Cited]`
+
+| Aspect | Status (source) |
+|---|---|
+| **What shipped** | **GA 2026-10-15**, rollout to mid-Dec (techcommunity post; MC1509799). Two legal plugins: **Word desktop** and **Cowork**. The Cowork plugin carries 20 skills, incl. `review-contract`, `create-playbook`, `extract-obligations-and-deadlines`, `analyze-related-contracts`, `compare-key-terms`, `build-case-chronology`, `summarize-legal-matters` (Learn cowork-available-plugins, 2026-10-26) |
+| **Legal Agent for Word** | Never went GA on its own; folded in and **being retired** (no date) (MC1509799) |
+| **Playbooks** | **`.docx` only**, via upload or "Attach from Cloud" (M365). Template-based review not yet supported. No DMS, no MCP playbook source |
+| **"Matters"** | **Marketing only.** The post says Work IQ understands "the matters, standards…"; no matter object exists in any doc — the matter skills run over files and email |
+| **Licensing** | Word use under the M365 Copilot licence (USL); Cowork use metered in **Copilot Credits** ($0.01 PayGo), nothing bills until an admin creates a spending policy. No separate legal SKU — **effectively free to existing seat holders** |
+| **Admin control** | **Corrects v2.2's "no admin off-switch".** Word plugin on by default; disabled via the "Legal Skills in M365 Copilot in Word" policy. Cowork governed under Agents › Tools (Learn manage-copilot-for-legal, 2026-10-13) |
+| **Partners** | 25+ named plugin partners "beginning to roll out": iManage, NetDocuments, HighQ, Litera, Harvey, Legora, DeepJudge, Relativity, Everlaw, Docusign, Bloomberg Law… Several not yet in the Cowork catalog (2026-10-26) |
+| **Ethical walls** | Cowork docs: Purview **Information Barriers "aren't currently supported for plugin or skill management and sharing."** Whether the legal plugin itself works in IB tenants is unverified |
+
+#### The surrounding platform `[Cited]`
+
+| Microsoft move | Date / status | Consequence for Spaarke |
+|---|---|---|
+| **Plugin registry** — one registry across Copilot Chat, Cowork, Word/Excel/PowerPoint and SharePoint. A plugin = skills (SKILL.md) + remote-MCP connectors + agents; ISVs publish through **Partner Center → M365 App Store**; admins allow "certified external publishers" and toggle individual MCP tools (Agent 365 Tooling Gateway) | 2026-09-30 (blog); Learn manage-plugins 2026-10-14 | 🚩 **The documented ISV entry point.** The Spaarke MCP server should ship as a Copilot plugin. Auth: `OAuthPluginVault` with "Any Microsoft 365 Organization" (DCR works only in Cowork). Microsoft contractually does not persist ISV content returned via MCP. One package can also target Claude (`atk export/import openplugin`) |
+| **Copilot Cowork** — model picker incl. Anthropic (Fable 5.1, Sonnet 5), OpenAI (GPT-6.1 Sol, GPT-6 Astra), xAI (Grok 4.7); Oct: Projects, non-Microsoft event triggers, MCP apps, Claude-plugin import, file inputs to MCP tools | GA 2026-06-16; what's-new 2026-10-28 | The multi-step legal surface Spaarke would plug into |
+| **"Business apps (preview)" in Cowork** — natural-language **read and write** on custom Dataverse tables under the user's roles ("Update the contract record") | Learn 2026-10-13. MC1483492 (2026-09-30): Business Apps in Work IQ **default-ON** for new production envs (Copilot Premium + Power Apps Premium/D365; not EEA/gov/non-prod) | 🚩 Possible ADR-002 bypass if users hold direct Create/Write on `sprk_` tables. **Check the role design.** Also: customers on new envs may already have "Copilot over Dataverse" — our L1 contrast must be made against that |
+| **"Microsoft Copilot" rebrand** (Home / Code / Autopilot; USL + usage billing) | 2026-09-25 | Update naming in sales copy |
+| **Agent 365 / E7** | Unchanged: $15/user/mo, E7 $99; basic registry included with qualifying subscriptions | Still soft pressure, not a gate; MCP approval needs AI Admin / Global Admin consent |
+| **Declarative agent manifest v1.9** — `agent_skills` (≤ 8 SKILL.md folders) + `Fabric` capability; MCP plugins: dynamic tool discovery, MCP Apps widgets | 2026-09-30 / upd 2026-10-22 | Bump the per-customer Copilot agent (T257) |
+| **Copilot in model-driven apps** — GA for MDA (read-only); **a custom agent can be the default agent**; `Xrm.Copilot.sendPromptToM365Copilot` / `addActionHandler` (MCP Apps post actions back into the app) | upd 2026-10-10 / 10-13 | New surface: the Spaarke agent as the Matter Management side-pane default. Licence: Power Apps Premium + M365 Copilot |
+| **Dataverse BYO-MCP / ISV MCP certification** | **Not GA** — RM576752 targets Dec 2026 | Secondary channel, 2027 |
+| **Entra Agent ID for Dataverse** | Learn still "(preview)" (2026-09-24); RM576843 says launched — sources conflict | Treat as preview |
+| **Foundry IQ** | **No change** — no new Search data-plane API version; GA still extractive-only; no `sharePointEmbedded` KS; planner list ends at gpt-5.6 | v2.2 judgment holds |
+| **Foundry models** | GPT-6 Astra GA 09-03; **GPT-6 Luna GA 09-22 ($0.10 / $0.50 per 1M)**; GPT-6.1 Sol GA 09-29. MAI-Thinking-1 still preview. Claude in Foundry not available on CSP subscriptions. EU Data Zone / non-US PTU price rises | Luna covers the cheap tier on Azure OpenAI; MAI not needed. Re-check EU stamp costs |
+| **Foundry Agent Service** | Routines GA 09-24 (scheduled, agent-identity run mode); A2A / Tool Search GA; **Copilot harness** public preview 10-28 | First Foundry primitive for app-identity scheduled agents; option for future agentic jobs, not a Service Bus replacement |
+| **Work IQ** | App-only still unsupported. **New MCP `retrieve` tool (preview, 10-13)** reaches SPE content *the signed-in user can access*. **Dataverse in Work IQ: "not a near-term priority. No delivery timeline"** | `retrieve` sees Spaarke documents only if users are SPE container members (vs. BFF app-only access) — unverified. Drop plans relying on Work IQ over Spaarke Dataverse |
+| **Agent Framework** | .NET 1.26.0 (10-23); breaking changes in 1.23 (MEAI 10.10.1, Azure.AI.Projects 3.0.0-beta.3, approval binding enforced) | Weekly cadence; pin. BFF is on MEAI 10.3.0 with no Agent Framework package |
+
+#### Copilot for Legal vs Spaarke `[Judgment]`
+
+**Commoditized now (at Copilot-seat price):** clause review against a playbook with tracked changes and citations; drafting from precedent; playbook *authoring*; obligation and deadline *extraction* into a tracker; cross-contract term comparison; chronologies. A standalone NDA / Agreement Analysis product has no price room left — §2.6 item 1 is no longer "within weeks", it is now.
+
+**Still uniquely Spaarke's:**
+- **Obligation as a governed object**, not a tracker row — owner, authority, lifecycle.
+- **A Policy version that is evaluated and cited on a decision**, vs a `.docx` playbook decomposed per session.
+- **Matter binding, approval authority, Decision Record** — none exist in Microsoft's product.
+- **Ethical walls** — Information Barriers unsupported for Cowork plugin management.
+- **Neutrality** — Microsoft aggregates partners, but only into its own surfaces.
+
+**Integration posture: complement, don't compete.**
+1. **Spaarke plugin in the registry** — skills + the Spaarke MCP server as a connector, exposing `get_matter_context`, `get_policy_version`, `record_decision` (write tools off by default, per-tool admin toggles). Copilot for Legal does the review; Spaarke supplies the matter, the policy and the record.
+2. **Policy → playbook bridge** — render a Spaarke Policy version as a version-stamped `.docx` playbook so Word's `review-contract` can use it, and bind the result back to the Matter and Policy version.
+3. **MDA default agent** — the Spaarke agent as the Copilot side-pane default in Matter Management.
+
+**Open questions:** do registry plugins run inside *Word* Copilot (registry says yes; the Word legal doc mentions only upload)? Which model powers the Word legal plugin? EU Data Boundary for Anthropic-backed Cowork models? Legal Agent retirement date? What does "certified external publisher" require, and how does it relate to Dataverse ISV certification? 🚩 Do Spaarke security roles grant direct Write on `sprk_` tables (Business-apps bypass)? Are Spaarke users SPE container members (Work IQ `retrieve`)?
 
 ### 2.6 What this does to the strategy `[Judgment]`
 
@@ -375,7 +440,7 @@ Note: the Fabric IQ overview page claims the ontology defines *"rules, and actio
 But three things become urgent rather than important:
 
 1. **NDA Analysis / Agreement Analysis needs a repositioning within weeks, not quarters.** When Word ships playbook review with tracked changes at Copilot price, a standalone clause-deviation module is not a product. What survives is what Word cannot do: the deviation tied to a Matter, an Obligation, a Policy version, an approval authority, and an audit record. Same analysis, different output contract.
-2. **The MCP server (egress) moves from "Designed" to first-priority build.** It is the single artifact that makes Spaarke reachable from every tool in the ILTA table at once, and it is how Spaarke becomes the neutral layer described in §2.3 rather than one more interchangeable tool.
+2. **The MCP server (egress) moves from "Designed" to first-priority build.** It is the single artifact that makes Spaarke reachable from every tool in the ILTA table at once, and it is how Spaarke becomes the neutral layer described in §2.3 rather than one more interchangeable tool. **`[v2.3]`** It now has a documented Microsoft distribution path — the M365 plugin registry, which reaches Copilot Chat, Cowork, Word and SharePoint, and sits alongside Copilot for Legal (§2.5b).
 3. **L4 becomes a build-vs-buy decision.** Continuing to hand-build retrieval orchestration now costs differentiation *and* engineering time. The engineering should move to L1 and L2 — exactly what the §6.2 observation already implied.
 
 ### 2.7 Positioning conclusion `[Judgment]`

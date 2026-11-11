@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0001",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0001","generator_id":"gen_eval_set.py@1 F-0001","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0001.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Garrison Dunmore PC","firm_invoice_number":"INV-2025-22459","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"34334-0003","po_number":"PO-4539884","fees_total":2985.5,"expenses_total":390.95,"adjustments_total":0.0,"total_due":3376.45,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Eriksen","title":"Associate","rate":250.0,"billed_as":"HE"},{"name":"Imani Pemberton","title":"Partner","rate":440.0,"billed_as":"IP"},{"name":"Ingrid Ashdown","title":"Paralegal","rate":140.0,"billed_as":"IA"},{"name":"Nadia Oyelaran","title":"Associate","rate":255.0,"billed_as":"NO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-05","timekeeper":"IA","timekeeper_name":"Ingrid Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":140.0,"amount":42.0,"narrative":"Research standard for provisional remedies concerning the supply agreement","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-05","timekeeper":"HE","timekeeper_name":"Helena Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":250.0,"amount":475.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-15","timekeeper":"NO","timekeeper_name":"Nadia Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":255.0,"amount":51.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-16","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":440.0,"amount":616.0,"narrative":"Draft motion for preliminary injunction in the distribution agreement","codes":["L220","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-18","timekeeper":"NO","timekeeper_name":"Nadia Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":255.0,"amount":127.5,"narrative":"Attend case management conference in the vendor agreement","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-19","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Partner","title":"Ptr","hours":1.65,"rate":440.0,"amount":726.0,"narrative":"Telephone conference with client representative regarding factual background of the licensing dispute","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-23","timekeeper":"IA","timekeeper_name":"Ingrid Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":140.0,"amount":336.0,"narrative":"Draft settlement term sheet for the lease dispute","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-25","timekeeper":"NO","timekeeper_name":"Nadia Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":255.0,"amount":612.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":58.35,"amount":233.4,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":54.0,"rate":0.6,"amount":32.4,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":40.18,"amount":80.36,"narrative":"Overnight courier to Ironbridge Steel counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-06-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":44.79,"amount":44.79,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["364 Congress Boulevard","Seattle","Tax ID 75-9111552"],"template":"T21","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-23","matter_close":"2026-09-28","matter_budget":38505.0,"approved_timekeepers":["Ingrid Ashdown","Helena Eriksen","Nadia Oyelaran","Hannah Mbeki","Imani Pemberton","Nadia Brennan"],"invoice_received_date":"2026-07-08"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

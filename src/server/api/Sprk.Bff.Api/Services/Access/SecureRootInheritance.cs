@@ -218,6 +218,14 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
     /// Display names only these: a direct parent is already visible on the record's own lookup, a grandparent is not.
     /// </summary>
     public IReadOnlyList<FilingParentState> DirectParents { get; init; } = Array.Empty<FilingParentState>();
+
+    /// <summary>
+    /// Owner decision 2026-10-29: the matters and projects the record is filed under directly, keyed as its owner question keys
+    /// them (<see cref="SecureRootInheritance.OwnerKeyedParents"/>, the rule creation keys by) — what the un-secure cascade asks
+    /// (<see cref="SecureRootInheritance.UnsecureOwnerQuestionOf"/>). Read in the same filing read as the flags (no extra query).
+    /// </summary>
+    internal IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerLookups { get; init; } =
+        Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
 }
 
 /// <summary>Task 174: one DIRECT filing parent and what arrives through it — <see cref="EffectiveSecure"/> (it or anything
@@ -475,9 +483,10 @@ public sealed partial class SecureRootInheritance
     /// (<see cref="SecureParentsAnswer.WallsDecidable"/>). The container resolver refuses such a pair naming any root
     /// (a work assignment too). Its writers send the typed lookup and the same pair (the Create Work Assignment wizard —
     /// a matter, project, invoice or event — and the BFF).</para>
-    /// <para>Why not field security on the work assignment's pair too: the Create Work Assignment wizard and the Assign
-    /// Work follow-on create the row through <c>Xrm.WebApi</c> AS THE USER with the pair in the payload, which a secured
-    /// column would refuse.</para>
+    /// <para>Why not field security on the work assignment's pair too: it was written AS THE USER with the pair in the payload
+    /// when the Create Work Assignment wizard created the row through <c>Xrm.WebApi</c>, which a secured column would refuse.
+    /// The wizard now posts the same payload to the BFF (<c>workAssignmentService.ts</c>,
+    /// <c>/api/v1/child-records/sprk_workassignment</c>); securing the column is not part of that change.</para>
     /// </remarks>
     internal static readonly IReadOnlySet<string> BffManagedPairTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Project };
@@ -500,6 +509,75 @@ public sealed partial class SecureRootInheritance
                $"a {(string.Equals(table, Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment")} is " +
                "filed under a matter or project only through those lookups (the pair repeats one)";
     }
+
+    /// <summary>
+    /// FR-09 (task 015; moved here from <c>RecordCreationService</c> so the ownership resolver reads a project's pair by
+    /// the same rule, owner decision 2026-10-29): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
+    /// BFF-managed (<see cref="PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
+    /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
+    /// this (one row, its <c>sprk_recordlogicalname</c>). Only a table the plan reads as a parent
+    /// (<see cref="IsParent"/>: a matter or project) is returned, so the owner and the secure-root plan
+    /// see the same filing.
+    /// </summary>
+    /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
+    /// a secure-root parent (a document, an event: the plan reads such a pair as no filing). <c>Undetermined</c>: the pair
+    /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
+    /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
+    /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (!PairNamesAParentOnItsOwn(table) || string.IsNullOrWhiteSpace(idText))
+            return (null, null);
+
+        if (!Guid.TryParse(idText.Trim(), out var id) || id == Guid.Empty)
+            return (null, $"its {PairIdColumn} is not a record id");
+
+        if (typeId is not { } type || type == Guid.Empty)
+            return (null, $"its {PairIdColumn} names a record without its record type");
+
+        var query = new QueryExpression(RecordTypeRefEntity)
+        {
+            ColumnSet = new ColumnSet(RecordTypeLogicalNameColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RecordTypeRefEntity + "id", ConditionOperator.Equal, type);
+        var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var named = row?.GetAttributeValue<string>(RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(named))
+            return (null, "its record type names no table");
+
+        // Review F3: the plan files a project under its pair only when the pair names a matter or project; a pair typed to
+        // anything else files it under nothing, and the owner must agree (else a document's unit would own the project, or
+        // DecideOwnerAsync's consistency check would refuse, "Try again", a create the plan admitted).
+        return IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
+    }
+
+    /// <summary>
+    /// Fix round (B-K1): <see cref="PairParentAsync"/> for an EXISTING row, as the ownership resolver and the root-owner step
+    /// read it — a pair naming a record that no longer exists files the row under nothing (the parent is gone), as the
+    /// secure-root plan reads a missing parent ("a missing record confers nothing"). The named record is read by id
+    /// (<paramref name="committed"/>: a committed read, else <c>NoLock</c>). A Dataverse fault reading it propagates.
+    /// </summary>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> ExistingPairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, bool committed, CancellationToken ct)
+    {
+        var pair = await PairParentAsync(entities, table, idText, typeId, ct).ConfigureAwait(false);
+        if (pair.Parent is not { } parent)
+            return pair;
+
+        var query = new QueryExpression(parent.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(parent.EntityLogicalName + "id"),
+            TopCount = 1,
+            NoLock = !committed,
+        };
+        query.Criteria.AddCondition(parent.EntityLogicalName + "id", ConditionOperator.Equal, parent.RecordId);
+        var found = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        return found ? pair : (null, null);
+    }
+
 
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 
@@ -999,9 +1077,15 @@ public sealed partial class SecureRootInheritance
     /// under — asked once they are known and BEFORE the No Access checks, so a caller who may not file under a secure record
     /// learns nothing more about it (not even its No Access state). Its refusal is returned as the plan's. <c>null</c>: the
     /// writer made its own check already.</param>
+    /// <param name="secureRequested">field-mapping-server-write-path-r1 task 049 fix round 2 (owner ruling 2026-11-05): the
+    /// creator asked for the record to be secure (the Create Project wizard's Secure choice). A project the wizard creates as
+    /// secure is secure from creation: it is planned INTO isolation whether or not it is filed under a secure record, with
+    /// the same creator, No Access and named-team checks. The writer asks the caller's own rights for that BEFORE this plan
+    /// (<c>RecordCreationService</c>, the delegation rule).</param>
     public async Task<SecureRootCreatePlan> PlanCreateAsync(
         string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct,
-        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null,
+        bool secureRequested = false)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!Inherits(table))
@@ -1028,26 +1112,31 @@ public sealed partial class SecureRootInheritance
             return SecureRootCreatePlan.Refused(Refused(logical, ex.Message));
         }
 
-        if (filingWrites.Count == 0)
+        if (filingWrites.Count == 0 && !secureRequested)
             return SecureRootCreatePlan.Ordinary;
 
-        var answer = await DecideParentsAsync(Overlay(logical, null, filingWrites), ct).ConfigureAwait(false);
+        var answer = filingWrites.Count == 0
+            ? new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null)
+            : await DecideParentsAsync(Overlay(logical, null, filingWrites), ct).ConfigureAwait(false);
         if (!answer.HasSecureParent)
         {
-            return answer.IsKnown
-                ? SecureRootCreatePlan.Ordinary
-                : SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
+            if (!answer.IsKnown)
+                return SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
+            if (!secureRequested)
+                return SecureRootCreatePlan.Ordinary;
         }
 
+        var why = answer.HasSecureParent ? "filed under a secure record" : "made secure";
         if (creatorSystemUserId == Guid.Empty)
         {
             return SecureRootCreatePlan.Refused(Refusal(ProvisionProjectEndpoint.ReasonCreatorUnresolved,
-                $"a {noun} filed under a secure record is created secure for the person who creates it, and that person could " +
-                "not be identified, so it was not created"));
+                $"a {noun} {why} is created secure for the person who creates it, and that person could not be identified, " +
+                "so it was not created"));
         }
 
         // G5 on the secure parents (the writer's as-the-caller check) — before anything about them is said.
-        if (callerMayFileUnder is not null
+        if (answer.HasSecureParent
+            && callerMayFileUnder is not null
             && await callerMayFileUnder(answer.SecureParents, ct).ConfigureAwait(false) is { } callerRefusal)
         {
             return SecureRootCreatePlan.Refused(callerRefusal);
@@ -1090,14 +1179,14 @@ public sealed partial class SecureRootInheritance
         if (!topology.IsResolved || topology.OwnerTeamId is not { } team)
         {
             return SecureRootCreatePlan.Refused(Refusal(RecordOwnerRefusal.SecureOwnerTeamUnresolved,
-                $"a {noun} filed under a secure record is created owned by the Secure Record Owners team, which could not be " +
-                "resolved in this environment, so it was not created"));
+                $"a {noun} {why} is created owned by the Secure Record Owners team, which could not be resolved in this " +
+                "environment, so it was not created"));
         }
 
         _logger.LogInformation(
-            "[SECURE-INHERIT] A new {Table} is filed under secure record(s) {Parents}: it is created INTO isolation (owner team " +
-            "{Team}, flagged) for {Creator}.", logical, string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")),
-            team, creatorSystemUserId);
+            "[SECURE-INHERIT] A new {Table} is {Why} {Parents}: it is created INTO isolation (owner team {Team}, flagged) for " +
+            "{Creator}.", logical, answer.HasSecureParent ? "filed under secure record(s)" : "secure from creation, as its creator asked",
+            string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")), team, creatorSystemUserId);
         return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents);
     }
 
@@ -1163,8 +1252,13 @@ public sealed partial class SecureRootInheritance
     /// step that does not complete (the container, the sharees) leaves a PROVISIONED-but-incomplete record, which the job
     /// (≤ 5 minutes) completes through the same re-entry branch. Never throws.
     /// </summary>
+    /// <remarks>Fix round 3: <paramref name="secureFromCreation"/> is <c>true</c> for a create the caller asked to be secure.
+    /// The job visits only records filed under a secure parent, so such a record (unfiled, or under a parent that is not
+    /// secure) is not resumed by it: the log says an administrator must act, and says what finishes an incomplete securing,
+    /// instead of promising a retry.</remarks>
     public async Task<SecureRootInheritResult> CompleteIsolatedCreateAsync(
-        string table, Guid recordId, Guid creatorSystemUserId, string traceId, CancellationToken ct)
+        string table, Guid recordId, Guid creatorSystemUserId, string traceId, CancellationToken ct,
+        bool secureFromCreation = false)
     {
         if (!Inherits(table))
             throw new ArgumentOutOfRangeException(nameof(table), table, "Only work assignments and projects inherit security.");
@@ -1200,10 +1294,22 @@ public sealed partial class SecureRootInheritance
         // branch completes it); one nobody can open is removed, read back — never left behind.
         if (await CreatorHoldsShareAsync(logical, recordId, creatorSystemUserId, ct).ConfigureAwait(false))
         {
-            _logger.LogWarning(
-                "[SECURE-INHERIT] {Table} {RecordId} was created into isolation and shared to its creator, but its provisioning did " +
-                "not complete ({Code}: {Detail}); the secure-root inheritance job completes it.", logical, recordId,
-                provisioned.ReasonCode, provisioned.Detail);
+            if (secureFromCreation)
+            {
+                _logger.LogWarning(
+                    "[SECURE-INHERIT] {Table} {RecordId} was created secure from creation and shared to its creator, but its " +
+                    "provisioning did not complete ({Code}: {Detail}); the inheritance job does not visit it, so an " +
+                    "administrator must finish it (for a project: the wizard, or provision-project).", logical, recordId,
+                    provisioned.ReasonCode, provisioned.Detail);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[SECURE-INHERIT] {Table} {RecordId} was created into isolation and shared to its creator, but its provisioning did " +
+                    "not complete ({Code}: {Detail}); the secure-root inheritance job completes it.", logical, recordId,
+                    provisioned.ReasonCode, provisioned.Detail);
+            }
+
             return provisioned;
         }
 
@@ -1224,6 +1330,15 @@ public sealed partial class SecureRootInheritance
                 "[SECURE-INHERIT] {Table} {RecordId} was created into isolation, but its creator could not be shared ({Code}: " +
                 "{Detail}); the row was deleted (read back gone) and the create is refused.", logical, recordId,
                 provisioned.ReasonCode, provisioned.Detail);
+        }
+        else if (secureFromCreation)
+        {
+            // The job does not visit a secure-from-creation record that has no secure parent: ACTION NEEDED, no retry is promised.
+            _logger.LogCritical(
+                "[SECURE-INHERIT] ACTION NEEDED: {Table} {RecordId} was created secure from creation, its creator could not be " +
+                "shared ({Code}), AND the row could not be removed: it is owned by the memberless Secure Record Owners team and " +
+                "only an administrator can open it. Nothing retries this on its own — an administrator must review and remove " +
+                "it.", logical, recordId, provisioned.ReasonCode);
         }
         else if (provisioned.CompletesAutomatically)
         {
@@ -1758,7 +1873,11 @@ public sealed partial class SecureRootInheritance
 
                 rows.Add(new AssignedAccessLedgerRow
                 {
-                    Id = created, SourceField = source, StateValue = (int)write.State, Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+                    Id = created,
+                    SourceField = source,
+                    StateValue = (int)write.State,
+                    Reason = write.Reason,
+                    GrantedLevel = write.GrantedLevel,
                     SystemUserId = intent.Principal.Kind == DataversePrincipalKind.SystemUser ? intent.Principal.Id : null,
                     SubjectTeamId = intent.Principal.Kind == DataversePrincipalKind.Team ? intent.Principal.Id : null,
                 });
@@ -1849,7 +1968,11 @@ public sealed partial class SecureRootInheritance
 
             rows.Add(new AssignedAccessLedgerRow
             {
-                Id = created, SourceField = source, StateValue = (int)write.State, Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+                Id = created,
+                SourceField = source,
+                StateValue = (int)write.State,
+                Reason = write.Reason,
+                GrantedLevel = write.GrantedLevel,
                 SystemUserId = outcome.Principal.Kind == DataversePrincipalKind.SystemUser ? outcome.Principal.Id : null,
                 SubjectTeamId = outcome.Principal.Kind == DataversePrincipalKind.Team ? outcome.Principal.Id : null,
             });
@@ -1952,8 +2075,11 @@ public sealed partial class SecureRootInheritance
 
         var reopened = new AssignedAccessLedgerRow
         {
-            Id = id, SourceField = AssignedAccessStore.InheritedSourceField(parent.Table, parent.Id), StateValue = (int)write.State,
-            Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+            Id = id,
+            SourceField = AssignedAccessStore.InheritedSourceField(parent.Table, parent.Id),
+            StateValue = (int)write.State,
+            Reason = write.Reason,
+            GrantedLevel = write.GrantedLevel,
             SystemUserId = outcome.Principal.Kind == DataversePrincipalKind.SystemUser ? outcome.Principal.Id : null,
             SubjectTeamId = outcome.Principal.Kind == DataversePrincipalKind.Team ? outcome.Principal.Id : null,
         };
@@ -2977,6 +3103,9 @@ public sealed partial class SecureRootInheritance
                     ? own.FiledUnder.Select(p => new FilingParentState(
                         new SecureFilingParent(p.Table, p.Id, p.Name), effective.IsSecure(p), effective.Rank(p))).ToList()
                     : Array.Empty<FilingParentState>(),
+                OwnerLookups = decisions.TryGetValue(c.Start, out var start)
+                    ? start.Answer.OwnerLookups
+                    : Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(),
             });
     }
 
@@ -3590,11 +3719,17 @@ public sealed partial class SecureRootInheritance
     /// see the intermediate on the row, never the record it belongs to (task 174 verifier F1-d).</summary>
     private sealed record NamedParents(
         IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated,
-        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly);
+        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly)
+    {
+        /// <summary>The matters and projects keyed as the row's owner question keys them (<see cref="OwnerKeyedParents"/>).</summary>
+        public IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerLookups { get; init; } =
+            Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
+    }
 
     /// <summary>#1630: an intermediate as read — the matters and projects it belongs to (<c>null</c> = it does not exist), or a
-    /// fault.</summary>
-    private readonly record struct IntermediateRead(IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted);
+    /// fault (<c>Fault</c>: what the read threw, for a caller that propagates it).</summary>
+    private readonly record struct IntermediateRead(
+        IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted, Exception? Fault = null);
 
     /// <summary>#1630: the intermediate rows one call has read (a row reached by several records is read once).</summary>
     private sealed class IntermediateReads : Dictionary<(string Table, Guid Id), IntermediateRead>
@@ -3604,13 +3739,15 @@ public sealed partial class SecureRootInheritance
     /// <summary>
     /// #1630: the matters and projects each of <paramref name="ids"/> (rows of the intermediate <paramref name="table"/>)
     /// belongs to, by its <see cref="IntermediateParentColumns"/> — one query (one id, or an id list of at most
-    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates.
+    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates. <paramref name="committed"/>: a
+    /// committed read (the resolver's re-file path, #2143 round 3); otherwise <c>NoLock</c>, as every other read here.
     /// </summary>
     private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>> ReadIntermediatesAsync(
-        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct, bool committed = false)
     {
         var columns = IntermediateParentColumns(table);
         var query = Query(table, columns.Select(c => c.Column).ToArray());
+        query.NoLock = !committed;
         IReadOnlyList<Entity> rows;
         if (ids.Length == 1)
         {
@@ -3641,10 +3778,11 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>#1630: reads every intermediate in <paramref name="refs"/> not already in <paramref name="into"/> — per table,
     /// one row per query (<paramref name="batched"/> false) or in chunks of <see cref="IdsPerQuery"/>. Never throws a read
-    /// fault: a row (or chunk) that cannot be read is recorded as faulted.</summary>
+    /// fault: a row (or chunk) that cannot be read is recorded as faulted. <paramref name="committed"/>: see
+    /// <see cref="ReadIntermediatesAsync"/>.</summary>
     private static async Task ReadIntermediatesIntoAsync(
         IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> refs, IntermediateReads into,
-        bool batched, CancellationToken ct)
+        bool batched, CancellationToken ct, bool committed = false)
     {
         foreach (var group in refs.Where(r => !into.ContainsKey(r)).Distinct().GroupBy(r => r.Table))
         {
@@ -3652,7 +3790,7 @@ public sealed partial class SecureRootInheritance
             {
                 try
                 {
-                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct)
+                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct, committed)
                         .ConfigureAwait(false);
                     foreach (var row in chunk)
                         into[row] = new IntermediateRead(found.TryGetValue(row.Id, out var parents) ? parents : null, false);
@@ -3662,7 +3800,7 @@ public sealed partial class SecureRootInheritance
                     logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} row(s) a record is filed under could not be read.",
                         chunk.Length, group.Key);
                     foreach (var row in chunk)
-                        into[row] = new IntermediateRead(null, true);
+                        into[row] = new IntermediateRead(null, true, ex);
                 }
             }
         }
@@ -3674,6 +3812,202 @@ public sealed partial class SecureRootInheritance
             .Select(c => (Table: c.Item2, Id: facts.Typed.TryGetValue(c.Item1, out var id) ? id : null))
             .Where(c => c.Id is { } i && i != Guid.Empty)
             .Select(c => (c.Table, c.Id!.Value));
+
+    /// <summary>
+    /// #1630: the matters and projects <paramref name="filedIntermediates"/> belong to, in order (each intermediate as read into
+    /// <paramref name="intermediates"/>, its <see cref="IntermediateParentColumns"/> order), and why any could not be named —
+    /// an intermediate whose read faulted is unknown; one the read did not return confers nothing, or (the read path's
+    /// <paramref name="absentIsUnknown"/>) is unknown. The ONE rule both <see cref="NameParentsAsync"/> (the inheritance and
+    /// the un-secure cascade) and <see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>
+    /// (a create's owner question) apply. Each parent carries the intermediate table that names it (<c>Via</c>), which
+    /// <see cref="OwnerKeyedParents"/> keys it by.
+    /// </summary>
+    private static (List<(string Table, Guid Id, string Via)> Parents, string? Unknown) NameThroughIntermediates(
+        IEnumerable<(string Table, Guid Id)> filedIntermediates, IntermediateReads intermediates, bool absentIsUnknown)
+    {
+        var parents = new List<(string Table, Guid Id, string Via)>();
+        string? unknown = null;
+        foreach (var intermediate in filedIntermediates)
+        {
+            var read = intermediates[intermediate];
+            if (read.Faulted)
+            {
+                unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
+                continue;
+            }
+
+            // The read path opts in (absentIsUnknown): an intermediate the read did not return is not "belongs to nothing",
+            // it is unknown (the same rule DecideNamedParents applies to a named matter or project).
+            if (read.Parents is null && absentIsUnknown)
+                unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
+
+            parents.AddRange((read.Parents ?? Array.Empty<(string Table, Guid Id)>()).Select(p => (p.Table, p.Id, intermediate.Table)));
+        }
+
+        return (parents, unknown);
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: THE rule for which column a row's owner question keys each matter and project it is filed
+    /// under by, so the one builder (<c>RecordOwnershipContext.ForRow</c>, <c>SecureChildLineage.RootLookupOrder</c>) ranks the
+    /// same parent first on every path — creation (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>)
+    /// and the un-secure cascade (<see cref="UnsecureOwnerQuestionOf"/>) alike. A matter or project the row holds in a typed
+    /// column (<paramref name="typed"/>) is keyed under that column. One named only through an invoice or event
+    /// (<paramref name="throughIntermediates"/>) is keyed under the row's typed column for its table when the row holds no
+    /// typed matter or project (<see cref="OwnerIntermediatesOf"/>: then that record's matter is the row's core record), and
+    /// otherwise under the invoice's or event's own column, so it ranks after the row's own matter and project. A parent
+    /// named both ways is keyed once, under the typed column.
+    /// </summary>
+    internal static IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerKeyedParents(
+        string table, IEnumerable<(string Column, string Table, Guid Id)> typed,
+        IEnumerable<(string Table, Guid Id, string Via)> throughIntermediates)
+    {
+        ArgumentNullException.ThrowIfNull(typed);
+        ArgumentNullException.ThrowIfNull(throughIntermediates);
+        var logical = table.Trim().ToLowerInvariant();
+        var typedColumns = TypedFilingColumns.TryGetValue(logical, out var t) ? t : Array.Empty<(string, string)>();
+        var intermediateColumns = IntermediateFilingColumns.TryGetValue(logical, out var i) ? i : Array.Empty<(string, string)>();
+
+        var keyed = new List<KeyValuePair<string, RecordOwnershipParent?>>();
+        var named = new HashSet<(string Table, Guid Id)>();
+        foreach (var (column, parentTable, id) in typed)
+        {
+            if (named.Add((parentTable.Trim().ToLowerInvariant(), id)))
+                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
+        }
+
+        var holdsTyped = named.Count > 0;
+        foreach (var (parentTable, id, via) in throughIntermediates)
+        {
+            if (!named.Add((parentTable.Trim().ToLowerInvariant(), id)))
+                continue;
+            var column = holdsTyped
+                ? intermediateColumns.FirstOrDefault(c => string.Equals(c.Item2, via, StringComparison.OrdinalIgnoreCase)).Item1
+                : typedColumns.FirstOrDefault(c => string.Equals(c.Item2, parentTable, StringComparison.OrdinalIgnoreCase)).Item1;
+            if (column is not null)
+                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
+        }
+
+        return keyed;
+    }
+
+    /// <summary>
+    /// What a row's owner question adds through its intermediates
+    /// (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>):
+    /// the matters and projects, keyed under the typed column that files a row there; or why they could not be read.
+    /// </summary>
+    internal sealed record OwnerFilingThroughIntermediates(
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> Lookups, string? Unverifiable)
+    {
+        /// <summary>
+        /// Set when <see cref="Unverifiable"/> is because an intermediate's read FAULTED (a throttled or failed read), not
+        /// because it was not found: what that read threw. A writer refuses on <see cref="Unverifiable"/> either way (fail
+        /// closed); the resolver propagates this fault, as it does a fault reading the row itself, so a caller retries a
+        /// transient fault rather than reporting a refusal.
+        /// </summary>
+        internal Exception? Fault { get; init; }
+
+        /// <summary>An intermediate's read faulted (<see cref="Fault"/>).</summary>
+        internal bool Faulted => Fault is not null;
+
+        /// <summary>Nothing to add: the row holds a typed parent, or no intermediate.</summary>
+        internal static OwnerFilingThroughIntermediates None { get; } =
+            new(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), null);
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29 (a work assignment belongs to its core record): the intermediates a row of
+    /// <paramref name="table"/> about to be written is filed under (<see cref="IntermediateFilingColumns"/>) whose matters and
+    /// projects its owner question must name — empty when the table has no intermediate lookups, when the row holds a typed
+    /// parent lookup (<see cref="TypedFilingColumns"/>: then that parent is its core record, and nothing changes), or when it
+    /// holds no intermediate. Reads nothing.
+    /// </summary>
+    internal static IReadOnlyList<(string Table, Guid Id)> OwnerIntermediatesOf(
+        string? table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups)
+    {
+        ArgumentNullException.ThrowIfNull(lookups);
+        var logical = table?.Trim().ToLowerInvariant();
+        if (logical is null
+            || !IntermediateFilingColumns.TryGetValue(logical, out var intermediateColumns) || intermediateColumns.Count == 0
+            || !TypedFilingColumns.TryGetValue(logical, out var typed))
+        {
+            return Array.Empty<(string, Guid)>();
+        }
+
+        var held = lookups.Where(l => l.Value is { IsSpecified: true }).ToArray();
+        IEnumerable<Guid> IdsUnder(string column) => held
+            .Where(l => string.Equals(l.Key?.Trim(), column, StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Value!.RecordId);
+
+        if (typed.Any(t => IdsUnder(t.Column).Any()))
+            return Array.Empty<(string, Guid)>();
+
+        return intermediateColumns
+            .SelectMany(c => IdsUnder(c.Column).Select(id => (Table: c.Intermediate, Id: id)))
+            .Distinct()
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: a work assignment filed only under an invoice or event (no typed matter or project) is owned
+    /// in the business unit of the matters and projects THAT record belongs to — what <see cref="NameParentsAsync"/> names for
+    /// it (#1630 Option A, "exactly as if it were filed under them directly"), so creation and the un-secure cascade
+    /// (<c>UnsecureFollowingParentsAsync</c>) name the same parents. Each is returned keyed under the typed column that files a
+    /// row under its table (<see cref="TypedFilingColumns"/>), so the one builder (<c>RecordOwnershipContext.ForRow</c>) ranks
+    /// it first in the table's order (<c>SecureChildLineage.RootLookupOrder</c>: matter, then project), ahead of the
+    /// intermediate — which the caller keeps among the parents, so secure-if-any reads at least what it read before. The row
+    /// holds no typed matter or project (<see cref="OwnerIntermediatesOf"/> answers the intermediates only then); the keys are
+    /// <see cref="OwnerKeyedParents"/>', the rule the cascade keys by.
+    /// </summary>
+    /// <param name="committed">A committed read of the intermediates (the resolver's re-file path, #2143 round 3: every parent
+    /// fact it reads is committed); otherwise <c>NoLock</c> (creation, the resolver's create paths).</param>
+    /// <returns>An intermediate that cannot be read: <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> (the caller
+    /// refuses; never "under nothing"), with <see cref="OwnerFilingThroughIntermediates.Fault"/> when that read faulted. One
+    /// that does not exist confers nothing. Never throws a read fault.</returns>
+    internal static async Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates,
+        CancellationToken ct, bool committed = false)
+    {
+        ArgumentNullException.ThrowIfNull(filedIntermediates);
+        var logical = table.Trim().ToLowerInvariant();
+        if (filedIntermediates.Count == 0 || !TypedFilingColumns.ContainsKey(logical))
+            return OwnerFilingThroughIntermediates.None;
+
+        var reads = new IntermediateReads();
+        await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, reads, batched: false, ct, committed)
+            .ConfigureAwait(false);
+        var (parents, unknown) = NameThroughIntermediates(filedIntermediates, reads, absentIsUnknown: false);
+        if (unknown is not null)
+        {
+            return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown)
+            {
+                Fault = filedIntermediates.Select(i => reads[i]).FirstOrDefault(r => r.Faulted).Fault,
+            };
+        }
+
+        return new OwnerFilingThroughIntermediates(
+            OwnerKeyedParents(logical, Array.Empty<(string, string, Guid)>(), parents), null);
+    }
+
+    /// <summary>
+    /// The same, from the lookups a row holds (column → record: a mapped write's, or an existing row's
+    /// <c>RecordOwnershipContext.LookupsOf(row)</c>) — <see cref="OwnerIntermediatesOf"/>, then the read. A caller with an
+    /// <see cref="IGenericEntityService"/> (the resolver's read path, a writer) asks it for a row of any table: a table with no
+    /// intermediate lookups, or a row holding a typed matter or project, answers <see cref="OwnerFilingThroughIntermediates.None"/>
+    /// with nothing read. It then refuses on <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> and otherwise asks
+    /// <c>RecordOwnershipContext.ForRow(table, result.Lookups.Concat(lookups), …)</c>. <paramref name="committed"/>: the
+    /// resolver's re-file path reads the intermediates committed.
+    /// </summary>
+    internal static Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        IGenericEntityService dataverse, ILogger logger, string table,
+        IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct, bool committed = false) =>
+        OwnerLookupsThroughIntermediatesAsync(dataverse, logger, table, OwnerIntermediatesOf(table, lookups), ct, committed);
+
+    /// <summary><see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>
+    /// over this service's reader (<see cref="SecureRootFilingGate.OwnerLookupsThroughIntermediatesAsync"/>).</summary>
+    internal Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates, CancellationToken ct) =>
+        OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, table, filedIntermediates, ct);
 
     /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, #1630 the matters and
     /// projects its intermediates belong to, then the pair), and why any could not be named. Reads only the pair's TYPE (cached
@@ -3691,12 +4025,16 @@ public sealed partial class SecureRootInheritance
         bool absentIsUnknown = false)
     {
         var named = new List<(string Table, Guid Id)>();
+        var typedHeld = new List<(string Column, string Table, Guid Id)>();
         string? unknown = null;
         string? unrepeated = null; // #1616: kept apart — see SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair
         foreach (var (column, parentTable) in TypedFilingColumns[facts.Table])
         {
             if (facts.Typed.TryGetValue(column, out var id) && id is { } parentId)
+            {
                 named.Add((parentTable, parentId));
+                typedHeld.Add((column, parentTable, parentId));
+            }
         }
 
         // #1630 (owner Option A): an invoice or event the row is filed under by its typed lookup files it under the matters and
@@ -3704,32 +4042,21 @@ public sealed partial class SecureRootInheritance
         // nothing, like a missing parent).
         var direct = named.ToHashSet();
         var viaIntermediate = new HashSet<(string Table, Guid Id)>();
+        var throughParents = new List<(string Table, Guid Id, string Via)>();
         var filedIntermediates = IntermediatesOf(facts).ToList();
         if (filedIntermediates.Count > 0)
         {
             intermediates ??= new IntermediateReads();
             await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, intermediates, batched: false, ct)
                 .ConfigureAwait(false);
-            foreach (var intermediate in filedIntermediates)
+            var through = NameThroughIntermediates(filedIntermediates, intermediates, absentIsUnknown);
+            unknown ??= through.Unknown;
+            throughParents = through.Parents;
+            foreach (var (table, id, _) in through.Parents)
             {
-                var read = intermediates[intermediate];
-                if (read.Faulted)
-                {
-                    unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
-                    continue;
-                }
-
-                // The read path opts in (absentIsUnknown): an intermediate the read did not return is not "belongs to nothing",
-                // it is unknown (the same rule DecideNamedParents applies to a named matter or project).
-                if (read.Parents is null && absentIsUnknown)
-                    unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
-
-                foreach (var parent in read.Parents ?? Array.Empty<(string Table, Guid Id)>())
-                {
-                    named.Add(parent);
-                    if (!direct.Contains(parent))
-                        viaIntermediate.Add(parent);
-                }
+                named.Add((table, id));
+                if (!direct.Contains((table, id)))
+                    viaIntermediate.Add((table, id));
             }
         }
 
@@ -3779,7 +4106,10 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return new NamedParents(named, unknown, unrepeated, viaIntermediate);
+        return new NamedParents(named, unknown, unrepeated, viaIntermediate)
+        {
+            OwnerLookups = OwnerKeyedParents(facts.Table, typedHeld, throughParents),
+        };
     }
 
     /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
@@ -3837,6 +4167,7 @@ public sealed partial class SecureRootInheritance
         {
             UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
             StrictestPermission = strictest,
+            OwnerLookups = naming.OwnerLookups,
         }, existing);
     }
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -23,6 +24,7 @@ public class SignalEvaluationServiceTests : IDisposable
 
     private readonly Guid _matterId = Guid.NewGuid();
     private readonly Guid _snapshotId = Guid.NewGuid();
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _ownership = new();
 
     // Dataverse schema constants (mirrored from service for readability)
     private const int PeriodTypeMonth = 100000000;
@@ -51,7 +53,7 @@ public class SignalEvaluationServiceTests : IDisposable
         var optionsMock = Options.Create(options);
         return new SignalEvaluationService(
             _dataverseServiceMock.Object,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            _ownership,
             optionsMock,
             _telemetry,
             _loggerMock.Object);
@@ -777,6 +779,69 @@ public class SignalEvaluationServiceTests : IDisposable
         VerifySignalUpserted(
             expectedSignalType: SignalEvaluationService.SignalTypeBudgetWarning,
             expectedSeverity: SignalEvaluationService.SeverityWarning,
+            times: Times.Never());
+    }
+
+    #endregion
+
+    #region Ownership question (UAC task 194b R4-2)
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EvaluateAsync_AsksOverTheMatterAndTheSnapshot_TheQuestionTheReconcilerAsksTheSignal()
+    {
+        // A signal row holds two lookups (sprk_matter, sprk_snapshot); the reconciler asks over both, matter first.
+        SetupSingleSnapshot(BuildToDateSnapshot(invoicedAmount: 11000m, budgetAmount: 10000m));
+        var sut = CreateService();
+
+        (await sut.EvaluateAsync(_matterId)).Should().Be(1);
+
+        var written = new Microsoft.Xrm.Sdk.Entity("sprk_spendsignal", Guid.NewGuid())
+        {
+            // Attribute order deliberately NOT the table's: the snapshot first.
+            ["sprk_snapshot"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_spendsnapshot", _snapshotId),
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", _matterId),
+        };
+        var question = _ownership.Requests.Should().ContainSingle().Subject;
+        question.Parents.Should().Equal(
+            new RecordOwnershipParent("sprk_matter", _matterId),
+            new RecordOwnershipParent("sprk_spendsnapshot", _snapshotId));
+        question.Parents.Should().Equal(RecordOwnershipContext.OrderedParentsOf(written));
+        question.TargetEntityLogicalName.Should().Be("sprk_matter");
+        question.TargetRecordId.Should().Be(_matterId);
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EvaluateAsync_AsksOncePerSnapshotThatFires_AndNotForOneThatDoesNot()
+    {
+        var toDateId = Guid.NewGuid();
+        var monthId = Guid.NewGuid();
+        var quietId = Guid.NewGuid();
+        SetupMultipleSnapshots(
+            (toDateId, BuildToDateSnapshot(invoicedAmount: 11000m, budgetAmount: 10000m)),
+            (monthId, BuildMonthSnapshot(invoicedAmount: 5000m, velocityPct: 60m)),
+            (quietId, BuildMonthSnapshot(invoicedAmount: 100m, velocityPct: 1m)));
+        var sut = CreateService();
+
+        (await sut.EvaluateAsync(_matterId)).Should().Be(2);
+
+        _ownership.Requests.Select(q => q.Parents.Last().RecordId).Should().Equal(toDateId, monthId);
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EvaluateAsync_ARefusedSnapshot_WritesNoSignal()
+    {
+        SetupSingleSnapshot(BuildToDateSnapshot(invoicedAmount: 11000m, budgetAmount: 10000m));
+        _ownership.TeamId = null;
+        var sut = CreateService();
+
+        (await sut.EvaluateAsync(_matterId)).Should().Be(0);
+
+        VerifySignalUpserted(
+            expectedSignalType: SignalEvaluationService.SignalTypeBudgetExceeded,
+            expectedSeverity: SignalEvaluationService.SeverityCritical,
             times: Times.Never());
     }
 

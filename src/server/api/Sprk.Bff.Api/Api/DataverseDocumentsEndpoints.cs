@@ -148,6 +148,24 @@ public static class DataverseDocumentsEndpoints
                         });
                 }
 
+                // Task 039 (FR-38), task 041 (FR-40): a document's search index is the SERVER's, and nothing on the create and
+                // client paths writes it (the index follows the content type). The indexing pipeline's own stamps (RagEndpoints and the RAG
+                // indexing jobs) record where a file was indexed and are deliberately left alone. A body that names one has it
+                // dropped — never refused — and the row's index stays as it is. This typed request does not use
+                // DropSearchIndexFromUpdate (it has no dictionary or JSON body to drop from: one nullable property).
+                if (request.SearchIndexName is not null
+                    && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex("sprk_document"))
+                {
+                    Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
+                        logger, "sprk_document", Guid.Parse(id),
+                        [new Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue(
+                            Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver.LegacyTextColumn,
+                            Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginCaller, null,
+                            string.IsNullOrWhiteSpace(request.SearchIndexName) ? null : request.SearchIndexName.Trim())],
+                        applied: null, correlationId: traceId);
+                    request.SearchIndexName = null;
+                }
+
                 // Check if document exists
                 var existingDocument = await dataverseService.GetDocumentAsync(id);
                 if (existingDocument == null)
@@ -325,6 +343,7 @@ public static class DataverseDocumentsEndpoints
         documentsGroup.MapDelete("/{id}", async (
             string id,
             IDocumentDataverseService dataverseService,
+            Spaarke.Dataverse.IGenericEntityService entities,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -363,6 +382,19 @@ public static class DataverseDocumentsEndpoints
                         "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent",
                         id, childCount);
                     return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
+                }
+
+                // ebilling-r1 task 094 (ontology-r1 088 gate F1; owner EB-D-166): a Stored File copied from the document
+                // (sprk_sourcedocument, Delete = Restrict) refuses the row the same way, so it is checked too - with its own code
+                // (fix round F1-c): the document is an invoice's source, not a parent of child documents.
+                var copyCount = await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
+                    entities, Guid.Parse(id), context.RequestAborted);
+                if (copyCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source",
+                        id, copyCount);
+                    return ProblemDetailsHelper.DocumentIsInvoiceSource(traceId);
                 }
 
                 try
@@ -880,6 +912,8 @@ public static class DataverseDocumentsEndpoints
         IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         Spaarke.Dataverse.IGenericEntityService genericEntityService,
+        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe accessProbe,
+        [FromServices] RecordContainerResolver containerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -891,6 +925,15 @@ public static class DataverseDocumentsEndpoints
         {
             logger.LogInformation("Creating document {DocumentName} in container {ContainerId}",
                 request.Name, request.ContainerId);
+
+            // Unified-access-control-r2 task 166: the row is written APP-ONLY, so the caller's own rights are checked
+            // first, as the caller — Create on sprk_document, and the body's container must be the caller's
+            // business-unit container. Nothing below runs unless both pass.
+            if (await AuthorizeDocumentCreateAsync(request, accessProbe, containerResolver, userId, logger, context, ct)
+                is { } refused)
+            {
+                return refused;
+            }
 
             // Task 080 (write-path invariant I-6): this create is APP-ONLY, so without an explicit owner
             // Dataverse makes the BFF application user the owner — in the ROOT business unit, where no child-BU
@@ -983,6 +1026,114 @@ public static class DataverseDocumentsEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
+
+    /// <summary>
+    /// The Create privilege on <c>sprk_document</c>, by its live name. Reuses
+    /// <see cref="CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege"/> — one spelling of one privilege.
+    /// </summary>
+    internal const string CreateDocumentPrivilege = CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege;
+
+    /// <summary>
+    /// The ONE detail of the create's refusal when the caller lacks Create on <c>sprk_document</c> or names a container
+    /// that is not their business unit's: the two read the same, so the response says nothing about which containers exist.
+    /// </summary>
+    internal const string DocumentCreateDeniedDetail = "You do not have permission to create a document in this location.";
+
+    /// <summary>
+    /// Authorizes <c>POST /api/v1/documents</c> AS THE CALLER before the app-only write (unified-access-control-r2 task
+    /// 166; owner G5): the caller must hold <see cref="CreateDocumentPrivilege"/>, asked through
+    /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (on
+    /// behalf of the caller, uncached), and the body's container must be the caller's business-unit container, derived
+    /// server-side by <see cref="RecordContainerResolver.ResolveForActingUserAsync"/>. <c>null</c> when allowed.
+    /// </summary>
+    /// <remarks>
+    /// Fails closed: a privilege not held and a container that is not the caller's are the same 403
+    /// (<see cref="FinanceAuthorizationFilter.InsufficientRightsReasonCode"/>, <see cref="DocumentCreateDeniedDetail"/>).
+    /// The probe answers a Dataverse fault as "not held" (a limit it shares with its other callers), so that fault is the
+    /// insufficient-rights 403; an exception from either check is a 403 <see cref="FinanceAuthorizationFilter.SystemFailureReasonCode"/>,
+    /// a timeout included. The body's container is not stored on the row; comparing it confirms the client and the
+    /// server agree, and deriving it applies the resolver's eligibility rule (an enabled, internal user). A business
+    /// unit with no container is refused (409, as the record-less upload route refuses it), and the resolver's own typed
+    /// refusals (a caller with no usable Dataverse user) are returned as they are. The body's container is never
+    /// replaced: a mismatch is refused.
+    /// </remarks>
+    private static async Task<IResult?> AuthorizeDocumentCreateAsync(
+        CreateDocumentRequest request,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe accessProbe,
+        RecordContainerResolver containerResolver,
+        string? userId,
+        ILogger logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var traceId = context.TraceIdentifier;
+
+        bool holdsCreate;
+        try
+        {
+            holdsCreate = await accessProbe.CallerHoldsPrivilegeAsync(
+                Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context), CreateDocumentPrivilege, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Document create: the {Privilege} check faulted; refusing (fail closed)", CreateDocumentPrivilege);
+            return DocumentCreateCheckFaulted(traceId);
+        }
+
+        if (!holdsCreate)
+        {
+            logger.LogWarning("Document create DENIED: caller {UserId} does not hold {Privilege}", userId, CreateDocumentPrivilege);
+            return ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode, DocumentCreateDeniedDetail, traceId);
+        }
+
+        ContainerDecision decision;
+        try
+        {
+            decision = await containerResolver.ResolveForActingUserAsync(userId, ct);
+        }
+        catch (SdapProblemException ex)
+        {
+            // The resolver's typed refusals (no usable caller identity, an ambiguous or ineligible user) are its contract.
+            logger.LogWarning("Document create refused: the caller's business-unit container could not be derived ({Code})", ex.Code);
+            return TypedResults.Problem(
+                statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = traceId });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Document create: deriving the caller's business-unit container faulted; refusing (fail closed)");
+            return DocumentCreateCheckFaulted(traceId);
+        }
+
+        if (decision.ContainerId is null)
+        {
+            logger.LogWarning("Document create refused: the caller's business unit has no sprk_containerid stamped");
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "No storage container is configured",
+                detail: "Your business unit has no document container configured, so the document was not created. "
+                        + "Ask an administrator to configure one.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+
+        if (!RecordContainerResolver.IsSameContainerId(decision.ContainerId, request.ContainerId))
+        {
+            logger.LogWarning(
+                "Document create DENIED: caller {UserId} named a container that is not their business unit's", userId);
+            return ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode, DocumentCreateDeniedDetail, traceId);
+        }
+
+        return null;
+    }
+
+    /// <summary>The create's refusal when a check could not be answered: denied, never allowed (ADR-003).</summary>
+    private static IResult DocumentCreateCheckFaulted(string traceId) =>
+        ProblemDetailsHelper.Forbidden(
+            FinanceAuthorizationFilter.SystemFailureReasonCode,
+            "Your permission to create this document could not be confirmed, so it was not created. Try again.",
+            traceId);
 
     /// <summary>The reason code of every refused file attach (one code; the detail says which check refused).</summary>
     internal const string AttachRefusedCode = "document_file_attach_refused";

@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0290",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0290","generator_id":"gen_eval_set.py@1 F-0290","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0290.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Sutherland & Whitcombe LLP","firm_invoice_number":"INV-2025-37895","invoice_date":"2025-07-01","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"91660-0033","po_number":"PO-4570592","fees_total":5811.5,"expenses_total":6558.76,"adjustments_total":0.0,"total_due":12370.26,"currency":"USD"},
+ "timekeepers":[{"name":"Gregory Dunleavy","title":"Partner","rate":560.0,"billed_as":"GD"},{"name":"Imani Pemberton","title":"Associate","rate":300.0,"billed_as":"IP"},{"name":"Yusuf Thornbury","title":"Associate","rate":325.0,"billed_as":"YT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-01","timekeeper":"GD","timekeeper_name":"Gregory Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":560.0,"amount":896.0,"narrative":"Draft settlement term sheet for the employment claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-03","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":300.0,"amount":210.0,"narrative":"Review expert qualifications and prior testimony for the construction contract","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-12","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":300.0,"amount":270.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-12","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":300.0,"amount":525.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-13","timekeeper":"GD","timekeeper_name":"Gregory Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":1.8,"rate":755.0,"amount":1359.0,"narrative":"Review and organize incoming production from Orchard Row Brands for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-13","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":325.0,"amount":227.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-13","timekeeper":"GD","timekeeper_name":"Gregory Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":560.0,"amount":504.0,"narrative":"Research standard for provisional remedies concerning the employment claim","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-20","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":325.0,"amount":910.0,"narrative":"Research pleading standards applicable to the data incident","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-27","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":325.0,"amount":910.0,"narrative":"Draft protective order in the supply agreement","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6.41,"amount":6.41,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":675.44,"amount":675.44,"narrative":"Airfare to Denver for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1759.67,"amount":1759.67,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4117.24,"amount":4117.24,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["533 Commerce Avenue","Dallas","Tax ID 85-7893778"],"template":"T17","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-01-24","matter_close":"2025-09-28","matter_budget":74481.0,"approved_timekeepers":["Yusuf Thornbury","Imani Pemberton","Daniel Halloran","Beatrix Delacroix","Gregory Dunleavy","Gideon Galbraith"],"invoice_received_date":"2025-07-19"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

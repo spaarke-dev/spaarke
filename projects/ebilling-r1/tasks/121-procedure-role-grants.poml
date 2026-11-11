@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="ebilling-r1">
+  <metadata>
+    <title>Procedure-table role grants after uac-r2 task 191: org Read (O-6), Billing Administrator Create/Write on sprk_procedure; flip UntilTask191</title>
+    <phase>3 Rules and Procedures — role follow-up (O-6, 081 notes)</phase>
+    <gate>BLOCKED until uac-r2 task 191 (Dataverse-side external visibility, External Collaborator role) is merged and deployed to dev, AND uac-r2 agrees to flip UntilTask191. The live dev step needs the owner's OK plus notices to ontology-r1 and uac-r2.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-role change on shared roles (auth); removes a temporary uac-r2 guard rule.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant and external-visibility sensitive grant (K-1 window) with a live step.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-R</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same role files as task 120; runs after it.</parallel-reason>
+    <deps>120</deps>
+    <tags>dataverse, solution, auth, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Once uac-r2 task 191 has landed, grant the Procedure-table privileges the 081 notes reserved for "task 191":
+- org-level Read on sprk_procedure and sprk_procedureversion for internal users (O-6);
+- Create and Write on sprk_procedure for Spaarke Billing Administrator.
+
+Flip ProcedureRolePrivilegeGuardTests.UntilTask191 with uac-r2's agreement. The external role gets nothing.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse security roles and the uac-r2 external-visibility model.</role>
+
+  <goal>Internal users can open Procedures and Procedure versions in Dataverse (O-6), and billing admins can edit Procedures. Flagged-external users still reach no Procedure row: Dataverse-side through 191, and BFF-side through step 0. Create and Write on versions and assignments stay with no role.</goal>
+
+  <context>
+    <background>
+- **081 notes** (projects/ebilling-r1/notes/081-procedure-version-service.md, "Task 191 must, in the same change"): flip UntilTask191; add org Read (O-6), plus Create and Write for billing admin; give the external role nothing.
+- **procedure-and-file-model.md section 5 and K-1:** until 191 deploys, org-level Read would reach flagged-external users through their business unit's default team. That is why no role holds anything on these tables today.
+- **081's routes:** RequireWriteOnTheRuleSetsProcedure and RequireReadOnTheRuleSetsProcedure ask the caller's rights on the Procedure record, so without these grants only System Administrators pass them.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/ProcedureRolePrivilegeGuardTests.cs (UntilTask191 → removed with its control, per its own summary; the "never Create/Write on versions/assignments" rule stays)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml</file>
+      <file role="modify">the internal role chosen for O-6 Read (decide with uac-r2: Core User, or a role 191 names as internal-only); its Roles/*.xml</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 (add the grants; -Verify covers them)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RuleSetRolePrivilegeGuardTests.cs (Billing Administrator's exact set now includes the sprk_procedure grants)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="O-6">Read at Global on sprk_procedure and sprk_procedureversion goes to the internal role uac-r2 confirms after 191. No role gets any privilege on sprk_procedureassignment except as uac-r2 directs.</constraint>
+    <constraint source="081 guard">No role ever gets prvCreate or prvWrite on sprk_procedureversion or sprk_procedureassignment. The guard keeps that rule after the flip.</constraint>
+    <constraint source="uac-r2">The External Collaborator role, and any role 191 marks external, hold nothing on the Procedure tables. Add a guard fact for this, with a must-fire on an inline fixture.</constraint>
+    <constraint source="D-76">Billing Administrator gets Create, Read and Write on sprk_procedure at Global, and Read on sprk_procedureversion at Global. Nothing else changes in its set.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>projects/ebilling-r1/notes/081-procedure-version-service.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 5, K-1)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the gate: uac-r2 191 is merged and deployed on dev. Get uac-r2's written agreement on the flip and on which internal role gets O-6 Read. Quote both in notes/121-procedure-role-grants.md.</step>
+    <step order="2">Source:
+- the role XML grants;
+- the guard flip, removing UntilTask191 and its control and keeping the never-rule;
+- the external-role guard fact with its must-fire;
+- the RuleSetRolePrivilegeGuardTests set update.
+
+Seeding proof: give the external role prvReadsprk_procedure, confirm the guard fails, then restore it.</step>
+    <step order="3">Script: extend Deploy-EbillingBillingAdminRole.ps1 (or the role-privilege script uac-r2 names) and run -WhatIf on dev.</step>
+    <step order="4">Build and run ArchTests plus the Procedure and RuleSet unit filters. Commit (no push).</step>
+    <step order="5">LIVE (dev), only with the owner's OK:
+1. send notices to ontology-r1 and uac-r2;
+2. plain run;
+3. -Verify exits 0;
+4. send the after-notices.</step>
+    <step order="6">Update TASK-INDEX.md and the POML status; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 191 is not deployed on dev, or uac-r2 has not agreed to the flip in writing, STOP. This task is blocked.</trigger>
+    <trigger>If flagged-external systemusers on dev still hold the role chosen for O-6 Read through a default team, and 191 does not hide Procedure rows from them, STOP and escalate (K-1).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/ProcedureRolePrivilegeGuardTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/121-procedure-role-grants.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The guard passes with the new grants. It fails when any role gets Create or Write on sprk_procedureversion or sprk_procedureassignment, and when the external role gets any privilege on the three tables (the must-fire tests).</criterion>
+    <criterion testable="true">Billing Administrator's exact set equals the 120 set plus Create, Read and Write on sprk_procedure and Read on sprk_procedureversion, all at Global.</criterion>
+    <criterion testable="true">On dev after the live run, -Verify exits 0, and a second plain run writes nothing.</criterion>
+    <criterion testable="true">ArchTests, and the unit filter FullyQualifiedName~Procedure|FullyQualifiedName~RuleSet, pass.</criterion>
+    <criterion testable="true">Test scope: the guard facts named here and the seeding proof only.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0204",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0204","generator_id":"gen_eval_set.py@1 F-0204","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0204.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Stanhope and Dunmore LLP","firm_invoice_number":"LF0076172","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"22690-0023","po_number":"PO-4564045","fees_total":1974.5,"expenses_total":1178.07,"adjustments_total":0.0,"total_due":3152.57,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Brennan","title":"Paralegal","rate":105.0,"billed_as":"FB"},{"name":"Hannah Voss","title":"Paralegal","rate":120.0,"billed_as":"HV"},{"name":"Ingrid Abernathy","title":"Partner","rate":365.0,"billed_as":"IA"},{"name":"Ingrid Lockhart","title":"Of Counsel","rate":300.0,"billed_as":"IL"},{"name":"Ivan Santoro","title":"Legal Assistant","rate":90.0,"billed_as":"IS"},{"name":"Oliver Dunleavy","title":"Associate","rate":235.0,"billed_as":"OD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-04","timekeeper":"FB","timekeeper_name":"Farah Brennan","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":145.0,"amount":319.0,"narrative":"Draft settlement term sheet for the lease dispute","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-07","timekeeper":"HV","timekeeper_name":"Hannah Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":120.0,"amount":108.0,"narrative":"Draft settlement term sheet for the licensing dispute","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-08","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Of Counsel","title":"O/C","hours":1.7,"rate":300.0,"amount":510.0,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-10","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Of Counsel","title":"O/C","hours":0.6,"rate":300.0,"amount":180.0,"narrative":"Research public records concerning Tidewater Retail and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-10","timekeeper":"HV","timekeeper_name":"Hannah Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":120.0,"amount":312.0,"narrative":"Continue work on project.","codes":["L120","A101"],"page":1,"narrative_style":"vague"},
+  {"n":6,"line_type":"fee","date":"2025-07-15","timekeeper":"IS","timekeeper_name":"Ivan Santoro","timekeeper_title":"Legal Assistant","title":"LA","hours":1.1,"rate":90.0,"amount":99.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-18","timekeeper":"IS","timekeeper_name":"Ivan Santoro","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":90.0,"amount":45.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-24","timekeeper":"IA","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":365.0,"amount":401.5,"narrative":"Attend case management conference in the supply agreement","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-07-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":668.43,"amount":668.43,"narrative":"Airfare to Seattle for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":509.64,"amount":509.64,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["370 Elm Court","Denver","Tax ID 94-9397900"],"template":"T19","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-09-23","matter_close":"2025-10-29","matter_budget":37610.0,"approved_timekeepers":["Sofia Sandoval","Gregory Tavares","Ingrid Lockhart","Hannah Voss","Farah Brennan","Ivan Santoro","Oliver Dunleavy"],"invoice_received_date":"2025-08-04"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[8],"consequence":"Reject"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[5],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

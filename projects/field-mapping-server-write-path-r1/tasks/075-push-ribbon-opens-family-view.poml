@@ -4,7 +4,7 @@
     <title>Push Updates ribbon opens the Family view (code-page dialog hosting RecordFamilyModal) (FR-35)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>073 complete; MERGE AND DEPLOY ONLY TOGETHER WITH 040 (owner, 2026-10-28)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New code page + ribbon web-resource change.</rigor-reason>
     <model-tier>sonnet</model-tier>

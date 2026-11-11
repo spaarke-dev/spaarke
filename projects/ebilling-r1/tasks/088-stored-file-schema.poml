@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="ebilling-r1">
+  <metadata>
+    <title>Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
+    <gate>Startable for steps 1-6 (script, code change, -WhatIf, review). The real dev run (step 8) waits for ontology-r1's full schema-review PASS, both before-notices, the owner's OK, AND 080's real run (the Stored File's sprk_procedureversion lookup needs that table).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (ParentLineage.cs) and adds an isolation guard; plus a new table with field security on dev, owner-gated.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: the marker decides whether (a′) hides an invoice from its firm, and the field security decides who may write every authorization column of an invoice file.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches no file another P3-A task touches; only the real run is ordered after 080's.</parallel-reason>
+    <deps>080</deps>
+    <tags>dataverse, schema, security, bff-api, coordination</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Write scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1 (items F1-F5 below) and add the submission marker to the app-only write refusal in ParentLineage.cs with tests; after the review gates, run the script on dev (after 080's run), run it again, verify, notify and update docs/data-model/sprk_invoice.md.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Dataverse metadata Web API, field security and the BFF's document access-permission guards.</role>
+
+  <goal>Dev has F1-F5 as stated; InheritedAccessPermission.RefuseAppOnlyWrite refuses the marker on a document, so every app-only generic writer and the field-mapping push skip it; tests and one seeding proof show it; the gates and notices are recorded in notes/088-stored-file-schema.md.</goal>
+
+  <context>
+    <background>Model: projects/ebilling-r1/notes/procedure-and-file-model.md sections 4.1 (Stored File columns, field security), 4.2, 5.1-5.2 (census, Restrict on source lookups, hard-deny list), 9.1 (the marker paragraph "The .eml is own-Restricted", and "Existing invoice": close as Superseded) and 10; breakdown notes/replan-eb-d-148.md row 088. Not here: the marker's writer and create-only ArchTest (095), the (a′) predicate (098), the file store service (090), the Superseded close (097), invoice Stored File registration (086). The refusal lives in InheritedAccessPermission.RefuseAppOnlyWrite (ParentLineage.cs:578; class at :476; not a member of ParentLineage). Its callers: FieldMappingEndpoints.cs:1054 (the push skips the rule), UpdateRecordActionCore.cs:151 and DataverseUpdateHandler.cs:67 (refuse the write). sprk_invoice.sprk_supersedesinvoice exists (task 012, Deploy-EbillingInvoiceHeaderSchema.ps1:195; InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn); 104 sets it.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1</file>
+      <file role="modify">scripts/README.md (the script's entry)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs (InheritedAccessPermission: marker constant; RefuseAppOnlyWrite :578)</file>
+      <file role="modify">tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionAppOnlyWriterTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionPushTargetTests.cs</file>
+      <file role="modify">docs/data-model/sprk_invoice.md (Status section)</file>
+      <file role="new">projects/ebilling-r1/notes/088-stored-file-schema.md</file>
+      <file role="read">scripts/ebilling/Deploy-EbillingProcedureSchema.ps1 (080); Deploy-EbillingInvoiceHeaderSchema.ps1:97-152 (InsertStatusValue)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 4.1, 5.2 (items)">The script creates exactly: F1 global choice sprk_storedfilepurpose (Procedure source 100000000, Invoice PDF 100000001, Invoice supporting file 100000002, Export file 100000003). F2 table sprk_storedfile (user-owned, IsAuditEnabled, primary sprk_name = file name, 400): parent lookups sprk_procedureversion, sprk_invoice, sprk_billingexport (each RemoveLink, optional); sprk_purpose (F1); sprk_firmvisible (two-option, default No); sprk_filestatus (local choice: Not yet servable 100000000, Servable 100000001, Removed 100000002); sprk_sourcedocument (-> sprk_document, Restrict); sprk_sourcecommunication (-> sprk_communication, Restrict); sprk_sourceattachmentidentity (text 1000); sprk_sourceversion (text 20, ONE canonical string form of the source row version: invariant culture, no padding, no separators); sprk_sourcesha256 and sprk_sha256 (text 64); sprk_contenttype (text 255); sprk_sizebytes (whole number, Integer, MinValue 0, MaxValue 2147483647: a file over 2 GiB cannot be stored; no BigInt column, run 1 on dev showed a BigInt cannot be secured); sprk_blobpath (text 1024); sprk_createdbyperson (shape of Deploy-EbillingSubmissionSchema.ps1:182-183, unsecured). F4 sprk_document.sprk_restrictedbysubmission (two-option "Restricted by invoice submission", default No). F5 sprk_invoice statuscode "Superseded" = 659490005 at statecode 1 (Inactive), refused (exit 2, nothing written) if the value or label exists with another meaning.</constraint>
+    <constraint source="model 4.1 (uac-r2 F1-b), 9.1 marker paragraph">F3 field security, reusing uac-r2's reader / writer pair as 080 does (permission rows only, never members): writer (BFF application user) Create/Update on every F2 column except sprk_name and sprk_createdbyperson, and on F4; reader Read on all of them except sprk_blobpath, which has the writer profile only (server-only, like the old S8 column). sprk_createdbyperson is secured later by 086.</constraint>
+    <constraint source="model 4.2, 5.2">The parent lookups use RemoveLink (a parent deleted outside the BFF leaves the row for 090's orphan reconcile, which reads the parent from the blob path; 090's download refuses a row whose parent lookup does not match the path). Restrict only on the two source lookups. The Stored File row id is supplied by the BFF (090); no column or key here.</constraint>
+    <constraint source="model 9.1, task 189 K5 pattern">Add the marker column name as an internal const on InheritedAccessPermission and make RefuseAppOnlyWrite refuse it on sprk_document exactly as it refuses sprk_accesspermission and the own-narrowing record (same reason code). Change no other behaviour of RefuseAppOnlyWrite and no caller. ParentLineage.cs is uac-r2's code (task 189): uac-r2 reviews this diff, and /conflict-check runs before the PR.</constraint>
+    <constraint source="root CLAUDE.md section 10, .claude/constraints/bff-extensions.md">Measure the BFF publish-size delta against a fresh master build and record it; no new package.</constraint>
+    <constraint source="model 9.1, 10, section 12">Never: set any invoice to Superseded, add a code constant for it (097), write the marker anywhere (095), create sprk_storedfile forms, views or subgrids, change role privileges (081, 086), or touch SpaarkeMaster (079). Dev only; -WhatIf first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 4, 5.2, 9.1, 10)</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only dev checks, recorded in the notes: every planned name, value and relationship is absent or identical; sprk_invoice statuscode options are exactly the seven of task 012 (659490005 free); which identity creates the .eml Document in the /office/save pipeline (OfficeDocumentPersistence.cs, UploadFinalizationWorker.cs).</step>
+    <step order="2">Write the script on EbillingSchema.psm1, copying 080's script for the pre-flight, the global choice and the field security, and Deploy-EbillingInvoiceHeaderSchema.ps1:97-152 for F5. Its pre-flight refuses (exit 2) when sprk_procedureversion does not exist. Update scripts/README.md.</step>
+    <step order="3">Code: the marker constant and the RefuseAppOnlyWrite change. Tests: must-fire — an app-only update naming the marker on a document is refused and writes nothing; a field-mapping rule targeting the marker is Skipped and the rest of the push applies. Must-not-fire — the marker name on a non-document table is not refused; a document payload without it passes.</step>
+    <step order="4">Seeding proof: remove the marker from the refusal, show the must-fire tests fail, restore. Record it in the notes.</step>
+    <step order="5">dotnet build and the touched test projects green; measure the publish-size delta.</step>
+    <step order="6">Run -WhatIf; send the item list, delete behaviours, field-security plan and -WhatIf output to ontology-r1 and uac-r2 (before-notices); get ontology-r1's full schema-review PASS (fix and re-run -WhatIf for each finding); ask the owner for the dev run. Record dates and answers.</step>
+    <step order="7">Confirm 080's real run is recorded in notes/080-procedure-schema.md.</step>
+    <step order="8">Run for real, then again (every item skipped, nothing written).</step>
+    <step order="9">Verify by metadata and row reads every acceptance criterion below; record the output.</step>
+    <step order="10">After-notices to ontology-r1 and uac-r2; update docs/data-model/sprk_invoice.md (Superseded: set only by 097's corrected-invoice close; the lifecycle fails closed on it until 097).</step>
+    <step order="11">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="12">Record deviations in projects/ebilling-r1/notes/088-stored-file-schema.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology-r1 has not passed, the owner has not given the OK, uac-r2 does not agree the profile reuse, or 080 has not run for real, STOP before step 8.</trigger>
+    <trigger>If step 1 finds the .eml Document is created by a user identity rather than the BFF application user, STOP: field security to the BFF app user would refuse 095's marker write. Record it and raise 🔔 Human Input Required (model 9.1: "or the recorded reason not to").</trigger>
+    <trigger>If a planned name or value exists with another meaning, or the review changes a name, value or delete behaviour, STOP and present it; do not rename or renumber.</trigger>
+    <trigger>If the RefuseAppOnlyWrite change would alter any existing must-fire or must-not-fire test's outcome, STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_document (SharePoint Embedded document management, ruled out by O-2 / O-8); SessionFileBlobStore holds AI session bytes, not business records; sprk_invoice has no file columns. Grep of scripts/ebilling and src/ finds no sprk_storedfile and no submission marker. The Superseded value: InvoiceStatusCodes (InvoiceLifecycleService.cs:44-71) has seven values and no Superseded.</existing>
+    <extension>A parent row cannot hold several files with per-file status, purpose and source ids, so a file table is needed (model 4.1). The marker extends sprk_document, and its guard extends the existing RefuseAppOnlyWrite rather than adding a new check.</extension>
+    <cost-of-doing-nothing>Invoice, Procedure and export files have no home outside document management; a retried submission would reuse a Restricted .eml with no marker and hide the invoice from its firm for good (uac-r2 v5.7 change 1); a corrected invoice cannot close as Superseded (owner L).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Schema script</tool>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="dataverse-mcp">Metadata reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs</output>
+    <output type="test">tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionAppOnlyWriterTests.cs; DocumentAccessPermissionPushTargetTests.cs</output>
+    <output type="docs">scripts/README.md; docs/data-model/sprk_invoice.md; projects/ebilling-r1/notes/088-stored-file-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes record, with dates and before the real run: both before-notices, uac-r2's answer on the profiles and its review of the ParentLineage.cs diff, ontology-r1's PASS, the owner's OK and 080's run.</criterion>
+    <criterion testable="true">A dev metadata read shows sprk_storedfilepurpose with exactly the four listed values; sprk_storedfile user-owned and audited with every listed column and type; the three parent lookups RemoveLink; sprk_sourcedocument and sprk_sourcecommunication Restrict.</criterion>
+    <criterion testable="true">Every F3 column reads IsSecured = true with the stated permission rows; sprk_blobpath has no reader permission row; no profile's members changed.</criterion>
+    <criterion testable="true">sprk_document.sprk_restrictedbysubmission exists, defaults to No, is field-secured (writer: BFF application user); no document row holds Yes.</criterion>
+    <criterion testable="true">sprk_invoice statuscode has 659490005 "Superseded" at statecode 1 and the seven earlier values unchanged; no invoice holds 659490005; InvoiceStatusCodes is unchanged.</criterion>
+    <criterion testable="true">RefuseAppOnlyWrite returns the refusal for sprk_document with the marker key and null for another table with the same key; the field-mapping push skips a marker rule and applies the others (tests above; seeding proof recorded).</criterion>
+    <criterion testable="true">Negative: no form, view or subgrid for sprk_storedfile; no role privilege, SpaarkeMaster or InvoiceStatusCodes change; no file under src/ other than ParentLineage.cs changed.</criterion>
+    <criterion testable="true">A second run reports every item skipped and writes nothing; the publish-size delta is recorded.</criterion>
+    <criterion testable="true">Test scope: cover the two must-fire and two must-not-fire cases of step 3 only. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The model's 4.1 row for "source attachment identity" describes the flagged-mailbox case that v5.5 retired; the column stays as listed (it holds the marked attachment's identity inside the .eml, 9.1 step 3). The breakdown lists 088 with no dependencies, but its real run needs 080's table; its authoring and review run alongside 080 so ontology-r1 can review both scripts together.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

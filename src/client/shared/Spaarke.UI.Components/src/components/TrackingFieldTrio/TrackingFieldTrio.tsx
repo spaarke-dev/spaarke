@@ -39,6 +39,13 @@
  * component builds ONLY the toolbar shell + click affordances — the modal
  * and email-dialog contents are implemented by the caller in tasks 041/042.
  *
+ * Family tool (field-mapping-server-write-path-r1 task 074, FR-33): a third
+ * opt-in icon, `onOpenFamily`, opens the record's Family (the host renders
+ * `RecordFamilyModal`). Same opt-in rule as the two above - omitted, nothing
+ * is drawn and the toolbar is unchanged. It is NOT gated by `canGrantAccess`:
+ * the Family view lists only records the caller may already read (the server
+ * filters it), so it is available to a person who cannot manage access.
+ *
  * Read-only + secure display (unified-access-control-r2 task 138):
  *   - `disabled` (the host form is read-only) disables all three controls, and
  *     `accessPermissionDisabled` the pill alone; a disabled pill's menu cannot
@@ -83,7 +90,7 @@ import {
   MenuItem,
   shorthands,
 } from '@fluentui/react-components';
-import { PersonRegular, MailRegular } from '@fluentui/react-icons';
+import { PersonRegular, MailRegular, OrganizationRegular } from '@fluentui/react-icons';
 import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
 import { resolveAccessIndicator } from './accessStatus';
 
@@ -313,6 +320,7 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   onAccessPermissionChange,
   onOpenGrantModal,
   onOpenEmailMembers,
+  onOpenFamily,
   canGrantAccess,
   disabled = false,
   accessPermissionDisabled = false,
@@ -337,7 +345,7 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   // row (when `title` is set, task 073 UAT #3) OR in the prior absolute
   // top-right toolbar (no title — unchanged for existing consumers).
   const toolbarIcons =
-    onOpenGrantModal || onOpenEmailMembers ? (
+    onOpenGrantModal || onOpenEmailMembers || onOpenFamily ? (
       <>
         {onOpenGrantModal && (
           <Tooltip
@@ -367,6 +375,19 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
               icon={<MailRegular />}
               aria-label="Email members"
               onClick={onOpenEmailMembers}
+            />
+          </Tooltip>
+        )}
+        {onOpenFamily && (
+          <Tooltip content="Family" relationship="label">
+            <Button
+              className={styles.toolbarIconButton}
+              appearance="subtle"
+              size="small"
+              icon={<OrganizationRegular />}
+              aria-label="Family"
+              // Wrapped so the click event is never passed to the host as an argument.
+              onClick={() => onOpenFamily()}
             />
           </Tooltip>
         )}

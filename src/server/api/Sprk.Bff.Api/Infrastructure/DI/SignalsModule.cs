@@ -96,6 +96,9 @@ public static class SignalsModule
         // caller's. DecisionRouteCores adapts the shipped event, child-record and communications cores. Unconditional:
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
+        // Task 167 (D-193): the one resolver of a catalog parameter's named option lists (live picklist metadata, active currencies) and of a
+        // budget's currency, used by the plan route and the Create budget executor. Scoped: it holds the caller's IDataverseUserClient.
+        services.AddScoped<DecisionParameterSources>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
@@ -116,6 +119,14 @@ public static class SignalsModule
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
         services.AddScoped<DecisionCommitFollowUps>();
+        // Task 168 (D-194): Assign Task's email (as the assigner, else the system mailbox from an ADR-004 job) and bell, after the record.
+        // Scoped like AssignedAccessStore, which it takes; the handler is scoped because IIdempotencyService is. Unconditional (F.1): its
+        // dependencies (CommunicationService, NotificationService, JobSubmissionService) are.
+        // Fix round (D-199): the ONE recipient gate the notifier and its job both ask. Scoped like AssignedAccessStore and
+        // SecureShareNoAccessGuard, which it takes; unconditional because they all are (AddExternalAccess).
+        services.AddScoped<AssignTaskRecipientGate>();
+        services.AddScoped<AssignTaskNotifier>();
+        services.AddScoped<IJobHandler, AssignTaskEmailJobHandler>();
         services.AddScoped<DecisionCommitService>();
         // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
         services.AddSingleton<DecisionPlanReadStamp>();

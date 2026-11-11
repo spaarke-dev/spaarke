@@ -36,6 +36,9 @@ public class FinanceTelemetry : IDisposable
     // Signal metrics
     private readonly Counter<long> _signalsEmitted;
 
+    // Billing compliance (ebilling-r1 task 072, review B3)
+    private readonly Counter<long> _billingSecureRootWalkFaults;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Finance";
 
@@ -99,6 +102,11 @@ public class FinanceTelemetry : IDisposable
             name: "finance.signal.emitted",
             unit: "{signal}",
             description: "Number of finance signals emitted (BudgetWarning, VelocitySpike, etc.)");
+
+        _billingSecureRootWalkFaults = _meter.CreateCounter<long>(
+            name: "finance.billing.secure_root_walk.faults",
+            unit: "{fault}",
+            description: "Billing evaluations whose secure-root walk (D-112) faulted, so every Duplicate prior's detail was withheld");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -225,6 +233,13 @@ public class FinanceTelemetry : IDisposable
 
         _signalsEmitted.Add(1, tags);
     }
+
+    /// <summary>
+    /// ebilling-r1 task 072 (review B3): the billing loader's secure-root walk (D-112) threw, so the evaluation failed closed and
+    /// every Duplicate finding of that submission withheld its prior's detail. Alert on a non-zero rate: it is a Dataverse fault or
+    /// a walker defect, not a data state.
+    /// </summary>
+    public void RecordBillingSecureRootWalkFault() => _billingSecureRootWalkFaults.Add(1);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Distributed Tracing

@@ -4,11 +4,11 @@ import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
+import { launchAssociationFromParams } from "@spaarke/ui-components/utils/launchAssociation";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateProjectWizard, mapProjectHandoffSeed } from "@spaarke/ui-components/components/CreateProjectWizard";
-import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
@@ -73,6 +73,14 @@ function App() {
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
   }, [handoff]);
 
+  // Task 195 (#2352): opened from a matter's form command or its "New" on the Project <-> Matter subgrid
+  // (sprk_wizard_commands), the launch envelope names that matter — pre-select it and lock the Associate-To step.
+  // Only the matter table is taken; any other launch record, or none, leaves the step as it was.
+  const { initialAssociation, lockAssociation } = React.useMemo(
+    () => launchAssociationFromParams(params, "sprk_matter"),
+    [params]
+  );
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -99,15 +107,6 @@ function App() {
     return (bu["sprk_containerid"] as string) || "";
   }, []);
 
-  const resolveUserBuDefaults = React.useCallback(async (): Promise<IUserBuCascadeDefaults> => {
-    // Shared cross-frame walker (task 081 / C-8).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(['webApi', 'utility']);
-    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
-    return await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
-  }, []);
-
   if (!isAuthReady) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -131,10 +130,11 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
-        resolveUserBuDefaults={resolveUserBuDefaults}
         tenantId={resolvedTenantId}
         initialFormValues={initialFormValues}
         initialFileRefs={initialFileRefs}
+        initialAssociation={initialAssociation}
+        lockAssociation={lockAssociation}
       />
     </FluentProvider>
   );

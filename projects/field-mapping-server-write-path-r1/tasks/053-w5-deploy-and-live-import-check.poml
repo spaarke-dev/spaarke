@@ -18,7 +18,7 @@
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
-  <prompt>Deploy the BFF (repair pass) and the native-UI customizations to dev, then prove on dev: import 5 rows natively, verify mapping, standard owner, search-index default and stamp within 10 minutes; a re-run is a no-op; a pre-go-live row is untouched; `Test-NativeCreateSurfaces.ps1 -Verify` passes. Do not enable beyond dev without the owner's explicit OK.</prompt>
+  <prompt>Deploy the BFF (repair pass) and the native-UI customizations to dev, then prove on dev: import 5 rows natively, verify mapping, standard owner and stamp within 10 minutes, and no index column written by the server (FR-40); a re-run is a no-op; a pre-go-live row is untouched; `Test-NativeCreateSurfaces.ps1 -Verify` passes. Do not enable beyond dev without the owner's explicit OK.</prompt>
   <role>SPAARKE platform engineer, BFF and Dataverse deployment, live verification.</role>
   <goal>Dev evidence, recorded in the task notes, that FR-24 and FR-25 acceptance hold in a real environment, and a recorded owner decision on any wider rollout.</goal>
 
@@ -65,7 +65,7 @@
     <step order="1">Deploy the BFF with the bff-deploy skill; confirm health; deploy ribbon and web resources with dataverse-deploy if 051 did not already leave them on dev.</step>
     <step order="2">Run `Test-NativeCreateSurfaces.ps1 -Verify` on dev; it must exit 0.</step>
     <step order="3">Import 5 rows natively (data import or direct API as a non-BFF principal) across at least two mapping-target tables; record the exact timestamps.</step>
-    <step order="4">Within 10 minutes verify each row: mapping applied, owner = standard owner, search-index default, stamp. Record elapsed time per row.</step>
+    <step order="4">Within 10 minutes verify each row: mapping applied, owner = standard owner, stamp, no index column written by the server (FR-40). Record elapsed time per row.</step>
     <step order="5">Wait one more tick (or use the admin trigger): confirm the second pass wrote nothing (counters no-op). Confirm the pre-go-live row is unchanged. Confirm a value set by the importer was not overwritten.</step>
     <step order="6">Check App Insights: counters, no new exception class; record publish-size delta and CVE result.</step>
     <step order="7">Ask the owner for explicit OK before any wider rollout; record the answer.</step>
@@ -85,7 +85,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">5 natively imported rows each have mapping, standard owner, search-index default and stamp within 10 minutes of creation (elapsed time recorded per row).</criterion>
+    <criterion testable="true">5 natively imported rows each have mapping, standard owner and stamp within 10 minutes, and no index column written by the server (FR-40), of creation (elapsed time recorded per row).</criterion>
     <criterion testable="true">A second pass (next tick or admin trigger) writes nothing: counters show no-op for all 5 rows; importer-supplied values are unchanged.</criterion>
     <criterion testable="true">Negative: a pre-go-live row is unchanged after at least two passes (before/after read-back recorded).</criterion>
     <criterion testable="true">`Test-NativeCreateSurfaces.ps1 -Verify` exits 0 on dev; App Insights shows counters and no new exception class; publish-size delta and CVE result are recorded.</criterion>

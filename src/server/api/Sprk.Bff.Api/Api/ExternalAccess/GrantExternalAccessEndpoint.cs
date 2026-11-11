@@ -1172,13 +1172,13 @@ public static class GrantExternalAccessEndpoint
                 : refusal.ReasonCode == ExternalGrantLifecycle.GrantContactNotFoundReasonCode
                 ? "Contact not found" // slice C2c: a 404 about the person, not the record
                 : refusal.StatusCode switch
-            {
-                StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
-                StatusCodes.Status409Conflict => "Existing access is higher",
-                StatusCodes.Status403Forbidden => "Access not granted",
-                StatusCodes.Status500InternalServerError => "Access not granted", // task 099b: owner_unresolved, owner_privilege_missing
-                _ => "Grant not allowed on this record",
-            },
+                {
+                    StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
+                    StatusCodes.Status409Conflict => "Existing access is higher",
+                    StatusCodes.Status403Forbidden => "Access not granted",
+                    StatusCodes.Status500InternalServerError => "Access not granted", // task 099b: owner_unresolved, owner_privilege_missing
+                    _ => "Grant not allowed on this record",
+                },
             detail: refusal.Detail,
             extensions: extensions);
     }

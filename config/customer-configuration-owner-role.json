@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "description": "The tables the 'Customer Configuration Owner' role holds Read on, at User (Basic) depth, so that Dataverse accepts the memberless 'Spaarke Customer Configuration Owners' team as the OWNER of a customer configuration row (unified-access-control-r2 task 194b R4b-3b; field-mapping #2399, owner shape A). Under owner round 136 a customer's configuration rows are owned in the customer's own top business unit, the direct child of the root that provisioning H10 creates (customerBusinessUnitId, a sibling of Secure Record), never in the root, which holds only Spaarke product data. Dataverse refuses to assign a row to a principal whose roles lack Read on the table (0x80040299, 'Read Privilege Check For Owner failed ... is missing prv<Read> privilege'), and the unit's default team is not an acceptable owner: a role on it reaches every member. So each customer top unit holds this second memberless team, and the role is created once in the root (Dataverse copies it into every child unit) with each customer unit's copy assigned to that unit's team. The BFF does not resolve this team. Field-mapping's seeder (its task 004) and provisioning's H12b seeder (FR-39) WILL own new configuration rows to this team; until they ship, the rows stay with the seeding identity and an operator re-owns them to this team after setup. Users keep reading the rows through their own roles (Spaarke Core User, Deep). The 'tables' array below is the ONE declared list of customer configuration tables; scripts/Set-CustomerOwnerTeams.ps1 and RestrictedContentOwnerRoleGuardTests read it. Do not copy it anywhere else.",
+  "howToExtend": [
+    "Add a table by adding ONE entry to 'tables' (logicalName, privilegeName, reason, evidence, addedBy). The declared set is field-mapping's seeded customer configuration tables (#2399): sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule. A table is added here only when the owning project names it (never guessed).",
+    "A configuration table is never a hard-deny table (RecordOwnershipResolver.RestrictedContentTables, the restricted-content role's), never an ownership parent (RecordOwnershipResolver.OwnershipParentEntities) and never a secure-child table (SecureChildLineage.Children): those rows are customer records whose owner the BFF resolver decides. RestrictedContentOwnerRoleGuardTests fails the build on any of them.",
+    "'privilegeName' is the Read privilege's name from metadata (EntityDefinitions(LogicalName='x')/Privileges, PrivilegeType eq 'Read'). The casing follows the schema name. The script checks it against metadata and refuses a mismatch.",
+    "Then run, for each customer top business unit: scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl <url> -CustomerBusinessUnitId <id> (dry run), then -Apply (owner go), then -Verify. The one run sets up both declared teams.",
+    "Never add a depth, an access type or a member here. The role grants Read at User (Basic) depth and nothing else; the team has no members, ever, and holds no other role."
+  ],
+  "teamName": "Spaarke Customer Configuration Owners",
+  "roleName": "Customer Configuration Owner",
+  "businessUnit": "customer",
+  "access": "Read",
+  "depth": "Basic",
+  "tables": [
+    {
+      "logicalName": "sprk_aisearchindex",
+      "privilegeName": "prvReadsprk_AISearchIndex",
+      "reason": "Field-mapping #2399: a seeded customer configuration table (the AI Search index catalog DataverseAllowedIndexesProvider reads). A customer's rows are owned by this team in the customer's top business unit; the seeders will own new rows to it (field-mapping task 004, H12b FR-39) and until then an operator re-owns them after setup.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-28: metadata names the table's Read privilege prvReadsprk_AISearchIndex (Id=559088ff-9fe5-48a0-86e8-201d575e3322); the table is UserOwned (schema name sprk_AISearchIndex). Its 11 rows are user-owned in the root business unit today. Dataverse refuses an owner team that lacks the privilege with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3b"
+    },
+    {
+      "logicalName": "sprk_fieldmappingprofile",
+      "privilegeName": "prvReadsprk_FieldMappingProfile",
+      "reason": "Field-mapping #2399: a seeded customer configuration table (a field-mapping profile). A customer's rows are owned by this team in the customer's top business unit; the seeders will own new rows to it (field-mapping task 004, H12b FR-39) and until then an operator re-owns them after setup.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-28: metadata names the table's Read privilege prvReadsprk_FieldMappingProfile (Id=50aab728-0a03-4113-95dd-1c7ebf8e7187); the table is UserOwned (schema name sprk_FieldMappingProfile). Its 7 rows are user-owned in the root business unit today. Dataverse refuses an owner team that lacks the privilege with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3b"
+    },
+    {
+      "logicalName": "sprk_fieldmappingrule",
+      "privilegeName": "prvReadsprk_FieldMappingRule",
+      "reason": "Field-mapping #2399: a seeded customer configuration table (a field-mapping rule of a profile). A customer's rows are owned by this team in the customer's top business unit; the seeders will own new rows to it (field-mapping task 004, H12b FR-39) and until then an operator re-owns them after setup.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-28: metadata names the table's Read privilege prvReadsprk_FieldMappingRule (Id=02b8f2a1-ed17-4c5b-82a3-37395a4ebd32); the table is UserOwned (schema name sprk_FieldMappingRule). Its 40 rows are user-owned in the root business unit today. Dataverse refuses an owner team that lacks the privilege with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3b"
+    }
+  ]
+}

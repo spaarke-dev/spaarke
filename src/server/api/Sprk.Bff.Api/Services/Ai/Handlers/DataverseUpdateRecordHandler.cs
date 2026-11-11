@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -96,16 +97,21 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly IServiceScopeFactory? _scopes;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly Spaarke.Dataverse.IGenericEntityService? _appOnlyEntities;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
+    /// <param name="appOnlyEntities">ebilling-r1 D-96: the app-only reader an invoice's lines are counted with when this tool
+    /// moves an invoice to another core record (<c>OwnedChildWrite.RefileAsync</c>). Registered unconditionally by the host;
+    /// optional so the test compositions keep compiling — absent, such a move fails closed.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
-        IServiceScopeFactory? scopes = null)
+        IServiceScopeFactory? scopes = null,
+        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -118,6 +124,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         // call. Registered beside the restamper (AddCoreAncestorResolver, which AddToolFramework calls) — §10 F.1.
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _scopes = scopes;
+        _appOnlyEntities = appOnlyEntities;
     }
 
     /// <inheritdoc />
@@ -177,11 +184,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
+        // never a confirm dialog; ExecuteChatAsync asks again.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is not null)
+            return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
 
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> (model-facing, as the create
+    /// tool's <c>CreatedOnlyByItsWriterCreateBlockedMessage</c>); every other path answers with
+    /// <see cref="RecordTableRules.ChangedOnlyByItsWriterMessage"/>, a plain sentence.</summary>
+    internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
+        ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    private static string ChatMessageFor(string tablename) =>
+        $"'{tablename}' records can't be changed from chat — this update was REJECTED and nothing was written. They are changed " +
+        "only by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a " +
+        $"decision is committed. Do NOT retry this update — {tablename} is blocked on every general update unconditionally and no " +
+        $"argument change makes it valid; work from the signal or its decision instead ({RecordTableRules.ChangedOnlyByItsWriterReasonCode}).";
 
     /// <inheritdoc />
     public async Task<ToolResult> ExecuteChatAsync(
@@ -195,6 +220,26 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var recordId, out var item, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): an item of a Signal or a Decision Record that names either column is refused
+        // whole, on its shape alone, before any read, re-file, index step or write. Nothing is written.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
+                    fixedRefusal.RefusalCode!, startedAt),
+                stopwatch);
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the create tool refuses). Refused whole,
+        // for any item and record, before any read, re-file, index step or write; ValidateChat already refuses it. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is { } writerOnly)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
         }
 
         try
@@ -217,6 +262,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     stopwatch);
             }
 
+            // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+            // the owning business unit), so an item that names either has it dropped — never refused — and the row's index stays
+            // as it is. Review R2 (NFR-07: drop, never refuse): an item that held ONLY the index is left with nothing to write and
+            // answers a success that says so, with nothing written; an item that was empty to begin with keeps the mapper's
+            // empty-update refusal.
+            var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N"));
+            item = indexDrop.Body;
+            if (indexDrop.Emptied)
+            {
+                // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
+                // gets the tool error a normal update of that id gets, never "nothing to update".
+                var rowRead = await _dataverse.GetAsync(
+                    $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
+                    cancellationToken).ConfigureAwait(false);
+                if (!rowRead.IsSuccess)
+                {
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
+                }
+
+                return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
+            }
+
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
             if (mapped.ValidationError is not null)
             {
@@ -228,16 +296,28 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             }
 
             // #1616: the ADR-024 pair is prepared BEFORE anything is checked — a project's half-pair completed from the row (so
-            // the checks and the application's write see exactly one pair), a work assignment's pair kept in step with the
-            // typed filing lookup this update moves (so this server never leaves a pair no typed lookup repeats).
+            // the checks and the application's write see exactly one pair); on every other pair table the task 045b update
+            // planner: a type-only pair filled or cleared, a pair kept in step with the agreement lookup this update moves.
             var prepared = await OwnedChildWrite.KeepPairInStepAsync(
-                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken, _logger)
                 .ConfigureAwait(false);
             if (prepared.Refusal is { } pairRefusal)
             {
                 return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, pairRefusal, startedAt), stopwatch);
             }
             mapped = mapped with { Item = prepared.Item };
+
+            // UAC-r2 task 195 (#2352): a project's pair — its only filing, field-secured so that only this server writes it —
+            // goes through the ONE project filing core the browser route shares (ProjectMatterFiling): its caller checks, the
+            // secure-root gate, the secure-record rules, the caller's own PATCH of any other column, the conditional
+            // (If-Match on the version read) application write, the read-back and the inline securing.
+            if (OwnedChildWrite.BffManagedPairColumnsOf(tablename).Count > 0 && OwnedChildWrite.PairOf(mapped.Item!).SetsEither)
+            {
+                return LogOutcome(context, tablename, recordId,
+                    await FileProjectAsync(tool, context, tablename, recordId, mapped.Item!, startedAt, cancellationToken)
+                        .ConfigureAwait(false),
+                    stopwatch);
+            }
 
             // AppendTo AS THE CALLER on every record a work assignment or project is moved under — its typed regarding
             // lookups and the record its ADR-024 pair names — BEFORE the secure-root gate below reads anything about them:
@@ -290,23 +370,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
             }
 
-            // #1616: a project's ADR-024 pair is field-secured so that only this server writes it (its only filing column; the
-            // pair rule was asked AS THE CALLER above) — the caller's own PATCH carries every other column, the app the pair.
-            OwnedChildWrite.RefileOutcome? managedPair = null;
-            if (!refile.Written && OwnedChildWrite.BffManagedPairColumnsOf(tablename).Count > 0)
-            {
-                using var pairScope = _scopes?.CreateScope();
-                managedPair = await OwnedChildWrite.PatchWithBffManagedPairAsync(
-                        _dataverse, pairScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(),
-                        tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
-                    .ConfigureAwait(false);
-                if (managedPair is { Written: false })
-                {
-                    return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, managedPair, startedAt), stopwatch);
-                }
-            }
-
-            if (!refile.Written && managedPair is null)
+            // (#1616 / task 195: an update that writes a project's pair returned above, through ProjectMatterFiling.)
+            if (!refile.Written)
             {
                 // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
                 var response = await _dataverse.PatchAsync(
@@ -382,33 +447,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     stopwatch);
             }
 
-            var result = ToolResult.Ok(
-                HandlerId, tool.Id, tool.Name,
-                data: new
-                {
-                    tool = DataverseToolNames.UpdateRecord,
-                    tablename,
-                    recordId = recordId.ToString("D"),
-                    path = DataverseRecordCitations.RecordPath(tablename, recordId),
-                    columnsUpdated = mapped.Item!.Columns,
-                    columnCount = mapped.Item.Columns.Count
-                },
-                summary: $"Updated {mapped.Item.Columns.Count} column(s) on record {recordId:D} in '{tablename}' (under the calling user's permissions).",
-                confidence: 1.0,
-                execution: Timed(startedAt)) with
-            {
-                Metadata = new Dictionary<string, object?>
-                {
-                    [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, recordId) },
-                    // R4-6/R4-3 (2026-07-07): user-facing outcome + record reference for the
-                    // gate-resume transcript message and its clickable MDA link.
-                    [ToolResultMetadataKeys.UserSummary] =
-                        $"Record updated in '{tablename}' ({mapped.Item.Columns.Count} column(s) changed).",
-                    [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(tablename, recordId)
-                }
-            };
-
-            return LogOutcome(context, tablename, recordId, result, stopwatch);
+            return LogOutcome(context, tablename, recordId, Updated(tool, tablename, recordId, mapped.Item!, startedAt), stopwatch);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -442,7 +481,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     {
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
         var outcome = await OwnedChildWrite.RefileAsync(
-            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct)
+            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities)
             .ConfigureAwait(false);
 
         return outcome switch
@@ -452,6 +491,128 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }
+
+    /// <summary>
+    /// UAC-r2 task 195 (#2352): an update that writes a project's ADR-024 pair — through the ONE project filing core
+    /// (<see cref="ProjectMatterFiling.FileAsync"/>), shared with <c>PATCH /api/v1/child-records/sprk_project/{id}</c>. The
+    /// core runs the caller checks, the secure-root gate and the secure-record rules, sends the caller's own PATCH of any other
+    /// column, writes the pair as the application conditional on the version it read, reads it back, then (its after-write
+    /// step) this tool's core-ancestor re-stamp, and secures inline. The task 142 "Assigned *" step follows, as after any update.
+    /// </summary>
+    private async Task<ToolResult> FileProjectAsync(
+        AnalysisTool tool, ChatInvocationContext context, string tablename, Guid recordId,
+        DataverseWriteItemMapper.MappedItem item, DateTimeOffset startedAt, CancellationToken ct)
+    {
+        using var scope = _scopes?.CreateScope();
+        var outcome = await ProjectMatterFiling.FileAsync(
+                _dataverse, scope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(), _rootFiling,
+                recordId, item, _logger, context.DecisionId.ToString("N"), ct,
+                // A chat update that names a matter is the user's explicit request to file (or move) the project there.
+                move: true,
+                afterWrite: async () =>
+                {
+                    var restamp = await _restamp.AfterWriteAsync(tablename, recordId, item.Columns).ConfigureAwait(false);
+                    if (!restamp.Complete)
+                    {
+                        _logger.LogWarning(
+                            "[dataverse.update_record] the core-ancestor re-stamp after the update of {Entity} {RecordId} did not finish "
+                            + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
+                            tablename, recordId, restamp.Failures.Count, restamp.Truncated);
+                    }
+                })
+            .ConfigureAwait(false);
+
+        if (!outcome.Wrote)
+        {
+            return outcome switch
+            {
+                { Kind: ProjectMatterFiling.OutcomeKind.ClientFailure, ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.NotFound or ProjectMatterFiling.OutcomeKind.Denied } =>
+                    Error(tool, outcome.Detail ?? "You do not have permission to change what this project is filed under.",
+                        DataverseUserClientErrorCodes.AccessDenied, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.Refused, Refusal: { } refusal } =>
+                    Error(tool, $"The update was NOT written: {refusal.Reason} ({refusal.RefusalCode}).",
+                        refusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.NotAMatter } =>
+                    Error(tool, $"The update was NOT written: {outcome.Detail}", ProjectMatterFiling.NotAMatterCode, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.SecureMatter } =>
+                    Error(tool, $"The update was NOT written: {outcome.Detail}", ProjectMatterFiling.SecureMatterCode, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.Conflict } =>
+                    Error(tool, outcome.Detail!, ProjectMatterFiling.ChangedConcurrentlyCode, startedAt),
+                { Kind: ProjectMatterFiling.OutcomeKind.Invalid } =>
+                    Error(tool, $"The update was NOT written: {outcome.Detail}", ToolErrorCodes.ValidationFailed, startedAt),
+                // F3: after the caller's own PATCH of the other columns, the detail says those were saved.
+                { OtherColumnsSaved: true } =>
+                    Error(tool, outcome.Detail!, DataverseUserClientErrorCodes.ServiceError, startedAt),
+                _ => Error(tool, $"The update was NOT written: {outcome.Detail}", DataverseUserClientErrorCodes.ServiceError, startedAt),
+            };
+        }
+
+        // Task 142 (L1, owner Q5 + A4): an "Assigned *" column the caller's own PATCH wrote (never throws, never fails this).
+        await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopes, tablename, recordId, item.Columns, grantorOid: null, _logger, ct)
+            .ConfigureAwait(false);
+
+        if (outcome.Secured is { IsComplete: false } secured)
+        {
+            return Error(tool,
+                $"The update was written, but record {recordId:D} is now filed under a secure record and could not be made " +
+                $"secure yet ({secured.ReasonCode}). " +
+                (secured.CompletesAutomatically
+                    ? "It is retried automatically within a few minutes."
+                    : "Retrying will not change that on its own, so an administrator needs to review it."),
+                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        return Updated(tool, tablename, recordId, item, startedAt);
+    }
+
+    /// <summary>Review R2: the success result for an update whose only columns were the search index, which the server sets (FR-38) —
+    /// nothing was written, and the model is told why.</summary>
+    private ToolResult NothingToWrite(AnalysisTool tool, string tablename, Guid recordId, DateTimeOffset startedAt) =>
+        ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.UpdateRecord,
+                tablename,
+                recordId = recordId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, recordId),
+                columnsUpdated = Array.Empty<string>(),
+                columnCount = 0
+            },
+            summary: $"Nothing to update on record {recordId:D} in '{tablename}': the search index is set by the server, so it was left as it is.",
+            confidence: 1.0,
+            execution: Timed(startedAt));
+
+    /// <summary>The tool's success result for an update that was written.</summary>
+    private ToolResult Updated(
+        AnalysisTool tool, string tablename, Guid recordId, DataverseWriteItemMapper.MappedItem item, DateTimeOffset startedAt) =>
+        ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.UpdateRecord,
+                tablename,
+                recordId = recordId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, recordId),
+                columnsUpdated = item.Columns,
+                columnCount = item.Columns.Count
+            },
+            summary: $"Updated {item.Columns.Count} column(s) on record {recordId:D} in '{tablename}' (under the calling user's permissions).",
+            confidence: 1.0,
+            execution: Timed(startedAt)) with
+        {
+            Metadata = new Dictionary<string, object?>
+            {
+                [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, recordId) },
+                // R4-6/R4-3 (2026-07-07): user-facing outcome + record reference for the
+                // gate-resume transcript message and its clickable MDA link.
+                [ToolResultMetadataKeys.UserSummary] =
+                    $"Record updated in '{tablename}' ({item.Columns.Count} column(s) changed).",
+                [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(tablename, recordId)
+            }
+        };
 
     /// <summary>
     /// Ontology D-48 / #1659 (owner decision D-125): after this tool re-filed a communication, queues the matter's Signal
@@ -523,6 +684,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             { ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
             { Invalid: { } invalid } => Error(tool, $"The update was NOT written: {invalid}", ToolErrorCodes.ValidationFailed, startedAt),
+            // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the re-file core — its stable code.
+            { InvoiceFamilyRefusal: { } family } => Error(tool, $"The update was NOT written: {family.Reason} ({family.RefusalCode}).",
+                family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
             { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
             { SecureFilingRefused: { } owner } => Error(tool,
                 $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +

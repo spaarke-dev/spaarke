@@ -392,6 +392,71 @@ public class CallerRecordAccessProbe
     }
 
     /// <summary>
+    /// <see cref="GetCallerRightsForRecordsAsync"/>, keeping "Dataverse said no" apart from "Dataverse said nothing": one entry per
+    /// target, in target order, each the caller's rights, <see cref="AccessRights.None"/> for an access answer (a 403), or
+    /// <see langword="null"/> (UNKNOWN) when the question was not answered.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by ebilling-r1 task 081 (uac-r2 review F1, 2026-10-22; uac-r2 approved the addition). A COUNT of what the caller can
+    /// see must not come out lower under throttling: <see cref="GetCallerRightsForRecordsAsync"/> answers <see cref="AccessRights.None"/>
+    /// for a 429 or a 5xx, which a count would read as "cannot see". That method's behaviour is unchanged (an authorization decision
+    /// treats both as a denial); a counter asks this one and shows no number when any entry is unknown.</para>
+    /// <para><b>Unknown</b>, per record: any <c>RetrievePrincipalAccess</c> answer other than 200 or 403 (a 404 after the re-asks
+    /// <see cref="NotFoundRetryDelay"/> schedules, a 429, a 5xx, a 401), a transport fault or an unreadable body. For EVERY record:
+    /// no caller token, no OBO configuration, a failed exchange or a failed <c>WhoAmI</c>. The caller's own cancellation is
+    /// rethrown PER RECORD only (during a <c>RetrievePrincipalAccess</c> ask). A cancellation during the OBO exchange or <c>WhoAmI</c> is caught
+    /// by those steps like any other failure and becomes "every entry unknown", not an exception. The same per-set and per-record steps, bound
+    /// and order as <see cref="GetCallerRightsForRecordsAsync"/>.</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
+        string? callerBearerToken,
+        IReadOnlyList<(string EntitySet, Guid RecordId)> targets,
+        CancellationToken ct = default)
+    {
+        var results = new AccessRights?[targets.Count];
+        if (targets.Count == 0)
+            return results;
+
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Rights check cannot run for {Count} record(s): hasToken={HasToken}, " +
+                "canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}. Every answer is unknown.",
+                FallbackMarker, targets.Count,
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
+
+            return results;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"{targets.Count} record(s)", ct).ConfigureAwait(false);
+        if (dataverseToken is null)
+            return results;
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+            return results;
+
+        using var gate = new SemaphoreSlim(MaxConcurrentRecordLookups);
+        var lookups = targets.Select(async (target, index) =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                results[index] = await RetrievePrincipalAccessOrUnknownAsync(
+                    dataverseToken, callerSystemUserId.Value, target.EntitySet, target.RecordId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(lookups).ConfigureAwait(false);
+        return results;
+    }
+
+    /// <summary>
     /// The calling user's Dataverse <c>systemuserid</c>, or <c>null</c> when it cannot be established.
     /// </summary>
     /// <remarks>
@@ -860,27 +925,28 @@ public class CallerRecordAccessProbe
     /// mis-supplied. It also needs no privilege beyond being a user, and no oid→systemuser mapping
     /// that could silently miss (<see cref="DataverseAccessDataSource"/> returns
     /// <see cref="AccessRights.None"/> exactly there, which reads as "denied" rather than "unmapped").
+    /// <para><b>Asked once per request</b> (ontology task 170, D-196). A successful answer is remembered for the rest of the
+    /// request under exactly this token (<see cref="CallerWhoAmIMemo"/>), so the next question in the same request does not ask
+    /// again; a failure is never remembered. Rights are not remembered: <c>RetrievePrincipalAccess</c> is asked every time.</para>
     /// </remarks>
     protected virtual async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
     {
+        if (CallerWhoAmIMemo.TryGetUserId(CallerWhoAmIMemo.CurrentRequest, _environmentUrl, dataverseToken, out var knownCaller))
+            return knownCaller;
+
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_environmentUrl}/api/data/v9.2/WhoAmI()");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            var (status, body) = await SendWhoAmIRequestAsync(dataverseToken, ct).ConfigureAwait(false);
 
-            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
+            if (((int)status) < 200 || ((int)status) > 299)
             {
                 _logger.LogWarning(
                     "[{Marker}] WhoAmI returned {StatusCode} for the delegation check. Denying.",
-                    FallbackMarker, (int)response.StatusCode);
+                    FallbackMarker, (int)status);
 
                 return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var document = JsonDocument.Parse(body);
 
             if (document.RootElement.TryGetProperty("UserId", out var userId) &&
@@ -888,6 +954,8 @@ public class CallerRecordAccessProbe
                 Guid.TryParse(userId.GetString(), out var systemUserId) &&
                 systemUserId != Guid.Empty)
             {
+                // Re-read at the point of use: the request may have ended during the await (the memo then no-ops).
+                CallerWhoAmIMemo.Remember(CallerWhoAmIMemo.CurrentRequest, _environmentUrl, dataverseToken, document.RootElement);
                 return systemUserId;
             }
 
@@ -904,6 +972,25 @@ public class CallerRecordAccessProbe
     }
 
     /// <summary>
+    /// One <c>WhoAmI()</c> GET under <paramref name="dataverseToken"/>: its status and, on success, its body (the wire seam,
+    /// ontology task 170 — as <see cref="SendPrincipalAccessRequestAsync"/> is for task 064, so a test answers it from memory
+    /// instead of a transport double, ADR-038, and counts it).
+    /// </summary>
+    protected virtual async Task<(System.Net.HttpStatusCode Status, string Body)> SendWhoAmIRequestAsync(
+        string dataverseToken, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_environmentUrl}/api/data/v9.2/WhoAmI()");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var body = response.IsSuccessStatusCode
+            ? await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)
+            : string.Empty;
+        return (response.StatusCode, body);
+    }
+
+    /// <summary>
     /// <c>GET systemusers({principal})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)</c>
     /// — the Dataverse function that answers "what rights does this principal hold on this record".
     /// </summary>
@@ -915,6 +1002,22 @@ public class CallerRecordAccessProbe
     /// single place in the codebase that reads that wire format.
     /// </remarks>
     protected virtual async Task<AccessRights> RetrievePrincipalAccessAsync(
+        string dataverseToken,
+        Guid principalSystemUserId,
+        string entitySet,
+        Guid recordId,
+        CancellationToken ct)
+        // Unknown denies here: there is no read-probe fallback, because a read proves Read and Read is not licence to grant.
+        => await RetrievePrincipalAccessOrUnknownAsync(dataverseToken, principalSystemUserId, entitySet, recordId, ct).ConfigureAwait(false)
+           ?? AccessRights.None;
+
+    /// <summary>
+    /// The one <c>RetrievePrincipalAccess</c> exchange behind <see cref="RetrievePrincipalAccessAsync"/> (which reads an unknown as
+    /// <see cref="AccessRights.None"/>) and <see cref="GetCallerRightsForRecordsOrUnknownAsync"/> (which keeps it): the rights for a 2xx,
+    /// <see cref="AccessRights.None"/> for a 403 (Dataverse's access answer), <see langword="null"/> for any other status once the
+    /// re-ask schedule is spent, a transport fault or an unreadable body. Only the caller's own cancellation is rethrown.
+    /// </summary>
+    private async Task<AccessRights?> RetrievePrincipalAccessOrUnknownAsync(
         string dataverseToken,
         Guid principalSystemUserId,
         string entitySet,
@@ -950,13 +1053,14 @@ public class CallerRecordAccessProbe
                         continue;
                     }
 
+                    var accessAnswer = status == System.Net.HttpStatusCode.Forbidden;
                     _logger.LogWarning(
                         "[{Marker}] RetrievePrincipalAccess returned {StatusCode} for {EntitySet}({RecordId}) " +
-                        "after {Attempts} attempt(s). Denying — there is no read-probe fallback here, because " +
-                        "a read proves Read and Read is not licence to grant.",
-                        FallbackMarker, (int)status, entitySet, recordId, attempt);
+                        "after {Attempts} attempt(s): {Answer}.",
+                        FallbackMarker, (int)status, entitySet, recordId, attempt,
+                        accessAnswer ? "no access" : "unanswered (unknown; a rights decision denies)");
 
-                    return AccessRights.None;
+                    return accessAnswer ? AccessRights.None : null;
                 }
 
                 using var document = JsonDocument.Parse(body);
@@ -982,10 +1086,10 @@ public class CallerRecordAccessProbe
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
-                    "[{Marker}] RetrievePrincipalAccess threw for {EntitySet}({RecordId}). Denying.",
+                    "[{Marker}] RetrievePrincipalAccess threw for {EntitySet}({RecordId}): unanswered (unknown; a rights decision denies).",
                     FallbackMarker, entitySet, recordId);
 
-                return AccessRights.None;
+                return null;
             }
         }
     }

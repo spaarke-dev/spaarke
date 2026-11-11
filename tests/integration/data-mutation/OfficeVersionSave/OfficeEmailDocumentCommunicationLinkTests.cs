@@ -19,6 +19,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
@@ -566,6 +567,112 @@ public class OfficeEmailDocumentCommunicationLinkTests
     public void EveryFilingResult_MapsToItsWireOutcome_AndNotApplicableToNone(ReconciledFilingResult result, EmailFilingOutcome? expected) =>
         OfficeService.ToEmailFilingOutcome(result).Should().Be(expected);
 
+    // ── UAC task 194b R4-2: the communication is in the document's owner question ─────────────────────────────────────
+
+    private static readonly Guid SecureTeam = Guid.Parse("194b0042-0000-4000-8000-00000000005e");
+
+    /// <summary>A secure-if-any stand-in: the Secure team when the question names <paramref name="secureCommunication"/>.</summary>
+    private static RecordOwnershipResolverDouble SecureWhenAskedAbout(Func<Guid> secureCommunication) => new()
+    {
+        AnswerFor = q => q.Parents.Contains(new RecordOwnershipParent("sprk_communication", secureCommunication()))
+            ? RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true }
+            : null,
+    };
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EmailSave_ToAnOrdinaryMatter_OfASecureCommunication_IsOwnedByTheSecureTeam_AndHandsItToTheWorker()
+    {
+        var store = new CommunicationStore();
+        var secure = store.Seed(RfcId); // captured earlier, on a secure matter: the capture reconciles to it
+        store.FiledElsewhere.Add(secure);
+        var ownership = SecureWhenAskedAbout(() => secure);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, documentOwnership: ownership);
+        var request = EmailSave();
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        world.CreatedDocumentOwningTeams.Should().Equal(SecureTeam);
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.RelatedCommunicationId.Should().Be(secure);
+        Guid.Parse(OfficeVersionSaveWorld.PayloadValue(world.FinalizationPayloads.Should().ContainSingle().Subject, "OwningTeamId")!)
+            .Should().Be(SecureTeam, "the worker's attachment children take the same team");
+        ownership.Requests.Should().ContainSingle(q => q.Parents.Contains(new RecordOwnershipParent("sprk_communication", secure)))
+            .Which.Parents.Should().Equal(
+                new RecordOwnershipParent("sprk_matter", request.TargetEntity!.EntityId),
+                new RecordOwnershipParent("sprk_communication", secure));
+        store.LookedUpIds.Should().BeEmpty("the capture's id is reused: no read");
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task AttachmentSave_WhenTheCaptureFails_ReadsTheSecureCommunicationByMessageId_AndIsOwnedByTheSecureTeam()
+    {
+        var store = new CommunicationStore { FailCapture = true };
+        var secure = store.Seed(RfcId);
+        var ownership = SecureWhenAskedAbout(() => secure);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, new ParentEmailGraph(), documentOwnership: ownership);
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId)))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        world.CreatedDocumentOwningTeams.Should().Equal(SecureTeam);
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.RelatedCommunicationId.Should().Be(secure);
+        store.LookedUpIds.Should().Equal(new[] { RfcId }, "one read, before the owner question; the create reuses its answer");
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EmailSave_WhenTheCommunicationCannotBeRead_IsRefused_AndWritesNoJobUploadOrDocument()
+    {
+        var store = new CommunicationStore { FailCapture = true, LookupFails = true };
+        var ownership = new RecordOwnershipResolverDouble();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, documentOwnership: ownership);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", EmailSave());
+
+        // 194b V-fix (verifier B F1/F2): a failed read is transient — the retryable OFFICE_014 (502), which the add-in
+        // (errorMessages.ts) offers to retry; never OFFICE_022, which tells the user to ask an administrator.
+        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        var (code, retryable) = await ErrorCodeOfAsync(response);
+        code.Should().Be(OfficeErrorCodes.DataverseError);
+        retryable.Should().BeTrue();
+        ownership.Requests.Should().NotContain(q => q.Parents.Any(p => p.EntityLogicalName == "sprk_matter"),
+            "never a question about the association alone");
+        world.ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EmailSave_WhenTheOwnerRuleRefuses_IsStillOffice022_AndWritesNoJobUploadOrDocument()
+    {
+        // The other case: the communication was read, and the ownership rule itself refuses — a real refusal (OFFICE_022).
+        var store = new CommunicationStore { FailCapture = true };
+        store.Seed(RfcId);
+        var ownership = new RecordOwnershipResolverDouble { TeamId = null };
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, documentOwnership: ownership);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOfAsync(response)).Code.Should().Be(OfficeErrorCodes.RecordOwnerUnresolved);
+        world.ShouldHaveWrittenNothing();
+    }
+
+    /// <summary>The ProblemDetails <c>errorCode</c> and <c>retryable</c> extensions.</summary>
+    private static async Task<(string? Code, bool? Retryable)> ErrorCodeOfAsync(HttpResponseMessage response)
+    {
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var code = body.RootElement.TryGetProperty("errorCode", out var c) ? c.GetString() : null;
+        bool? retryable = body.RootElement.TryGetProperty("retryable", out var r) && r.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? r.GetBoolean()
+            : null;
+        return (code, retryable);
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Task<HttpResponseMessage> PostWithKeyAsync(HttpClient client, SaveRequest body, string key)
@@ -628,7 +735,8 @@ public class OfficeEmailDocumentCommunicationLinkTests
     /// the parent email Graph returns for an attachment save.
     /// </summary>
     private static WebApplicationFactory<Program> Host(
-        OfficeVersionSaveWorld world, CommunicationStore store, ParentEmailGraph? graph = null, RecordingLoggerProvider? logs = null)
+        OfficeVersionSaveWorld world, CommunicationStore store, ParentEmailGraph? graph = null, RecordingLoggerProvider? logs = null,
+        RecordOwnershipResolverDouble? documentOwnership = null)
     {
         var dataverse = store.Dataverse;
         var ownership = new RecordOwnershipResolverDouble();
@@ -660,6 +768,12 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
             if (logs is not null)
                 services.AddSingleton<ILoggerProvider>(logs);
+
+            if (documentOwnership is not null)
+            {
+                services.RemoveAll<IRecordOwnershipResolver>();
+                services.AddSingleton<IRecordOwnershipResolver>(documentOwnership);
+            }
         }));
     }
 
@@ -740,6 +854,9 @@ public class OfficeEmailDocumentCommunicationLinkTests
         /// <summary>The document create's Message-ID lookup finds nothing, whatever the store holds.</summary>
         public bool LookupMisses { get; init; }
 
+        /// <summary>UAC task 194b R4-2: the Message-ID lookup throws (Dataverse could not be read).</summary>
+        public bool LookupFails { get; init; }
+
         /// <summary>A communication that already exists for <paramref name="messageId"/> (captured from a mailbox earlier).</summary>
         public Guid Seed(string messageId)
         {
@@ -779,6 +896,8 @@ public class OfficeEmailDocumentCommunicationLinkTests
             lock (_gate)
             {
                 LookedUpIds.Add(messageId);
+                if (LookupFails)
+                    throw new InvalidOperationException("Test: Dataverse could not read the communication by Message-ID.");
                 return !LookupMisses && ByMessageId.TryGetValue(messageId, out var id) ? new DataverseEntity("sprk_communication", id) : null;
             }
         }

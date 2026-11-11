@@ -719,6 +719,10 @@ public static class CommunicationModule
         services.AddSingleton(sp => new Lazy<IThreadMembershipDerivationService>(
             () => sp.GetRequiredService<IThreadMembershipDerivationService>()));
         services.AddSingleton<IDirectThreadAccessService, DirectThreadAccessService>(); // task 043
+        // field-mapping-server-write-path-r1 task 054a — the owner team of Direct 1:1 messages not filed under a record
+        // (DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName, no defaults: unset refuses at use, never at
+        // startup). Concrete singleton (ADR-010): it holds the short-lived verdict cache (ADR-009 metadata exception).
+        services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>();
         // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
         // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).
         // For a Direct thread it returns the two participants; for any non-Direct thread it returns EMPTY, so

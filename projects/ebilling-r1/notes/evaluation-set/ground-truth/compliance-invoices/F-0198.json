@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0198",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0198","generator_id":"gen_eval_set.py@1 F-0198","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0198.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ravenscroft & Beckett LLP","firm_invoice_number":"INV-2026-58025","invoice_date":"2025-05-01","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"38696-0028","po_number":"PO-4520725","fees_total":4572.5,"expenses_total":190.1,"adjustments_total":0.0,"total_due":4762.6,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Zielinski","title":"Associate","rate":235.0,"billed_as":"HZ"},{"name":"Imani Thornbury","title":"Associate","rate":190.0,"billed_as":"IT"},{"name":"Leila Okafor","title":"Paralegal","rate":95.0,"billed_as":"LO"},{"name":"Mei Halloran","title":"Partner","rate":345.0,"billed_as":"MH"},{"name":"Yusuf Zielinski","title":"Senior Associate","rate":255.0,"billed_as":"YZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-01","timekeeper":"LO","timekeeper_name":"Leila Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":95.0,"amount":247.0,"narrative":"Draft appellate brief in the customs audit","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-02","timekeeper":"MH","timekeeper_name":"Mei Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":345.0,"amount":828.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-03","timekeeper":"MH","timekeeper_name":"Mei Halloran","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":345.0,"amount":103.5,"narrative":"Draft notice of appeal and docketing statement for the distribution agreement","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-07","timekeeper":"LO","timekeeper_name":"Leila Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":95.0,"amount":209.0,"narrative":"Draft notice of appeal and docketing statement for the employment claim","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-08","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":235.0,"amount":141.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-10","timekeeper":"IT","timekeeper_name":"Imani Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":190.0,"amount":152.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-22","timekeeper":"IT","timekeeper_name":"Imani Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":190.0,"amount":171.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-24","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":235.0,"amount":235.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-25","timekeeper":"YZ","timekeeper_name":"Yusuf Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":255.0,"amount":739.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-25","timekeeper":"YZ","timekeeper_name":"Yusuf Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.8,"rate":255.0,"amount":204.0,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-04-28","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":235.0,"amount":282.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-04-29","timekeeper":"YZ","timekeeper_name":"Yusuf Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":255.0,"amount":612.0,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-04-29","timekeeper":"YZ","timekeeper_name":"Yusuf Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":255.0,"amount":178.5,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-04-30","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":235.0,"amount":470.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.48,"amount":35.48,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":77.31,"amount":154.62,"narrative":"Overnight courier to Redstone Mining counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["191 Market Street","Chicago","Tax ID 75-9374931"],"template":"T21","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-03-03","matter_close":"2025-07-29","matter_budget":44050.0,"approved_timekeepers":["Helena Zielinski","Imani Thornbury","Mei Halloran","Leila Okafor","Farah Abernathy","Yusuf Zielinski"],"invoice_received_date":"2025-05-08"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[16],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

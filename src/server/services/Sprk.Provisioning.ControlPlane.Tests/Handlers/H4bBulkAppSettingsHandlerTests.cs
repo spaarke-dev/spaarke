@@ -58,6 +58,9 @@
 //   AC-21 A run whose stored list breaks CustomerWorkforceTenantsRule (missing, CIAM, Spaarke, Model 1 run tenant)
 //         fails Resumable with the rule's code BEFORE any write.
 //   AC-22 An indexed entry fed by a scalar source (hand-built manifest) fails before any write.
+//   T186 follow-up (AiSearch allow-list): AiSearch__AllowedIndexes from H2b's AiSearchIndexNames.
+//   AC-23 The 7 verified index names are written as AiSearch__AllowedIndexes__0..6 in order; the base key is exclusive.
+//   AC-24 Names missing or empty fails Resumable (PerEnvInputMissing) BEFORE any write.
 //   AC-19 FIC-flap tolerance budget guard — HttpHealthzProbe's shipped
 //         DefaultBackoffSchedule total budget must stay comfortably above
 //         the measured ~130s AADSTS70025 propagation-flap window (regression
@@ -91,7 +94,15 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
     private const string StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/";   // T186 follow-up: H2a StorageBlobEndpoint
+    private const string OntologyWriterClientId = "11111111-2222-3333-4444-555555555555";   // T266: H2a OntologyWriterClientId
     private const string CustomerBusinessUnitId = "7c1b2a40-5d6e-4f80-9a1b-2c3d4e5f6a7b";   // R3 073: H10's InterStepState.CustomerBusinessUnitId ("D" GUID)
+
+    // T186 follow-up (AiSearch allow-list): the indexes H2b built and verified (InterStepState.AiSearchIndexNames), in catalog order.
+    private static readonly string[] AiSearchIndexNames =
+    [
+        "spaarke-files-index", "spaarke-discovery-index", "spaarke-records-index", "spaarke-rag-references",
+        "spaarke-insights-index", "spaarke-session-files", "spaarke-invoices-index",
+    ];
 
     // T255: the Worker's reserved tenants and the run's customer workforce tenants.
     private const string SpaarkeTenantId = "5a5a5a5a-0000-4000-8000-000000000001";
@@ -181,6 +192,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
             ["storage_blob_endpoint"] = StorageBlobEndpoint,   // T186 follow-up: H2a StorageBlobEndpoint
+            ["ontology_writer_client_id"] = OntologyWriterClientId,   // T266: H2a OntologyWriterClientId
             ["customer_business_unit_id"] = CustomerBusinessUnitId,   // R3 073: H10's CustomerBusinessUnitId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
@@ -188,6 +200,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var expectedLists = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["customer_workforce_tenant_ids"] = [WorkforceTenantA, WorkforceTenantB],
+            ["ai_search_index_names"] = AiSearchIndexNames,   // T186 follow-up: H2b's AiSearchIndexNames
         };
         expected.Keys.Concat(expectedLists.Keys).Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -303,6 +316,46 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Diagnostic.Should().Contain("ExternalAccess__CustomerBusinessUnitId");
         failure.Diagnostic.Should().Contain("InterStepState.CustomerBusinessUnitId");
         failure.Diagnostic.Should().Contain("H10 must complete");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    // ---------- T266 (#2605): Ontology__Writer__ManagedIdentityClientId (H2a's ontology writer UAMI) ----------
+
+    [Fact]
+    public async Task RealManifest_WritesOntologyWriterClientId_FromH2a_NeverTheStampUami()
+    {
+        // The BFF's Signal / Decision Record writers authenticate ONLY as this identity and fail closed without it.
+        var entries = await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId");
+        var writer = FakeSettingsWriter.Succeeds();
+        var run = BuildRun();
+        var handler = Build(new FakeRepository(run, "etag-ow"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["Ontology__Writer__ManagedIdentityClientId"].Should().Be(OntologyWriterClientId)
+            .And.NotBe(run.InterStepState.MiClientId);
+    }
+
+    [Fact]
+    public async Task RunWithoutOntologyWriterClientId_ResumableFailure_BeforeAnyWrite()
+    {
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-ow-b"),
+            FakePerEnvManifest.Success(await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId")), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("ontology_writer_client_id");
+        failure.Diagnostic.Should().Contain("InterStepState.OntologyWriterClientId");
         writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
@@ -1054,6 +1107,57 @@ public sealed class H4bBulkAppSettingsHandlerTests
         writer.CallCount.Should().Be(0);
     }
 
+    // ---------- T186 follow-up (AiSearch allow-list): AiSearch__AllowedIndexes from H2b's verified index names ----------
+
+    private static PerEnvSettingEntry AiSearchAllowedIndexesEntry() =>
+        new("AiSearch__AllowedIndexes", PerEnvSettingSource.FromHandlerOutput,
+            LiteralValue: null, ParameterKey: "ai_search_index_names", Required: true,
+            IOptionsModuleName: "AiSearchOptions", Indexed: true);
+
+    [Fact]
+    public async Task AC23_AiSearchAllowedIndexes_WritesEveryIndexH2bVerifiedInOrder_AndOwnsTheListKey()
+    {
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-23"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), AiSearchAllowedIndexesEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var request = writer.LastRequest!;
+        for (var i = 0; i < AiSearchIndexNames.Length; i++)
+        {
+            request.Settings[$"AiSearch__AllowedIndexes__{i}"].Should().Be(AiSearchIndexNames[i], $"index {i}, in H2b's catalog order");
+        }
+        request.Settings.Keys.Where(k => k.StartsWith("AiSearch__AllowedIndexes", StringComparison.Ordinal))
+            .Should().HaveCount(7, "one setting per verified index, no bare key");
+        request.ExclusiveListKeys.Should().Contain("AiSearch__AllowedIndexes",
+            "the writer removes any other AiSearch__AllowedIndexes__* on both slots, so a dropped index cannot linger");
+    }
+
+    [Theory]
+    [InlineData(false)]   // H2b has not recorded anything
+    [InlineData(true)]    // an empty list is as useless as none: the BFF would refuse every index
+    public async Task AC24_AiSearchIndexNamesMissing_FailsResumable_BeforeAnyWrite(bool empty)
+    {
+        var run = BuildRun();
+        run.InterStepState.AiSearchIndexNames = empty ? new List<string>() : null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-24"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), AiSearchAllowedIndexesEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("ai_search_index_names").And.Contain("AiSearch__AllowedIndexes")
+            .And.Contain("InterStepState.AiSearchIndexNames");
+        writer.CallCount.Should().Be(0);
+    }
+
     // ---------- task 253: parity with the generated Configure-AppServiceSettings script ----------
     //
     // H4b used to run scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1. It now
@@ -1081,6 +1185,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["SpeContainerId"] = "b!h8-created-customer-container",
         ["CustomerBusinessUnitId"] = CustomerBusinessUnitId,
         ["StorageBlobEndpoint"] = StorageBlobEndpoint,
+        ["OntologyWriterClientId"] = OntologyWriterClientId,
         ["OpenaiMonthlyLimitUsd"] = "500",
     };
 
@@ -1088,6 +1193,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private static readonly IReadOnlyDictionary<string, string[]> ScriptListArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
         ["CustomerWorkforceTenantIds"] = [WorkforceTenantA, WorkforceTenantB],
+        ["AiSearchIndexNames"] = AiSearchIndexNames,   // T186 follow-up
     };
 
     [Theory]
@@ -1116,7 +1222,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             "same Key Vault references (re-run Invoke-CatalogGenerator.ps1 if the manifest changed)");
         // T255: and own (remove stale indices of) exactly the lists the script owns.
         writer.LastRequest.ExclusiveListKeys.Should().BeEquivalentTo(scriptListKeys);
-        scriptListKeys.Should().Equal(["WorkforceIdentity__CustomerTenantIds"]);
+        scriptListKeys.Should().BeEquivalentTo(["AiSearch__AllowedIndexes", "WorkforceIdentity__CustomerTenantIds"]);
+        scriptSettings["AiSearch__AllowedIndexes__0"].Should().Be(AiSearchIndexNames[0]);   // T186 follow-up
+        scriptSettings["AiSearch__AllowedIndexes__6"].Should().Be(AiSearchIndexNames[6]);
         scriptSettings["WorkforceIdentity__CustomerTenantIds__0"].Should().Be(WorkforceTenantA);
         scriptSettings["WorkforceIdentity__CustomerTenantIds__1"].Should().Be(WorkforceTenantB);
 
@@ -1371,7 +1479,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
         s.StorageBlobEndpoint = StorageBlobEndpoint;   // H2a output (T186 follow-up - SessionFileStore__BlobEndpoint)
+        s.OntologyWriterClientId = OntologyWriterClientId;   // H2a output (T266 - Ontology__Writer__ManagedIdentityClientId)
         s.CustomerBusinessUnitId = CustomerBusinessUnitId;   // H10 output (R3 073 — ExternalAccess__CustomerBusinessUnitId)
+        s.AiSearchIndexNames = [.. AiSearchIndexNames];   // H2b output (T186 follow-up — AiSearch__AllowedIndexes)
         return run;
     }
 

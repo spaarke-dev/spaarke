@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Outlook pane recognises mailbox-captured emails as saved, and uses the real sent date</title>
+    <phase>8 — UAT findings and cross-project fixes</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF identity route (authorization-adjacent: a new related-record source) plus an Outlook add-in client change on the save path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The related-record fallback shows a record the document does not carry itself; deciding when the caller may see it is an access decision.</model-tier-reason>
+    <effort>high</effort>
+    <deps>120, 121, 130</deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single task; shares DocumentUrlIdentityResolution and OfficeEmailEnricher with earlier tasks on this branch.</parallel-reason>
+    <tags>bff-api, office, office-addins, frontend, communication, unit-test</tags>
+  </metadata>
+  <prompt>Owner UAT 2026-10-22, two defects. The owner said: "yes fix the 'already in spaarke' issues" and "yes fix the 'send date' error issue (we do not need to fix the dev test data)".
+
+A. "Already in Spaarke" never shows for an email captured by the mailbox processor (dev: sprk_communication 4cded5d5-29bc-f111-aaaf-3833c5e9614d, its archive sprk_document 2e37d3db-29bc-f111-aaaf-3833c5e9614d). `DocumentUrlIdentityResolution.ResolveByEmailMessageIdAsync` (Services/Documents/DocumentUrlIdentityResolution.cs:385) matches only `sprk_isemailarchive = true AND sprk_emailmessageid = key`. Only Office saves stamp `sprk_emailmessageid` (OfficeDocumentPersistence.cs:424). The two other archive writers do not: `IncomingCommunicationProcessor.cs:1341-1354` (mailbox capture) and `CommunicationService.cs:2728-2746` (Spaarke-sent email). Both DO set `sprk_relatedcommunication`, and the communication carries `sprk_internetmessageid`. Those two writers belong to the communication projects: do NOT change them; resolve through the link instead (covers every existing row, no backfill).
+Second half: even when found, the "Related to" card is blank, because `FirstRelatedRecord` (:452) reads only the document's direct slots (sprk_matter, sprk_project, sprk_invoice, sprk_workassignment), and a captured archive has none. Its filing is on the communication (`sprk_regardingmatter`, `sprk_regardingproject`, `sprk_regardinginvoice`, `sprk_regardingworkassignment`; mapping in RecordContainerResolver.cs:1815-1822).
+
+B. The pane's "Sent" date is the item's last-modified time: `OutlookAdapter.getSentDate()` returns `item.dateTimeModified` (shared/adapters/OutlookAdapter.ts:1016). It flows to the server as `EmailMetadata.SentDate` and becomes `sprk_emaildate` (OfficeDocumentPersistence.cs:421, UploadFinalizationWorker.cs:701), the .eml Date header (OfficeEmailEnricher.cs:392-394) and the file-name date prefix (OfficeEmailEnricher.cs:480). Measured in dev: "Fw PAT-942665" sent 2026-09-03 stored 2026-10-03; "Fw PROJ-12345.02" sent 10-08 stored 10-21. `OfficeEmailEnricher.EnrichEmailFromGraphAsync` already selects `sentDateTime` from Graph (:68) and discards it. Quick Save (outlook/commands/index.ts:87) already uses `dateTimeCreated`. Office.js has no sent-time property for a read item.</prompt>
+  <steps mode="directional">
+    <step>A1. ResolveByEmailMessageIdAsync: the candidate set is the union of (a) today's match and (b) `sprk_isemailarchive = true` documents whose `sprk_relatedcommunication` is a sprk_communication with `sprk_internetmessageid = keys.InternetMessageId`. Newest by createdon wins, sprk_documentid breaks a tie (the existing rule, now across both). Still one candidate, one authorization; still 503 (never "not saved") when Dataverse cannot answer. Prefer one query (link-entity) over two.</step>
+    <step>A2. Related record: when the document has no direct slot and has `sprk_relatedcommunication`, take the communication's regarding in the same priority as RelatedRecordAttributes (matter, project, invoice, work assignment). Mark it as derived, so the response builder knows the document itself does not carry it.</step>
+    <step>A3. Access for the derived record: the record-access ⇔ document-access rule (notes/026-slot-scope-decision.md §6) holds for the document's own slots, NOT for a record reached through a communication (an external participant may read the email without reading the matter). Show a derived record only when the caller may read that record, using the existing record-access check behind `RecordRouteAccessAuthorizationFilter` (find its service; do not write a new one). Not readable or the check fails: no card, the rest of the answer unchanged, never a 403 or 503 for the whole answer. Apply this in the shared `BuildIdentityResponseAsync` path so the three identity routes cannot drift.</step>
+    <step>B1. OfficeEmailEnricher.EnrichEmailFromGraphAsync: set `SentDate = message.SentDateTime` when Graph returns it (also when body and attachments did not change; fix the early return at :129), else keep the request's value. Confirm by reading the code that sprk_emaildate, the .eml Date header and the file-name prefix all read the enriched value on both the sync and the worker paths; fix any that read the raw request.</step>
+    <step>B2. OutlookAdapter.getSentDate(): return `item.dateTimeCreated` (what Quick Save already uses), and say in its doc comment why (no sent-time property for a read item; dateTimeModified changes whenever the item is read, moved or flagged).</step>
+    <step>Update the remarks on ResolveByEmailMessageIdAsync, the FileAccessEndpoints route comment (:231-241) and the 120 notes pointer; record the derived-record access rule next to §6 in notes/026-slot-scope-decision.md.</step>
+  </steps>
+  <goal>An email already in Spaarke by any path (Office save, mailbox capture, Spaarke send) shows as already saved in the Outlook pane, with the record it is filed to when the caller may read that record; and a saved email's date is when it was sent.</goal>
+  <constraints>
+    <constraint>Do not modify IncomingCommunicationProcessor or CommunicationService (other projects' writers). No Dataverse data write, no backfill (owner: dev test data stays as it is). No schema change.</constraint>
+    <constraint>Response contract: additive only. Amended 2026-10-23 after review finding F1: ONE optional field on DocumentIdentityResponse saying a derived record exists but is withheld, so the pane does not claim "not filed" and offer filing; older clients ignore it. No new endpoint, service or DI registration; no new package.</constraint>
+    <constraint>Fail closed: a derived record is shown only on a positive access answer. The document's own direct-slot behaviour is unchanged.</constraint>
+    <constraint>Message ids are never logged (existing rule in this file).</constraint>
+    <constraint>BFF §10: publish-size delta vs a fresh master build (same zip tool, file counts match); `dotnet list package --vulnerable --include-transitive` shows no new HIGH; tests updated. Run /conflict-check (hot path).</constraint>
+    <constraint>Office add-in: `npm run build` in src/client/office-addins (no build:prod there); type-aware lint ratchet clean. The add-in deploys on the master push; the BFF deploy goes through R3 with the owner's standing go for coordinated deploys.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: an archive with no sprk_emailmessageid, linked to a communication whose sprk_internetmessageid equals the key, resolves (DocumentEmailIdentityResolutionTests).</criterion>
+    <criterion testable="true">Must-fire: when a key-matched row and a communication-matched row both exist, the newer one wins; equal createdon breaks on sprk_documentid.</criterion>
+    <criterion testable="true">Must-not-fire: a communication match whose document is not sprk_isemailarchive (an attachment child) is never returned; no match on either path still answers not_saved; a Dataverse fault still answers 503.</criterion>
+    <criterion testable="true">Must-fire: a resolved archive with no direct slot returns the communication's regarding as the related record when the caller may read it.</criterion>
+    <criterion testable="true">Must-not-fire: the caller may not read the communication's record, or the check throws: no related record, the answer is otherwise the same 200. A document with its own direct slot keeps it, and the communication is not read.</criterion>
+    <criterion testable="true">Must-fire: an email save whose Graph read returns sentDateTime stores that value in sprk_emaildate, the .eml Date header and the file-name prefix, even when the client sent a different SentDate. Must-not-fire: when Graph is not reached, the request's SentDate is kept.</criterion>
+    <criterion testable="true">Client: OutlookAdapter.getSentDate returns dateTimeCreated, not dateTimeModified (jest).</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>ResolveByEmailMessageIdAsync, FirstRelatedRecord, BuildIdentityResponseAsync, the record-access service behind RecordRouteAccessAuthorizationFilter, OfficeEmailEnricher's Graph read, OutlookAdapter.getSentDate.</existing>
+    <extension>Yes: every change extends an existing method; no new surface.</extension>
+    <cost-of-doing-nothing>Every email captured by the mailbox or sent from Spaarke shows as "not yet in Spaarke" in Outlook, inviting a duplicate save; and every pane save stores the wrong date in the record, the .eml and its file name.</cost-of-doing-nothing>
+  </justification>
+  <notes>Completed 2026-10-23: PR #2304 merged as cdb149cc2d. A: resolve-email-identity matches an .eml archive through sprk_relatedcommunication → sprk_internetmessageid (one query, outer link in the key OR); the identity routes show the communication's record only on the caller's own Read (CallerRecordAccessProbe), else the optional relatedRecordWithheld → pane "record unknown". B: OutlookAdapter.getSentDate → dateTimeCreated; the save reads Graph sentDateTime for every email save with an item id (light $select when the body is present). Review: one adversarial pass; fix round 1 (withheld flag, caller-only cancellation, Graph sent date always read, URL/by-id tests) and round 2 (unreadable communication is "unknown"; an unknown answer keeps a known record). Size +0.002 MB (192/192). Known limits in PR #2304. Not done (owner): no backfill of dev rows.
+rework: fix-round-2 task 132</notes>
+</task>

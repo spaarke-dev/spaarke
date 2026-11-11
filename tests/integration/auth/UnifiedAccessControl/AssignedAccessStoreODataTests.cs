@@ -84,12 +84,36 @@ public class AssignedAccessStoreODataTests
         _table.Add(Row(source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, statecode: 1));
         _table.Add(Row(source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared, user: User));
 
-        var (rows, truncated) = await _store.ScanRootlessLedgerRowsAsync(CancellationToken.None);
+        var (rows, truncated) = await _store.ScanRootlessLedgerRowsAsync(null, CancellationToken.None);
 
         truncated.Should().BeFalse();
         rows.Select(r => r.State).Should().BeEquivalentTo(new[] { AssignedAccessState.Granted, AssignedAccessState.Declined });
         rows.Should().OnlyContain(r => AssignedAccessStore.RootOf(r) == null);
         rows.Single(r => r.State == AssignedAccessState.Granted).LedgerKey.Should().Be(key, "the key is what names the deleted record");
+    }
+
+    /// <summary>
+    /// Fix round 3 (K4): the rootless scan reads in id order, after the cursor it is given (the OData filter and order are what
+    /// Dataverse evaluates).
+    /// </summary>
+    [Fact]
+    public async Task TheRootlessScan_ReadsInIdOrder_AfterTheGivenCursor()
+    {
+        var ids = Enumerable.Range(1, 4).Select(i => new Guid(i, 0, 0, new byte[8])).ToArray();
+        foreach (var id in ids.Reverse())
+        {
+            var row = Row(source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact);
+            row["sprk_assignedaccessid"] = id;
+            _table.Add(row);
+        }
+
+        var (first, _) = await _store.ScanRootlessLedgerRowsAsync(null, CancellationToken.None);
+        var (after, _) = await _store.ScanRootlessLedgerRowsAsync(ids[1], CancellationToken.None);
+
+        first.Select(r => r.Id).Should().Equal(ids, "ascending by id, whatever order the rows are stored in");
+        after.Select(r => r.Id).Should().Equal(ids[2], ids[3]);
+        _table.OrderBys.Should().OnlyContain(o => o == "sprk_assignedaccessid asc");
+        _table.Filters.Last().Should().EndWith($" and sprk_assignedaccessid gt {ids[1]:D}");
     }
 
     /// <summary>
@@ -291,7 +315,7 @@ public class AssignedAccessStoreODataTests
     private static Dictionary<string, object?> Row(
         Guid? project = null, Guid? matter = null, Guid? workAssignment = null, string? source = null,
         AssignedAccessState state = AssignedAccessState.Shared, Guid? user = null, Guid? team = null, Guid? contact = null,
-        int? level = null, string? reason = null, string? key = null, int statecode = 0) => new(StringComparer.OrdinalIgnoreCase)
+        int? level = null, string? reason = null, string? key = null, int statecode = 0, DateTimeOffset? modified = null) => new(StringComparer.OrdinalIgnoreCase)
         {
             ["sprk_assignedaccessid"] = Guid.NewGuid(),
             ["sprk_ledgerkey"] = key ?? Guid.NewGuid().ToString("N"),
@@ -309,6 +333,7 @@ public class AssignedAccessStoreODataTests
             ["sprk_grantedlevel"] = level,
             ["sprk_grantedexpiry"] = null,
             ["statecode"] = statecode,
+            ["modifiedon"] = modified,
         };
 
     /// <summary>
@@ -383,13 +408,39 @@ public class AssignedAccessStoreODataTests
             _rows.Add(row);
         }
 
+        /// <summary>Task 049 (fix round 2): every <c>$filter</c> and <c>$orderby</c> sent through the ordered read.</summary>
+        public List<string> Filters { get; } = new();
+
+        public List<string> OrderBys { get; } = new();
+
+        public override Task<List<T>> QueryOrderedAsync<T>(string entitySetName, string? filter, string? select, int? top,
+            string orderBy, CancellationToken cancellationToken = default)
+        {
+            if (filter is not null) Filters.Add(filter);
+            OrderBys.Add(orderBy);
+            return Read<T>(entitySetName, filter, select, top, orderBy);
+        }
+
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => Read<T>(entitySetName, filter, select, top, orderBy: null);
+
+        private Task<List<T>> Read<T>(string entitySetName, string? filter, string? select, int? top, string? orderBy)
         {
             entitySetName.Should().Be(Set);
             var predicate = filter is null ? (_ => true) : ODataFilter.Parse(filter);
             var columns = select?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var rows = _rows.Where(predicate)
+            IEnumerable<Dictionary<string, object?>> matching = _rows.Where(predicate);
+            if (orderBy is not null)
+            {
+                var parts = orderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                object? Key(Dictionary<string, object?> r) => r.TryGetValue(parts[0], out var v) ? v : null;
+                matching = parts.Length > 1 && parts[1].Equals("desc", StringComparison.OrdinalIgnoreCase)
+                    ? matching.OrderByDescending(Key)
+                    : matching.OrderBy(Key);
+            }
+
+            var rows = matching
                 .Take(top ?? int.MaxValue)
                 .Select(r => columns is null ? r : columns.Append("@odata.etag").Distinct()
                     .ToDictionary(c => c, c => r.TryGetValue(c, out var v) ? v : null))
@@ -446,8 +497,9 @@ public class AssignedAccessStoreODataTests
     }
 
     /// <summary>
-    /// The subset of OData <c>$filter</c> the store sends — <c>a eq v</c>, <c>a ne v</c>, <c>and</c>, <c>or</c>, <c>not</c>,
-    /// parentheses, <c>startswith(a,'v')</c>; values <c>null</c>, integers, bare GUIDs and quoted strings — evaluated as
+    /// The subset of OData <c>$filter</c> the store sends — <c>a eq v</c>, <c>a ne v</c>, <c>a ge</c> a UTC date-time (task
+    /// 049), <c>and</c>, <c>or</c>, <c>not</c>, parentheses, <c>startswith(a,'v')</c>; values <c>null</c>, integers, bare GUIDs,
+    /// UTC date-times (<c>2026-11-05T11:40:00Z</c>) and quoted strings — evaluated as
     /// Dataverse evaluates it, in SQL: string comparison is case-insensitive, and a comparison or <c>startswith</c> against an
     /// EMPTY column is UNKNOWN (three-valued logic — <c>not</c> keeps it unknown, and only a row whose filter is TRUE is
     /// returned); only <c>eq null</c> / <c>ne null</c> test emptiness. That is why the store writes
@@ -458,7 +510,7 @@ public class AssignedAccessStoreODataTests
     {
         public static Func<Dictionary<string, object?>, bool> Parse(string filter)
         {
-            var tokens = Regex.Matches(filter, @"'(?:[^']|'')*'|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z_][A-Za-z0-9_]*|-?\d+|[(),]")
+            var tokens = Regex.Matches(filter, @"'(?:[^']|'')*'|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z|[A-Za-z_][A-Za-z0-9_]*|-?\d+|[(),]")
                 .Select(m => m.Value).ToList();
             var position = 0;
             var expression = Or();
@@ -547,6 +599,10 @@ public class AssignedAccessStoreODataTests
                 {
                     "eq" => row => Compare(row.TryGetValue(name, out var v) ? v : null, literal),
                     "ne" => row => Compare(row.TryGetValue(name, out var v) ? v : null, literal) is { } equal ? !equal : null,
+                    "gt" when literal is Guid after => row =>
+                        row.TryGetValue(name, out var v) && v is Guid at ? at.CompareTo(after) > 0 : null,
+                    "ge" when literal is DateTimeOffset bound => row =>
+                        row.TryGetValue(name, out var v) && v is DateTimeOffset at ? at >= bound : null,
                     _ => throw new NotSupportedException($"Operator '{op}' in: {filter}"),
                 };
             }
@@ -562,6 +618,8 @@ public class AssignedAccessStoreODataTests
             token == "null" ? null
             : token.StartsWith('\'') ? token[1..^1].Replace("''", "'", StringComparison.Ordinal)
             : Guid.TryParse(token, out var guid) ? guid
+            : token.Length > 10 && token[10] == 'T'
+              && DateTimeOffset.TryParse(token, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at
             : long.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number
             : throw new NotSupportedException($"Literal '{token}'");
 
@@ -628,6 +686,259 @@ public class AssignedAccessStoreODataTests
             entitySetName.Should().Be("sprk_matters");
             Select = select;
             return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(new[] { _row }))!);
+        }
+    }
+
+    // ── The reconciliation job's Assigned-root scans (task 049, F2) ─────────────────────────────────────────────────
+
+    private static readonly string[] AssignedFields = { "sprk_assignedattorney1", "sprk_assignedparalegal1" };
+    private static readonly DateTimeOffset Now = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// Task 049 (F2): the full scan reads newest change first, so when more roots are assigned than one scan reads, the
+    /// newest are kept and the oldest dropped. Without <c>$orderby</c> Dataverse returns whatever prefix it chooses, and a
+    /// root created after the bound was reached was never a candidate: a create's queued grant that did not complete had
+    /// no backstop.
+    /// </summary>
+    [Fact]
+    public async Task TheAssignedRootScan_ReadsNewestChangeFirst_SoAScanPastItsBoundKeepsANewRoot()
+    {
+        var table = new AssignedRootsTable();
+        for (var i = 0; i < AssignedAccessStore.MaxScanRows; i++)
+            table.Add(Guid.NewGuid(), assigned: Contact, modified: Now.AddDays(-30).AddSeconds(i));
+        var newRoot = Guid.NewGuid();
+        table.Add(newRoot, assigned: Contact, modified: Now.AddMinutes(-1)); // created last, so stored last
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var (roots, truncated) = await store.ScanAssignedRootsAsync(ExternalGrantRootType.Matter, AssignedFields, CancellationToken.None);
+
+        truncated.Should().BeTrue("one more root is assigned than one scan reads");
+        roots.Should().HaveCount(AssignedAccessStore.MaxScanRows);
+        roots[0].RootId.Should().Be(newRoot, "newest change first: the new root is inside the bound, at its head");
+        roots.Select(r => r.ModifiedOn).Should().BeInDescendingOrder();
+    }
+
+    /// <summary>Task 049 (F2): the scan's order is newest change first, whatever order the rows are stored in.</summary>
+    [Fact]
+    public async Task TheAssignedRootScan_ReturnsTheRootsNewestChangeFirst()
+    {
+        var (older, newest, middle) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var table = new AssignedRootsTable();
+        table.Add(older, assigned: Contact, modified: Now.AddHours(-3));
+        table.Add(newest, assigned: Contact, modified: Now.AddMinutes(-1));
+        table.Add(middle, assigned: Contact, modified: Now.AddHours(-1));
+        table.Add(Guid.NewGuid(), assigned: null, modified: Now); // nothing assigned: not a root of this scan
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var (roots, truncated) = await store.ScanAssignedRootsAsync(ExternalGrantRootType.Matter, AssignedFields, CancellationToken.None);
+
+        truncated.Should().BeFalse();
+        roots.Select(r => r.RootId).Should().Equal(newest, middle, older);
+    }
+
+    /// <summary>
+    /// Task 049 (F2): the recent-change scan returns only the assigned roots changed at or after its bound, newest first.
+    /// A root changed before the bound, or one with no Assigned column set, is not returned.
+    /// </summary>
+    [Fact]
+    public async Task TheRecentChangeScan_ReturnsOnlyAssignedRootsChangedSinceItsBound_NewestFirst()
+    {
+        var (before, atBound, recent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var since = Now.AddMinutes(-20);
+        var table = new AssignedRootsTable();
+        table.Add(before, assigned: Contact, modified: since.AddSeconds(-1));
+        table.Add(atBound, assigned: Contact, modified: since);
+        table.Add(recent, assigned: Contact, modified: Now.AddMinutes(-1));
+        table.Add(Guid.NewGuid(), assigned: null, modified: Now.AddMinutes(-1));
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var (roots, truncated) = await store.ScanRecentlyChangedAssignedRootsAsync(
+            ExternalGrantRootType.Matter, AssignedFields, since, CancellationToken.None);
+
+        truncated.Should().BeFalse();
+        roots.Select(r => r.RootId).Should().Equal(recent, atBound);
+        table.Filters.Should().ContainSingle().Which.Should().EndWith(" and modifiedon ge 2026-11-05T11:40:00Z");
+        table.OrderBys.Should().Equal("modifiedon desc");
+    }
+
+    // ── The Restricted-root and ledger scans (task 049, fix round 2) ────────────────────────────────────────────────
+
+    private const int Restricted = 100000002;
+
+    /// <summary>
+    /// Task 049 (fix round 2): the Restricted-root scan reads newest change first, so when more roots are Restricted than one
+    /// scan reads, the newest are kept and the oldest dropped. Unordered, a root changed after the bound was reached could be
+    /// left out of every run.
+    /// </summary>
+    [Fact]
+    public async Task TheRestrictedRootScan_ReadsNewestChangeFirst_SoAScanPastItsBoundKeepsARecentlyChangedRoot()
+    {
+        var table = new AssignedRootsTable();
+        for (var i = 0; i < AssignedAccessStore.MaxScanRows; i++)
+            table.Add(Guid.NewGuid(), assigned: null, modified: Now.AddDays(-30).AddSeconds(i), accessPermission: Restricted);
+        var recent = Guid.NewGuid();
+        table.Add(recent, assigned: null, modified: Now.AddMinutes(-1), accessPermission: Restricted); // stored last
+        table.Add(Guid.NewGuid(), assigned: null, modified: Now, accessPermission: 100000000); // not Restricted
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var (roots, truncated) = await store.ScanRestrictedRootsAsync(ExternalGrantRootType.Matter, CancellationToken.None);
+
+        truncated.Should().BeTrue("one more root is Restricted than one scan reads");
+        roots.Should().HaveCount(AssignedAccessStore.MaxScanRows);
+        roots[0].RootId.Should().Be(recent, "newest change first: the recently changed root is inside the bound, at its head");
+        roots.Select(r => r.ModifiedOn).Should().BeInDescendingOrder();
+        table.OrderBys.Should().Equal("modifiedon desc");
+    }
+
+    /// <summary>
+    /// Task 049 (fix round 2): the Restricted recent-change scan returns only the Restricted roots changed at or after its
+    /// bound, newest first, and sends the same filter and order as the first scan's recent-change read.
+    /// </summary>
+    [Fact]
+    public async Task TheRestrictedRecentChangeScan_ReturnsOnlyRestrictedRootsChangedSinceItsBound_NewestFirst()
+    {
+        var (before, atBound, recent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var since = Now.AddMinutes(-20);
+        var table = new AssignedRootsTable();
+        table.Add(before, assigned: null, modified: since.AddSeconds(-1), accessPermission: Restricted);
+        table.Add(atBound, assigned: null, modified: since, accessPermission: Restricted);
+        table.Add(recent, assigned: null, modified: Now.AddMinutes(-1), accessPermission: Restricted);
+        table.Add(Guid.NewGuid(), assigned: null, modified: Now.AddMinutes(-1), accessPermission: 100000000);
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var (roots, truncated) = await store.ScanRecentlyChangedRestrictedRootsAsync(ExternalGrantRootType.Matter, since, CancellationToken.None);
+
+        truncated.Should().BeFalse();
+        roots.Select(r => r.RootId).Should().Equal(recent, atBound);
+        table.Filters.Should().ContainSingle().Which.Should().Be(
+            "sprk_accesspermission eq 100000002 and modifiedon ge 2026-11-05T11:40:00Z");
+        table.OrderBys.Should().Equal("modifiedon desc");
+    }
+
+    /// <summary>
+    /// Task 049 (fix round 2): the ledger scan reads the rows newest change first, so when more live rows exist than one scan
+    /// reads, the most recently changed are kept. Unordered, a root whose ledger row changed after the bound was reached could
+    /// be left out of every run.
+    /// </summary>
+    [Fact]
+    public async Task TheLedgerRootScan_ReadsNewestChangeFirst_SoAScanPastItsBoundKeepsARecentlyChangedRow()
+    {
+        for (var i = 0; i < AssignedAccessStore.MaxScanRows; i++)
+            _table.Add(Row(matter: Guid.NewGuid(), source: "sprk_assignedattorney1", state: AssignedAccessState.Granted,
+                contact: Contact, modified: Now.AddDays(-30).AddSeconds(i)));
+        var recent = Guid.NewGuid();
+        _table.Add(Row(matter: recent, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted,
+            contact: Contact, modified: Now.AddMinutes(-1))); // stored last
+
+        var (roots, truncated) = await _store.ScanLedgerRootsAsync(CancellationToken.None);
+
+        truncated.Should().BeTrue("one more live row exists than one scan reads");
+        roots.Should().HaveCount(AssignedAccessStore.MaxScanRows);
+        roots.Select(r => r.RootId).Should().Contain(recent, "newest change first: the recently changed row is inside the bound");
+        _table.OrderBys.Should().Equal("modifiedon desc");
+    }
+
+    /// <summary>
+    /// Task 049 fix round 3 (K2): a ledger root scan carries the root's newest live-row change (one entry per root), so the
+    /// reconciliation job can rank a root whose ledger row changed recently.
+    /// </summary>
+    [Fact]
+    public async Task TheLedgerRootScans_CarryTheNewestChangeOfEachRoot_OneEntryPerRoot()
+    {
+        var matter = Guid.NewGuid();
+        _table.Add(Row(matter: matter, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, modified: Now.AddMinutes(-9)));
+        _table.Add(Row(matter: matter, source: "sprk_assignedattorney2", state: AssignedAccessState.Granted, contact: Contact, modified: Now.AddMinutes(-2)));
+
+        var (all, _) = await _store.ScanLedgerRootsAsync(CancellationToken.None);
+        var (recent, _) = await _store.ScanRecentlyChangedLedgerRootsAsync(Now.AddMinutes(-20), CancellationToken.None);
+
+        all.Should().ContainSingle().Which.ModifiedOn.Should().Be(Now.AddMinutes(-2));
+        recent.Should().ContainSingle().Which.ModifiedOn.Should().Be(Now.AddMinutes(-2));
+    }
+
+    /// <summary>
+    /// Task 049 (fix round 2): the ledger recent-change scan returns the roots of live rows changed at or after its bound,
+    /// newest first, with the full scan's predicate (no Revoked, deactivated or inherited-share row).
+    /// </summary>
+    [Fact]
+    public async Task TheLedgerRecentChangeScan_ReturnsOnlyRootsOfLiveRowsChangedSinceItsBound_NewestFirst()
+    {
+        var (before, atBound, recent, revoked, inherited) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var since = Now.AddMinutes(-20);
+        _table.Add(Row(matter: before, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, modified: since.AddSeconds(-1)));
+        _table.Add(Row(matter: atBound, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, modified: since));
+        _table.Add(Row(matter: recent, source: null, state: AssignedAccessState.Shared, contact: Contact, modified: Now.AddMinutes(-1)));
+        _table.Add(Row(matter: revoked, source: "sprk_assignedattorney1", state: AssignedAccessState.Revoked, contact: Contact, modified: Now.AddMinutes(-1)));
+        _table.Add(Row(workAssignment: inherited, source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared, user: User, modified: Now.AddMinutes(-1)));
+
+        var (roots, truncated) = await _store.ScanRecentlyChangedLedgerRootsAsync(since, CancellationToken.None);
+
+        truncated.Should().BeFalse();
+        roots.Select(r => r.RootId).Should().Equal(recent, atBound);
+        _table.Filters.Should().ContainSingle().Which.Should().EndWith(" and modifiedon ge 2026-11-05T11:40:00Z");
+        _table.OrderBys.Should().Equal("modifiedon desc");
+    }
+
+    /// <summary>
+    /// <c>sprk_matters</c> rows (the matter id, one Assigned column, <c>modifiedon</c>) that EVALUATE the <c>$filter</c> they
+    /// are sent (<see cref="ODataFilter"/>), apply <c>$orderby</c> (<c>column asc|desc</c>) and <c>$top</c>, and return the
+    /// <c>$select</c>ed columns. A read with no <c>$orderby</c> returns the rows in the order they were stored, as nothing
+    /// obliges Dataverse to do otherwise.
+    /// </summary>
+    private sealed class AssignedRootsTable : DataverseWebApiClient
+    {
+        private readonly List<Dictionary<string, object?>> _rows = new();
+
+        public AssignedRootsTable()
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+        {
+        }
+
+        public List<string> Filters { get; } = new();
+
+        public List<string> OrderBys { get; } = new();
+
+        public void Add(Guid id, Guid? assigned, DateTimeOffset modified, int? accessPermission = null) => _rows.Add(new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matterid"] = id,
+            ["_sprk_assignedattorney1_value"] = assigned,
+            ["sprk_accesspermission"] = accessPermission,
+            ["modifiedon"] = modified,
+        });
+
+        public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+            => Read<T>(entitySetName, filter, select, top, orderBy: null);
+
+        public override Task<List<T>> QueryOrderedAsync<T>(string entitySetName, string? filter, string? select, int? top,
+            string orderBy, CancellationToken cancellationToken = default)
+            => Read<T>(entitySetName, filter, select, top, orderBy);
+
+        private Task<List<T>> Read<T>(string entitySetName, string? filter, string? select, int? top, string? orderBy)
+        {
+            entitySetName.Should().Be("sprk_matters");
+            if (filter is not null) Filters.Add(filter);
+            if (orderBy is not null) OrderBys.Add(orderBy);
+
+            IEnumerable<Dictionary<string, object?>> rows = _rows.Where(filter is null ? (_ => true) : ODataFilter.Parse(filter));
+            if (orderBy is not null)
+            {
+                var parts = orderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                object? Key(Dictionary<string, object?> r) => r.TryGetValue(parts[0], out var v) ? v : null;
+                rows = parts.Length > 1 && parts[1].Equals("desc", StringComparison.OrdinalIgnoreCase)
+                    ? rows.OrderByDescending(Key)
+                    : rows.OrderBy(Key);
+            }
+
+            var columns = select?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var page = rows.Take(top ?? int.MaxValue)
+                .Select(r => columns is null ? r : columns.ToDictionary(c => c, c => r.TryGetValue(c, out var v) ? v : null))
+                .ToList();
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(page))!);
         }
     }
 

@@ -694,6 +694,14 @@ public sealed class ContactIdentityBinder
                 "be established (its removed marker's empty read is not proven). Retryable.",
                 decision.ReasonCode, decision.ContactId);
         }
+        else if (decision.ReasonCode == ContactBindingDecision.InviteWorkforceHomeContact)
+        {
+            // Not a collision; nothing is flagged. The contact already signs in with its organization's work account.
+            _logger.LogInformation(
+                "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId} already signs in with its organization's work "
+                + "account; not a collision, nothing flagged. Staff use Grant access",
+                decision.ReasonCode, decision.ContactId);
+        }
         else if (decision.Action == InviteContactAction.Refuse)
         {
             var known = new Dictionary<Guid, ContactBindingRow>();
@@ -936,6 +944,9 @@ public sealed class ContactIdentityBinder
             "This email belongs to a contact already bound to an employee's work identity. One contact carries one "
             + "sign-in, so an external account cannot be created for it. An administrator must resolve the identity "
             + "collision on the contact first.",
+        ContactBindingDecision.InviteWorkforceHomeContact =>
+            "This person already signs in with their organization's work account, so no invitation is needed. "
+            + "Use Grant access to give them access to this record.",
         ContactBindingDecision.InviteContactLinkedToInternalUser =>
             "This email belongs to the contact of an internal user. An external account cannot be attached to it. "
             + "An administrator must resolve the identity collision on the contact first.",
@@ -1055,7 +1066,8 @@ public sealed class ContactIdentityBinder
                 case RegistrationEmailAction.Deny:
                     _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode})", who, decision.DenyCode);
                     return HomeRegistrationResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
-                        with { RemovedMarkerUnproven = decision.RemovedMarkerUnproven };
+                        with
+                    { RemovedMarkerUnproven = decision.RemovedMarkerUnproven };
 
                 case RegistrationEmailAction.Conflict:
                     return await RefuseAndFlagAsync(decision, known, oid, who, ct).ConfigureAwait(false);
@@ -1064,121 +1076,123 @@ public sealed class ContactIdentityBinder
                     return await AlreadyRegisteredAsync(tid, oid, who, wroteNothingElse: true, ct).ConfigureAwait(false);
 
                 case RegistrationEmailAction.BindExisting:
-                {
-                    var target = known[decision.ContactId!.Value];
-
-                    // C5: never bound while an inactive contact for the same email is one whose external access an
-                    // administrator removed. Checked before the confirmation prompt, as the invite stamp is.
-                    if (await EmailBindAroundRemovalAsync(request.Email, "Registration", who, target.ContactId, ct)
-                            .ConfigureAwait(false) is { } removal)
                     {
-                        return HomeRegistrationResult.Denied(removal.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
-                            with { RemovedMarkerUnproven = removal.MarkerUnproven };
-                    }
+                        var target = known[decision.ContactId!.Value];
 
-                    // The email-bind rule (as the Workforce token plane, E11): binding an existing contact needs a current
-                    // invite stamp whose recorded address is the token's email and the contact's emailaddress1, and whose
-                    // tenant is the token's tid unless xms_edov is boolean true. Checked before the confirmation prompt, so
-                    // the person is never asked to confirm a bind that would be refused. No fallback to a create.
-                    var stamp = await ReadInviteStampAsync(target.ContactId, ct).ConfigureAwait(false);
-                    if (stamp.ContactId != target.ContactId
-                        || stamp.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
-                    {
-                        _logger.LogWarning(
-                            "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the invite stamp of contact {ContactId} could "
-                            + "not be read. Nothing was bound or created; retryable.",
-                            who, ContactBindingDecision.DenyContactLookupFailed, target.ContactId);
-                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
-                    }
-
-                    if (ContactBindingDecision.CheckInviteStamp(stamp, request.Email, requireTenantProof: true, tid,
-                            request.EmailDomainOwnerVerified) is { } stampFailure)
-                    {
-                        _logger.LogInformation(
-                            "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): existing contact {ContactId} is not invited for "
-                            + "this sign-in ({NotInvitedReason}). Nothing was bound or created.",
-                            who, ContactBindingDecision.DenyContactNotInvited, target.ContactId,
-                            ContactBindingDecision.StampReason(stampFailure));
-                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited);
-                    }
-
-                    if (!SameRowVersion(stamp.ETag, target.ETag))
-                    {
-                        // The row changed between the email read and the stamp read: re-read and re-decide (once).
-                        if (attempt == 0)
+                        // C5: never bound while an inactive contact for the same email is one whose external access an
+                        // administrator removed. Checked before the confirmation prompt, as the invite stamp is.
+                        if (await EmailBindAroundRemovalAsync(request.Email, "Registration", who, target.ContactId, ct)
+                                .ConfigureAwait(false) is { } removal)
                         {
-                            continue;
+                            return HomeRegistrationResult.Denied(removal.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
+                                with
+                            { RemovedMarkerUnproven = removal.MarkerUnproven };
                         }
 
+                        // The email-bind rule (as the Workforce token plane, E11): binding an existing contact needs a current
+                        // invite stamp whose recorded address is the token's email and the contact's emailaddress1, and whose
+                        // tenant is the token's tid unless xms_edov is boolean true. Checked before the confirmation prompt, so
+                        // the person is never asked to confirm a bind that would be refused. No fallback to a create.
+                        var stamp = await ReadInviteStampAsync(target.ContactId, ct).ConfigureAwait(false);
+                        if (stamp.ContactId != target.ContactId
+                            || stamp.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+                        {
+                            _logger.LogWarning(
+                                "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the invite stamp of contact {ContactId} could "
+                                + "not be read. Nothing was bound or created; retryable.",
+                                who, ContactBindingDecision.DenyContactLookupFailed, target.ContactId);
+                            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+                        }
+
+                        if (ContactBindingDecision.CheckInviteStamp(stamp, request.Email, requireTenantProof: true, tid,
+                                request.EmailDomainOwnerVerified) is { } stampFailure)
+                        {
+                            _logger.LogInformation(
+                                "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): existing contact {ContactId} is not invited for "
+                                + "this sign-in ({NotInvitedReason}). Nothing was bound or created.",
+                                who, ContactBindingDecision.DenyContactNotInvited, target.ContactId,
+                                ContactBindingDecision.StampReason(stampFailure));
+                            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited);
+                        }
+
+                        if (!SameRowVersion(stamp.ETag, target.ETag))
+                        {
+                            // The row changed between the email read and the stamp read: re-read and re-decide (once).
+                            if (attempt == 0)
+                            {
+                                continue;
+                            }
+
+                            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+                        }
+
+                        if (!request.ConfirmExistingRecord)
+                        {
+                            _logger.LogInformation(
+                                "[ID-BIND] Registration for {Who} found existing contact {ContactId}: confirmation required",
+                                who, target.ContactId);
+                            return new HomeRegistrationResult(HomeRegistrationOutcome.ExistingRecordFound, target.ContactId);
+                        }
+
+                        // Conditional on the version the stamp was read at (the same as the email read's, checked above).
+                        var write = await _store.BindHomeOidAsync(target.ContactId, stamp.ETag, tid, oid, ct).ConfigureAwait(false);
+                        if (write.Status == StoreWriteStatus.Forbidden)
+                        {
+                            // A missing privilege on the contact PATCH (HTTP 403, or a 400 that names a privilege): permanent, an
+                            // operator fix - not retryable. Answered like the create's Forbidden (500 registration_environment).
+                            _logger.LogError(
+                                "[ID-BIND] Registration bind for {Who} on contact {ContactId} refused ({DenyCode}): Dataverse refused "
+                                + "the write for a missing privilege (the BFF application user needs write on the contact and its "
+                                + "owner). Nothing was bound.",
+                                who, target.ContactId, ContactBindingDecision.DenyContactCreateUnavailable);
+                            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+                        }
+
+                        if (write.Status == StoreWriteStatus.Written)
+                        {
+                            _logger.LogInformation(
+                                "[ID-BIND] Registration bound {Who} (WorkforceHome) to existing contact {ContactId} on confirmation",
+                                who, target.ContactId);
+                            return new HomeRegistrationResult(HomeRegistrationOutcome.BoundExisting, target.ContactId, Wrote: true);
+                        }
+
+                        if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
+                        {
+                            continue; // the row changed under us — re-decide against fresh rows
+                        }
+
+                        if (write.Status is StoreWriteStatus.KeyConflict)
+                        {
+                            return await KeyConflictRegistrationAsync(tid, oid, who, ct).ConfigureAwait(false);
+                        }
+
+                        _logger.LogWarning("[ID-BIND] Registration bind for {Who} on contact {ContactId} failed ({Status})",
+                            who, target.ContactId, write.Status);
                         return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
                     }
 
-                    if (!request.ConfirmExistingRecord)
-                    {
-                        _logger.LogInformation(
-                            "[ID-BIND] Registration for {Who} found existing contact {ContactId}: confirmation required",
-                            who, target.ContactId);
-                        return new HomeRegistrationResult(HomeRegistrationOutcome.ExistingRecordFound, target.ContactId);
-                    }
-
-                    // Conditional on the version the stamp was read at (the same as the email read's, checked above).
-                    var write = await _store.BindHomeOidAsync(target.ContactId, stamp.ETag, tid, oid, ct).ConfigureAwait(false);
-                    if (write.Status == StoreWriteStatus.Forbidden)
-                    {
-                        // A missing privilege on the contact PATCH (HTTP 403, or a 400 that names a privilege): permanent, an
-                        // operator fix - not retryable. Answered like the create's Forbidden (500 registration_environment).
-                        _logger.LogError(
-                            "[ID-BIND] Registration bind for {Who} on contact {ContactId} refused ({DenyCode}): Dataverse refused "
-                            + "the write for a missing privilege (the BFF application user needs write on the contact and its "
-                            + "owner). Nothing was bound.",
-                            who, target.ContactId, ContactBindingDecision.DenyContactCreateUnavailable);
-                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
-                    }
-
-                    if (write.Status == StoreWriteStatus.Written)
-                    {
-                        _logger.LogInformation(
-                            "[ID-BIND] Registration bound {Who} (WorkforceHome) to existing contact {ContactId} on confirmation",
-                            who, target.ContactId);
-                        return new HomeRegistrationResult(HomeRegistrationOutcome.BoundExisting, target.ContactId, Wrote: true);
-                    }
-
-                    if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
-                    {
-                        continue; // the row changed under us — re-decide against fresh rows
-                    }
-
-                    if (write.Status is StoreWriteStatus.KeyConflict)
-                    {
-                        return await KeyConflictRegistrationAsync(tid, oid, who, ct).ConfigureAwait(false);
-                    }
-
-                    _logger.LogWarning("[ID-BIND] Registration bind for {Who} on contact {ContactId} failed ({Status})",
-                        who, target.ContactId, write.Status);
-                    return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
-                }
-
                 case RegistrationEmailAction.Create:
-                {
-                    // Fix round 2 (owner 2026-10-15, "Refuse, flag for admin"): no ACTIVE match. An INACTIVE contact carrying
-                    // the email refuses the registration and is flagged - never a second contact beside a deactivated one,
-                    // and never bound (reactivation is an operator decision). Active matches above decide as they always did.
-                    var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(request.Email, ct).ConfigureAwait(false);
-                    Remember(known, inactiveLookup);
-                    var inactive = ContactBindingDecision.DecideInactiveRegistrationEmail(inactiveLookup);
-                    if (inactive.Action == RegistrationEmailAction.Deny)
                     {
-                        // The inactive-contact read failed, or (slice C) an inactive match's external access was removed.
-                        _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}) at the inactive-contact check",
-                            who, inactive.DenyCode);
-                        return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
-                            with { RemovedMarkerUnproven = inactive.RemovedMarkerUnproven };
-                    }
+                        // Fix round 2 (owner 2026-10-15, "Refuse, flag for admin"): no ACTIVE match. An INACTIVE contact carrying
+                        // the email refuses the registration and is flagged - never a second contact beside a deactivated one,
+                        // and never bound (reactivation is an operator decision). Active matches above decide as they always did.
+                        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(request.Email, ct).ConfigureAwait(false);
+                        Remember(known, inactiveLookup);
+                        var inactive = ContactBindingDecision.DecideInactiveRegistrationEmail(inactiveLookup);
+                        if (inactive.Action == RegistrationEmailAction.Deny)
+                        {
+                            // The inactive-contact read failed, or (slice C) an inactive match's external access was removed.
+                            _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}) at the inactive-contact check",
+                                who, inactive.DenyCode);
+                            return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
+                                with
+                            { RemovedMarkerUnproven = inactive.RemovedMarkerUnproven };
+                        }
 
-                    return inactive.Action == RegistrationEmailAction.Conflict
-                        ? await RefuseAndFlagAsync(inactive, known, oid, who, ct).ConfigureAwait(false)
-                        : await CreateHomeContactAsync(request, who, ct).ConfigureAwait(false);
-                }
+                        return inactive.Action == RegistrationEmailAction.Conflict
+                            ? await RefuseAndFlagAsync(inactive, known, oid, who, ct).ConfigureAwait(false)
+                            : await CreateHomeContactAsync(request, who, ct).ConfigureAwait(false);
+                    }
             }
         }
 
@@ -1474,14 +1488,14 @@ public sealed class ContactIdentityBinder
                 return new HomeRegistrationResult(HomeRegistrationOutcome.Created, created, Wrote: true);
 
             case StoreWriteStatus.Written:
-            {
-                // Created, but the response named no id: the (tid, oid) read finds it.
-                var reread = await AlreadyRegisteredAsync(request.HomeTenantId, request.HomeObjectId, who, false, ct)
-                    .ConfigureAwait(false);
-                return reread.Outcome == HomeRegistrationOutcome.AlreadyRegistered
-                    ? new HomeRegistrationResult(HomeRegistrationOutcome.Created, reread.ContactId, Wrote: true)
-                    : HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
-            }
+                {
+                    // Created, but the response named no id: the (tid, oid) read finds it.
+                    var reread = await AlreadyRegisteredAsync(request.HomeTenantId, request.HomeObjectId, who, false, ct)
+                        .ConfigureAwait(false);
+                    return reread.Outcome == HomeRegistrationOutcome.AlreadyRegistered
+                        ? new HomeRegistrationResult(HomeRegistrationOutcome.Created, reread.ContactId, Wrote: true)
+                        : HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
+                }
 
             case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
                 // A concurrent submit won the race (the mirror key's 412): it is the contact for this (tid, oid).
@@ -1694,132 +1708,132 @@ public sealed class ContactIdentityBinder
                     return ContactBindingResult.Resolved(decision.ContactId!.Value, BindingAction.ResolveByOid);
 
                 case BindingAction.Collision:
-                {
-                    var wrote = await WriteFlagsAsync(decision.FlagContactIds ?? Array.Empty<Guid>(), known,
-                        request.CallerOid, request.CallerPlane, decision.Reason!.Value, ct).ConfigureAwait(false);
-                    return ContactBindingResult.Denied(decision.DenyCode!, BindingAction.Collision, decision.Reason, wrote);
-                }
-
-                case BindingAction.BindByEmail:
-                {
-                    if (await MaskedAsync(ct).ConfigureAwait(false))
                     {
-                        return ContactBindingResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
+                        var wrote = await WriteFlagsAsync(decision.FlagContactIds ?? Array.Empty<Guid>(), known,
+                            request.CallerOid, request.CallerPlane, decision.Reason!.Value, ct).ConfigureAwait(false);
+                        return ContactBindingResult.Denied(decision.DenyCode!, BindingAction.Collision, decision.Reason, wrote);
                     }
 
-                    var target = known[decision.ContactId!.Value];
-
-                    // An email bind decided on an invite stamp is written conditional on the row version the stamp was read
-                    // at, and only when the binding read saw that same version: a row that changed between the two reads (a
-                    // re-invite, an emailaddress1 edit, a concurrent bind) is re-read and re-decided, never bound on stale state.
-                    if (intent is not null && !SameRowVersion(intent.ETag, target.ETag))
+                case BindingAction.BindByEmail:
                     {
-                        _logger.LogInformation(
-                            "[ID-BIND] Contact {ContactId} changed between its binding read and its invite-stamp read; re-deciding",
-                            target.ContactId);
-                        if (attempt == 0)
+                        if (await MaskedAsync(ct).ConfigureAwait(false))
                         {
-                            continue;
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
                         }
 
+                        var target = known[decision.ContactId!.Value];
+
+                        // An email bind decided on an invite stamp is written conditional on the row version the stamp was read
+                        // at, and only when the binding read saw that same version: a row that changed between the two reads (a
+                        // re-invite, an emailaddress1 edit, a concurrent bind) is re-read and re-decided, never bound on stale state.
+                        if (intent is not null && !SameRowVersion(intent.ETag, target.ETag))
+                        {
+                            _logger.LogInformation(
+                                "[ID-BIND] Contact {ContactId} changed between its binding read and its invite-stamp read; re-deciding",
+                                target.ContactId);
+                            if (attempt == 0)
+                            {
+                                continue;
+                            }
+
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+                        }
+
+                        // Task 185 — E11's marker leg binds only with the invite code, and consumes it in the SAME conditional
+                        // write as the oid (single-use). #2005: every other email bind (the workforce plane) consumes a pending
+                        // hash the same way, so a bound contact never keeps a code an operator unbind could revive. The same write
+                        // clears the invite stamp (email hash and tenant).
+                        var write = await _store.BindOidAndConsumeInviteAsync(target.ContactId, intent?.ETag ?? target.ETag,
+                            request.CallerOid, request.CallerPlane, ct).ConfigureAwait(false);
+                        if (write.Status == StoreWriteStatus.Written)
+                        {
+                            _logger.LogInformation(
+                                "[ID-BIND] Bound oid {Oid} ({Plane}) to contact {ContactId} by first-sign-in email match",
+                                request.CallerOid, request.CallerPlane, target.ContactId);
+                            return ContactBindingResult.Resolved(target.ContactId, BindingAction.BindByEmail, wrote: true);
+                        }
+
+                        if (write.Status == StoreWriteStatus.KeyConflict)
+                        {
+                            // Another contact holds this oid in its uniqueness mirror. Never bound around.
+                            return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
+                        }
+
+                        if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
+                        {
+                            continue; // the row changed under us — re-decide against fresh rows
+                        }
+
+                        // A failed bind is NOT "resolved anyway": a contact is resolved only once its binding is
+                        // written, so the next sign-in retries the bind.
                         return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
                     }
 
-                    // Task 185 — E11's marker leg binds only with the invite code, and consumes it in the SAME conditional
-                    // write as the oid (single-use). #2005: every other email bind (the workforce plane) consumes a pending
-                    // hash the same way, so a bound contact never keeps a code an operator unbind could revive. The same write
-                    // clears the invite stamp (email hash and tenant).
-                    var write = await _store.BindOidAndConsumeInviteAsync(target.ContactId, intent?.ETag ?? target.ETag,
-                        request.CallerOid, request.CallerPlane, ct).ConfigureAwait(false);
-                    if (write.Status == StoreWriteStatus.Written)
-                    {
-                        _logger.LogInformation(
-                            "[ID-BIND] Bound oid {Oid} ({Plane}) to contact {ContactId} by first-sign-in email match",
-                            request.CallerOid, request.CallerPlane, target.ContactId);
-                        return ContactBindingResult.Resolved(target.ContactId, BindingAction.BindByEmail, wrote: true);
-                    }
-
-                    if (write.Status == StoreWriteStatus.KeyConflict)
-                    {
-                        // Another contact holds this oid in its uniqueness mirror. Never bound around.
-                        return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
-                    }
-
-                    if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
-                    {
-                        continue; // the row changed under us — re-decide against fresh rows
-                    }
-
-                    // A failed bind is NOT "resolved anyway": a contact is resolved only once its binding is
-                    // written, so the next sign-in retries the bind.
-                    return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
-                }
-
                 case BindingAction.CreateByOid:
-                {
-                    if (details is null)
                     {
-                        // Unreachable by construction (only creating planes get here); fail closed if it ever is.
-                        return ContactBindingResult.Denied(ContactBindingDecision.DenyContactNotFound);
-                    }
+                        if (details is null)
+                        {
+                            // Unreachable by construction (only creating planes get here); fail closed if it ever is.
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactNotFound);
+                        }
 
-                    if (await MaskedAsync(ct).ConfigureAwait(false))
-                    {
-                        return ContactBindingResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
-                    }
+                        if (await MaskedAsync(ct).ConfigureAwait(false))
+                        {
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
+                        }
 
-                    // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
-                    var owner = await ResolveWorkforceCreateOwnerAsync("First sign-in create", request.CallerOid, ct)
-                        .ConfigureAwait(false);
-                    switch (owner.Status)
-                    {
-                        case OwnerTeamStatus.Unconfigured:
-                            return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
-                        case OwnerTeamStatus.LookupFailed:
-                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
-                    }
+                        // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
+                        var owner = await ResolveWorkforceCreateOwnerAsync("First sign-in create", request.CallerOid, ct)
+                            .ConfigureAwait(false);
+                        switch (owner.Status)
+                        {
+                            case OwnerTeamStatus.Unconfigured:
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
+                            case OwnerTeamStatus.LookupFailed:
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+                        }
 
-                    var guarded = await CreateContactGuardedAsync(request.CallerOid, request.CallerPlane,
-                            WithOwner(details, owner), "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ct)
-                        .ConfigureAwait(false);
-                    if (guarded.DenyCode is { } refused)
-                    {
-                        return ContactBindingResult.Denied(refused);
-                    }
+                        var guarded = await CreateContactGuardedAsync(request.CallerOid, request.CallerPlane,
+                                WithOwner(details, owner), "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ct)
+                            .ConfigureAwait(false);
+                        if (guarded.DenyCode is { } refused)
+                        {
+                            return ContactBindingResult.Denied(refused);
+                        }
 
-                    var create = guarded.Write;
-                    switch (create.Status)
-                    {
-                        case StoreWriteStatus.Written when create.ContactId is { } created:
-                            _logger.LogInformation(
-                                "[ID-BIND] Created contact {ContactId} keyed by oid {Oid} ({Plane})",
-                                created, request.CallerOid, request.CallerPlane);
-                            return ContactBindingResult.Resolved(created, BindingAction.CreateByOid, wrote: true);
-                        case StoreWriteStatus.Written:
-                        case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict when attempt == 0:
-                            // Created without an id in the response, or a concurrent first sign-in won the race
-                            // (the mirror key's 412 duplicate fault). Either way the oid lookup now finds exactly one contact.
-                            continue;
-                        case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
-                            // Refused by the key AGAIN although the binding read found no contact for this oid: no
-                            // racer explains it. Another contact holds the oid in its uniqueness mirror.
-                            return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
-                        case StoreWriteStatus.KeyMissing:
-                            _logger.LogError(
-                                "[ID-BIND] {DenyCode}: the alternate key on the uniqueness mirror ({Mirror}) is not "
-                                + "defined, so exactly-one-contact-per-oid cannot be guaranteed. Apply "
-                                + "scripts/Set-ContactIdentityBindingSchema.ps1.",
-                                ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
-                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
-                        case StoreWriteStatus.OwnerPrivilegeMissing:
-                            // K1 (UAC re-check): the owner team may not own a contact (no role with contact Read).
-                            LogOwnerPrivilegeMissing(
-                                "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ContactBindingDecision.DenyOwnerUnconfigured);
-                            return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
-                        default:
-                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
+                        var create = guarded.Write;
+                        switch (create.Status)
+                        {
+                            case StoreWriteStatus.Written when create.ContactId is { } created:
+                                _logger.LogInformation(
+                                    "[ID-BIND] Created contact {ContactId} keyed by oid {Oid} ({Plane})",
+                                    created, request.CallerOid, request.CallerPlane);
+                                return ContactBindingResult.Resolved(created, BindingAction.CreateByOid, wrote: true);
+                            case StoreWriteStatus.Written:
+                            case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict when attempt == 0:
+                                // Created without an id in the response, or a concurrent first sign-in won the race
+                                // (the mirror key's 412 duplicate fault). Either way the oid lookup now finds exactly one contact.
+                                continue;
+                            case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
+                                // Refused by the key AGAIN although the binding read found no contact for this oid: no
+                                // racer explains it. Another contact holds the oid in its uniqueness mirror.
+                                return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
+                            case StoreWriteStatus.KeyMissing:
+                                _logger.LogError(
+                                    "[ID-BIND] {DenyCode}: the alternate key on the uniqueness mirror ({Mirror}) is not "
+                                    + "defined, so exactly-one-contact-per-oid cannot be guaranteed. Apply "
+                                    + "scripts/Set-ContactIdentityBindingSchema.ps1.",
+                                    ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+                            case StoreWriteStatus.OwnerPrivilegeMissing:
+                                // K1 (UAC re-check): the owner team may not own a contact (no role with contact Read).
+                                LogOwnerPrivilegeMissing(
+                                    "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ContactBindingDecision.DenyOwnerUnconfigured);
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
+                            default:
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
+                        }
                     }
-                }
 
                 default:
                     // Task 185 (pass 1 F1): the contact row and its version were read BEFORE the marker and the hash. A
@@ -2034,228 +2048,228 @@ public sealed class ContactIdentityBinder
                 return Result(suid, SystemUserLinkOutcome.Denied, null, decision.DenyCode, null, none, changes, false);
 
             case BindingAction.Collision:
-            {
-                // Every row to flag must be KNOWN — its current flag decides idempotence. A row the decision
-                // named without reading (the linked contact in L5) is read now; one that cannot be read is
-                // skipped this run rather than written blind. Idempotence is per PARTY: this user's collision is
-                // recorded once, even on a contact another identity already flagged (verifier finding 3).
-                await EnsureKnownAsync(decision.FlagContactIds ?? none, known, ct).ConfigureAwait(false);
-                var party = Party(request.CallerOid, request.CallerPlane, decision.Reason!.Value);
-                var toFlag = (decision.FlagContactIds ?? none)
-                    .Where(id => known.TryGetValue(id, out var r) && ShouldRecord(r, party))
-                    .ToList();
-                foreach (var id in toFlag)
                 {
-                    var before = known[id].Flag is { } open ? $"flag parties={open.Parties.Count}" : "flag=(none)";
-                    changes.Add(new IdentityChange("contact", id, before,
-                        $"flag +party reason={decision.Reason} oid={request.CallerOid:D} plane={request.CallerPlane}"));
-                }
+                    // Every row to flag must be KNOWN — its current flag decides idempotence. A row the decision
+                    // named without reading (the linked contact in L5) is read now; one that cannot be read is
+                    // skipped this run rather than written blind. Idempotence is per PARTY: this user's collision is
+                    // recorded once, even on a contact another identity already flagged (verifier finding 3).
+                    await EnsureKnownAsync(decision.FlagContactIds ?? none, known, ct).ConfigureAwait(false);
+                    var party = Party(request.CallerOid, request.CallerPlane, decision.Reason!.Value);
+                    var toFlag = (decision.FlagContactIds ?? none)
+                        .Where(id => known.TryGetValue(id, out var r) && ShouldRecord(r, party))
+                        .ToList();
+                    foreach (var id in toFlag)
+                    {
+                        var before = known[id].Flag is { } open ? $"flag parties={open.Parties.Count}" : "flag=(none)";
+                        changes.Add(new IdentityChange("contact", id, before,
+                            $"flag +party reason={decision.Reason} oid={request.CallerOid:D} plane={request.CallerPlane}"));
+                    }
 
-                if (toFlag.Count == 0)
-                {
-                    // A row that could not be read, or whose collision columns' read is not proven, is retried next run.
-                    var unreadable = (decision.FlagContactIds ?? none)
-                        .Any(id => !known.TryGetValue(id, out var r) || r.CollisionColumnsUnproven);
-                    return Result(suid,
-                        unreadable ? SystemUserLinkOutcome.Failed : SystemUserLinkOutcome.FlagAlreadyPresent,
-                        null, decision.DenyCode, decision.Reason, decision.FlagContactIds ?? none, changes, false);
-                }
+                    if (toFlag.Count == 0)
+                    {
+                        // A row that could not be read, or whose collision columns' read is not proven, is retried next run.
+                        var unreadable = (decision.FlagContactIds ?? none)
+                            .Any(id => !known.TryGetValue(id, out var r) || r.CollisionColumnsUnproven);
+                        return Result(suid,
+                            unreadable ? SystemUserLinkOutcome.Failed : SystemUserLinkOutcome.FlagAlreadyPresent,
+                            null, decision.DenyCode, decision.Reason, decision.FlagContactIds ?? none, changes, false);
+                    }
 
-                if (applyWrites)
-                {
-                    await WriteFlagsAsync(toFlag, known, request.CallerOid, request.CallerPlane, decision.Reason!.Value, ct)
-                        .ConfigureAwait(false);
-                }
+                    if (applyWrites)
+                    {
+                        await WriteFlagsAsync(toFlag, known, request.CallerOid, request.CallerPlane, decision.Reason!.Value, ct)
+                            .ConfigureAwait(false);
+                    }
 
-                return Result(suid, SystemUserLinkOutcome.Flagged, null, decision.DenyCode, decision.Reason,
-                    decision.FlagContactIds ?? none, changes, applyWrites);
-            }
+                    return Result(suid, SystemUserLinkOutcome.Flagged, null, decision.DenyCode, decision.Reason,
+                        decision.FlagContactIds ?? none, changes, applyWrites);
+                }
 
             case BindingAction.BindLinkedContact:
-            {
-                var target = decision.ContactId!.Value;
-                changes.Add(WorkforceBindChange(target, request.CallerOid));
-                if (!applyWrites)
                 {
-                    return Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null, none, changes, false);
-                }
+                    var target = decision.ContactId!.Value;
+                    changes.Add(WorkforceBindChange(target, request.CallerOid));
+                    if (!applyWrites)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null, none, changes, false);
+                    }
 
-                if (await MaskedAsync(ct).ConfigureAwait(false))
-                {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
-                        null, none, Array.Empty<IdentityChange>(), false);
-                }
+                    if (await MaskedAsync(ct).ConfigureAwait(false))
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
+                            null, none, Array.Empty<IdentityChange>(), false);
+                    }
 
-                // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
-                var etag = known.TryGetValue(target, out var row) ? row.ETag : null;
-                var write = await _store.BindOidAndConsumeInviteAsync(target, etag, request.CallerOid,
-                    IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
-                if (write.Status == StoreWriteStatus.KeyConflict)
-                {
-                    return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
-                }
+                    // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
+                    var etag = known.TryGetValue(target, out var row) ? row.ETag : null;
+                    var write = await _store.BindOidAndConsumeInviteAsync(target, etag, request.CallerOid,
+                        IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
+                    if (write.Status == StoreWriteStatus.KeyConflict)
+                    {
+                        return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
+                    }
 
-                return write.Status switch
-                {
-                    StoreWriteStatus.Written => Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null,
-                        none, changes, true),
-                    StoreWriteStatus.PreconditionFailed => null,
-                    _ => Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactBindFailed,
-                        null, none, changes, true),
-                };
-            }
+                    return write.Status switch
+                    {
+                        StoreWriteStatus.Written => Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null,
+                            none, changes, true),
+                        StoreWriteStatus.PreconditionFailed => null,
+                        _ => Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactBindFailed,
+                            null, none, changes, true),
+                    };
+                }
 
             case BindingAction.ResolveByOid:
-            {
-                // The user's oid is already bound to a contact; only the link is missing.
-                var target = decision.ContactId!.Value;
-                changes.Add(LinkChange(suid, target));
-                if (!applyWrites)
                 {
-                    return Result(suid, SystemUserLinkOutcome.Linked, target, null, null, none, changes, false);
-                }
+                    // The user's oid is already bound to a contact; only the link is missing.
+                    var target = decision.ContactId!.Value;
+                    changes.Add(LinkChange(suid, target));
+                    if (!applyWrites)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Linked, target, null, null, none, changes, false);
+                    }
 
-                return await LinkAsync(user, target, SystemUserLinkOutcome.Linked, changes, ct).ConfigureAwait(false);
-            }
+                    return await LinkAsync(user, target, SystemUserLinkOutcome.Linked, changes, ct).ConfigureAwait(false);
+                }
 
             case BindingAction.BindByEmail:
-            {
-                var target = decision.ContactId!.Value;
-                changes.Add(WorkforceBindChange(target, request.CallerOid));
-                changes.Add(LinkChange(suid, target));
-                if (!applyWrites)
                 {
-                    return Result(suid, SystemUserLinkOutcome.BoundAndLinked, target, null, null, none, changes, false);
-                }
+                    var target = decision.ContactId!.Value;
+                    changes.Add(WorkforceBindChange(target, request.CallerOid));
+                    changes.Add(LinkChange(suid, target));
+                    if (!applyWrites)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.BoundAndLinked, target, null, null, none, changes, false);
+                    }
 
-                if (await MaskedAsync(ct).ConfigureAwait(false))
-                {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
-                        null, none, Array.Empty<IdentityChange>(), false);
-                }
+                    if (await MaskedAsync(ct).ConfigureAwait(false))
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
+                            null, none, Array.Empty<IdentityChange>(), false);
+                    }
 
-                // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
-                var write = await _store.BindOidAndConsumeInviteAsync(target, known[target].ETag, request.CallerOid,
-                    IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
-                if (write.Status == StoreWriteStatus.PreconditionFailed) return null;
-                if (write.Status == StoreWriteStatus.KeyConflict)
-                {
-                    return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
-                }
+                    // #2005: the bind consumes a pending invite-code hash in the same conditional write (see the store).
+                    var write = await _store.BindOidAndConsumeInviteAsync(target, known[target].ETag, request.CallerOid,
+                        IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
+                    if (write.Status == StoreWriteStatus.PreconditionFailed) return null;
+                    if (write.Status == StoreWriteStatus.KeyConflict)
+                    {
+                        return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
+                    }
 
-                if (write.Status != StoreWriteStatus.Written)
-                {
-                    return Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactBindFailed,
-                        null, none, changes, true);
-                }
+                    if (write.Status != StoreWriteStatus.Written)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactBindFailed,
+                            null, none, changes, true);
+                    }
 
-                return await LinkAsync(user, target, SystemUserLinkOutcome.BoundAndLinked, changes, ct).ConfigureAwait(false);
-            }
+                    return await LinkAsync(user, target, SystemUserLinkOutcome.BoundAndLinked, changes, ct).ConfigureAwait(false);
+                }
 
             case BindingAction.CreateByOid:
-            {
-                var details = new NewContactDetails(
-                    user.FirstName,
-                    LastNameFor(user.LastName, null, user.InternalEmail),
-                    user.InternalEmail);
-
-                // A write pass refuses a masked binding column before anything else is read. A report-only pass never probes it.
-                if (applyWrites && await MaskedAsync(ct).ConfigureAwait(false))
                 {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
-                        null, none, Array.Empty<IdentityChange>(), false);
-                }
+                    var details = new NewContactDetails(
+                        user.FirstName,
+                        LastNameFor(user.LastName, null, user.InternalEmail),
+                        user.InternalEmail);
 
-                // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
-                // K1: the report-only pass decides the owner too (reads only), so it reports the refusal the write pass would
-                // make instead of promising a create (CreatedAndLinked) that the write pass would then refuse.
-                var owner = await ResolveWorkforceCreateOwnerAsync(
-                        applyWrites ? "Licensed-user link create" : "Licensed-user link create (report-only)", request.CallerOid, ct)
-                    .ConfigureAwait(false);
-                switch (owner.Status)
-                {
-                    case OwnerTeamStatus.Unconfigured:
-                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerUnconfigured,
+                    // A write pass refuses a masked binding column before anything else is read. A report-only pass never probes it.
+                    if (applyWrites && await MaskedAsync(ct).ConfigureAwait(false))
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
                             null, none, Array.Empty<IdentityChange>(), false);
-                    case OwnerTeamStatus.LookupFailed:
-                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactLookupFailed,
+                    }
+
+                    // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
+                    // K1: the report-only pass decides the owner too (reads only), so it reports the refusal the write pass would
+                    // make instead of promising a create (CreatedAndLinked) that the write pass would then refuse.
+                    var owner = await ResolveWorkforceCreateOwnerAsync(
+                            applyWrites ? "Licensed-user link create" : "Licensed-user link create (report-only)", request.CallerOid, ct)
+                        .ConfigureAwait(false);
+                    switch (owner.Status)
+                    {
+                        case OwnerTeamStatus.Unconfigured:
+                            return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerUnconfigured,
+                                null, none, Array.Empty<IdentityChange>(), false);
+                        case OwnerTeamStatus.LookupFailed:
+                            return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactLookupFailed,
+                                null, none, Array.Empty<IdentityChange>(), false);
+                    }
+
+                    // Slice C2b: no contact is created around a removal. The report-only pass runs the same check (reads only),
+                    // so it reports the refusal instead of promising a create (CreatedAndLinked) the write pass would refuse.
+                    var linkCreateWho = $"oid#{HashForLog(request.CallerOid)}";
+                    if (!applyWrites
+                        && await CreateAroundRemovalRefusalAsync(details.Email, "Licensed-user link create (report-only)",
+                            linkCreateWho, ct).ConfigureAwait(false) is { } wouldRefuse)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, wouldRefuse, null, none,
+                            Array.Empty<IdentityChange>(), false);
+                    }
+
+                    // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
+                    // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)"; so is the owner
+                    // (ownerid is "(set)" when a team owns the contact, "(none)" when this binder binds no owner), never the team id.
+                    changes.Add(new IdentityChange("contact", null, "(no contact)",
+                        $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
+                        + $"ownerid={(owner.Status == OwnerTeamStatus.Resolved ? "(set)" : "(none)")} "
+                        + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
+                    changes.Add(LinkChange(suid, null));
+                    if (!applyWrites)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.CreatedAndLinked, null, null, null, none, changes, false);
+                    }
+
+                    var guarded = await CreateContactGuardedAsync(request.CallerOid, IdentityPlaneMarker.Workforce,
+                            WithOwner(details, owner), "Licensed-user link create", linkCreateWho, ct)
+                        .ConfigureAwait(false);
+                    if (guarded.DenyCode is { } refused)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, refused, null, none,
+                            Array.Empty<IdentityChange>(), false);
+                    }
+
+                    var create = guarded.Write;
+                    if (create.Status == StoreWriteStatus.KeyMissing)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactCreateUnavailable,
                             null, none, Array.Empty<IdentityChange>(), false);
-                }
+                    }
 
-                // Slice C2b: no contact is created around a removal. The report-only pass runs the same check (reads only),
-                // so it reports the refusal instead of promising a create (CreatedAndLinked) the write pass would refuse.
-                var linkCreateWho = $"oid#{HashForLog(request.CallerOid)}";
-                if (!applyWrites
-                    && await CreateAroundRemovalRefusalAsync(details.Email, "Licensed-user link create (report-only)",
-                        linkCreateWho, ct).ConfigureAwait(false) is { } wouldRefuse)
-                {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, wouldRefuse, null, none,
-                        Array.Empty<IdentityChange>(), false);
-                }
+                    if (create.Status is StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict)
+                    {
+                        // First refusal: a concurrent writer may have created it — re-decide; the oid lookup finds it.
+                        // Refused AGAIN after a fresh read found no contact bound to the oid: a key-mirror conflict.
+                        return lastAttempt
+                            ? await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false)
+                            : null;
+                    }
 
-                // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
-                // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)"; so is the owner
-                // (ownerid is "(set)" when a team owns the contact, "(none)" when this binder binds no owner), never the team id.
-                changes.Add(new IdentityChange("contact", null, "(no contact)",
-                    $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
-                    + $"ownerid={(owner.Status == OwnerTeamStatus.Resolved ? "(set)" : "(none)")} "
-                    + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
-                changes.Add(LinkChange(suid, null));
-                if (!applyWrites)
-                {
-                    return Result(suid, SystemUserLinkOutcome.CreatedAndLinked, null, null, null, none, changes, false);
-                }
+                    if (create.Status == StoreWriteStatus.Written && create.ContactId is null)
+                    {
+                        return null; // created but the id was not returned: re-decide; the oid lookup now finds it
+                    }
 
-                var guarded = await CreateContactGuardedAsync(request.CallerOid, IdentityPlaneMarker.Workforce,
-                        WithOwner(details, owner), "Licensed-user link create", linkCreateWho, ct)
-                    .ConfigureAwait(false);
-                if (guarded.DenyCode is { } refused)
-                {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, refused, null, none,
-                        Array.Empty<IdentityChange>(), false);
-                }
+                    if (create.Status == StoreWriteStatus.OwnerPrivilegeMissing)
+                    {
+                        // K1 (UAC re-check): the owner team may not own a contact. A configuration fault that repeats every run,
+                        // nothing written. Round 3 F: its own code, so the reconciliation job counts and words it apart from an
+                        // unset CustomerBusinessUnitId (the fix is a security role on the team, not the setting).
+                        LogOwnerPrivilegeMissing(
+                            "Licensed-user link create", $"oid#{HashForLog(request.CallerOid)}", ContactBindingDecision.DenyOwnerPrivilegeMissing);
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerPrivilegeMissing,
+                            null, none, Array.Empty<IdentityChange>(), false);
+                    }
 
-                var create = guarded.Write;
-                if (create.Status == StoreWriteStatus.KeyMissing)
-                {
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactCreateUnavailable,
-                        null, none, Array.Empty<IdentityChange>(), false);
-                }
+                    if (create.Status != StoreWriteStatus.Written)
+                    {
+                        return Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactCreateFailed,
+                            null, none, changes, true);
+                    }
 
-                if (create.Status is StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict)
-                {
-                    // First refusal: a concurrent writer may have created it — re-decide; the oid lookup finds it.
-                    // Refused AGAIN after a fresh read found no contact bound to the oid: a key-mirror conflict.
-                    return lastAttempt
-                        ? await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false)
-                        : null;
+                    return await LinkAsync(user, create.ContactId!.Value, SystemUserLinkOutcome.CreatedAndLinked, changes, ct)
+                        .ConfigureAwait(false);
                 }
-
-                if (create.Status == StoreWriteStatus.Written && create.ContactId is null)
-                {
-                    return null; // created but the id was not returned: re-decide; the oid lookup now finds it
-                }
-
-                if (create.Status == StoreWriteStatus.OwnerPrivilegeMissing)
-                {
-                    // K1 (UAC re-check): the owner team may not own a contact. A configuration fault that repeats every run,
-                    // nothing written. Round 3 F: its own code, so the reconciliation job counts and words it apart from an
-                    // unset CustomerBusinessUnitId (the fix is a security role on the team, not the setting).
-                    LogOwnerPrivilegeMissing(
-                        "Licensed-user link create", $"oid#{HashForLog(request.CallerOid)}", ContactBindingDecision.DenyOwnerPrivilegeMissing);
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerPrivilegeMissing,
-                        null, none, Array.Empty<IdentityChange>(), false);
-                }
-
-                if (create.Status != StoreWriteStatus.Written)
-                {
-                    return Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactCreateFailed,
-                        null, none, changes, true);
-                }
-
-                return await LinkAsync(user, create.ContactId!.Value, SystemUserLinkOutcome.CreatedAndLinked, changes, ct)
-                    .ConfigureAwait(false);
-            }
 
             default:
                 return Result(suid, SystemUserLinkOutcome.Denied, null,

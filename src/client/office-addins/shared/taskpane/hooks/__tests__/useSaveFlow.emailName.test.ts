@@ -94,12 +94,42 @@ describe('useSaveFlow — the .eml name signal (task 046)', () => {
 
     expect(email.subject).toBe('Re: Filing');
     expect(email.isNameSystemDerived).toBe(true);
+    expect(email).not.toHaveProperty('documentName');
   });
 
-  it('a Document Name the user typed is sent as the subject, unchanged, and marked as typed', async () => {
+  it('a Document Name the user typed travels as documentName, unchanged and marked as typed; the subject stays the email’s own (#2416)', async () => {
     const email = await sentEmail(outlookContext({ documentName: 'Smith engagement letter' }));
 
-    expect(email.subject).toBe('Smith engagement letter');
+    expect(email.documentName).toBe('Smith engagement letter');
+    expect(email.subject).toBe('Re: Filing');
     expect(email.isNameSystemDerived).toBe(false);
+  });
+
+  it('an email with no subject still sends a subject (the server requires one)', async () => {
+    const email = await sentEmail(outlookContext({ itemName: '', documentName: 'Typed' }));
+
+    expect(email.subject).toBe('Untitled Email');
+    expect(email.documentName).toBe('Typed');
+  });
+
+  it('a whitespace-only Document Name is no name: nothing is sent and the name is system-derived (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: '   ' }));
+
+    expect(email).not.toHaveProperty('documentName');
+    expect(email.isNameSystemDerived).toBe(true);
+  });
+
+  it('a typed name is sent trimmed (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: '  Smith letter  ' }));
+
+    expect(email.documentName).toBe('Smith letter');
+    expect(email.isNameSystemDerived).toBe(false);
+  });
+
+  it('"Keep both" after a typed-name collision keeps the typed name and asks for the unique stored suffix (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: 'Smith letter', allowRename: true }));
+
+    expect(email.documentName).toBe('Smith letter');
+    expect(email.isNameSystemDerived).toBe(true);
   });
 });

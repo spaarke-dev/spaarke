@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0018",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0018","generator_id":"gen_eval_set.py@1 F-0018","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0018.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Maddox & Beckett LLP","firm_invoice_number":"LF0015416","invoice_date":"2026-06-04","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"95195-0035","po_number":"PO-4581009","fees_total":4175.0,"expenses_total":218.73,"adjustments_total":0.0,"total_due":4393.73,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Nwosu","title":"Senior Associate","rate":295.0,"billed_as":"BN"},{"name":"Dalia Santoro","title":"Associate","rate":205.0,"billed_as":"DS"},{"name":"Farah Kowalczyk","title":"Paralegal","rate":95.0,"billed_as":"FK"},{"name":"Gideon Brennan","title":"Associate","rate":220.0,"billed_as":"GB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-04","timekeeper":"GB","timekeeper_name":"Gideon Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":220.0,"amount":22.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-05","timekeeper":"BN","timekeeper_name":"Beatrix Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":295.0,"amount":619.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-11","timekeeper":"FK","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":95.0,"amount":266.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-13","timekeeper":"BN","timekeeper_name":"Beatrix Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":295.0,"amount":708.0,"narrative":"Prepare for hearing.","codes":["L430","A104"],"page":1,"narrative_style":"vague"},
+  {"n":5,"line_type":"fee","date":"2026-05-26","timekeeper":"BN","timekeeper_name":"Beatrix Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":295.0,"amount":265.5,"narrative":"Revise pretrial brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-27","timekeeper":"BN","timekeeper_name":"Beatrix Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.2,"rate":295.0,"amount":649.0,"narrative":"Prepare for hearing.","codes":["L120","A104"],"page":1,"narrative_style":"vague"},
+  {"n":7,"line_type":"fee","date":"2026-05-28","timekeeper":"DS","timekeeper_name":"Dalia Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":205.0,"amount":369.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-28","timekeeper":"GB","timekeeper_name":"Gideon Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":220.0,"amount":638.0,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-28","timekeeper":"GB","timekeeper_name":"Gideon Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":220.0,"amount":638.0,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-05-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":10.31,"amount":20.62,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-05-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":198.11,"amount":198.11,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["382 Federal Plaza","Portland","Tax ID 49-5509168"],"template":"T19","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-04-26","matter_close":"2026-08-29","matter_budget":42574.0,"approved_timekeepers":["Hannah Quillen","Dalia Santoro","Farah Kowalczyk","Gideon Brennan","Beatrix Nwosu","Hannah Lockhart","Emeka Tavares"],"invoice_received_date":"2026-06-15"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[9],"consequence":"Disallow","related_line_refs":[8]},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Flag"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[6],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

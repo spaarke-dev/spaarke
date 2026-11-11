@@ -235,22 +235,37 @@ public sealed class IncomingAssociationResolver
             row[fieldName] = target;
         }
 
-        if (decision.Status != AssociationStatusCodes.Ambiguous && PrimaryRegarding(row) is { } primary)
+        if (decision.Status != AssociationStatusCodes.Ambiguous && PrimaryRegarding(row, decision.PrimaryRegardingField) is { } primary)
             row[CoreAncestorResolver.RegardingRecordIdColumn] = primary.Reference.Id.ToString("D").ToLowerInvariant();
 
         WithholdIntermediateTheRowCannotPlace(row);
 
         var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, row, decision, ct).ConfigureAwait(false);
-        var parents = decision.RegardingWrites.Values
-            .OfType<EntityReference>()
-            .Concat(stamps.Values)
-            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id));
+        return OwnershipContextOf(decision.RegardingWrites, stamps);
+    }
 
-        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
+    /// <summary>
+    /// The ownership question for a new communication filed through <paramref name="regardingWrites"/> with the core-ancestor
+    /// <paramref name="stamps"/> derived from them (each keyed by the lookup it is written to): every one a parent
+    /// (secure-if-any); with none it keeps its creator (E1). UAC task 194b fix round, slice 3: the static tail of
+    /// <see cref="OwnershipContextForNewRecordAsync"/>, which the .eml parity test calls (the archive is owned as its
+    /// communication is). Fix round R (B1): in <c>sprk_communication</c>'s primary order over every lookup the row will hold
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder{TValue}"/>), the order the reconciler
+    /// asks the written row in — never the order the rungs wrote, so the PRIMARY (an ordinary row's business unit) is the
+    /// same for both. A stamp never shares a lookup with a regarding write (the derivation skips those).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextOf(
+        IEnumerable<KeyValuePair<string, EntityReference>> regardingWrites, IEnumerable<KeyValuePair<string, EntityReference>> stamps) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            CommunicationEntity,
+            regardingWrites.Concat(stamps).Select(w => KeyValuePair.Create(
+                w.Key,
+                w.Value is { } r
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null))) with
         {
             WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
         };
-    }
 
     /// <summary>
     /// Evaluate-only path (task 074, Path C): runs the deterministic + (cost-gated) AI rungs and applies the
@@ -578,7 +593,7 @@ public sealed class IncomingAssociationResolver
         // the reviewer picks the primary.
         if (decision.RegardingWrites.Count > 0 && decision.Status != AssociationStatusCodes.Ambiguous)
         {
-            await PopulateResolverFieldsAsync(fields, ct);
+            await PopulateResolverFieldsAsync(fields, decision.PrimaryRegardingField, ct);
         }
 
         // Task 156 (verifier round 1 item 9): with NO pair (an Ambiguous decision), the row cannot say that a root the
@@ -826,6 +841,7 @@ public sealed class IncomingAssociationResolver
 
     private async Task PopulateResolverFieldsAsync(
         Dictionary<string, object> fields,
+        string? preferredPrimaryField,
         CancellationToken ct)
     {
         // Find the primary regarding entity (highest priority field that was set). Priority order is the
@@ -834,7 +850,7 @@ public sealed class IncomingAssociationResolver
         // must never be the headline Regarding. When the substantive matters conflict (Ambiguous → not
         // written), leaving the denormalized fields unset is the correct outcome: the record shows no headline
         // Regarding and the review surface resolves the candidates from provenance.
-        if (PrimaryRegarding(fields) is not { } primary)
+        if (PrimaryRegarding(fields, preferredPrimaryField) is not { } primary)
             return;
 
         var primaryRef = primary.Reference;
@@ -912,9 +928,21 @@ public sealed class IncomingAssociationResolver
     /// The row's primary regarding — the highest-priority SUBSTANTIVE regarding field that is set (the order is
     /// <see cref="RegardingFieldMap.All"/>; fallback identity fields never headline). The target the pair names;
     /// shared by <see cref="PopulateResolverFieldsAsync"/> and <see cref="OwnershipContextForNewRecordAsync"/>.
+    /// <paramref name="preferredField"/> (<see cref="AssociationDecision.PrimaryRegardingField"/>) wins when it is a
+    /// substantive field that is set; otherwise the priority order decides.
     /// </summary>
-    private static (EntityReference Reference, string EntityLogicalName)? PrimaryRegarding(Dictionary<string, object> fields)
+    private static (EntityReference Reference, string EntityLogicalName)? PrimaryRegarding(
+        Dictionary<string, object> fields, string? preferredField = null)
     {
+        if (preferredField is not null
+            && !FallbackRegardingFields.Contains(preferredField)
+            && fields.TryGetValue(preferredField, out var preferredValue) && preferredValue is EntityReference preferredRef
+            && RegardingFieldMap.All.FirstOrDefault(m => string.Equals(m.RegardingField, preferredField, StringComparison.OrdinalIgnoreCase))
+                is { EntityLogicalName: { } preferredEntity })
+        {
+            return (preferredRef, preferredEntity);
+        }
+
         foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
             if (FallbackRegardingFields.Contains(fieldName))

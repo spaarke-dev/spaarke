@@ -90,14 +90,17 @@ public sealed class BudgetInquiryExecutorTests
         public CancellationToken TokenSeen { get; private set; }
         public Exception? Throw { get; init; }
 
-        public override Task<Guid?> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+        /// <summary>The communication core's archival warning this send reports (D-216), or null when the .eml was archived.</summary>
+        public string? ArchivalWarning { get; init; }
+
+        public override Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
         {
             TokenSeen = ct;
             if (Throw is not null)
                 throw Throw;
             Sends++;
             ServiceRequestSeen = serviceRequestId;
-            return fail ? throw new InvalidOperationException("graph down") : Task.FromResult<Guid?>(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+            return fail ? throw new InvalidOperationException("graph down") : Task.FromResult(new InquirySendResult(Guid.Parse("11111111-1111-1111-1111-111111111111"), ArchivalWarning));
         }
     }
 
@@ -120,11 +123,21 @@ public sealed class BudgetInquiryExecutorTests
         }
     }
 
-    private static (BudgetInquiryExecutor Sut, Rig Rig) Build(FakeUser user, FakeSender sender, bool secure = false)
+    private static (BudgetInquiryExecutor Sut, Rig Rig) Build(
+        FakeUser user, FakeSender sender, bool secure = false, Microsoft.Extensions.Logging.ILogger<BudgetInquiryExecutor>? logger = null)
     {
         var rig = new Rig(secure);
-        var sut = new BudgetInquiryExecutor(user, rig.Ownership.Object, rig.AppOnly.Object, sender,
-            new Microsoft.AspNetCore.Http.HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
+        // Field mapping task 017 (2d-3): the executor creates through the ONE server create, resolved from the request's
+        // services (as DecisionRouteCores does); the rig's resolver and app-only writer are the service's.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services,
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(rig.Ownership.Object, rig.AppOnly.Object));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services),
+        };
+        var sut = new BudgetInquiryExecutor(user, rig.Ownership.Object, sender,
+            new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = http }, logger ?? NullLogger<BudgetInquiryExecutor>.Instance);
         return (sut, rig);
     }
 
@@ -262,6 +275,51 @@ public sealed class BudgetInquiryExecutorTests
         result.Outcome.Should().Be(BudgetInquiryOutcome.SendFailed);
         result.ServiceRequestId.Should().Be(rig.Writes.Single().Id);
         result.Succeeded.Should().BeFalse();
+    }
+
+    /// <summary>Captures what the executor logs (level and rendered text).</summary>
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<BudgetInquiryExecutor>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Text)> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Lines.Add((logLevel, formatter(state, exception)));
+    }
+
+    private const string ArchiveFailed = "Email sent successfully but archival failed: container could not be resolved for tenant-secret-text";
+
+    [Fact]
+    public async Task Sent_but_not_archived_carries_the_warning_and_logs_a_warning_with_ids_only_task176()
+    {
+        // D-216: the email is archived as .eml. When the archive fails (for example the matter's container cannot be resolved) the
+        // send stands, but the result carries the core's warning and the log names the inquiry and the communication - never the text.
+        var logger = new CapturingLogger();
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess"), new FakeSender { ArchivalWarning = ArchiveFailed }, logger: logger);
+
+        var result = await sut.ExecuteAsync(Req(), default);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Sent);
+        result.ArchivalWarning.Should().Be(ArchiveFailed);
+        var line = logger.Lines.Should().ContainSingle(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Warning).Subject.Text;
+        line.Should().Contain(rig.Writes.Single().Id.ToString()).And.Contain("11111111-1111-1111-1111-111111111111");
+        line.Should().NotContain("tenant-secret-text", "ids only: the warning text can carry an exception message");
+    }
+
+    [Fact]
+    public async Task Sent_and_archived_has_no_warning_and_logs_none_task176()
+    {
+        var logger = new CapturingLogger();
+        var (sut, _) = Build(new FakeUser(true, "AppendToAccess"), new FakeSender(), logger: logger);
+
+        var result = await sut.ExecuteAsync(Req(), default);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Sent);
+        result.ArchivalWarning.Should().BeNull();
+        logger.Lines.Should().NotContain(l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
     }
 
     // ---- round 2 ----------------------------------------------------------------------------------------------

@@ -13,6 +13,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// for a child of a secure record, the record's business-unit team otherwise — never the calling user.
 /// </summary>
 /// <remarks>
+/// <para><b>The create half is gone (field-mapping-server-write-path-r1 task 017, 2d-5).</b> Every owned create — the
+/// child-records route, the chat <c>dataverse.create_record</c> owned path, <c>email.draft</c>'s filed draft and the budget
+/// inquiry — runs through <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, which ported this file's
+/// create (the as-the-caller checks, the resolver's owner, the isolated root create) step for step. What stays here is the
+/// re-file half (<see cref="RefileAsync"/>, unified-access-control-r2's) and the rules both halves read (the write path,
+/// the "for" columns, the regarding pair, the invoice-family step). The remarks below describe the G5 design those rules
+/// implement.</para>
 /// <para><b>Owner decision S1, option (1)</b> (session-27 round 3, accepted as recommended; it names "AI email draft, AI
 /// create-record" explicitly), <b>refined by G5</b> (round 3b): the BFF checks AS THE USER that they could make the row
 /// themselves, then the APPLICATION creates it OWNED BY THE TEAM — "same rule that assigned to the bu/team not
@@ -98,13 +105,42 @@ internal static class OwnedChildWrite
 
     /// <summary>The ownership parents a mapped row of <paramref name="table"/> is filed under (resolver's definition — no per-table
     /// list). #2084: a lookup that CITES rather than files (<see cref="RecordOwnershipResolver.IsCitation"/>, the one predicate the
-    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.</summary>
+    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.
+    /// UAC task 194b fix round F4: in the table's primary order (<see cref="RecordOwnershipContext.InPrimaryOrder"/>, the order the
+    /// reconciler asks the row in once it exists), never the order the caller's payload named the lookups in — the first is the
+    /// primary, whose business unit decides an ordinary row's owner.</summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(string table, DataverseWriteItemMapper.MappedItem item) =>
-        item.Lookups
-            .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable) && !RecordOwnershipResolver.IsCitation(table, l.Column))
-            .Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId))
-            .Distinct()
-            .ToArray();
+        OwnershipOf(table, item).Parents; // 194b R (B3): the one builder's parents, so the two cannot drift
+
+    /// <summary>UAC task 194b fix round R (B3): the ownership question for a mapped row of <paramref name="table"/> — the one
+    /// builder (<see cref="RecordOwnershipContext.ForRow"/>) over the lookups the item writes and its regarding pair id.</summary>
+    internal static RecordOwnershipContext OwnershipOf(
+        string table, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId = null, Guid? callerSystemUserId = null) =>
+        RecordOwnershipContext.ForRow(table, LookupsOf(item), PairIdOf(item.JsonBody), callerObjectId, callerSystemUserId);
+
+    /// <summary>UAC task 194b R4: every lookup the mapped item writes, column → the record it names (the builder filters).</summary>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(DataverseWriteItemMapper.MappedItem item) =>
+        item.Lookups.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId)));
+
+    /// <summary>The body's <c>sprk_regardingrecordid</c> (the regarding pair's id, a text column), or <c>null</c>.</summary>
+    private static string? PairIdOf(string jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return null;
+        try
+        {
+            using var body = JsonDocument.Parse(jsonBody);
+            return body.RootElement.ValueKind == JsonValueKind.Object
+                   && body.RootElement.TryGetProperty(CoreAncestorResolver.RegardingRecordIdColumn, out var pair)
+                   && pair.ValueKind == JsonValueKind.String
+                ? pair.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// True when an <c>email.draft</c> takes the owned path: a draft (a <c>sprk_communication</c>, a CHILD in the ownership
@@ -182,7 +218,7 @@ internal static class OwnedChildWrite
     /// matter/project precedent. Its extra <c>sprk_assignedto</c> is not a "for" column (b2-r2, verifier b2-r1 item 4; task
     /// note §15b); by owner decision 2026-10-27 (field-mapping-server-write-path-r1 task 037, FR-36, #2354) it is a copied
     /// default instead — the new row's own <c>sprk_assignedtointernal</c>, when the create leaves it unset
-    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.ServerDefault.CopiedFrom"/>, applied by <see cref="CreateAsync"/>).
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.ServerDefault.CopiedFrom"/>, applied by <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>).
     /// A table not listed has no "for" column.
     /// </summary>
     /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the registry's
@@ -230,18 +266,12 @@ internal static class OwnedChildWrite
         item.ValueKind == JsonValueKind.Object
         && item.EnumerateObject().Any(p => string.Equals(p.Name.Trim(), column, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>What the owned create (or a check) answered.</summary>
+    /// <summary>What a caller check (<see cref="CallerWriteAuthorization"/>) answered. Field-mapping-server-write-path-r1 task
+    /// 017 (2d-5): the owned create that also answered through this record (its created id, owner, plan, secure-filing and
+    /// invoice-family refusals) was deleted; <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/> creates
+    /// and answers with its own outcome.</summary>
     internal sealed record Outcome
     {
-        public Guid? CreatedId { get; init; }
-
-        /// <summary>
-        /// Task 037 (fix round 1): with <see cref="CreatedId"/>, the columns the created row was written with — the
-        /// caller's own plus any copied default this create filled (a work assignment's Assigned To), so a caller reports
-        /// what was actually set rather than what it sent. <c>null</c> when nothing was created.
-        /// </summary>
-        public IReadOnlyList<string>? WrittenColumns { get; init; }
-
         /// <summary>Refused by the caller's own rights — surfaced as the user's access error.</summary>
         public string? Denied { get; init; }
 
@@ -259,9 +289,6 @@ internal static class OwnedChildWrite
         /// </summary>
         public string? RefusedColumn { get; init; }
 
-        /// <summary>Refused by the owner decision — the stable <see cref="RecordOwnerRefusal"/> code and its reason.</summary>
-        public RecordOwnerResolution? OwnerRefusal { get; init; }
-
         /// <summary>A question asked as the caller failed at Dataverse — the caller's own error.</summary>
         public DataverseUserResponse? ClientFailure { get; init; }
 
@@ -273,252 +300,9 @@ internal static class OwnedChildWrite
         /// </summary>
         public string? Invalid { get; init; }
 
-        /// <summary>
-        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a matter (a
-        /// root, made secure only through its own Make Secure; a work assignment or project is instead created as an
-        /// ordinary row and secured by provisioning, task 158) or a table outside the ownership set (the Secure Record
-        /// Owner role holds no Read on it). Nothing is created.
-        /// </summary>
-        public string? SecureFilingRefused { get; init; }
-
-        /// <summary>
-        /// Task 158 r1 (owner round 31): the secure-create plan's refusal — the stable code (an unreadable parent flag, the
-        /// caller walled off a secure parent or the record, the named team unresolved) and its reason. Nothing is created.
-        /// </summary>
-        public RecordOwnerResolution? PlanRefusal { get; init; }
-
-        /// <summary>Task 158 r1: the row was created INTO isolation by this plan — the writer completes it.</summary>
-        public SecureRootCreatePlan? Isolated { get; init; }
-
-        /// <summary>
-        /// Task 158 r1: the person an isolated create was made for (the caller, by the WhoAmI this create made — its
-        /// <c>sprk_createdbyperson</c>), whom completing it shares the row to; never asked a second time.
-        /// </summary>
-        public Guid? IsolatedFor { get; init; }
-
-        public bool Succeeded =>
-            CreatedId is not null
-            || (Denied is null && OwnerRefusal is null && ClientFailure is null && Invalid is null && SecureFilingRefused is null
-                && PlanRefusal is null);
+        public bool Succeeded => Denied is null && ClientFailure is null && Invalid is null;
 
         public static readonly Outcome Allowed = new();
-    }
-
-    /// <summary>
-    /// Creates a FILED child row (S1 / G5): as the caller, checks they could create it themselves; resolves its owner
-    /// through the one resolver (secure-if-any); then the application creates it owned by that team, by PATCHing a fresh
-    /// id — the create-by-upsert <c>InvoiceReviewService</c> uses for the G5 invoice. Nothing is written on any refusal; a
-    /// Dataverse fault propagates.
-    /// </summary>
-    /// <param name="serverSetLookupColumns">Lookups the SERVER added to the row (e.g. the email draft's sender) — they
-    /// name the caller themselves and cost no AppendTo check.</param>
-    /// <param name="planSecureCreate">Task 158 r1 (owner round 31): for a work assignment or project, the secure-create plan
-    /// (<see cref="SecureRootFilingGate.PlanCreateAsync"/>) — asked AFTER the caller's own G5 check above and given its
-    /// AppendTo check on the secure parents (the polymorphic pair is text, not a lookup the mapper checks), so a caller who
-    /// may not file under a secure record learns nothing more about it. A refusal creates nothing; an isolated plan creates
-    /// the row owned by the plan's named Secure Record Owners team with <c>sprk_issecure = true</c> in the create itself.
-    /// <c>null</c> for every other create.</param>
-    /// <param name="logger">Task 037: where a copied default that could not be applied is reported (a structured
-    /// warning); <c>null</c> reports nothing.</param>
-    internal static async Task<Outcome> CreateAsync(
-        IDataverseUserClient user,
-        IRecordOwnershipResolver ownership,
-        IFieldMappingDataverseService appOnly,
-        string table,
-        DataverseWriteItemMapper.MappedItem item,
-        IReadOnlySet<string>? serverSetLookupColumns,
-        Guid? callerObjectId,
-        CancellationToken ct,
-        SecureRootFilingGate? planSecureCreate = null,
-        ILogger? logger = null)
-    {
-        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
-        if (me.Failure is not null)
-            return new Outcome { ClientFailure = me.Failure };
-
-        // Task 037 (FR-36): the table's copied defaults (a work assignment's Assigned To from its own Assigned To Internal),
-        // fill-only, on the row BEFORE anything is checked or written — so the value is checked as the caller exactly like
-        // a supplied one, written in the create itself, and read back by the "Assigned *" materialisation after it. A copy of
-        // a SERVER-set source (the chat create's "for" person, the caller's own contact) names the same server-chosen record,
-        // so it is server-set too: it costs no more AppendTo than its source did.
-        var defaulted = await WithCopiedDefaultsAsync(user, table, item, logger, ct).ConfigureAwait(false);
-        if (defaulted.ClientFailure is { } defaultFailure)
-            return new Outcome { ClientFailure = defaultFailure };
-        item = defaulted.Item;
-        var serverSetCopies = defaulted.Copied
-            .Where(c => serverSetLookupColumns?.Contains(c.Source) == true)
-            .Select(c => c.Column)
-            .ToArray();
-        if (serverSetCopies.Length > 0)
-        {
-            serverSetLookupColumns = new HashSet<string>(serverSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase);
-        }
-
-        var check = await CheckCallerMayCreateAsync(user, me.SystemUserId, table, item, serverSetLookupColumns, ct)
-            .ConfigureAwait(false);
-        if (!check.Succeeded)
-            return check;
-
-        if (planSecureCreate is not null && SecureRootInheritance.Inherits(table))
-        {
-            // G5 for the secure parents themselves: AppendTo AS THE CALLER on each one the row will be filed under - asked by
-            // the plan before it says anything about them. Every record a typed lookup or the pair names was already
-            // checked above, secure or not (so this refuses nothing the check above let through: it is the plan's own
-            // guard, kept for any parent the plan names that the payload did not). A parent counts as checked only when a
-            // lookup the check above ASKED about names the same record — the same TABLE and id: a contact whose id was
-            // chosen equal to a matter's says nothing about that matter. A parent the pair names is asked again here.
-            var checkedRecords = item.Lookups
-                .Where(l => serverSetLookupColumns?.Contains(l.Column) != true)
-                .Select(l => (Table: l.RelatedTable.ToLowerInvariant(), l.RecordId))
-                .ToHashSet();
-            var plan = await planSecureCreate.PlanCreateAsync(table, WritesOf(item), me.SystemUserId, ct,
-                async (parents, token) =>
-                {
-                    var parentLookups = parents
-                        .Where(p => !checkedRecords.Contains((p.Table.ToLowerInvariant(), p.Id)))
-                        .Select(p => new DataverseWriteItemMapper.MappedLookup(
-                            "filed under", p.Table, SecureDesignationRemoval.EntitySetFor(p.Table), p.Id))
-                        .ToArray();
-                    var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, parentLookups, token).ConfigureAwait(false);
-                    return appendTo.Succeeded
-                        ? null
-                        : RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied,
-                            appendTo.Denied ?? "you do not have permission to file this record under the secure record it names");
-                }).ConfigureAwait(false);
-
-            if (plan.Refusal is { } refusal)
-                return new Outcome { PlanRefusal = refusal };
-
-            if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
-            {
-                var created = await CreateIntoIsolationAsync(appOnly, table, item, secureTeam, me.SystemUserId, ct).ConfigureAwait(false);
-                return created with { Isolated = plan, IsolatedFor = me.SystemUserId };
-            }
-        }
-
-        // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
-        // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
-        var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(ParentsOf(table, item), callerObjectId, me.SystemUserId) with
-            {
-                RequestedBy = RecordRequester.Of(me.SystemUserId),
-            },
-            ct).ConfigureAwait(false);
-        if (!owner.IsOwned)
-            return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
-
-        // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
-        // set, config/secure-record-owner-role.json). A work assignment or project filed under a secure record is created
-        // into isolation above (task 158 r1, owner round 31 item 2) — reaching here with a Secure owner means the plan
-        // found no secure parent while the resolver did: the two cannot be reconciled now, so nothing is created (fail
-        // closed). Any other table would be refused by Dataverse (no Read).
-        if (owner.IsSecureOwner && SecureRootInheritance.Inherits(table))
-        {
-            return new Outcome
-            {
-                SecureFilingRefused = $"Whether this '{table}' is filed under a secure record could not be decided consistently " +
-                                      "(the records it names changed while it was being created). It was NOT created. Try again.",
-            };
-        }
-        else if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
-        {
-            return new Outcome
-            {
-                SecureFilingRefused = RecordOwnershipResolver.IsOwnershipParent(table)
-                    ? $"A '{table}' record cannot be created under a secure record from chat: it would itself have to be "
-                      + "made secure (its own owner team, container and sharing — the record's Make Secure path). It was "
-                      + "NOT created. Create it from the secure record itself."
-                    : $"A '{table}' record cannot be filed under a secure record from chat, and was NOT created. Create it "
-                      + "from the record itself.",
-            };
-        }
-
-        var fields = BodyFields(item.JsonBody);
-        fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
-        owner.StampCreatorOn(fields, table);
-
-        var id = Guid.NewGuid();
-        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
-    }
-
-    /// <summary>
-    /// Task 158 r1 (owner round 31 item 2): the app-only create of a work assignment or project — a ROOT — INTO isolation:
-    /// owned by the named Secure Record Owners team provisioning's own topology names (resolved by
-    /// <see cref="SecureRootInheritance.PlanCreateAsync"/>), flagged in the create itself. A root's own ownership is
-    /// provisioning's (task 144), never a child's resolver answer; provisioning's re-entry steps then complete it.
-    /// </summary>
-    private static async Task<Outcome> CreateIntoIsolationAsync(
-        IFieldMappingDataverseService appOnly, string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam,
-        Guid creatorPerson, CancellationToken ct)
-    {
-        var fields = BodyFields(item.JsonBody);
-        fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
-        fields["sprk_issecure"] = true;
-        // Batch-4 integration (146 c1-r1 x 158): the person who asked for it, stamped in the create itself as on every other
-        // app-only create (task 146 moved the stamp off the handlers into this writer), so provisioning's completion and any
-        // later resume share to that person.
-        if (RecordCreatorPerson.IsStamped(table))
-            RecordCreatorPerson.Bind(fields, creatorPerson);
-
-        var id = Guid.NewGuid();
-        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
-    }
-
-    /// <summary>
-    /// Task 037 (FR-36): <paramref name="item"/> with the table's copied defaults
-    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor"/>) filled — each lookup the row
-    /// binds in the source column, bound as-is in the target the row leaves unset, mapped as the caller (navigation property
-    /// from metadata, as every other lookup) and merged in. A target the row sets (an explicit null included) is never
-    /// touched. A source the row leaves unset leaves the target blank, with a structured warning. A default the table's
-    /// metadata cannot bind is left out with a warning (the create goes on); the caller's own failure reading that
-    /// metadata is returned, and nothing is written. A table with no copied default costs nothing.
-    /// </summary>
-    /// <returns>The item to check and write, each (column, source column) pair it filled, or the caller's own failure.</returns>
-    private static async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlyList<(string Column, string Source)> Copied,
-        DataverseUserResponse? ClientFailure)> WithCopiedDefaultsAsync(
-        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, ILogger? logger, CancellationToken ct)
-    {
-        var fills = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor(
-            Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(table), item);
-        if (fills.Count == 0)
-            return (item, [], null);
-
-        var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
-        var copied = new List<(string Column, string Source)>();
-        foreach (var fill in fills)
-        {
-            if (fill.Source is { } source)
-            {
-                extra[fill.Default.Column] = new { relatedTable = source.RelatedTable, recordId = source.RecordId };
-                copied.Add((fill.Default.Column, source.Column));
-                continue;
-            }
-
-            logger?.LogWarning(
-                "copied_default_source_unset: entity={Entity} column={Column} source={Source} — the create leaves both unset, " +
-                "so the column stays blank (task 037, FR-36)",
-                table, fill.Default.Column, fill.Default.CopiedFrom);
-        }
-
-        if (extra.Count == 0)
-            return (item, [], null);
-
-        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
-            .ConfigureAwait(false);
-        if (mapped.ClientFailure is { } mapFailure)
-            return (item, [], mapFailure);
-        if (mapped.Item is not { } added)
-        {
-            logger?.LogWarning(
-                "copied_default_not_bound: entity={Entity} columns={Columns} — the table's metadata cannot bind them, so they " +
-                "are left blank: {Reason} (task 037, FR-36)",
-                table, string.Join(",", extra.Keys), mapped.ValidationError);
-            return (item, [], null);
-        }
-
-        return (Merge(item, added), copied, null);
     }
 
     // ── The ADR-024 regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype) ─────────────────────────────
@@ -582,146 +366,27 @@ internal static class OwnedChildWrite
         SecureRootInheritance.PairNamesAParentOnItsOwn(table) ? PairColumns : NoColumns;
 
     /// <summary>
-    /// #1616: the update tool's write of a row whose ADR-024 pair is BFF-managed (<see cref="BffManagedPairColumnsOf"/>): the
-    /// pair columns are field-secured so that no user can set them through the Web API, so the caller's own PATCH of them
-    /// would be refused. The pair rule has already been asked AS THE CALLER (<see cref="CheckCallerMayFileRootUnderAsync"/>:
-    /// AppendTo on the record the pair will name); this asks, as the caller too, what a run-as-user PATCH of the pair would
-    /// otherwise have had Dataverse check — Write on the row, and Append on it plus AppendTo on the record-type catalog row
-    /// when the type is set — then sends the caller's own PATCH of every OTHER column (Dataverse authorizes it, field
-    /// security included), and last the application writes the pair (update-only, never a create).
-    /// </summary>
-    /// <returns><c>null</c> when <paramref name="item"/> writes no BFF-managed pair column (the caller's own PATCH, as
-    /// before); otherwise <see cref="RefileOutcome.Written"/> or the refusal. A refusal before the caller's PATCH writes nothing;
-    /// a fault of the application's write after it propagates (the caller's other columns are then written).</returns>
-    internal static async Task<RefileOutcome?> PatchWithBffManagedPairAsync(
-        IDataverseUserClient user, IFieldMappingDataverseService? appOnly, string table, string entitySetName, Guid recordId,
-        DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
-    {
-        var managed = BffManagedPairColumnsOf(table);
-        if (managed.Count == 0)
-            return null;
-
-        var pairFields = new Dictionary<string, object?>(StringComparer.Ordinal);
-        string? callerBody = null;
-        using (var body = JsonDocument.Parse(item.JsonBody))
-        {
-            using var stream = new MemoryStream();
-            var rest = 0;
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                writer.WriteStartObject();
-                foreach (var property in body.RootElement.EnumerateObject())
-                {
-                    if (managed.Contains(SecureRootInheritance.NormalizeColumn(property.Name)))
-                    {
-                        pairFields[property.Name] = property.Value.Clone();
-                        continue;
-                    }
-
-                    property.WriteTo(writer);
-                    rest++;
-                }
-
-                writer.WriteEndObject();
-            }
-
-            if (rest > 0)
-                callerBody = System.Text.Encoding.UTF8.GetString(stream.ToArray());
-        }
-
-        if (pairFields.Count == 0)
-            return null; // no pair column in the body: the caller's own PATCH, as before
-
-        if (appOnly is null)
-        {
-            return new RefileOutcome
-            {
-                ClientFailure = DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.ServiceError,
-                    $"What this {table} is filed under is written only by Spaarke, which cannot write it here, so nothing was written."),
-            };
-        }
-
-        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
-        if (me.Failure is { } failure)
-            return new RefileOutcome { ClientFailure = failure };
-
-        var typeLookups = item.Lookups.Where(l => IsPairType(l.Column)).ToArray();
-        var needed = typeLookups.Length > 0 ? AccessRights.Write | AccessRights.Append : AccessRights.Write;
-        var rights = await RightsOnAsync(user, me.SystemUserId, entitySetName, recordId, ct).ConfigureAwait(false);
-        if ((rights & needed) != needed)
-            return new RefileOutcome { Denied = $"You do not have permission to change what this {table} is filed under." };
-
-        var typeAppendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, typeLookups, ct).ConfigureAwait(false);
-        if (typeAppendTo.ClientFailure is { } typeFailure)
-            return new RefileOutcome { ClientFailure = typeFailure };
-        if (!typeAppendTo.Succeeded)
-        {
-            return new RefileOutcome
-            {
-                Denied = typeAppendTo.Denied ?? "You do not have permission to file this record under the record type it names.",
-                ParentUnavailable = typeAppendTo.ParentUnavailable,
-            };
-        }
-
-        // The FULL pair the rule checked: the update tool completes a half-pair write from the row BEFORE anything is
-        // checked (KeepPairInStepAsync), so the item carries both halves, the rule (CheckCallerMayRefileByPairAsync) and the
-        // gate decided exactly them, and exactly them is what the application writes. An item that still sets one half was
-        // not prepared that way: refused (fail closed), never completed from a second read.
-        if (PairOf(item) is not { SetsId: true, SetsType: true })
-        {
-            return new RefileOutcome
-            {
-                Invalid = $"What this {table} is filed under is written as a whole (its record and its record type), so nothing was written.",
-            };
-        }
-
-        if (callerBody is not null)
-        {
-            // If-Match: * (update-only), AS THE CALLER — every column but the pair, authorized by Dataverse itself.
-            var response = await user.PatchAsync($"{entitySetName}({recordId:D})", callerBody, ct).ConfigureAwait(false);
-            if (!response.IsSuccess)
-                return new RefileOutcome { ClientFailure = response };
-        }
-
-        await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, pairFields, ct).ConfigureAwait(false);
-        return new RefileOutcome { Written = true };
-    }
-
-    /// <summary>
     /// #1616: prepares an update's ADR-024 pair BEFORE anything is checked or written, AS THE CALLER (one read of the row,
     /// only when it applies), so the checks and the write see one and the same pair:
     /// <list type="bullet">
     /// <item><b>A BFF-managed pair</b> (a project, <see cref="BffManagedPairColumnsOf"/>) written by one half: the other half is
     /// added as the row holds it, so the pair rule, the secure-root gate and the application's write
-    /// (<see cref="PatchWithBffManagedPairAsync"/>) all act on exactly the same (record, type).</item>
-    /// <item><b>A work assignment</b> (its pair is not BFF-managed) whose update changes or clears a typed filing lookup
-    /// (<see cref="SecureRootInheritance.TypedLookupsOf"/>: a matter or project, or #1630 an invoice or event) the pair was IN
-    /// STEP with — same id, a type naming that
-    /// lookup's table — and does not write the pair itself: the pair is kept in step in the same caller PATCH (moved to the
-    /// lookup's new record, or cleared with its display columns when the lookup is cleared). Otherwise a BFF re-file would
-    /// leave a pair no typed lookup repeats, which holds the record's sharees and every loosening until a repair. The pair
-    /// rule then asks AppendTo on the new record exactly as for any pair write. A pair that was not in step is left alone.</item>
+    /// (<see cref="ProjectMatterFiling.FileAsync"/>) all act on exactly the same (record, type).</item>
+    /// <item><b>Every other pair table</b> (task 045b): the update planner (<see cref="KeepRegardingPairWholeAsync"/>) — a
+    /// type-only pair filled or cleared, a cleared id taking its type with it, and a pair kept in step with the agreement
+    /// lookup this update moves or clears (the work assignment's #1616 rule, widened to the 18 pair tables).</item>
     /// </list>
     /// </summary>
     /// <returns>The item to check and write (unchanged when nothing applies), or the caller's own failure — nothing written.</returns>
     internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepPairInStepAsync(
         IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
-        CancellationToken ct)
+        CancellationToken ct, ILogger? logger = null)
     {
+        if (BffManagedPairColumnsOf(table).Count == 0)
+            return await KeepRegardingPairWholeAsync(user, table, entitySetName, recordId, item, logger, ct).ConfigureAwait(false);
+
         var pair = PairOf(item);
-        var managed = BffManagedPairColumnsOf(table).Count > 0;
-        // #1630: the intermediate lookups too (an invoice or event files a work assignment as its matter or project lookup
-        // does), so a re-file from one invoice to another moves the pair with it.
-        var filing = SecureRootInheritance.TypedLookupsOf(table.Trim().ToLowerInvariant())
-            .Select(t => (Column: t.Column, ParentTable: t.Table))
-            .ToArray();
-        var changedFiling = filing
-            .Where(f => item.Lookups.Any(l => string.Equals(l.Column, f.Column, StringComparison.OrdinalIgnoreCase))
-                        || item.ClearedColumns.Contains(f.Column, StringComparer.OrdinalIgnoreCase))
-            .ToArray();
-        var completes = managed && pair.SetsEither && !(pair.SetsId && pair.SetsType);
-        var follows = !managed && SecureRootInheritance.Inherits(table) && !pair.SetsEither && changedFiling.Length > 0;
-        if (!completes && !follows)
+        if (!pair.SetsEither || (pair.SetsId && pair.SetsType))
             return (item, null);
 
         var row = await user.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
@@ -745,59 +410,19 @@ internal static class OwnedChildWrite
             : null;
 
         var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (completes)
-        {
-            if (!pair.SetsId)
-                extra[SecureRootInheritance.PairIdColumn] = rowId;
-            if (!pair.SetsType)
-                extra[SecureRootInheritance.PairTypeColumn] = rowType is { } t ? new { relatedTable = RecordTypeTable, recordId = t } : null;
-        }
-        else
-        {
-            if (!Guid.TryParse(rowId?.Trim(), out var pairId) || pairId == Guid.Empty || rowType is not { } pairType)
-                return (item, null); // no typed pair to keep in step
+        if (!pair.SetsId)
+            extra[SecureRootInheritance.PairIdColumn] = rowId;
+        if (!pair.SetsType)
+            extra[SecureRootInheritance.PairTypeColumn] = rowType is { } t ? new { relatedTable = RecordTypeTable, recordId = t } : null;
 
-            // The typed lookup the pair was in step with: same id on the row, and the pair's type names its table.
-            (string Column, string ParentTable)? inStep = null;
-            foreach (var f in changedFiling)
-            {
-                if (body.TryGetProperty($"_{f.Column}_value", out var current) && current.ValueKind == JsonValueKind.String
-                    && Guid.TryParse(current.GetString(), out var currentId) && currentId == pairId)
-                {
-                    inStep = f;
-                    break;
-                }
-            }
+        return await MergeExtraAsync(user, table, item, extra, ct).ConfigureAwait(false);
+    }
 
-            if (inStep is not { } step)
-                return (item, null);
-
-            var typeRow = await user.GetAsync($"{RecordTypeEntitySet}({pairType:D})?$select={RecordTypeLogicalNameColumn}", ct)
-                .ConfigureAwait(false);
-            if (!typeRow.IsSuccess)
-                return (item, new RefileOutcome { ClientFailure = typeRow });
-            var pairTable = typeRow.Body is { } typeBody && typeBody.TryGetProperty(RecordTypeLogicalNameColumn, out var logical)
-                                                         && logical.ValueKind == JsonValueKind.String
-                ? logical.GetString()?.Trim()
-                : null;
-            if (!string.Equals(pairTable, step.ParentTable, StringComparison.OrdinalIgnoreCase))
-                return (item, null);
-
-            var moved = item.Lookups.FirstOrDefault(l => string.Equals(l.Column, step.Column, StringComparison.OrdinalIgnoreCase));
-            if (moved is not null)
-            {
-                extra[SecureRootInheritance.PairIdColumn] = moved.RecordId.ToString("D");
-                extra[SecureRootInheritance.PairTypeColumn] = new { relatedTable = RecordTypeTable, recordId = pairType };
-            }
-            else
-            {
-                extra[SecureRootInheritance.PairIdColumn] = null;
-                extra[SecureRootInheritance.PairTypeColumn] = null;
-                foreach (var display in PairDisplayColumns)
-                    extra[display] = null;
-            }
-        }
-
+    /// <summary>Maps <paramref name="extra"/> as the caller and merges it over <paramref name="item"/> (its columns win).</summary>
+    private static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> MergeExtraAsync(
+        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> extra,
+        CancellationToken ct)
+    {
         var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
             .ConfigureAwait(false);
         if (mapped.ClientFailure is { } mapFailure)
@@ -808,8 +433,747 @@ internal static class OwnedChildWrite
         return (Merge(item, added), null);
     }
 
-    /// <summary>The pair's display columns (a work assignment's; cleared with the pair).</summary>
-    private static readonly string[] PairDisplayColumns = ["sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl"];
+    /// <summary>The pair's display columns, which describe the record the pair names: re-derived on a move, cleared with the
+    /// pair (task 045b, owner ruling Q7).</summary>
+    internal static readonly string[] PairDisplayColumns = ["sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl"];
+
+    // ── Task 045b: the update planner (design §2.2; owner rulings Q1, Q2, Q4, Q5, Q7 of 2026-11-07) ─────────────────────
+
+    /// <summary>
+    /// The 18 tables whose rows carry the whole ADR-024 pair — the type lookup to <c>sprk_recordtype_ref</c>, the id as text —
+    /// and its display columns (owner ruling Q1 (a); the solution's <c>Entity.xml</c>). Not here: the matter's lone type column,
+    /// the notification outbox's text type, and the thread's own anchor columns, which are not a pair.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RegardingPairTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_analysis", "sprk_billingevent", "sprk_communication", "sprk_decisionrecord", "sprk_event", "sprk_externalidentifier",
+        "sprk_invoice", "sprk_invoiceapproval", "sprk_invoicecorrection", "sprk_invoicesubmission", "sprk_kpiassessment",
+        "sprk_memo", "sprk_project", "sprk_reportcard", "sprk_servicerequest", "sprk_signal", "sprk_todo", "sprk_workassignment",
+    };
+
+    /// <summary>The pair type's navigation property on each pair table (the relationship's referencing attribute schema name,
+    /// SpaarkeMaster <c>Other/Relationships/sprk_RecordType_Ref.xml</c>). Web API names are case-sensitive, and the invoice's is
+    /// lower-case; every other pair table's is <c>sprk_RegardingRecordType</c>. Pinned against the solution for each of the
+    /// <see cref="RegardingPairTables"/> by <c>RegardingPairUpdatePlannerTests.ThePairTypeNavigationProperties_MatchTheSolution</c>.</summary>
+    internal static string RegardingRecordTypeNavigationPropertyOf(string table) =>
+        string.Equals(table.Trim(), "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+            ? InvoiceRegardingRecordTypeNavigationProperty
+            : RegardingRecordTypeNavigationProperty;
+
+    private const string RegardingRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+    private const string InvoiceRegardingRecordTypeNavigationProperty = "sprk_regardingrecordtype";
+
+    /// <summary>The structured log event an update that kept its pair whole writes (owner ruling Q5 (a): the response is unchanged).</summary>
+    internal static readonly EventId RegardingPairKeptWholeEvent = new(45201, "RegardingPairKeptWholeOnUpdate");
+
+    /// <summary>What an update writes about the pair, its display columns and the agreement lookups — the same view whichever
+    /// shape the path's payload has (a mapped item, or a Web API dictionary).</summary>
+    internal sealed record RegardingPairChange(
+        bool SetsId, string? IdText, bool SetsType, Guid? TypeId, bool Unreadable,
+        IReadOnlyDictionary<string, Guid> LookupsSet, IReadOnlySet<string> LookupsCleared, IReadOnlySet<string> DisplaySet)
+    {
+        public bool WritesPair => SetsId || SetsType;
+    }
+
+    /// <summary>The row's pair and agreement lookups, as the path's own reader read them.</summary>
+    internal sealed record RegardingPairRow(string? IdText, Guid? TypeId, IReadOnlyDictionary<string, Guid> Lookups);
+
+    /// <summary>A catalog row: the table its type names and the column its reference number is in.</summary>
+    internal sealed record RegardingPairType(string? Table, string? NumberColumn);
+
+    /// <summary>One read's answer: the value, or the status it failed with (and the caller's own response, on a caller read).</summary>
+    internal readonly record struct RegardingPairRead<T>(T? Value, int Status, DataverseUserResponse? Failure) where T : class
+    {
+        public static RegardingPairRead<T> Ok(T value) => new(value, 200, null);
+    }
+
+    /// <summary>The reads the planner asks: each path passes the reader it already has (the caller's client, or the app-only
+    /// reader of the playbook and push paths), so no path gains a reader (design §2.2, item 4). <c>MovedRecord</c>, when set,
+    /// is the reader of the display values of a pair the update itself moves (rule 3) only; rules 2 and 4 keep
+    /// <c>Record</c>, and without it rule 3 uses <c>Record</c> too.</summary>
+    internal sealed record RegardingPairReaders(
+        Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>> Row,
+        Func<Guid, CancellationToken, Task<RegardingPairRead<RegardingPairType>>> Type,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> Record,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? MovedRecord = null);
+
+    /// <summary>The planner's answer: the columns to write over the update's own (the id as text or <c>null</c>, the type as a
+    /// catalog row id or <c>null</c>, each display column as text or <c>null</c>), what it did, or the read that failed.</summary>
+    internal sealed record RegardingPairPlan(IReadOnlyDictionary<string, object?> Columns, string? Outcome, int? FailedStatus,
+        DataverseUserResponse? Failure)
+    {
+        public static readonly RegardingPairPlan Nothing = new(new Dictionary<string, object?>(), null, null, null);
+
+        public bool Failed => FailedStatus is not null;
+
+        public bool ClearsThePair => Columns.TryGetValue(SecureRootInheritance.PairTypeColumn, out var type) && type is null;
+    }
+
+    /// <summary>The update's pair view of a mapped item.</summary>
+    internal static RegardingPairChange PairChangeOf(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        var pair = PairOf(item);
+        var agreement = PairAgreementColumns(table);
+        var set = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var lookup in item.Lookups.Where(l => agreement.ContainsKey(l.Column)))
+            set[lookup.Column] = lookup.RecordId;
+        var cleared = item.ClearedColumns.Where(agreement.ContainsKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var display = item.Columns.Concat(item.ClearedColumns)
+            .Where(c => PairDisplayColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return new RegardingPairChange(pair.SetsId, pair.IdText, pair.SetsType, pair.TypeId, pair.InvalidId, set, cleared, display);
+    }
+
+    /// <summary>The update's pair view of a Web API dictionary (a lookup as an <c>@odata.bind</c> path or an
+    /// <see cref="Microsoft.Xrm.Sdk.EntityReference"/>; <c>null</c> clears). A pair value it cannot read makes the view
+    /// <see cref="RegardingPairChange.Unreadable"/>: the planner then leaves the write to its own checks.</summary>
+    internal static RegardingPairChange PairChangeOf(string table, IEnumerable<KeyValuePair<string, object?>> payload)
+    {
+        var agreement = PairAgreementColumns(table);
+        var set = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var cleared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var display = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool setsId = false, setsType = false, unreadable = false;
+        string? idText = null;
+        Guid? typeId = null;
+        foreach (var (key, raw) in payload)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = SecureRootInheritance.NormalizeColumn(key);
+            var value = raw is JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : raw;
+            if (string.Equals(column, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                setsId = true;
+                idText = value switch
+                {
+                    null => null,
+                    string s => s,
+                    Guid g => g.ToString("D"),
+                    JsonElement { ValueKind: JsonValueKind.String } e => e.GetString(),
+                    _ => null,
+                };
+                unreadable |= value is not null && idText is null;
+            }
+            else if (string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                setsType = true;
+                typeId = ReferencedId(value);
+                unreadable |= value is not null && typeId is null;
+            }
+            else if (agreement.ContainsKey(column))
+            {
+                if (value is null)
+                    cleared.Add(column);
+                else if (ReferencedId(value) is { } id)
+                    set[column] = id;
+            }
+            else if (PairDisplayColumns.Contains(column, StringComparer.OrdinalIgnoreCase))
+            {
+                display.Add(column);
+            }
+        }
+
+        return new RegardingPairChange(setsId, idText, setsType, typeId, unreadable, set, cleared, display);
+    }
+
+    /// <summary>The record a lookup value names: an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, or a bind path
+    /// (<c>/sprk_matters(…)</c>) as text. <c>null</c> for anything else.</summary>
+    private static Guid? ReferencedId(object? value)
+    {
+        var text = value switch
+        {
+            Microsoft.Xrm.Sdk.EntityReference r => r.Id == Guid.Empty ? null : r.Id.ToString("D"),
+            string s => s,
+            JsonElement { ValueKind: JsonValueKind.String } e => e.GetString(),
+            _ => null,
+        };
+        if (text is null)
+            return null;
+        var open = text.LastIndexOf('(');
+        var close = text.LastIndexOf(')');
+        var inner = open >= 0 && close > open ? text[(open + 1)..close] : text;
+        return Guid.TryParse(inner.Trim(), out var id) && id != Guid.Empty ? id : null;
+    }
+
+    /// <summary>
+    /// Task 045b, the update planner (design §2.2): what an update of a pair table (<see cref="RegardingPairTables"/>, not a
+    /// BFF-managed pair) must add so the pair it leaves is whole and in step. It reads the row once, and only when the update
+    /// writes a pair column or sets or clears an agreement lookup (<see cref="PairAgreementColumns"/>):
+    /// <list type="number">
+    /// <item><b>A cleared id</b> (the update clears the id and sets no type): the type and the display columns go with it.</item>
+    /// <item><b>A type with no id after the write</b> (owner ruling Q2 (a)): the catalog row is read; exactly one record of its
+    /// table named by the agreement lookups the row will hold (the update's own and the row's kept ones; an I-1 stamp column
+    /// never while an intermediate source is bound; a mapped lookup never) → the id is filled; none or several, or a catalog
+    /// read answered 403 (a type naming no table the reader can see) → the type is cleared with the display columns. A
+    /// catalog read answered 404 leaves the write as sent (its own checks answer as before); any other failure is the read's
+    /// own failure and nothing is written.</item>
+    /// <item><b>A pair the update moves</b> (a new id, or a new type over the same id): its display columns are re-derived
+    /// (owner ruling Q7 (b)), or cleared when the catalog row or the record answers 403 or 404 — never left describing the old
+    /// record. Any other failed read is the read's own, and nothing is written. On the app-only paths the display values are
+    /// read as the person the write runs for (<see cref="RegardingPairReaders.MovedRecord"/>); with no person they are cleared.</item>
+    /// <item><b>A lookup the pair repeated</b> (same id, the type naming that lookup's table), moved or cleared by an update that
+    /// writes no pair column, and no other lookup still repeating it: the pair moves with it (display columns re-derived) or is
+    /// cleared with it (owner ruling Q4 (b)). A catalog read that fails refuses, as the work assignment's #1616 rule did.</item>
+    /// </list>
+    /// A whole pair, an empty pair and an id-only pair the update leaves alone are untouched. Columns the update itself sends
+    /// are never overwritten, except a type-only pair's own type and id, which rule 2 completes or clears. The planner checks
+    /// nothing and grants nothing: every path still asks its own checks of the pair as it will be written.
+    /// </summary>
+    /// <param name="lookupsAreMapped">The update's lookups are field-mapped values (the push): rule 2 never fills from them
+    /// (owner ruling Q2, as 045a's step 4½ excludes a mapped candidate), only from the lookups the row keeps.</param>
+    internal static async Task<RegardingPairPlan> PlanRegardingPairAsync(
+        string table, RegardingPairChange change, RegardingPairReaders reads, CancellationToken ct, bool lookupsAreMapped = false)
+    {
+        var key = table.Trim().ToLowerInvariant();
+        if (!RegardingPairTables.Contains(key) || BffManagedPairColumnsOf(key).Count > 0 || change.Unreadable
+            || (!change.WritesPair && change.LookupsSet.Count == 0 && change.LookupsCleared.Count == 0))
+        {
+            return RegardingPairPlan.Nothing;
+        }
+
+        var rowRead = await reads.Row(ct).ConfigureAwait(false);
+        if (rowRead.Value is not { } row)
+            return new RegardingPairPlan(new Dictionary<string, object?>(), null, rowRead.Status, rowRead.Failure);
+
+        var agreement = PairAgreementColumns(key);
+        var after = new Dictionary<string, Guid>(row.Lookups, StringComparer.OrdinalIgnoreCase);
+        foreach (var column in change.LookupsCleared)
+            after.Remove(column);
+        foreach (var (column, id) in change.LookupsSet)
+            after[column] = id;
+
+        var columns = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (change.WritesPair)
+        {
+            var idAfter = change.SetsId ? change.IdText : row.IdText;
+            var typeAfter = change.SetsType ? change.TypeId : row.TypeId;
+
+            // Rule 1: the update clears the id and names no type — the type and the display columns go with it.
+            if (change.SetsId && string.IsNullOrWhiteSpace(change.IdText) && !(change.SetsType && change.TypeId is not null))
+            {
+                if (typeAfter is not null)
+                    columns[SecureRootInheritance.PairTypeColumn] = null;
+                ClearDisplay(columns, change);
+                return Planned(columns, "the id was cleared; its type and display columns were cleared with it");
+            }
+
+            // Rule 2: a type with no id after the write.
+            if (typeAfter is { } type && string.IsNullOrWhiteSpace(idAfter))
+            {
+                // 404: left as sent (the write's own AppendTo on the catalog row answers its uniform not-found). 403: the reader
+                // may not see which table the type names — a type naming no table, cleared (as 045a's step 4½, fix round 2), never
+                // stored type-only. Any other failure is the read's own; nothing is written.
+                var typeRead = await reads.Type(type, ct).ConfigureAwait(false);
+                if (typeRead.Value is null && typeRead.Status == 404)
+                    return RegardingPairPlan.Nothing;
+                if (typeRead.Value is null && typeRead.Status != 403)
+                    return new RegardingPairPlan(new Dictionary<string, object?>(), null, typeRead.Status, typeRead.Failure);
+                var named = typeRead.Value ?? new RegardingPairType(null, null);
+
+                var fillFrom = lookupsAreMapped
+                    ? row.Lookups.Where(l => !change.LookupsSet.ContainsKey(l.Key) && !change.LookupsCleared.Contains(l.Key))
+                        .ToDictionary(l => l.Key, l => l.Value, StringComparer.OrdinalIgnoreCase)
+                    : after;
+                // The intermediate test is asked of the row as it will be (the update's own lookups too, mapped or not): a
+                // mapped intermediate makes a stamp column no candidate, though only the kept lookups are candidates.
+                var records = named.Table is null ? [] : FillRecords(key, fillFrom, after, named.Table);
+                if (records.Count == 1)
+                {
+                    columns[SecureRootInheritance.PairIdColumn] = records[0].ToString("D");
+                    var filled = await DeriveDisplayAsync(columns, change, reads, named.Table!, named.NumberColumn, records[0], ct).ConfigureAwait(false);
+                    return filled.Failed ?? Planned(columns, "a type with no id; the id was filled from the one agreeing lookup" + filled.Suffix);
+                }
+
+                columns[SecureRootInheritance.PairIdColumn] = null;
+                columns[SecureRootInheritance.PairTypeColumn] = null;
+                ClearDisplay(columns, change);
+                return Planned(columns, "a type with no id and no single agreeing lookup; the type was cleared");
+            }
+
+            // Rule 3: the update moves the pair itself — a new id, or a new type (re-typing names another record) — and its
+            // display columns follow.
+            if (Guid.TryParse(idAfter?.Trim(), out var movedTo) && movedTo != Guid.Empty
+                && (!(Guid.TryParse(row.IdText?.Trim(), out var before) && before == movedTo) || typeAfter != row.TypeId)
+                && PairDisplayColumns.Any(c => !change.DisplaySet.Contains(c)))
+            {
+                // A catalog row that is missing (404), that the reader may not see (403) or that names no table: the display
+                // columns are cleared, never left describing the old record. Any other failure is the read's own; nothing is
+                // written (as rule 2).
+                var movedRead = typeAfter is { } movedType
+                    ? await reads.Type(movedType, ct).ConfigureAwait(false)
+                    : new RegardingPairRead<RegardingPairType>(null, 404, null);
+                if (movedRead.Value is null && movedRead.Status is not (403 or 404))
+                    return new RegardingPairPlan(new Dictionary<string, object?>(), null, movedRead.Status, movedRead.Failure);
+                if (movedRead.Value is { Table: { } movedTable } movedNamed)
+                {
+                    var moved = await DeriveDisplayAsync(
+                        columns, change, reads, movedTable, movedNamed.NumberColumn, movedTo, ct, reads.MovedRecord ?? reads.Record).ConfigureAwait(false);
+                    return moved.Failed ?? Planned(columns, "the pair was moved" + moved.Suffix);
+                }
+
+                ClearDisplay(columns, change);
+                return Planned(columns, "the pair was moved; its type names no table this reader can see, so its display columns were cleared");
+            }
+
+            return RegardingPairPlan.Nothing;
+        }
+
+        // Rule 4: the update moves or clears a lookup the pair repeated, and writes no pair column.
+        if (!Guid.TryParse(row.IdText?.Trim(), out var pairId) || pairId == Guid.Empty || row.TypeId is not { } rowType)
+            return RegardingPairPlan.Nothing;
+
+        var inStep = agreement.Keys.Where(c => row.Lookups.TryGetValue(c, out var held) && held == pairId).ToArray();
+        var changed = inStep.Where(c => change.LookupsSet.ContainsKey(c) || change.LookupsCleared.Contains(c)).ToArray();
+        if (changed.Length == 0 || inStep.Any(c => !changed.Contains(c) || after.TryGetValue(c, out var still) && still == pairId))
+            return RegardingPairPlan.Nothing; // not in step with what moved, or a lookup still repeats it
+
+        var rowTypeRead = await reads.Type(rowType, ct).ConfigureAwait(false);
+        if (rowTypeRead.Value is not { } rowNamed)
+            return new RegardingPairPlan(new Dictionary<string, object?>(), null, rowTypeRead.Status, rowTypeRead.Failure);
+
+        var following = changed.Where(c => string.Equals(agreement[c], rowNamed.Table, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (following.Length == 0)
+            return RegardingPairPlan.Nothing; // the type names another table: the pair did not repeat that lookup
+
+        var movedIds = following.Where(change.LookupsSet.ContainsKey).Select(c => change.LookupsSet[c]).Distinct().ToArray();
+        if (movedIds.Length == 1)
+        {
+            // The type is unchanged, so it is not written again: only the id and the display columns move.
+            columns[SecureRootInheritance.PairIdColumn] = movedIds[0].ToString("D");
+            var followed = await DeriveDisplayAsync(columns, change, reads, rowNamed.Table!, rowNamed.NumberColumn, movedIds[0], ct).ConfigureAwait(false);
+            return followed.Failed ?? Planned(columns, "the pair moved with the lookup it repeated" + followed.Suffix);
+        }
+
+        columns[SecureRootInheritance.PairIdColumn] = null;
+        columns[SecureRootInheritance.PairTypeColumn] = null;
+        ClearDisplay(columns, change);
+        return Planned(columns, "the lookup the pair repeated was cleared or split; the pair was cleared with it");
+
+        static RegardingPairPlan Planned(Dictionary<string, object?> columns, string outcome) => new(columns, outcome, null, null);
+    }
+
+    /// <summary>Rule 2's candidates (pure; 045a's step 4½ rule on the row as it will be): the distinct records of
+    /// <paramref name="pairTable"/> named in the table's agreement columns, without an I-1 stamp column while an intermediate
+    /// source is bound (<see cref="CoreAncestorResolver.ClassifyStampSource"/> would read it as a direct root link).</summary>
+    /// <param name="lookups">The candidates' columns.</param>
+    /// <param name="rowAfter">Every lookup the row will hold (the update's own included), which the intermediate test reads.</param>
+    private static IReadOnlyList<Guid> FillRecords(
+        string table, IReadOnlyDictionary<string, Guid> lookups, IReadOnlyDictionary<string, Guid> rowAfter, string pairTable)
+    {
+        var agreement = PairAgreementColumns(table);
+        var bindsAnIntermediate = CoreAncestorResolver.StampSourceColumns.TryGetValue(table, out var sources)
+                                  && rowAfter.Keys.Any(c => sources.Any(s => string.Equals(s.Column, c, StringComparison.OrdinalIgnoreCase)));
+        return lookups
+            .Where(l => agreement.TryGetValue(l.Key, out var target)
+                        && string.Equals(target, pairTable, StringComparison.OrdinalIgnoreCase)
+                        && !(bindsAnIntermediate && CoreAncestorResolver.CoreAncestorLookups.Any(
+                            s => string.Equals(s.LookupAttribute, l.Key, StringComparison.OrdinalIgnoreCase))))
+            .Select(l => l.Value)
+            .Distinct()
+            .ToArray();
+    }
+
+    /// <summary>Clears every display column the update does not send itself.</summary>
+    private static void ClearDisplay(Dictionary<string, object?> columns, RegardingPairChange change)
+    {
+        foreach (var display in PairDisplayColumns.Where(c => !change.DisplaySet.Contains(c)))
+            columns[display] = null;
+    }
+
+    /// <summary>What <see cref="DeriveDisplayAsync"/> did: the display columns were derived or cleared (the outcome's
+    /// <see cref="Suffix"/>), or the read failed (<see cref="Failed"/>, the plan to return: nothing is written).</summary>
+    private readonly record struct DisplayDerivation(string Suffix, RegardingPairPlan? Failed);
+
+    /// <summary>Owner ruling Q7 (b): the display columns of the record the pair now names — its name (the one display-name
+    /// map), its number (the column its catalog row names) and its url — for each one the update does not send. A record that
+    /// is missing (404) or that the reader may not read (403) has its display columns cleared, never left stale; any other
+    /// failed read is the read's own, and nothing is written.</summary>
+    private static async Task<DisplayDerivation> DeriveDisplayAsync(
+        Dictionary<string, object?> columns, RegardingPairChange change, RegardingPairReaders reads, string pairTable,
+        string? numberColumn, Guid recordId, CancellationToken ct,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? readRecord = null)
+    {
+        if (PairDisplayColumns.All(change.DisplaySet.Contains))
+            return new DisplayDerivation("", null);
+
+        var nameColumn = RegardingRecordType.GetPrimaryNameField(pairTable);
+        var asked = new[] { nameColumn, numberColumn }.OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        IReadOnlyDictionary<string, string?>? values = null;
+        if (asked.Length > 0)
+        {
+            var read = await (readRecord ?? reads.Record)(pairTable, recordId, asked, ct).ConfigureAwait(false);
+            if (read.Value is null && read.Status is 403 or 404)
+            {
+                ClearDisplay(columns, change);
+                return new DisplayDerivation("; the record it names could not be read, so its display columns were cleared", null);
+            }
+
+            if (read.Value is null)
+                return new DisplayDerivation("", new RegardingPairPlan(new Dictionary<string, object?>(), null, read.Status, read.Failure));
+            values = read.Value;
+        }
+
+        string? ValueOf(string? column) =>
+            column is not null && values is not null && values.TryGetValue(column, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+
+        var name = ValueOf(nameColumn);
+        Set("sprk_regardingrecordname", name is { Length: > InvoiceFamilyCoreRecordGuard.RegardingRecordNameMaxLength }
+            ? name[..InvoiceFamilyCoreRecordGuard.RegardingRecordNameMaxLength]
+            : name);
+        Set("sprk_regardingrecordnumber", ValueOf(numberColumn));
+        Set("sprk_regardingrecordurl", RegardingRecordType.BuildRecordUrl(pairTable, recordId.ToString("D")));
+        return new DisplayDerivation("; its display columns were re-derived", null);
+
+        void Set(string column, string? value)
+        {
+            if (!change.DisplaySet.Contains(column))
+                columns[column] = value;
+        }
+    }
+
+    /// <summary>Logs what the planner did (owner ruling Q5 (a)): the table, the row and the outcome — never the record the pair
+    /// names (042c coordinator condition 2). A clear is a warning; a fill or a move is information.</summary>
+    internal static void LogRegardingPairPlan(ILogger? logger, string path, string table, Guid recordId, RegardingPairPlan plan)
+    {
+        if (logger is null || plan.Outcome is null)
+            return;
+        logger.Log(plan.ClearsThePair ? LogLevel.Warning : LogLevel.Information, RegardingPairKeptWholeEvent,
+            "[{Path}] the regarding pair of {Table} {RecordId} was kept whole on update: {Outcome}",
+            path, table, recordId, plan.Outcome);
+    }
+
+    /// <summary>The planner's reads AS THE CALLER (the chat tool and the browser re-file routes): the row and the catalog
+    /// through <see cref="CallerWriteAuthorization.PairTypeTableAsync"/>, the regarded record's name and number.</summary>
+    internal static RegardingPairReaders CallerReaders(IDataverseUserClient user, string table, string entitySetName, Guid recordId) => new(
+        async ct =>
+        {
+            var row = await user.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
+            if (!row.IsSuccess)
+                return new RegardingPairRead<RegardingPairRow>(null, row.StatusCode, row);
+            if (row.Body is not { ValueKind: JsonValueKind.Object } body)
+            {
+                return new RegardingPairRead<RegardingPairRow>(null, row.StatusCode, DataverseUserResponse.Fail(row.StatusCode,
+                    DataverseUserClientErrorCodes.BadRequest, "The record could not be read, so what it is filed under cannot be checked."));
+            }
+
+            static Guid? GuidAt(JsonElement body, string property) =>
+                body.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g)
+                    ? g
+                    : null;
+
+            var lookups = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var column in PairAgreementColumns(table).Keys)
+            {
+                if (GuidAt(body, $"_{column}_value") is { } id)
+                    lookups[column] = id;
+            }
+
+            var idText = body.TryGetProperty(SecureRootInheritance.PairIdColumn, out var pairId) && pairId.ValueKind == JsonValueKind.String
+                ? pairId.GetString()
+                : null;
+            return RegardingPairRead<RegardingPairRow>.Ok(
+                new RegardingPairRow(idText, GuidAt(body, $"_{SecureRootInheritance.PairTypeColumn}_value"), lookups));
+        },
+        async (typeId, ct) =>
+        {
+            var (typeRow, pairTable) = await PairTypeTableAsync(user, typeId, null, ct).ConfigureAwait(false);
+            if (!typeRow.IsSuccess)
+                return new RegardingPairRead<RegardingPairType>(null, typeRow.StatusCode, typeRow);
+            var number = pairTable is null
+                ? null
+                : await user.GetAsync($"{RecordTypeEntitySet}({typeId:D})?$select={RegardingRecordType.RecordNumberFieldColumn}", ct)
+                    .ConfigureAwait(false) is { IsSuccess: true, Body: { } numberBody }
+                  && numberBody.TryGetProperty(RegardingRecordType.RecordNumberFieldColumn, out var field)
+                  && field.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(field.GetString())
+                    ? field.GetString()!.Trim()
+                    : null;
+            return RegardingPairRead<RegardingPairType>.Ok(new RegardingPairType(pairTable, number));
+        },
+        async (recordTable, id, asked, ct) =>
+        {
+            var set = await user.GetAsync($"EntityDefinitions(LogicalName='{recordTable}')?$select=EntitySetName", ct).ConfigureAwait(false);
+            if (!set.IsSuccess)
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, set.StatusCode, set);
+            if (set.Body is not { } meta || !meta.TryGetProperty("EntitySetName", out var name) || name.ValueKind != JsonValueKind.String)
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 500, null);
+
+            var record = await user.GetAsync($"{name.GetString()}({id:D})?$select={string.Join(",", asked)}", ct).ConfigureAwait(false);
+            if (!record.IsSuccess)
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, record.StatusCode, record);
+            if (record.Body is not { ValueKind: JsonValueKind.Object } values)
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 500, null);
+            return RegardingPairRead<IReadOnlyDictionary<string, string?>>.Ok(asked.ToDictionary(c => c,
+                c => values.TryGetProperty(c, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null,
+                StringComparer.OrdinalIgnoreCase));
+        });
+
+    /// <summary>The planner's reads with the APP-ONLY reader the playbook and push paths already use for their own guards
+    /// (design §2.2, item 4). A row or catalog row that does not exist answers 404; any other fault answers 500.</summary>
+    internal static RegardingPairReaders AppOnlyReaders(IGenericEntityService entities, string table, Guid recordId) => new(
+        async ct =>
+        {
+            var agreement = PairAgreementColumns(table).Keys.ToArray();
+            var read = await AppOnlyAsync(() => entities.RetrieveAsync(
+                table, recordId, [SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn, .. agreement], ct), ct)
+                .ConfigureAwait(false);
+            if (read.Value is not { } row)
+                return new RegardingPairRead<RegardingPairRow>(null, read.Status, null);
+            var lookups = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var column in agreement)
+            {
+                if (row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(column) is { Id: var id } && id != Guid.Empty)
+                    lookups[column] = id;
+            }
+
+            return RegardingPairRead<RegardingPairRow>.Ok(new RegardingPairRow(
+                row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn),
+                row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id,
+                lookups));
+        },
+        async (typeId, ct) =>
+        {
+            var read = await AppOnlyAsync(() => entities.RetrieveAsync(
+                RecordTypeTable, typeId, [RecordTypeLogicalNameColumn, RegardingRecordType.RecordNumberFieldColumn], ct), ct)
+                .ConfigureAwait(false);
+            if (read.Value is not { } row)
+                return new RegardingPairRead<RegardingPairType>(null, read.Status, null);
+            var logical = row.GetAttributeValue<string>(RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
+            return RegardingPairRead<RegardingPairType>.Ok(new RegardingPairType(
+                string.IsNullOrEmpty(logical) ? null : logical, RegardingRecordType.RecordNumberFieldOf(row)));
+        },
+        async (recordTable, id, asked, ct) =>
+        {
+            var read = await AppOnlyAsync(() => entities.RetrieveAsync(recordTable, id, asked.ToArray(), ct), ct).ConfigureAwait(false);
+            return read.Value is { } row
+                ? RegardingPairRead<IReadOnlyDictionary<string, string?>>.Ok(
+                    asked.ToDictionary(c => c, c => (string?)row.GetAttributeValue<string>(c), StringComparer.OrdinalIgnoreCase))
+                : new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, read.Status, null);
+        });
+
+    /// <summary>
+    /// The field-mapping push's display read: the push derives display values as the caller. The record the pair names is
+    /// read with the caller's own query (<c>MSCRMCallerID</c>); a record the caller may not read, or that is missing, answers
+    /// 403 or 404 (its display columns are cleared); any other fault, or no caller query, answers 500 (that child is refused).
+    /// </summary>
+    internal static Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>
+        CallerDisplayReader(
+            Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? callerQuery, IGenericEntityService? entities,
+            Guid callerSystemUserId) =>
+        async (recordTable, id, asked, ct) =>
+        {
+            if (callerQuery is null || entities is null || callerSystemUserId == Guid.Empty)
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 500, null);
+            try
+            {
+                var entitySet = await entities.GetEntitySetNameAsync(recordTable, ct).ConfigureAwait(false);
+                var rows = await callerQuery.QueryAsync(
+                    entitySet, $"$select={string.Join(",", asked)}&$filter={recordTable}id eq {id:D}", callerSystemUserId, ct)
+                    .ConfigureAwait(false);
+                if (rows.Count == 0)
+                    return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 404, null);
+                var row = rows[0];
+                return RegardingPairRead<IReadOnlyDictionary<string, string?>>.Ok(asked.ToDictionary(c => c,
+                    c => row.TryGetValue(c, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null,
+                    StringComparer.OrdinalIgnoreCase));
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound)
+            {
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, (int)ex.StatusCode!.Value, null);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 500, null);
+            }
+        };
+
+    /// <summary>
+    /// The display read of a pair an app-only update moves (rule 3): as the person the write runs for
+    /// (<see cref="CallerDisplayReader"/>: a record they may not read, or that is missing, answers 403 or 404 and its display
+    /// columns are cleared; any other fault, or no query, answers 500 and the write is refused). With no person (null or empty)
+    /// it answers 403 without reading, so the display columns are cleared.
+    /// </summary>
+    internal static Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>
+        MovedDisplayReader(
+            Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? personQuery, IGenericEntityService? entities,
+            Guid? person) =>
+        person is { } id && id != Guid.Empty
+            ? CallerDisplayReader(personQuery, entities, id)
+            : (_, _, _, _) => Task.FromResult(new RegardingPairRead<IReadOnlyDictionary<string, string?>>(null, 403, null));
+
+    /// <summary>An app-only read: a row, or 404 (it does not exist) or 500 (any other fault). The caller's own cancellation
+    /// propagates.</summary>
+    private static async Task<RegardingPairRead<Microsoft.Xrm.Sdk.Entity>> AppOnlyAsync(
+        Func<Task<Microsoft.Xrm.Sdk.Entity>> read, CancellationToken ct)
+    {
+        try
+        {
+            return await read().ConfigureAwait(false) is { } row
+                ? RegardingPairRead<Microsoft.Xrm.Sdk.Entity>.Ok(row)
+                : new RegardingPairRead<Microsoft.Xrm.Sdk.Entity>(null, 404, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new RegardingPairRead<Microsoft.Xrm.Sdk.Entity>(null,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(ex) ? 404 : 500, null);
+        }
+    }
+
+    /// <summary>
+    /// Task 045b: the update planner (<see cref="PlanRegardingPairAsync"/>) on a CALLER path's mapped item (the chat tool and
+    /// the browser re-file routes), before anything is checked or written, so every check sees the pair as it will be written.
+    /// The planned columns replace the item's own (its type-only pair, a display column) and are mapped as the caller.
+    /// </summary>
+    /// <returns>The item to check and write (unchanged when nothing applies), or the caller's own failure — nothing written.</returns>
+    internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepRegardingPairWholeAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
+        ILogger? logger, CancellationToken ct)
+    {
+        var plan = await PlanRegardingPairAsync(table, PairChangeOf(table, item), CallerReaders(user, table, entitySetName, recordId), ct)
+            .ConfigureAwait(false);
+        if (plan.Failed)
+        {
+            return (item, new RefileOutcome
+            {
+                ClientFailure = plan.Failure ?? DataverseUserResponse.Fail(plan.FailedStatus!.Value, DataverseUserClientErrorCodes.BadRequest,
+                    "The record could not be read, so what it is filed under cannot be checked."),
+            });
+        }
+
+        if (plan.Columns.Count == 0)
+            return (item, null);
+
+        // A clear of the type THIS update sends removes it before the re-file checks, so they would no longer ask AppendTo on
+        // its catalog row: asked here, with their own question and answer (as 045a's step 4½, fix round 1 F4) — a caller who may
+        // not append to the type, or whose type row is missing, still gets the uniform not-found, never a cleared write.
+        var sentType = item.Lookups
+            .Where(l => string.Equals(l.Column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (plan.ClearsThePair && sentType.Length > 0)
+        {
+            var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
+            if (me.Failure is { } whoAmIFailure)
+                return (item, new RefileOutcome { ClientFailure = whoAmIFailure });
+            var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, sentType, ct).ConfigureAwait(false);
+            if (!appendTo.Succeeded)
+                return (item, new RefileOutcome { Denied = appendTo.Denied, ParentUnavailable = appendTo.ParentUnavailable });
+        }
+
+        LogRegardingPairPlan(logger, "UPDATE", table, recordId, plan);
+        var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (column, value) in plan.Columns)
+        {
+            extra[column] = string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase) && value is Guid type
+                ? new { relatedTable = RecordTypeTable, recordId = type }
+                : value;
+        }
+
+        var merged = await MergeExtraAsync(user, table, WithoutColumns(item, plan.Columns.Keys), extra, ct).ConfigureAwait(false);
+        if (merged.Refusal is not null)
+            return merged;
+
+        // A display column the planner clears is text, never a lookup: it is written as a null, but not listed as a cleared
+        // column, which the re-file core reads as a candidate parent clear (RefileAsync) — so clearing the display never turns
+        // an ordinary update into a re-file. A display clear the caller sent itself is kept as the caller's mapper listed it.
+        return (merged.Item with
+        {
+            ClearedColumns = merged.Item.ClearedColumns
+                .Where(c => !PairDisplayColumns.Contains(c, StringComparer.OrdinalIgnoreCase)
+                            || item.ClearedColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+                .ToArray(),
+        }, null);
+    }
+
+    /// <summary>
+    /// Task 045b: the update planner on an APP-ONLY path's Web API dictionary (the playbook Update Record node and confirmed
+    /// proposals, the playbook output mapping, the field-mapping push), with the app-only reader the path already has. It adds
+    /// no check (UAC-r2, 2026-11-07). A row or catalog row that does not exist leaves the payload as sent (the write answers
+    /// its own not-found); any other failed read refuses, nothing written (fail closed).
+    /// </summary>
+    /// <returns>The payload to write: <paramref name="payload"/> itself when nothing applies, otherwise a copy.</returns>
+    /// <exception cref="RecordOwnerUnresolvedException">A read the planner needs failed; nothing was written.</exception>
+    internal static async Task<Dictionary<string, object?>> KeepRegardingPairWholeAppOnlyAsync(
+        IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
+        ILogger? logger, CancellationToken ct, bool lookupsAreMapped = false,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? movedDisplayRecord = null)
+    {
+        if (!RegardingPairPlannerApplies(table, payload))
+            return payload;
+        var change = PairChangeOf(table, payload);
+
+        if (entities is null)
+        {
+            throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                "what it is filed under cannot be read here, so it was not written"));
+        }
+
+        // displayRecord: the reader of the regarded record's display values when the path reads them otherwise (the push, as
+        // the caller: CallerDisplayReader); the row and the catalog are still read with the path's app-only reader.
+        // movedDisplayRecord: the display values of a pair the update itself moves (rule 3) are read as the person the write
+        // runs for (<see cref="MovedDisplayReader"/>); left out, they are cleared, never read app-only. Rules 2 and 4 follow a
+        // lookup the row holds and keep the app-only reader. A path that passes displayRecord reads every rule's display so.
+        var readers = AppOnlyReaders(entities, table, recordId);
+        readers = displayRecord is not null
+            ? readers with { Record = displayRecord }
+            : readers with { MovedRecord = movedDisplayRecord ?? MovedDisplayReader(null, entities, null) };
+        var plan = await PlanRegardingPairAsync(table, change, readers, ct, lookupsAreMapped).ConfigureAwait(false);
+        if (plan.Failed)
+        {
+            if (plan.FailedStatus == 404)
+                return payload;
+            throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                "what it is filed under could not be read, so it was not written"));
+        }
+
+        if (plan.Columns.Count == 0)
+            return payload;
+
+        LogRegardingPairPlan(logger, path, table, recordId, plan);
+        var written = new Dictionary<string, object?>(payload, payload.Comparer);
+        foreach (var key in written.Keys.Where(k => plan.Columns.ContainsKey(SecureRootInheritance.NormalizeColumn(k))).ToList())
+            written.Remove(key);
+        foreach (var (column, value) in plan.Columns)
+        {
+            if (string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase))
+                written[$"{RegardingRecordTypeNavigationPropertyOf(table)}@odata.bind"] = value is Guid type ? $"/{RecordTypeEntitySet}({type:D})" : null;
+            else
+                written[column] = value;
+        }
+
+        return written;
+    }
+
+    /// <summary>Whether an app-only payload is one the update planner reads anything for (a pair table, not BFF-managed, whose
+    /// payload writes a pair column or sets or clears an agreement lookup), so a path resolves its reader only when it is.</summary>
+    internal static bool RegardingPairPlannerApplies(string table, IEnumerable<KeyValuePair<string, object?>> payload)
+    {
+        if (!RegardingPairTables.Contains(table.Trim()) || BffManagedPairColumnsOf(table).Count > 0)
+            return false;
+        var change = PairChangeOf(table, payload);
+        return !change.Unreadable && (change.WritesPair || change.LookupsSet.Count > 0 || change.LookupsCleared.Count > 0);
+    }
+
+    /// <summary><paramref name="item"/> without <paramref name="columns"/> — its body keys (a column, or a lookup's
+    /// <c>{nav}@odata.bind</c>), columns, lookups and clears — so planned columns replace the item's own.</summary>
+    private static DataverseWriteItemMapper.MappedItem WithoutColumns(DataverseWriteItemMapper.MappedItem item, IEnumerable<string> columns)
+    {
+        var drop = columns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var body = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        using (var doc = JsonDocument.Parse(item.JsonBody))
+        {
+            foreach (var property in doc.RootElement.EnumerateObject().Where(p => !drop.Contains(SecureRootInheritance.NormalizeColumn(p.Name))))
+                body[property.Name] = property.Value.Clone();
+        }
+
+        return item with
+        {
+            JsonBody = JsonSerializer.Serialize(body),
+            Columns = item.Columns.Where(c => !drop.Contains(SecureRootInheritance.NormalizeColumn(c))).ToArray(),
+            Lookups = item.Lookups.Where(l => !drop.Contains(l.Column)).ToArray(),
+            ClearedColumns = item.ClearedColumns.Where(c => !drop.Contains(c)).ToArray(),
+        };
+    }
 
     /// <summary>One mapped item carrying <paramref name="item"/>'s writes and <paramref name="added"/>'s (which win).</summary>
     private static DataverseWriteItemMapper.MappedItem Merge(DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedItem added)
@@ -934,8 +1298,11 @@ internal static class OwnedChildWrite
         }
         else if (!pair.SetsId || !pair.SetsType)
         {
-            return new RefileOutcome { ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
-                "The record could not be read, so what it is filed under cannot be checked.") };
+            return new RefileOutcome
+            {
+                ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
+                "The record could not be read, so what it is filed under cannot be checked.")
+            };
         }
 
         var target = await PairTargetAsync(user, table, idText, typeId, typeSet, item.Lookups, ct, kept).ConfigureAwait(false);
@@ -1040,8 +1407,15 @@ internal static class OwnedChildWrite
         /// <summary>A question or the PATCH, asked as the caller, failed at Dataverse — the caller's own error.</summary>
         public DataverseUserResponse? ClientFailure { get; init; }
 
-        /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>) — nothing written.</summary>
+        /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>), or the update names a
+        /// column fixed after create (<c>RecordTableRule.FixedAfterCreateColumns</c>) — nothing written.</summary>
         public string? Invalid { get; init; }
+
+        /// <summary>
+        /// ebilling-r1 FR-05 (ISS-010): the invoice-family guard refused the row as the update would leave it (the stored
+        /// lookups overlaid with the change) — its stable code. Nothing written.
+        /// </summary>
+        public InvoiceFamilyCoreRecord? InvoiceFamilyRefusal { get; init; }
 
         /// <summary>
         /// #2143 round 7 (F1): with <see cref="Written"/>, the person the re-file's F3 check acted for — what the writer hands the
@@ -1078,8 +1452,35 @@ internal static class OwnedChildWrite
         string? primaryIdAttribute,
         DataverseWriteItemMapper.MappedItem item,
         Guid? callerObjectId,
-        CancellationToken ct)
+        CancellationToken ct,
+        IGenericEntityService? appOnlyEntities = null)
     {
+        // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
+        // item's shape alone, before any read or write, so the re-file core holds it for any table a caller passes. Nothing written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(table, item.Columns) is { } fixedRefusal)
+            return new RefileOutcome { Invalid = $"{fixedRefusal.Reason} ({fixedRefusal.RefusalCode})" };
+
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter); asked on the table alone, before any read or write, so the re-file core
+        // holds it for any table a caller passes. Nothing written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(table) is { } writerOnly)
+            return new RefileOutcome { Invalid = writerOnly.Reason };
+
+        // ebilling-r1 FR-05 (ISS-010, #1973; unified-access-control-r2): BEFORE anything else — re-file or ordinary update —
+        // an update that sets or clears an invoice-family row's guarded lookups is decided on the stored lookups overlaid
+        // with the change (read as the caller, once). A refusal writes nothing. D-96: an invoice's lines are counted with
+        // appOnlyEntities (the app); without it an invoice core-lookup change fails closed.
+        if (await CheckInvoiceFamilyAsync(user, table, item, (entitySetName, recordId), ct, appOnlyEntities).ConfigureAwait(false) is { } family)
+        {
+            return new RefileOutcome
+            {
+                InvoiceFamilyRefusal = family.Refusal,
+                ClientFailure = family.ClientFailure,
+                Denied = family.ParentUnavailable ? NotAvailableToFileUnder : null,
+                ParentUnavailable = family.ParentUnavailable,
+            };
+        }
+
         var isChild = RecordOwnershipResolver.IsReparentableChild(table);
         if (!isChild && RecordOwnershipResolver.IsOwnershipParent(table))
         {
@@ -1129,9 +1530,12 @@ internal static class OwnedChildWrite
 
         if (!isChild)
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the columns the update writes.
             var owner = await ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(
-                    newParents.Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId)), callerObjectId, me.SystemUserId),
+                RecordOwnershipContext.ForRow(
+                    table,
+                    newParents.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId))),
+                    PairIdOf(item.JsonBody), callerObjectId, me.SystemUserId),
                 ct).ConfigureAwait(false);
             return owner.IsRefused || owner.IsSecureOwner
                 ? new RefileOutcome { SecureFilingRefused = owner }
@@ -1205,6 +1609,221 @@ internal static class OwnedChildWrite
             // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
             return new RefileOutcome { ClientFailure = failed.Response };
         }
+    }
+
+    // ── ebilling-r1 FR-05: the invoice-family guard, invoked by the write core (ISS-010 / #1973, unified-access-control-r2) ──
+
+    /// <summary>
+    /// The uniform not-found of a record a write names that the caller cannot read, or that does not exist — the one copy,
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder"/> (task 017).
+    /// </summary>
+    private const string NotAvailableToFileUnder = Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder;
+
+    /// <summary>
+    /// What the invoice-family step refused: the guard's decision (its stable code), the caller's own Dataverse failure on a
+    /// read the guard needed, or a record the row names that the caller cannot read (the uniform not-found).
+    /// </summary>
+    internal sealed record InvoiceFamilyStep(InvoiceFamilyCoreRecord? Refusal, DataverseUserResponse? ClientFailure, bool ParentUnavailable);
+
+    /// <summary>The invoice line table, and the invoice table's entity set (the one table a line's invoice lookup targets).</summary>
+    private const string LineTable = "sprk_billingevent";
+
+    private const string InvoiceEntitySet = "sprk_invoices";
+
+    /// <summary>
+    /// ebilling-r1 FR-05 (ISS-010, #1973), as unified-access-control-r2 answered it: the write core — the create
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s pre-write step, since task 017 replaced the
+    /// owned create that called it here) and the update / re-file (<see cref="RefileAsync"/>) — invokes
+    /// <see cref="InvoiceFamilyCoreRecordGuard"/> for every write of an invoice-family table, keyed by table, so every route
+    /// that writes one is guarded (the child-record routes and the chat create / update tools). The guard owns the rule;
+    /// this only assembles the row as it will be and reads what the rule needs, AS THE CALLER.
+    /// <list type="bullet">
+    /// <item><b>Create</b> (<paramref name="stored"/> null): the payload's lookups are the row.</item>
+    /// <item><b>Update</b>: only when the change sets or clears a guarded lookup (<see cref="InvoiceFamilyCoreRecordGuard.GuardedLookups"/>)
+    /// — an update that leaves them as stored cannot change the answer. The stored lookups are read once, as the caller, and
+    /// overlaid with the change (<see cref="EffectiveLookups"/>) BEFORE the guard runs.</item>
+    /// <item><b>Supersedes, and a line's invoice</b> (task 026): the other invoice's core lookups are read as the caller; a
+    /// row they cannot read (403) and one that does not exist (404) are the uniform not-found.</item>
+    /// </list>
+    /// Fail closed: a read that fails is the caller's own error and an answer that lacks a column the guard asked for is
+    /// <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/> — never "not set". A guarded column written as anything but
+    /// a lookup bind or a clear is <see cref="InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode"/>.
+    /// </summary>
+    /// <param name="appOnlyEntities">D-96: on an update that writes an invoice's core lookup, the APP-only reader its lines
+    /// are counted with (<see cref="InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord"/>); null then fails closed.</param>
+    /// <returns><c>null</c> when the write may proceed (or the table is not in the family); otherwise the refusal.</returns>
+    internal static async Task<InvoiceFamilyStep?> CheckInvoiceFamilyAsync(
+        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item,
+        (string EntitySetName, Guid RecordId)? stored, CancellationToken ct, IGenericEntityService? appOnlyEntities = null)
+    {
+        var guarded = InvoiceFamilyCoreRecordGuard.GuardedLookups(table);
+        if (guarded is null)
+            return null;
+
+        var guardedColumns = guarded.Select(g => g.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var written = item.Columns.Concat(item.ClearedColumns).Concat(item.Lookups.Select(l => l.Column))
+            .Where(guardedColumns.Contains)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (stored is not null && written.Count == 0)
+            return null; // an update that leaves every guarded lookup as stored
+
+        var notALookup = written.FirstOrDefault(c =>
+            !item.Lookups.Any(l => string.Equals(l.Column, c, StringComparison.OrdinalIgnoreCase))
+            && !item.ClearedColumns.Contains(c, StringComparer.OrdinalIgnoreCase));
+        if (notALookup is not null)
+        {
+            return new InvoiceFamilyStep(InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode,
+                $"{table}.{notALookup} is a lookup; it is set by a bind or cleared, never written as a value. Nothing was written."),
+                null, false);
+        }
+
+        IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> before =
+            new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        if (stored is { } row)
+        {
+            StoredLookups read;
+            try
+            {
+                read = await ReadLookupsAsCallerAsync(user, row.EntitySetName, row.RecordId, guarded, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // A transport fault (a timeout included) is never "not set"; its own text stays out of the reason.
+                read = new StoredLookups(null, null, ex.GetType().Name);
+            }
+
+            if (read.Failure is { } failure)
+                return new InvoiceFamilyStep(null, failure, false);
+            if (read.Values is not { } values)
+            {
+                return new InvoiceFamilyStep(InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                    $"What this {table} is filed under could not be read ({read.Problem}); nothing was written."), null, false);
+            }
+
+            before = values;
+        }
+
+        var effective = EffectiveLookups(before, item);
+        DataverseUserResponse? supersededFailure = null;
+        var supersededUnavailable = false;
+        var decided = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(
+            table,
+            column => effective.TryGetValue(column, out var value) ? value : null,
+            async (invoice, token) =>
+            {
+                // The other invoice is the one an invoice supersedes or the one a line belongs to (task 026). The bind names
+                // its entity set; one kept from the stored row is in the invoice set — for an invoice, the written table's.
+                var entitySet = item.Lookups.FirstOrDefault(l =>
+                                    (string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, StringComparison.OrdinalIgnoreCase))
+                                    && l.RecordId == invoice.Id)?.RelatedEntitySet
+                                ?? (stored is null ? null
+                                    : string.Equals(table, LineTable, StringComparison.OrdinalIgnoreCase) ? InvoiceEntitySet
+                                    : stored.Value.EntitySetName);
+                if (entitySet is null)
+                {
+                    return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                        "The other invoice's table could not be told; nothing was written.");
+                }
+
+                var other = await ReadLookupsAsCallerAsync(
+                        user, entitySet, invoice.Id,
+                        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[invoice.LogicalName].Select(l => (l.Column, l.CoreEntity)).ToArray(),
+                        token)
+                    .ConfigureAwait(false);
+                if (other.Failure is { } failure)
+                {
+                    if (failure.StatusCode is 403 or 404)
+                        supersededUnavailable = true;
+                    else
+                        supersededFailure = failure;
+                    return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName,
+                        supersededUnavailable ? InvoiceFamilyCoreRecordGuard.RecordNotFoundCode : InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                        "The other invoice could not be read; nothing was written.");
+                }
+
+                return other.Values is { } otherValues
+                    ? InvoiceFamilyCoreRecordGuard.Check(invoice.LogicalName,
+                        column => otherValues.TryGetValue(column, out var value) ? value : null)
+                    : InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                        $"The other invoice could not be read ({other.Problem}); nothing was written.");
+            },
+            ct,
+            // D-96: an update that moves an invoice to another core record must not leave its lines behind (counted as the app).
+            stored is { } invoiceRow && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
+                ? InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(appOnlyEntities, invoiceRow.RecordId)
+                : null,
+            // UAC-r2 ruling (RecordFamilyEdges, 2026-10-28): nor be filed under a work assignment that is filed under it (as the app).
+            stored is { } refiled && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
+                ? InvoiceFamilyCoreRecordGuard.WorkAssignmentFiledUnderInvoice(appOnlyEntities, refiled.RecordId)
+                : null).ConfigureAwait(false);
+
+        if (supersededUnavailable)
+            return new InvoiceFamilyStep(null, null, true);
+        if (supersededFailure is { } readFailure)
+            return new InvoiceFamilyStep(null, readFailure, false);
+        return decided.IsRefused ? new InvoiceFamilyStep(decided, null, false) : null;
+    }
+
+    /// <summary>
+    /// The lookups a row will hold after a write (unified-access-control-r2's merge for ISS-010): the stored row's lookups
+    /// overlaid with the change — a bind replaces the column's value, a clear sets it to <c>null</c>, every other column
+    /// keeps its stored value. Pure.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> EffectiveLookups(
+        IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> stored, DataverseWriteItemMapper.MappedItem change)
+    {
+        var effective = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in stored)
+            effective[column] = value;
+        foreach (var column in change.ClearedColumns)
+            effective[column] = null;
+        foreach (var lookup in change.Lookups)
+            effective[lookup.Column] = new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId);
+        return effective;
+    }
+
+    /// <summary>What <see cref="ReadLookupsAsCallerAsync"/> read: each column's value, the caller's own failure, or why the
+    /// answer could not be used.</summary>
+    internal sealed record StoredLookups(
+        IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?>? Values, DataverseUserResponse? Failure, string? Problem);
+
+    /// <summary>
+    /// AS THE CALLER, one row's single-target lookups (<c>_{column}_value</c>, each a reference to its column's one table).
+    /// Dataverse answers every <c>$select</c>ed column (null when unset), so a column missing from the answer, or a value that
+    /// is not an id, makes the read unusable (<see cref="StoredLookups.Problem"/>) — never "not set".
+    /// </summary>
+    internal static async Task<StoredLookups> ReadLookupsAsCallerAsync(
+        IDataverseUserClient user, string entitySetName, Guid recordId, IReadOnlyCollection<(string Column, string Table)> columns,
+        CancellationToken ct)
+    {
+        var select = string.Join(",", columns.Select(c => $"_{c.Column}_value"));
+        var response = await user.GetAsync($"{entitySetName}({recordId:D})?$select={select}", ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return new StoredLookups(null, response, null);
+        if (response.Body is not { ValueKind: JsonValueKind.Object } body)
+            return new StoredLookups(null, null, "the row came back empty");
+
+        var values = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, target) in columns)
+        {
+            if (!body.TryGetProperty($"_{column}_value", out var value))
+                return new StoredLookups(null, null, $"'{column}' was not returned");
+
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Null:
+                    values[column] = null;
+                    break;
+                case JsonValueKind.String when Guid.TryParse(value.GetString(), out var id):
+                    values[column] = id == Guid.Empty ? null : new Microsoft.Xrm.Sdk.EntityReference(target, id);
+                    break;
+                default:
+                    return new StoredLookups(null, null, $"'{column}' is not a record id");
+            }
+        }
+
+        return new StoredLookups(values, null, null);
     }
 
     /// <summary>The mapped JSON body as the field dictionary the app-only PATCH serializes (values kept as JSON).</summary>

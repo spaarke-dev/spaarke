@@ -9,8 +9,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 /// Rung 0 — explicit reference (highest determinism). Two authoritative sources:
 /// <list type="number">
 ///   <item>a <b>caller-supplied regarding</b> (<see cref="AssociationContext.CallerSuppliedRegarding"/>)
-///   — the outbound send request's associations or the add-in save-pane selection; the caller told us
-///   exactly what this communication is about, so it is treated as certain across all supported targets; and</item>
+///   — the Office add-in save's record (<c>EmailUploadCaptureService.BuildContext</c>, its only producer); the
+///   caller told us exactly what this communication is about, so it is treated as certain across all supported
+///   targets, and the status mapper lets it win its field over a conflicting match (#2412); and</item>
 ///   <item>an <b>explicit identifier in the subject line</b> — a matter reference number resolved to a
 ///   <c>sprk_matter</c>.</item>
 /// </list>
@@ -64,6 +65,7 @@ public sealed class ExplicitReferenceRung : IAssociationRung
                 Confidence = 1.0,
                 Provenance = $"explicit:caller-supplied:{assoc.EntityType}",
                 Rung = RungKind.ExplicitReference,
+                CallerSupplied = true,
             });
         }
 

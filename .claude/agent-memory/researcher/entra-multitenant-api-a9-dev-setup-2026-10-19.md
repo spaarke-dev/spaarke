@@ -1,0 +1,29 @@
+---
+name: entra-multitenant-api-a9-dev-setup-2026-10-19
+description: Task 059 (ADR-028 A9) Entra facts - v1->v2 access token change, M.I.Web audience/issuer defaults, optionalClaims JSON, removeUnverifiedEmailClaim (v1.0 Graph), admin consent URLs/knownClientApplications, brk-multihub, signInAudience change rules, OIDC scope GUIDs
+metadata:
+  type: reference
+---
+
+## 2026-10-19: Dev Entra setup for A9 (multitenant API app + multitenant SPA client)
+
+**Findings (all MS Learn unless noted)**
+- requestedAccessTokenVersion: null => 1. v2 REQUIRED only for AzureADandPersonalMicrosoftAccount, NOT for AzureADMultipleOrgs. Format is controlled by the RESOURCE app, not endpoint/client. v2 changes: iss sts.windows.net/{tid}/ -> login.microsoftonline.com/{tid}/v2.0; aud always client-id GUID (v1: api:// URI or GUID by request); appid/appidacr -> azp/azpacr; unique_name, acr, x5t dropped; upn/given_name/family_name/ipaddr need optional claims (+profile scope); preferred_username added (profile scope); ver 2.0.
+- M.I.Web (source read): AadIssuerValidator picks metadata by TOKEN issuer version (v1/v1.1/v2) and compares to the authority issuer with the token's tid => accepts BOTH v1 and v2 issuer forms (for the configured tenant if single TenantId; any tid on organizations). Audience: ONLY when ValidAudience/ValidAudiences/AudienceValidator are all unset does RegisterValidAudience apply: ver 2.0 => `{ClientId}`, ver 1.0 => `api://{ClientId}` (decided per token `ver`). Spaarke default scheme appsettings has `AzureAd:Audience = api://{API_APP_ID}` (template line 41) - if that becomes ValidAudience (JwtBearerOptions.Audience binding, inferred) a v2 token (aud GUID) is rejected by the default scheme. Workforce/Ciam schemes already use BuildCiamValidAudiences (both forms). MUST verify/fix before flipping to v2.
+- optionalClaims lives on the RESOURCE (API) app for access tokens: `{"optionalClaims":{"accessToken":[{"name":"acct","essential":false},{"name":"email","essential":false},{"name":"given_name","essential":false},{"name":"family_name","essential":false}]}}`; PATCH replaces collection -> send full array. given_name/family_name docs say need `profile` scope; email also via `email` scope on v2; email only if user has a mail attribute (Learn scopes-oidc: "included only if an email address is associated").
+- removeUnverifiedEmailClaim: in Graph v1.0 now (docs 2026-09). PATCH /v1.0/applications/{objectId}/authenticationBehaviors {"removeUnverifiedEmailClaim":true} or PATCH /applications/{id} {"authenticationBehaviors":{...}}; 204; null restores default; read via $select=authenticationBehaviors only. Default: unverified-domain emails ARE removed, EXCEPT single-tenant apps and multitenant apps with prior unverified-email sign-ins. Also property requireClientServicePrincipal exists.
+- Admin consent: v1 form `https://login.microsoftonline.com/{tenant}/adminconsent?client_id={clientId}` (documented w/o redirect_uri; driven by requiredResourceAccess). v2 `/{tenant}/v2.0/adminconsent?client_id&scope&redirect_uri&state` redirect_uri REQUIRED + must exactly match a registered URI (doc does not distinguish platform; SPA type not documented either way). knownClientApplications: consenting the client provisions SPs for client AND API (doc), both apps must be in same tenant. Privileged Role Admin sees "consent on behalf of org" checkbox in interactive sign-in (Cloud/App Admin do not); `prompt=consent` as admin.
+- brk-multihub: Teams doc says redirect of type Single-page application `brk-multihub://<domain>`. Graph spa.redirectUris is just a string collection; no doc about custom scheme via Graph, but repo already registers brk-multihub as SPA on the Office add-in app (docs/guides/office-addins-admin-guide.md:182). AADSTS7000471 if missing.
+- signInAudience change: App ID URI must be globally unique for multitenant; Learn howto-modify-supported-accounts: host must match a verified publisher domain (https:// URIs) else conversion fails; api://{appId} is a listed secure pattern (inferred OK). No doc says same-tenant callers are affected.
+- Graph delegated OIDC scope ids: openid 37f7f235-527c-4136-accd-4a02d197296e, profile 14dad69e-099b-42c9-810b-d002981feec1, email 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0, offline_access 7427e0e9-2fba-42fe-b0c0-848c9e6a8182 (graphpermissions.merill.net; MS permissions-reference page too big to page). Declaring them is optional; offline_access implicit once any delegated perm granted.
+
+**Sources**
+- https://learn.microsoft.com/en-us/entra/identity-platform/reference-app-manifest
+- https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims ; optional-claims-reference ; access-token-claims-reference ; id-token-claims-reference ; scopes-oidc
+- https://learn.microsoft.com/en-us/graph/applications-authenticationbehaviors ; /graph/api/resources/authenticationbehaviors?view=graph-rest-1.0
+- https://learn.microsoft.com/en-us/entra/identity-platform/v2-admin-consent ; /entra/identity/enterprise-apps/grant-admin-consent ; howto-convert-app-to-be-multi-tenant ; howto-modify-supported-accounts ; identifier-uri-restrictions ; application-consent-experience
+- https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/authentication/nested-authentication
+- github AzureAD/microsoft-identity-web (RegisterValidAudience.cs, MicrosoftIdentityWebApiAuthenticationBuilderExtensions.cs, IdentityOptionsHelpers.cs); AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet AadIssuerValidator.cs
+- repo: src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs, appsettings.template.json
+
+**Open questions**: does AzureAd:Audience bind to ValidAudience (needs a test); is spa.redirectUris Graph PATCH of brk-multihub accepted (portal route proven in repo); SPA-platform URI as adminconsent redirect_uri (untested); whether converting API to multitenant flips removeUnverifiedEmailClaim default (set explicitly).

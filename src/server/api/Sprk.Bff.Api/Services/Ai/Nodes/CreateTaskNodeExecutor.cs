@@ -234,6 +234,23 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 }
             }
 
+            // UAC task 194b V-fix (verifier A F1): a regarding ownership parent the task table cannot file fails the node with
+            // its named reason before anything is written.
+            if (TaskActionCore.RegardingRefusalOf(config.RegardingObjectType, regardingObjectId) is { } regardingRefusal)
+            {
+                _logger.LogError(
+                    "CreateTask node {NodeId} refused: {Refusal}",
+                    context.Node.Id,
+                    regardingRefusal);
+
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    $"Task was not created: {regardingRefusal}",
+                    NodeErrorCodes.ValidationFailed,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
+
             // Task 152: the playbook's acting user (PlaybookSchedulerService sets NodeExecutionContext.UserId for
             // per-user runs) is the triggering person — TaskActionCore writes their linked contact to
             // sprk_event.sprk_assignedto so the task reaches them (Created By is the BFF app user).

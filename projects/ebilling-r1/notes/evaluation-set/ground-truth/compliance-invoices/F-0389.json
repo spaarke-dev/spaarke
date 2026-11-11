@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0389",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0389","generator_id":"gen_eval_set.py@1 F-0389","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0389.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Holloway & Cranmer LLP","firm_invoice_number":"INV-2026-59788","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"71760-0031","po_number":"PO-4594188","fees_total":5960.0,"expenses_total":19.53,"adjustments_total":0.0,"total_due":5979.53,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Carmichael","title":"Paralegal","rate":135.0,"billed_as":"FC"},{"name":"Gideon Zielinski","title":"Partner","rate":565.0,"billed_as":"GZ"},{"name":"Oliver Nwosu","title":"Associate","rate":235.0,"billed_as":"ON"},{"name":"Victor Voss","title":"Senior Associate","rate":340.0,"billed_as":"VV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-03","timekeeper":"FC","timekeeper_name":"Farah Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":135.0,"amount":256.5,"narrative":"Review and analyze motion for summary judgment received from Bluepine Holdings","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-03","timekeeper":"GZ","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":1.2,"rate":565.0,"amount":678.0,"narrative":"Review and analyze discovery plan received from Pacifica Telecom","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-04","timekeeper":"GZ","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":565.0,"amount":169.5,"narrative":"Draft notice of deposition in the construction contract","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-06","timekeeper":"FC","timekeeper_name":"Farah Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":135.0,"amount":364.5,"narrative":"Draft motion to dismiss in the supply agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-06","timekeeper":"GZ","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":565.0,"amount":1356.0,"narrative":"Draft motion to dismiss to Larkspur Medical","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-07","timekeeper":"ON","timekeeper_name":"Oliver Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":235.0,"amount":564.0,"narrative":"Review expert report served by Meridian Foods","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-10","timekeeper":"ON","timekeeper_name":"Oliver Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":235.0,"amount":23.5,"narrative":"Research case law supporting witness list","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-14","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":340.0,"amount":374.0,"narrative":"Draft discovery plan to Bluepine Holdings","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-14","timekeeper":"ON","timekeeper_name":"Oliver Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":235.0,"amount":587.5,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-17","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":340.0,"amount":544.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-19","timekeeper":"ON","timekeeper_name":"Oliver Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":235.0,"amount":23.5,"narrative":"Review and organize incoming production from Orchard Row Brands for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-26","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":340.0,"amount":340.0,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350","A107"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-11-27","timekeeper":"GZ","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":565.0,"amount":339.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-11-27","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":340.0,"amount":340.0,"narrative":"Research authority for discovery plan","codes":["L250","A102"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":31.0,"rate":0.63,"amount":19.53,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["918 Peachtree Way","Seattle","Tax ID 24-1197791"],"template":"T15","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-06-28","matter_close":"2026-02-28","matter_budget":48918.0,"approved_timekeepers":["Beatrix Thornbury","Victor Voss","Oliver Nwosu","Gideon Zielinski","Dmitri Wickham","Farah Carmichael"],"invoice_received_date":"2025-12-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

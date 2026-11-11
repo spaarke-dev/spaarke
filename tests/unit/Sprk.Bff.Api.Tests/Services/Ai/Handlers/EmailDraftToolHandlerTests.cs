@@ -41,8 +41,15 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
         new(_dataverse.Object, _emailDraftAi.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             CreateLogger<EmailDraftToolHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+            // Task 017 (2d-4): the filed draft's create moved onto the one server create, over the same two doubles.
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Over(
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                    Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard,
+                    new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure()),
             Visibility.Service, Visibility.Accessor);
 
     private static AnalysisTool BuildDraftTool() =>

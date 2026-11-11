@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0347",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0347","generator_id":"gen_eval_set.py@1 F-0347","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0347.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Aldridge & Whitcombe LLP","firm_invoice_number":"INV-2025-10002","invoice_date":"2025-07-01","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"24950-0026","po_number":"PO-4542820","fees_total":3490.5,"expenses_total":8375.26,"adjustments_total":0.0,"total_due":11865.76,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Yilmaz","title":"Senior Associate","rate":315.0,"billed_as":"BY"},{"name":"Peter Nakamura","title":"Paralegal","rate":140.0,"billed_as":"PN"},{"name":"Rafael Dunleavy","title":"Partner","rate":495.0,"billed_as":"RD"},{"name":"Sofia Fairweather","title":"Associate","rate":280.0,"billed_as":"SF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-05","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":280.0,"amount":560.0,"narrative":"Prepare for oral argument in the vendor agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-13","timekeeper":"PN","timekeeper_name":"Peter Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":140.0,"amount":42.0,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-18","timekeeper":"BY","timekeeper_name":"Beatrix Yilmaz","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.0,"rate":315.0,"amount":945.0,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-20","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":280.0,"amount":644.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-24","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":280.0,"amount":504.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-27","timekeeper":"PN","timekeeper_name":"Peter Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":140.0,"amount":350.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-27","timekeeper":"RD","timekeeper_name":"Rafael Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":495.0,"amount":445.5,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-06-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1633.22,"amount":1633.22,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1577.12,"amount":1577.12,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":859.73,"amount":859.73,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4305.19,"amount":4305.19,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["394 Harbor Road","Phoenix","Tax ID 14-8368426"],"template":"T17","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-01-21","matter_close":"2025-09-28","matter_budget":72463.0,"approved_timekeepers":["Rafael Thornbury","Sofia Fairweather","Peter Hargrove","Gideon Fairweather","Beatrix Yilmaz","Ingrid Oyelaran","Rafael Dunleavy","Peter Nakamura","Hannah Dunleavy"],"invoice_received_date":"2025-07-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

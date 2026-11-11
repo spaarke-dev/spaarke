@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ebilling-r1">
+  <metadata>
+    <title>InvoiceComplianceEvaluator</title>
+    <phase>3 Rules (WP3) — wave W3-3</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core evaluation step of the submission pipeline: rule selection by date, core record and firm, precedence, determinism and the finding-to-Signal contract all decide what a firm is told.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Rule-in-force selection, firm-over-client precedence and the Signal mapping are judgment-heavy and cross ontology-owned contracts (SignalWriter).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>071, 017, 018</deps>
+    <tags>bff, rules</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build InvoiceComplianceEvaluator, the in-memory strategy of the shared rules system (D-23): given an extracted and resolved invoice, load once the published billing rules in force and the reference data they need, select for each line the rules in force on its date for its core record and firm (firm rule set overrides the client default for the same rule type, D-39), run 071's handlers, and return deterministic findings with suggested adjustments plus their mapping to SignalWriter requests.</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF service design, Dataverse query batching and deterministic evaluation pipelines.</role>
+
+  <goal>A side-effect-free evaluator (findings returned, nothing written) behind a fact loader that reads Dataverse once per invoice; rule rows obtained only through 070's billing gate; deterministic output; a 150-line invoice evaluated well inside NFR-01; a pure mapper from findings to SignalWriteRequest that 049 uses to persist.</goal>
+
+  <context>
+    <background>Spec FR-25 (acceptance: deterministic; 150-line invoice within NFR-01; findings written through SignalWriter), MUST "evaluate rules only from published, immutable policy versions; every finding cites policy, version and clause", Processing Pipeline step 4, D-39 precedence. Inputs: 046 resolution output (timekeeper match, rate card in force, combined confidence), 047 codes and observations, 017 timekeepers and rate cards, 018 code sets, 019 rule sets (scope client default or firm, status) and policy-version in-force dates. SignalWriter contract: Services/Signals/SignalWriter.cs:84-112 SignalWriteRequest (PolicyId, PolicyCode, PolicyVersionId, subject entity and id, ShortHeadline, Lane, Severity, MessageTemplate, FactValues); WriteAsync :465. Line-level subjects need 026's sprk_regardinginvoiceline support in SignalWriter (026 is not a declared dependency — see escalation). The write itself happens in 049's all-or-nothing persist step.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/InvoiceComplianceEvaluator.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs (Dataverse reads: rule sets, policy versions, timekeepers, rates, code tables, core-record dates, prior invoices)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFindingSignalMapper.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/unit/domain/Signals/Billing/InvoiceComplianceEvaluatorTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/BillingFactLoaderTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="071" status="pending">Handlers, fact set, finding contract</dependency>
+      <dependency task="017" status="pending">Timekeeper and rate card schema</dependency>
+      <dependency task="018" status="pending">Code sets and codes</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="076 adversarial review K3">"In force on a line's date" means sprk_inforcefrom &lt;= date AND (sprk_inforceto is null OR date &lt; sprk_inforceto), applied only to versions that are the rule's current version OR carry an end date (sprk_inforceto). A version created by an edit gets sprk_inforcefrom = UtcNow and no end date, so it would otherwise count as in force while still a draft or rejected. Required tests: a draft, and a rejected version, with no end date are never evaluated.</constraint>
+    <constraint source="spec MUST">Only published versions in force on the line date (in-force-from at or before the date, in-force-to after it or empty) are evaluated; Draft or unpublished rows never are.</constraint>
+    <constraint source="spec FR-24, project">Rule rows reach handlers only through 070's billing gate; a refused row is logged and metered there and produces no finding, and the run continues with the other rules.</constraint>
+    <constraint source="D-39">For one line, when both the client-default rule set and the line's firm rule set hold the same rule type, only the firm's rule is evaluated.</constraint>
+    <constraint source="project">Determinism: stable ordering of rules, lines and findings; no clock reads inside the evaluator (dates come from the invoice); same input gives identical output.</constraint>
+    <constraint source="ADR-010, project">DI in AddFinanceModule only (re-read FinanceModule.cs immediately before editing; add only this task's lines). Concrete classes unless a second implementation exists.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (BFF, synchronous domain code called by the 049 job), publish-size delta, no new HIGH CVE, no package.</constraint>
+    <constraint source="D-112 (owner), refined by uac-r2 and ontology-r1">Prior submissions for Duplicate are loaded as "this firm, this submission excluded" from every partition; do not restrict the loader. The loader fills the secure-root set of the judged invoice and of each prior app-only, using SecureChildShareSynchronizer.SecureRootsAboveAsync from the core record upward. Never use the core record's own sprk_issecure: a record secure through its parent takes the parent's root. An ordinary record has the empty set; a read that fails or cannot be resolved gives "unresolved". 071's Duplicate shows the tracking number and line detail only when both sets are resolved and the prior's set is a subset of the invoice's; otherwise it fires with "matches an earlier submission" only. Required tests: priors from two different secure roots, no detail; the same secure root, detail kept; an ordinary prior on a secure invoice, kept; a secure prior on an ordinary invoice, hidden; an inherited-secure core record takes its root's set; a root-set read failure, hidden and still fires; and the current submission is never among its own priors.</constraint>
+    <constraint source="uac-r2, on D-112 (SecureChildShareSynchronizer.cs:648-721)">Calling conditions for the secure-root read. Its fail-closed direction was built for the reconciler, and here a dropped root would leak detail:
+      (1) Read each row with exactly its SecureChildLineage table lookups plus the owner columns, or use SecureRootsAboveEachAsync(groups, ct, readRows), which reads them. A lookup that was not read counts as absent, which would shrink the prior's set and pass the subset test. Required test: a prior whose lineage lookup was not selected does NOT reveal detail.
+      (2) Pass the child rows (the sprk_invoice rows, which are in the lineage), never the matter or other root. The call throws ArgumentOutOfRange for a table that is not a secure child.
+      (3) "Resolved" means only Status == Completed with the row absent from Undetermined / UndeterminedRowRefs. Undetermined (missing ancestor, root flagged secure but not yet isolated, chain too deep), Status Failed (ambiguous Secure team) and a thrown Dataverse fault are all "unresolved": generic text, finding still fires.
+      (4) NotApplicable (no Secure Record owner team in the environment) means every set is empty, and that is correct.</constraint>
+    <constraint source="ontology-r1 071 review K1">BillingInvoiceFacts.SubmissionId is a required Guid (071's fix round makes it one). The loader sets it from the submission being judged and excludes that id from priors.</constraint>
+    <constraint source="D-20, ontology-r1 071 review K1">Currency: no reference rate or cap carries a currency (USD only in R1). When the invoice currency is not USD, or is missing, or is below its confidence floor (never default a missing currency to USD), money-comparing rules (ApprovedRate, ExpenseRule cap) are skipped with a logged reason and produce no finding and no adjustment. RequiredData's always-on currency check still reports the unsupported or missing currency. Required tests: a EUR invoice over the USD rate gives no ApprovedRate finding; an invoice with no extracted currency, over the USD rate, gives no ApprovedRate finding; a low-confidence currency is treated the same way.</constraint>
+    <constraint source="071 fix round 2 (reported defects)">(1) When BillingFinding.DetailWithheld is true (D-112), the finding is rendered and stored only with BillingRuleCatalogue.WithheldDuplicateTemplate. Never use the rule's own or the default template, and never write a withheld value into the Signal or its facts. Required test: a withheld Duplicate stores no tracking number in any field. (2) The default Duplicate template in BillingRuleDraftTranslator.Wording(Duplicate) names {{line.date}} and {{line.timekeeperName}}, which an invoice-level Duplicate finding lacks. Choose the template by subject (invoice vs line) so an invoice-level finding is never refused for absent tokens. Required test: an invoice-level Duplicate with the default template is written.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-25, Processing Pipeline, NFR-01)</file>
+      <file>projects/ebilling-r1/design.md (section 6, 7.5)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/PolicyScopeResolver.cs</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Evaluate without writing" location="src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluator.cs">Side-effect-free evaluation core; the job wraps it with writes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Check whether 026 has landed (SignalWriter accepts an invoice-line subject).</step>
+    <step order="1">Fact loader: one batched read set per invoice (no per-line queries): published Billing-domain rule sets for client default plus the invoice's firm, their in-force policy versions, timekeepers and rates for the firm, code tables for the resolved code sets, core-record dates, prior submissions and invoices for Duplicate.</step>
+    <step order="2">Evaluator: per line, select rules in force on the line date for the line's core record and firm, apply firm-over-default precedence per rule type, pass each through the billing gate, run the handler, collect findings; invoice-level rules once per invoice.</step>
+    <step order="3">Suggested adjustments: carry the handler's suggestion; never apply it (application is reviewer action, WP4).</step>
+    <step order="4">Mapper: finding to SignalWriteRequest (policy, version, subject, lane and severity from the policy row, message template, fact values limited to 070's fact-field set). Unit-test that mapped requests satisfy SignalWriter's template and fact-value rules.</step>
+    <step order="5">Tests: precedence; in-force by line date (rule published after the line date not applied; superseded version not applied); Draft rule ignored; refused row skipped and others still evaluated; determinism (two runs equal); 150-line fixture with all 11 types, measured time recorded.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Request ontology-r1 review; record outcome in notes.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 026 has not landed when the mapper step starts (SignalWriter has no invoice-line subject), STOP and report: options are wait for 026, or ship the evaluator with the mapper limited to invoice-level subjects plus a defer-issue. Do not hard-code a line subject outside SignalWriter's RegardingLookupByEntity.</trigger>
+    <trigger>If the policy store (019) cannot express "rule set scope" and "in force on a date" for a version, STOP and escalate rather than inferring scope from names.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Services/Signals/SignalEvaluator.cs (FetchXML strategy) and Services/Finance/SignalEvaluationService.cs; PolicyScopeResolver.cs resolves policy scope for Ontology policies. Spec section 11 row "InvoiceComplianceEvaluator + billing rule handlers".</existing>
+    <extension>No — SignalEvaluator compiles stored-row predicates and cannot evaluate an invoice in hand (D-23); PolicyScopeResolver's tenant / matter scope has no firm or rule-set axis, so the loader reads 019's rule-set scope directly.</extension>
+    <cost-of-doing-nothing>The submission job (049) has no evaluation step: no findings, no suggested adjustments, no rejection input (FR-25, FR-26).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/InvoiceComplianceEvaluator.cs, BillingFactLoader.cs, BillingFindingSignalMapper.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (registrations)</output>
+    <output type="test">tests/unit/domain/Signals/Billing/InvoiceComplianceEvaluatorTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/BillingFactLoaderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the same invoice and rule data twice, the evaluator returns equal findings in equal order.</criterion>
+    <criterion testable="true">Given a client-default rule and a firm rule of the same type, only the firm rule's finding appears for that firm's lines; the client-default rule still applies to other types.</criterion>
+    <criterion testable="true">A rule version not in force on a line's date, a Draft version and a version refused by the billing gate produce no finding; the refused version does not stop other rules.</criterion>
+    <criterion testable="true">Every finding cites policy, version and clause; every mapped SignalWriteRequest passes SignalWriter's template and fact-value validation.</criterion>
+    <criterion testable="true">The fact loader issues a bounded number of Dataverse reads independent of line count (asserted on the mocked entity service).</criterion>
+    <criterion testable="true">A 150-line fixture with all 11 types evaluates in-process in under 5 seconds on the test runner; the measured time is recorded in notes.</criterion>
+    <criterion testable="true">The evaluator writes nothing (no SignalWriter or entity-service write call in the evaluator path).</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">ontology-r1 review recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Touches the shared append point Infrastructure/DI/FinanceModule.cs: re-read immediately before editing and add only this task's registrations. 073 consumes the findings and read-field confidence; 049 calls evaluator then 073 then persists through SignalWriter; 101 re-runs the evaluator for corrected lines. Parallel group P3-C runs with 077 (frontend), no overlap.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

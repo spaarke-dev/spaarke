@@ -57,6 +57,14 @@ function contextOf(item: DecisionWizardItem): TemplateContext {
 function defaultsFor(action: DecisionAction, context: TemplateContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const parameter of action.parameters) {
+    // Task 167 (D-193): a starting value the server computed for the parameter (Create budget's currency, from the matter's business
+    // unit): data from the plan, never a template. It is offered, not chosen: the user can change it, and it is not a choice.
+    // Task 168 (D-194): a yes/no's fixed default (Assign Task's Send email notification is ticked).
+    if ((parameter.kind === 'Choice' || parameter.kind === 'Boolean') && parameter.defaultValue) {
+      out[parameter.code] = parameter.defaultValue;
+      continue;
+    }
+
     if (parameter.kind !== 'Text' && parameter.kind !== 'TextArea') continue;
     const value = TEMPLATES[parameter.code]?.(context);
     if (value) out[parameter.code] = value;

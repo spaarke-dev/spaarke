@@ -9,6 +9,7 @@ using Moq;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.Shared.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -75,9 +76,9 @@ public class OfficeRecordOwnershipTests
         world.CreatedDocumentOwningTeams.Should().Equal(RecordOwnershipResolverDouble.DefaultTeamId);
 
         var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
-        // The friendly spelling the add-in sends; the resolver maps it to sprk_matter (RecordOwnershipResolverTests).
-        asked.TargetEntityLogicalName.Should().Be("matter", "a filed document follows its record, not its uploader");
-        asked.TargetRecordId.Should().Be(matterId);
+        // The friendly spelling the add-in sends, asked as the column the document is written with (194b R4-2).
+        asked.Parents.Should().Equal(new[] { new RecordOwnershipParent("sprk_matter", matterId) },
+            "a filed document follows its record, not its uploader");
 
         // The worker creates an email's attachment children; it must give them the parent's team, not resolve anew.
         var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;
@@ -131,6 +132,52 @@ public class OfficeRecordOwnershipTests
         world.SpeItems.Values.Should().NotContain(i => i.DriveId == SaveContainer && i.Name == "Refused.docx");
     }
 
+    [Theory(DisplayName = "#2471 follow-up: OFFICE_022 for an email whose filing cannot be read says so, not 'check your business unit'")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Save_RefusedBecauseTheEmailsFilingCannotBeRead_SaysSo(bool filedToARecord)
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        factory.Ownership.TeamId = null;
+        factory.Ownership.RefusalCode = RecordOwnerRefusal.CommunicationFilingUnresolved;
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        {
+            ContentType = SaveContentType.Document,
+            TargetEntity = filedToARecord ? new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() } : null,
+            Document = new DocumentMetadata { FileName = "Refused.docx", ContentBase64 = Convert.ToBase64String(Docx) },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_022");
+        (await DetailOf(response)).Should().Be(
+            "This item could not be assigned an owner because the email it comes from could not be read, so it was not saved.",
+            "the reason is chosen by the refusal code: the email is the cause, not the user's business unit or the record");
+        world.ShouldHaveWrittenNothing();
+    }
+
+    [Theory(DisplayName = "#2471 follow-up must-not-fire: any other OFFICE_022 refusal keeps its message")]
+    [InlineData(false, "This item could not be assigned an owner from your business unit, so it was not saved. Ask an administrator to check your user record's business unit.")]
+    [InlineData(true, "This item could not be assigned an owner from the record it is filed to, so it was not saved. Check that the record still exists and that you can open it.")]
+    public async Task Save_RefusedForAnyOtherOwnerReason_KeepsItsMessage(bool filedToARecord, string expected)
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        factory.Ownership.TeamId = null;
+        factory.Ownership.RefusalCode = filedToARecord ? RecordOwnerRefusal.ParentUnresolved : RecordOwnerRefusal.NoDefaultOwnerTeam;
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        {
+            ContentType = SaveContentType.Document,
+            TargetEntity = filedToARecord ? new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() } : null,
+            Document = new DocumentMetadata { FileName = "Refused.docx", ContentBase64 = Convert.ToBase64String(Docx) },
+        });
+
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_022");
+        (await DetailOf(response)).Should().Be(expected);
+    }
+
     [Fact]
     public async Task VersionSave_NeverAsksForAnOwner_AndStillSucceedsWhenNoTeamWouldResolve()
     {
@@ -179,10 +226,13 @@ public class OfficeRecordOwnershipTests
         asked.TargetEntityLogicalName.Should().Be("sprk_matter");
         asked.TargetRecordId.Should().Be(matterId);
 
-        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do.
-        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do. Field mapping task 030a:
+        // the unified create names the person who asked by WhoAmI under their own token (ADR-028), carries their object id as
+        // the caller's, and stamps that systemuser as the creator person (as on the typed routes, task 031).
+        asked.RequestedBy!.SystemUserId.Should().Be(OfficeTodoRecordCreationHost.Caller);
+        asked.CallerObjectId.Should().Be(SavingUserOid);
         todo.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id
-            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
+            .Should().Be(OfficeTodoRecordCreationHost.Caller);
     }
 
     [Fact]
@@ -331,8 +381,48 @@ public class OfficeRecordOwnershipTests
         factory.Logs.Entries.Should().Contain(e =>
             e.Level == LogLevel.Warning
             && e.Message.Contains("todo_assignee_unset")
+            && e.Message.Contains("reason=caller_has_no_linked_contact")
             && e.Message.Contains(callerSystemUserId.ToString("D")),
             "the missing link must be logged, naming the caller");
+    }
+
+    [Fact]
+    public async Task CreateTodo_NoAssignee_WhenTheCallersOwnContactIsNotAppendable_StillCreates_WithNoAssignedTo_AndLogsTheDistinctReason()
+    {
+        // The caller HAS a linked contact, but may not AppendTo it: the service drops the post-mapping default with a warning
+        // and the To Do is created without an assignee. The log must not claim the caller has no linked contact.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var callerSystemUserId = Guid.NewGuid();
+        var callerContactId = Guid.NewGuid();
+        factory.RecordCreation.CallerDataverse.NoAppendTo.Add(("contact", callerContactId));
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(callerSystemUserId, ContactId: callerContactId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Contact not appendable",
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "a default the caller may not use must never refuse the create");
+        var created = factory.CreatedEntities.Should().ContainSingle().Subject;
+        created.Contains("sprk_assignedto").Should().BeFalse("the service did not write the default");
+
+        factory.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("todo_assignee_unset")
+            && e.Message.Contains("reason=caller_contact_not_appendable")
+            && e.Message.Contains("The default value for 'sprk_assignedto' was not written"),
+            "a contact that was offered but not written is a different reason, with the service's own warning");
+        factory.Logs.Entries.Should().NotContain(e => e.Message.Contains("reason=caller_has_no_linked_contact"),
+            "the caller does have a linked contact");
     }
 
     // =====================================================================================
@@ -395,5 +485,11 @@ public class OfficeRecordOwnershipTests
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.TryGetProperty("errorCode", out var code) ? code.GetString() : null;
+    }
+
+    private static async Task<string?> DetailOf(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
     }
 }

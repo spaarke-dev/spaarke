@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="172" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Pin D-197 "author wins, root included": a rule publish asks the ownership question without a child table, so 194b never refuses a root-homed author</title>
+    <phase>11 UAT</phase>
+    <gate>startable: uac-r2 194b (R4b-2c, `RestrictedContentOwnerTeam`) is on master as 2cd0f62e2c</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One test and one code comment; no behaviour change. It modifies tests, so code-review and adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A pin test over an existing seam; nothing to design.</model-tier-reason>
+    <effort>high</effort>
+    <deps>uac-r2 194b (2cd0f62e2c)</deps>
+    <tags>bff,access,testing</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>REWRITTEN 2026-10-29. The first version (a 409 for `RestrictedContentOwnerTeamUnresolved`) rested on a wrong premise and is withdrawn: uac-r2 corrected themselves and the main session verified the code. `CheckVersionOwnerAsync` builds `new RecordOwnershipContext { Parents = ..., WhenUnfiled = KeepCreator }` and never sets `ChildEntityLogicalName`. 194b's restricted-content step (`RecordOwnershipResolver` ~:4050) returns the default-team answer unless `IsRestrictedContentTable(context.ChildEntityLogicalName)`, which is false for null. So a root-homed author's publish proceeds, no ownerid is bound, and the version stays the author's. That is the owner's D-197 ("Admin-tab authoring: the author wins ... including the root business unit"). Nothing pins it: if someone later passes `sprk_policyversion` as the child table (ForChild, ForRow), every root-homed author's publish starts failing with 503. Add that pin.</prompt>
+  <role>SPAARKE BFF engineer (Ontology Admin authoring tests).</role>
+  <goal>A test fails if the `RecordOwnershipContext` that `CheckVersionOwnerAsync` passes to `IRecordOwnershipResolver.ResolveOwnerAsync` carries a non-null `ChildEntityLogicalName`. A one-line comment at the call cites D-197 and UAC round 137. No behaviour change.</goal>
+
+  <context>
+    <background>
+      <ul>
+        <li>Where: `src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs`, `CheckVersionOwnerAsync` (~:1270-1290): the `ResolveOwnerAsync` call.</li>
+        <li>The tests that already fake the resolver for this method: `tests/integration/auth/Ontology/OntologyAdminAuthoringSecureHoldTests.cs`. Capture the context there (or in a sibling file, in the same style) and assert on it.</li>
+        <li>The resolver rule being protected: `RecordOwnershipResolver.cs` ~:4050 (`OrdinaryExitAsync`) and `IsRestrictedContentTable` ~:1781 (read only).</li>
+      </ul>
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs (comment only)</file>
+      <file>tests/integration/auth/Ontology/OntologyAdminAuthoringSecureHoldTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-197">No behaviour change. The ownership question, the answers and the reason codes all stay as they are; only the comment and the test are added.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash, no sub-agents. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Add the test, asserting `ChildEntityLogicalName` is null and `WhenUnfiled` is `KeepCreator` on the captured context. Mutation-check: set `ChildEntityLogicalName = "sprk_policyversion"` at the call, confirm the test fails, then revert.</step>
+    <step order="2">Add the comment. Run the filtered Ontology authoring tests. Open a PR into `docs/ontology-platform-design` citing D-197.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The pin test passes today and fails under the mutation.</criterion>
+    <criterion testable="true">No production behaviour changes: the diff to OntologyAdminAuthoringService.cs is the comment only.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-197)</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-29">
+    Rewritten mid-task: the first version (a 409 for `RestrictedContentOwnerTeamUnresolved`) rested on a wrong premise. uac-r2 corrected itself and the main session verified that `CheckVersionOwnerAsync` names no child table, so 194b never refuses a root-homed author (D-197 holds). The implementer stopped correctly on the escalation trigger first (docs lacked 194b); master was merged into docs (`4470c95b86`, repoint `f1133d951b`).
+    Delivered: one comment at the `ResolveOwnerAsync` call and the pin test `Publish_AsksTheResolverWithNoChildTable_SoTheAuthorWins_RootIncluded` (ChildEntityLogicalName null, KeepCreator). Filtered OntologyAdminAuthoring 183/183; mutation (`ChildEntityLogicalName = "sprk_policyversion"`) fails only the pin. Review: main-session read clean; uac-r2 OK at `ddab988203`. PR #2434 merged to docs `fab8c91531`.
+    rework: none task 172
+  </completion>
+</task>

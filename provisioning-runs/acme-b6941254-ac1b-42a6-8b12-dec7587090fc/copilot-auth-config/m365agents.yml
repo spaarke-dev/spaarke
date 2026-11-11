@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://aka.ms/m365-agents-toolkits/v1.11/yaml.schema.json
+#
+# ACME's Copilot agent auth config (deployment guide §7.12 step 6), created with the Agents Toolkit because the
+# Teams developer portal form requires a client secret and the Spaarke Copilot Agent client is a secret-free public
+# client (SPA redirect + PKCE).
+#
+#   npm install -g @microsoft/m365agentstoolkit-cli
+#   atk auth login m365 --tenant a221a95e-6abc-4434-aecc-e48338a1b2f2
+#   atk provision --env acme --folder <this folder>
+#
+# The new id lands in env/.env.acme as SPAARKE_COPILOT_AUTH_CONFIG_ID. Keep that file: the driver skips creation only
+# when that variable has a value, so a run from a fresh folder creates a second auth config.
+# appId: required by the driver, unused with AnyApp. scope: comma-separated (the driver splits on ",").
+version: v1.11
+
+provision:
+  - uses: oauth/register
+    with:
+      name: spaarke-copilot-acme
+      flow: authorizationCode
+      appId: 00000000-0000-0000-0000-000000000000
+      applicableToApps: AnyApp
+      targetAudience: AnyTenant
+      baseUrl: https://sprk-acme-prod-api.azurewebsites.net
+      clientId: 3a36eac4-10c5-4b90-9a83-913138a466af
+      authorizationUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/authorize
+      tokenUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/token
+      refreshUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/token
+      scope: api://b4882848-d094-4f17-b87b-c9b9cd8f7ec6/user_impersonation,offline_access
+      isPKCEEnabled: true
+    writeToEnvironmentFile:
+      configurationId: SPAARKE_COPILOT_AUTH_CONFIG_ID
+projectId: 6bb3986a-58aa-4438-90e9-dd1772ae598b

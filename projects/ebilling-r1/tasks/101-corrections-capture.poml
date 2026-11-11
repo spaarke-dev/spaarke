@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="ebilling-r1">
+  <metadata>
+    <title>Value / code corrections, structured capture, re-evaluation</title>
+    <phase>4 Review and approval (WP4) — wave W4-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Corrections rewrite extracted facts, re-run rule evaluation and become AI training labels (D-64); a wrong label, an out-of-set code or a stale finding corrupts both the bill and the calibration data.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-bounded service over fixed contracts (027 record, 072 evaluator, 047 code-set resolution); many edge cases warrant xhigh effort, not a higher tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 027, 072</deps>
+    <tags>bff, api, ai, write-path</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the correction routes of the Invoice Review page: a reviewer corrects a misread extracted value or an AI code on a line or the header, or confirms it as read; each change writes one D-64 correction record (Corrected or Confirmed individually), updates the stored value, re-runs 072's evaluator for the affected line(s) and updates findings and line status — kept strictly separate from Reduce (100).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, Dataverse writes, deterministic re-evaluation and audit-quality data capture.</role>
+
+  <goal>InvoiceCorrectionEndpoints.cs and InvoiceCorrectionService: correct / confirm routes plus a corrections read route; correction rows queryable per Action / analyzer code and version; codes accepted only from the line's resolved code set; findings and line status reflect the re-evaluation in the same request.</goal>
+
+  <context>
+    <background>Spec FR-31 (acceptance: a correction is attributable and visible in history; distinguishable from a Reduce; stored corrections queryable per Action version — feeds the D-47 calibration report, task 161), D-64 (outcome types; only Corrected and Confirmed individually are labels), FR-22 (codes only from the resolved code set; out-of-set refused server-side), NFR-09. Prototype answer 3 (README): keep Correct separate from Reduce; a low-confidence value has the path "Compare with the document, then confirm or correct"; correcting hours 25.0 to 2.5 clears both findings and the line becomes Clean. 027 table sprk_invoicecorrection (sprk_fieldname, sprk_aivalue, sprk_finalvalue, sprk_aiconfidence, sprk_outcometype, sprk_islabel, sprk_sourcecode, sprk_sourceversion, sprk_reviewerrole, sprk_reviewedon, sprk_invoice, sprk_invoiceline, sprk_reviewedby). Source code / version: the analyzer id (sprk_invoice_vN, 043) for extracted fields, INVOICE-LINE-CODE and its version (047) for codes — read from the line's extraction / coding metadata stored by 049. Re-evaluation: 072's InvoiceComplianceEvaluator (in memory, deterministic) and BillingFindingSignalMapper; Signal writes through Services/Signals/SignalWriter.cs (WriteAsync :465); a finding that no longer fires is closed with SignalWriter.CloseAsync as ResolutionConditionCleared (:316; precedent SignalReevaluationJob.cs:387 — no Decision Record for a cleared condition). Authorization and route conventions: 100 ("ebilling.invoice.decide" on sprk_invoices(route invoiceId), RequireEbillingEnabled, In Review only).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceCorrectionEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceCorrectionService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceCorrectionServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceCorrectionEndpointsAuthorizationContractTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs (100 — copy route conventions, do not edit)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Route conventions, policy key, line decision semantics</dependency>
+      <dependency task="027" status="pending">sprk_invoicecorrection</dependency>
+      <dependency task="072" status="pending">Evaluator and finding-to-Signal mapper</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-31, prototype answer 3">A correction never changes approved amount or line decision fields; a Reduce never writes a correction row. Separate routes, separate records.</constraint>
+    <constraint source="D-64">One correction row per changed or confirmed field: changed value = Corrected, same value confirmed = Confirmed individually; islabel true for both. Rows are append-only (a later correction of the same field adds a row). Reviewer role recorded (the caller's role in this decision: eligible approver, billing admin, other — directional; state the rule in notes).</constraint>
+    <constraint source="FR-22">A code correction is accepted only if the code is in the line's resolved code set (use 047's resolver; never a second resolution order). Out-of-set is 400 ebilling.code.not_in_set and nothing is written.</constraint>
+    <constraint source="project">Correctable fields are a closed list: line date, timekeeper (to a roster entry of the firm), hours, rate, amount, narrative, task / activity / expense code; header firm invoice number, invoice date, billing period, currency, total due. Corrections allowed only on undecided lines (Clean or Flagged) of an In Review invoice; decided lines and Pending lines 409.</constraint>
+    <constraint source="FR-25, FR-07">After a correction, re-run 072 for the affected line(s) (all lines for a header field), write new findings, close findings that no longer fire, set line status Clean or Flagged from the result, and recompute totals through 016 when an amount changed — all in the request.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019, ADR-015">Route conventions from 100; logs carry ids and codes only, never values or narratives.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="owner D-128 / D-129 (2026-10-19), 049 credit totals">Credit lines in reviewer corrections and adjustments:
+- A reviewer may DISALLOW a credit line (D-128): it raises the payable total, and the adjustment report shows it.
+- A reviewer may REDUCE a credit line (D-129 (3)) to an approved amount between the billed credit and 0. Accepting more credit than billed, or flipping the sign, stays refused (line-approved-amount-invalid).
+- Do not add any refusal of negative lines. D-105 still holds for automatic rules: NonBillableActivity never suggests disallowing a negative amount.
+- A percent adjustment applies to the fee (or expense) base clamped at zero (D-129 (2)): on a net-negative base it adjusts nothing. A fixed adjustment still applies.
+- The FR-32 floor (approved total not below zero) applies only to invoices billed at zero or more; a credit memo has no extra limit (D-129 (1)).
+- Counted spend now sums the approved total (D-130 (2)). Today nothing recalculates sprk_approvedtotal after submission: IInvoiceTotalsService.RecalculateAsync's only caller is the 049 persister. So THIS task must call RecalculateAsync after every write that changes a line's approved amount or an adjustment, and a test must show sprk_approvedtotal changes (ontology-r1 D-130 review).
+See projects/ebilling-r1/notes/049-credit-totals.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-22, FR-25, FR-31, NFR-09, NFR-11)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-47, D-64)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\Dialogs.tsx (CorrectValueModal — fields and wording)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\LinePanel.tsx (What was read, Correct affordance, CorrectionNotice)</file>
+      <file>docs/data-model/sprk_invoicecorrection.md (from 027)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 027's notes and data-model doc, 072's evaluator and mapper APIs, 047's code-set resolver, 049's notes (where analyzer id / Action version and per-field confidence live).</step>
+    <step order="1">Routes under /api/finance/invoices/{invoiceId} (names directional): POST lines/{lineId}/corrections and POST header/corrections (body: field, final value, or confirm flag); GET corrections (rows for this invoice, newest first, for the History pane).</step>
+    <step order="2">Service: validate field and value per type; code-set check; write the correction row(s) and the new value; re-evaluate through 072; persist finding changes through SignalWriter (new) and CloseAsync ConditionCleared (no longer firing); set line status; recompute totals via 016 if needed; return the updated line with findings before and after.</step>
+    <step order="3">Tests: Corrected vs Confirmed individually rows and islabel; out-of-set code refused; decided / Pending line 409; hours correction that clears findings makes the line Clean; header correction re-runs invoice-level rules (e.g. Duplicate, RequiredData); no correction touches approved amount; GET returns rows filterable by source code and version; contract tests 401 / 403 / disabled.</step>
+    <step order="4">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations (field list, reviewer-role rule) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 049 did not store the analyzer id / Action version per line, the correction row cannot be attributed to a source version (FR-31 calibration fails): STOP and report rather than writing a blank version.</trigger>
+    <trigger>If re-evaluation of a corrected field could flip a decided line, or the owner wants corrections on decided lines, STOP and confirm the rule; this task refuses corrections on decided lines.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Structured correction record" (027 owns the table); Dataverse audit history is not queryable per Action version; no correction route exists (grep "sprk_invoicecorrection" in src finds only 027's script).</existing>
+    <extension>Extends the review route group (100's conventions) in its own endpoints file so P4-B tasks share no file; reuses 072, 047 and 016 rather than re-implementing evaluation, code resolution or totals.</extension>
+    <cost-of-doing-nothing>Misread values cannot be fixed (findings stay wrong, the bill is judged on bad data) and no label data exists for the D-47 calibration report (task 161).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceCorrectionEndpoints.cs; Services/Finance/InvoiceCorrectionService.cs</output>
+    <output type="test">InvoiceCorrectionServiceTests.cs; InvoiceCorrectionEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each route returns 401 unauthenticated, 403 without access to the invoice's core record, 503 ebilling.disabled when off, 409 when the invoice is not In Review.</criterion>
+    <criterion testable="true">A changed value writes one Corrected row (AI value, final value, confidence, source code and version, reviewer, role, time, islabel true); confirming the read value writes one Confirmed individually row; neither changes approved amount or decision fields.</criterion>
+    <criterion testable="true">A code outside the line's resolved code set is 400 ebilling.code.not_in_set and nothing is written.</criterion>
+    <criterion testable="true">A correction on a decided or Pending line is 409.</criterion>
+    <criterion testable="true">After a correction that removes the failing condition, the line's findings are closed and the line becomes Clean; one that creates a condition adds the finding and makes the line Flagged; totals follow I-1.</criterion>
+    <criterion testable="true">GET corrections returns this invoice's rows, filterable by source code and version; rows from another invoice never appear.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-B with 102, 103, 105: own endpoints and service files; FinanceModule.cs and EndpointMappingExtensions.cs are shared append points (re-read before editing, add only this task's lines). Does not edit 100's files or OperationAccessPolicy.cs. 161 reads the rows written here. The UI (CorrectValueModal equivalent) is 110's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

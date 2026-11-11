@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="ebilling-r1">
+  <metadata>
+    <title>Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-B</phase>
+    <gate>080 and 088 schema live on dev (Procedure tables, sprk_publishstate, sprk_procedureversion on policy version, sprk_storedfile); 099 merged; ontology-r1 reviews the SignalClosureService and PolicyVersionValidator edits; uac-r2 reviews the authorization</gate>
+    <status>completed</status>
+    <status-note>2026-10-22: code, tests and the task's reviews done on task/ebill-081-procedure-service (notes/081-procedure-version-service.md). Open for the main session: the ontology-r1 and uac-r2 review records (gate), the creator-person schema run on dev before the BFF deploy, and the TASK-INDEX update at merge.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>New service and routes with caller authorization (step 0, Write plus billing-admin privilege) and a reconcile that closes Signals on invoices across Secure records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and security tags; edits ontology-owned files (SignalClosureService, PolicyVersionValidator) and re-keys RuleSetService's version chain.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares the uac-r2 creator-person files (RecordCreatorPerson.cs, scripts/Set-ChildRecordCreatorPersonSchema.ps1 and its Pester pin, census PersonBearingWriters) with 090 in the same wave; merge 081 first, 090 rebases.</parallel-reason>
+    <deps>080, 088, 099</deps>
+    <tags>bff, api, auth, security, rules, testing</tags>
+    <estimated-effort>3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Procedure and Procedure Version service of notes/procedure-and-file-model.md sections 3 and 8 and section 15 answers 1-2: create Procedures (each with its one rule set), create and copy-forward versions, publish, change dates, retire a version, and retire a Procedure through a named reconcile behind a read-only confirmation preview that selects Signals with the SAME method the D-170 sweep closes and counts only open invoices the caller can Read.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, the Finance authorization filter, RuleSetService (076) and the Signals closure code (D-170).</role>
+
+  <goal>Procedures and their versions are written only by the BFF under I-P1 to I-P5; a version's rules publish as policy versions keyed to it; retiring a Procedure switches its policies Off and closes their open Signals after a preview whose count can never exceed what the caller can see; every route refuses flagged-external callers first.</goal>
+
+  <context>
+    <background>Model 3.1 (I-P1 to I-P5), 3.2 (columns), 5.1 (Procedure rows, step 0), 7.2 (re-key; v2 copies v1), 8.2 (no automatic re-check), 12 (019/076/077, D-170 rows), 15 answers 1-2 (preview rules, warning text). Code: RuleSetService (Services/Finance/RuleSetService.cs: edit creates a version :1296; publish refuses an earlier date :1628, end-dates the predecessor and moves sprk_currentversion :1720-1731; IsDraft :2082, Predecessor :2090; display readers :773, :2134). D-170 close: SignalClosureService (Services/Signals/SignalClosureService.cs): ClosePoliciesNotInForceAsync :130 (job sweep) and ClosePolicyRetiredNowAsync :85 both select with the private ReadOpenSignalsAsync(policyId) :403 and close with CloseAsync :358. The model cites :164-177, which is ReadPoliciesNotInForceAsync (which policies are Off), not the Signal selection. Caller rights: CallerRecordAccessProbe.GetCallerRightsForRecordsAsync (Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:346). Billing admin: BillingAdminAuthorization (Api/Finance/BillingAdminAuthorization.cs:26, D-76). Column names and option values: notes/080-*.md and notes/088-*.md.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (sprk_procedure on the set; version chain per (policy, Procedure Version); display readers)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs (ontology-r1: one shared selection method)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs (ontology-r1: refuse sprk_procedureversion on Ontology-domain policies)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordCreatorPerson.cs, scripts/Set-ChildRecordCreatorPersonSchema.ps1, tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1 (uac-r2: sprk_procedure, sprk_procedureversion)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs, Infrastructure/DI/EndpointMappingExtensions.cs (shared append points)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/ProcedureServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/ProcedureEndpointsTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs; the SignalClosureService and PolicyVersionValidator test files</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 5.3, 5.1, 3.1 I-P5">Every route in ProcedureEndpoints.cs carries 099's step-0 flag on its group (reads included): flagged-external, no systemuser row or a flag-read fault → refused before any read.</constraint>
+    <constraint source="model 3.1 I-P5, D-76">Publish, date changes, version retire and Procedure retire: caller Write on the Procedure (Record path, as the caller) AND the billing-admin privilege (BillingAdminAuthorization, CallerHoldsPrivilegeAsync, fail closed). Create: the caller's Create privilege on sprk_procedure (live name casing read and pinned by a test). Reads: caller Read on the Procedure. Writes then run as the BFF application user (I-P2 field security).</constraint>
+    <constraint source="model 3.1 I-P1">Dates are DateOnly, half-open [from, to). Publishing version n from D sets the previous Active version's to = D in the same BFF operation; a failure of the second write undoes the first. Overlap with another Active version → 409 procedure.version_overlap, nothing written. Version numbers are assigned by the BFF; a duplicate on the (Procedure, version number) alternate key retries once, then 409.</constraint>
+    <constraint source="model 3.1 I-P3, I-P4">Type Rate card without Firm → 400 procedure.firm_required. Once any version is Active, a change to Applies to or Firm → 409 procedure.scope_locked ("Create a new Procedure to change who it governs."), nothing written.</constraint>
+    <constraint source="model 3.2, 7.2">Publish needs a Draft version with one Servable Stored File (purpose Procedure source) and an effective-from; otherwise 400 with the field. Publish marks the version's policy versions sprk_publishstate Published and moves sprk_currentversion to the latest published one (display only, ontology-r1 D-14 amendment). RuleSetService edit, publish, IsDraft and Predecessor are keyed per (policy, Procedure Version).</constraint>
+    <constraint source="model 7.2 (v2 copies v1)">Copy-forward creates version n+1 as Draft and copies version n's rules as Draft policy versions of the SAME policies under the new version. A rule version n+1 drops stays enabled with no policy version under n+1. Rate-card copy is 085's.</constraint>
+    <constraint source="model 3.1 I-P5 (version retire), 8.2">Retiring one version sets it Retired (never selected again); its policies stay enabled; nothing is re-checked; no Signal is closed.</constraint>
+    <constraint source="model 15 answer 2 (preview = sweep)">The preview's Signal set comes from the SAME method the close uses: extract SignalClosureService's selection (ReadOpenSignalsAsync's query and predicate) into one internal method that ClosePolicyRetiredNowAsync, ClosePoliciesNotInForceAsync and the preview all call. No second query anywhere (an ArchTest or a test that the preview calls that method). The preview writes nothing.</constraint>
+    <constraint source="model 15 answer 2 (counted as the caller)">From that set, map each Signal to its invoice, keep open invoices, and count only those the caller can Read, in one batched GetCallerRightsForRecordsAsync call per page. Response: the warning "Retiring this Procedure will close all related rules and remove pending decisions on active invoices." plus "N open invoices you can see are affected." No "others hidden" number or flag. A rights read that faults → the warning with no count, never the app-only number.</constraint>
+    <constraint source="model 3.1 I-P5, 12 D-170">Retire (on confirm): Procedure Retired; each policy of its rule set sprk_enabled = No; then close each policy's open Signals PolicyRetired through the shared method. The action acts on every affected invoice. The result reports the actual closed count, counted as the preview counts (caller-readable open invoices among those whose Signals closed; no count on a rights fault). A close that fails leaves the policy Off, so the job's D-170 sweep closes the rest; the result says the close is incomplete. No re-check, no banner write.</constraint>
+    <constraint source="model 7.2 (O-24)">PolicyVersionValidator refuses sprk_procedureversion on an Ontology-domain policy. Billing never writes sprk_policy.sprk_matter.</constraint>
+    <constraint source="model 13 (080 row), O-23">sprk_procedure and sprk_procedureversion join RecordCreatorPerson.StampedChildTables and the creator-person script ($SolutionHomes: secure and verify only; 080 created the column), asserting zero non-null values before securing; creator person = the caller. Owner of both: the caller's business-unit team through IRecordOwnershipResolver with no parents (5.1); census lists the writer.</constraint>
+    <constraint source="project">Not in this task: assignments and overrides (089); the resolver (082); drafting re-keyed to the version's Stored File (BillingRuleDraftJobHandler, 075 row of model 12); retiring the Procedure Library upload of POST /rulesets (092, 084). A rule set without sprk_procedure applies to nothing under 082.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md, ADR-010">Placement BFF (B1 caller identity); concrete service registered in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-21 (round 113 item 3; task 191)">Procedures are internal-only. Flagged-external systemusers on dev hold the same roles as internal users (Spaarke Basic User, Spaarke Console User, Spaarke Office Add In User) through their business unit's default team. So until uac-r2 task 191 lands, this task adds NO role privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment without uac-r2's agreement; all access goes through the BFF.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3, 5.1, 5.3, 7.2, 8.2, 15)</file>
+      <file>projects/ebilling-r1/tasks/076-ruleset-endpoints.poml</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finance routes with billing-admin" location="src/server/api/Sprk.Bff.Api/Api/Finance/RuleSetEndpoints.cs, BillingAdminAuthorization.cs">Per-route AddFinanceAuthorizationFilter; privilege checks.</pattern>
+      <pattern name="Publish chain" location="RuleSetService publish (:1594-1731)">Predecessor end-date and pointer move; copy, re-keyed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read notes/080 and 088 for live names and values; confirm 099's flag type.</step>
+    <step order="1">Extract the Signal selection in SignalClosureService; tests that both close paths still close the same Signals.</step>
+    <step order="2">ProcedureService: create (with its rule set), version create, copy-forward, publish, date change, version retire, I-P3 / I-P4 checks; RuleSetService re-key.</step>
+    <step order="3">Preview and Procedure retire.</step>
+    <step order="4">ProcedureEndpoints with authorization; ledger GovernedFile entry; validator refusal; creator-person entries; census.</step>
+    <step order="5">Tests (criteria); seeding proof on the preview's caller filter (make it count every invoice; the hidden-invoice test must fail).</step>
+    <step order="6">dotnet build and test; Pester pin; publish-size delta; /conflict-check; ontology-r1 and uac-r2 reviews recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/081-procedure-version-service.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Model 3.1 I-P5 says "the response never counts or lists invoices" while 15 answer 2 says "the result reports the actual count". This task reports only a caller-scoped count. If a reviewer asks for an app-only count of Signals or invoices, STOP and raise 🔔 Human Input Required.</trigger>
+    <trigger>If ontology-r1 refuses the extraction of the selection method in SignalClosureService, STOP; do not write a second query in the BFF.</trigger>
+    <trigger>If the Procedure's owner cannot be resolved with no parents through IRecordOwnershipResolver (a census or resolver change needed), STOP and ask uac-r2.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RuleSetService (Services/Finance/RuleSetService.cs:320) holds rule sets with name, scope, firm, dates and source document; model 3.3 answers the overlap for sprk_procedure and sprk_procedureversion. No service writes either table (new in 080).</existing>
+    <extension>RuleSetService is extended for the re-key and the rule set's Procedure; a Procedure service is new because a Procedure is the document and its versions, not the rules (model 3.3, O-1, O-15). The selection method is extracted, not duplicated.</extension>
+    <cost-of-doing-nothing>No Procedure or version can be created or published, so no billing rule is ever in force under the resolver (082), and retiring a Procedure has no safe path (no preview, no reconcile).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Invoke-Pester for the creator-person script pin</tool>
+    <tool name="conflict-check">before the PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ProcedureService.cs, ProcedureEndpoints.cs, RuleSetService.cs, SignalClosureService.cs, PolicyVersionValidator.cs, RecordCreatorPerson.cs, Set-ChildRecordCreatorPersonSchema.ps1</output>
+    <output type="test">ProcedureServiceTests.cs, ProcedureEndpointsTests.cs, RuleSetServiceTests.cs, closure and validator tests, Pester pin, ledger, census</output>
+    <output type="docs">projects/ebilling-r1/notes/081-procedure-version-service.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every ProcedureEndpoints route refuses a flagged-external caller, a caller with no systemuser row and a flag-read fault, before any read (negative); internal callers pass to the next check.</criterion>
+    <criterion testable="true">Publish, date change, version retire and Procedure retire return 403 without the billing-admin privilege, 403 without Write on the Procedure, 403 when the privilege probe faults; with both they succeed. Create returns 403 without the Create privilege.</criterion>
+    <criterion testable="true">I-P1: publishing v2 from D sets v1's to = D; an overlapping date range returns 409 procedure.version_overlap and writes nothing; if the predecessor write fails, the new version is not left Active.</criterion>
+    <criterion testable="true">I-P3 and I-P4: a Rate card Procedure without Firm is refused 400; changing Applies to or Firm after a version is Active is refused 409 procedure.scope_locked; before that it succeeds.</criterion>
+    <criterion testable="true">Publish without a Servable Procedure-source Stored File is refused 400; a valid publish marks the version's policy versions Published and moves sprk_currentversion; a Draft policy version under another Procedure Version is untouched.</criterion>
+    <criterion testable="true">Copy-forward: v2 holds Draft copies of every v1 rule under the same policies; a rule removed from v2 before publish stays enabled with no v2 policy version.</criterion>
+    <criterion testable="true">Version retire sets Retired, closes no Signal and leaves the policies enabled.</criterion>
+    <criterion testable="true">Preview: it calls the shared selection method (test or ArchTest); with 3 affected open invoices of which the caller can Read 2, it returns "2 open invoices you can see are affected" and no other number or hidden flag; a rights fault returns the warning with no count; it writes nothing.</criterion>
+    <criterion testable="true">Retire: the Procedure is Retired, every policy of its set is Off, and the open Signals the shared method selects at confirm time are closed PolicyRetired, including those on invoices the caller cannot Read; the result's count is caller-scoped; a Signal that changed since the preview is handled as the close does today.</criterion>
+    <criterion testable="true">PolicyVersionValidator refuses sprk_procedureversion on an Ontology-domain policy and accepts it on a Billing policy.</criterion>
+    <criterion testable="true">Creator-person agreement test and Pester pin pass with sprk_procedure and sprk_procedureversion; census passes with the new writer; ledger lists ProcedureEndpoints.cs with each route's basis.</criterion>
+    <criterion testable="true">Seeding proof recorded for the preview's caller filter; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Two adversarial-review passes (auth, security). 089 reuses the shared selection method and the preview counting for override removal; copy the counting into one internal helper here so 089 calls it. The old 081 (rule-set scope, BU writes, secure family for every set) is superseded by EB-D-148; its secure-child work for record-scoped sets is 089's. ontology-r1 080 review 2026-10-21: sprk_procedureversion.sprk_procedure is an alternate-key column and cannot be field-secured, so this task pins (test over the role privileges) that no non-BFF role holds Create or Write on sprk_procedureversion or sprk_procedureassignment. 080 hand-off 2026-10-21: 080 creates sprk_createdbyperson on sprk_policy and sprk_policyversion but does not publish sprk_policy; Set-ChildRecordCreatorPersonSchema.ps1 (this task) lists and publishes sprk_policy and sprk_policyversion. 080's verify fails by design if any role a flagged-external user holds gains a privilege on the three Procedure tables (uac-r2 rule above). ontology-r1 080 re-check 2026-10-21 (K2): before securing sprk_policy.sprk_createdbyperson (and sprk_policyversion's), assert zero non-null values (the D-173 condition); the column stays unpublished and unsecured until this task. K1 (080): Assert-ScopeOptionsIntact fails only on missing sprk_scope options, not extras; the final verify catches extras.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

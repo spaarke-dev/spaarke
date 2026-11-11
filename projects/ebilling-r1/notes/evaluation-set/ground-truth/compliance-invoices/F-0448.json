@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0448",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0448","generator_id":"gen_eval_set.py@1 F-0448","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0448.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Calloway Vance PC","firm_invoice_number":"INV-2026-44405","invoice_date":"2025-11-03","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"35427-0036","po_number":"PO-4516334","fees_total":5217.5,"expenses_total":154.26,"adjustments_total":0.0,"total_due":5371.76,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Kowalczyk","title":"Paralegal","rate":180.0,"billed_as":"BK"},{"name":"Helena Oyelaran","title":"Associate","rate":295.0,"billed_as":"HO"},{"name":"Jordan Santoro","title":"Partner","rate":640.0,"billed_as":"JS"},{"name":"Leila Kowalczyk","title":"Associate","rate":340.0,"billed_as":"LK"},{"name":"Rafael Kowalczyk","title":"Paralegal","rate":200.0,"billed_as":"RK"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-02","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":340.0,"amount":765.0,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-06","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":340.0,"amount":1020.0,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-09","timekeeper":"BK","timekeeper_name":"Beatrix Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":180.0,"amount":225.0,"narrative":"Research standard for new trial in the customs audit","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-13","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":200.0,"amount":50.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-13","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":200.0,"amount":300.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-20","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":200.0,"amount":350.0,"narrative":"Attend trial day in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-21","timekeeper":"HO","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":295.0,"amount":737.5,"narrative":"Attend hearing on notice of deposition in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-21","timekeeper":"JS","timekeeper_name":"Jordan Santoro","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":640.0,"amount":1120.0,"narrative":"Review draft expert disclosure for the vendor agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-21","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":340.0,"amount":425.0,"narrative":"Prepare examination outlines for trial in the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-21","timekeeper":"BK","timekeeper_name":"Beatrix Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":180.0,"amount":225.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-10-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":51.42,"amount":154.26,"narrative":"Overnight courier to Harbor Point Capital counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["936 Peachtree Way","Seattle","Tax ID 85-7529045"],"template":"T17","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-30","matter_close":"2026-01-29","matter_budget":46487.0,"approved_timekeepers":["Beatrix Kowalczyk","Jordan Santoro","Rafael Kowalczyk","Dalia Thornbury","Leila Kowalczyk","Victor Lockhart","Anders Lockhart","Helena Oyelaran"],"invoice_received_date":"2025-11-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

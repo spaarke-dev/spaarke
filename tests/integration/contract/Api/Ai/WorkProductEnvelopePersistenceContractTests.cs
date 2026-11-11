@@ -102,7 +102,8 @@ public class WorkProductEnvelopePersistenceContractTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>())
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             HostContext = new ChatHostContext("matter", HostRecordId.ToString("D")),
         };
 
@@ -148,6 +149,89 @@ public class WorkProductEnvelopePersistenceContractTests
             .Should().BeEquivalentTo(new[] { "file-9" });
         DateTimeOffset.TryParse(root.GetProperty("generatedAt").GetString(), out _).Should().BeTrue(
             "generatedAt is an ISO-8601 date-time");
+    }
+
+    // ─── The core record pair is fixed after create on BFF update paths ─────────────────────────
+
+    [Fact]
+    public async Task PersistAsync_ARegistryRowTargetingASignalsCoreRecordId_IsRefused_AndNothingIsWritten()
+    {
+        var events = new List<string>();
+        var dataverse = new FakeDataverseUserClient(
+            events, registryTopic: "signal-summary", registryHostEntity: "sprk_signal", registryTargetField: "sprk_corerecordid");
+        var persister = new TopicRegistryWorkProductPersister(
+            dataverse, Mock.Of<ILogger<TopicRegistryWorkProductPersister>>());
+        var entry = new SessionOutput
+        {
+            Key = "wp-signal-1",
+            BindingId = BindingId.ToString("D"),
+            UcId = "UC-A-1",
+            Turn = 1,
+            Disposition = "work_product",
+            Payload = ParseJson("""{"tldr":"t"}"""),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var binding = new Binding
+        {
+            BindingId = BindingId,
+            ConsumerType = "chat-summarize",
+            ConsumerCode = "signal-summary",
+            Ucid = "UC-A-1",
+            Disposition = BindingDisposition.WorkProduct,
+        };
+
+        var persist = () => persister.PersistAsync(
+            entry, binding, new ChatHostContext("sprk_signal", HostRecordId.ToString("D")));
+
+        (await persist.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("sprk_signal.sprk_corerecordid").And.Contain("(record_update.fixed_after_create)");
+        events.Should().NotContain("patch", "nothing is written");
+        dataverse.PatchedPath.Should().BeNull();
+        dataverse.Gets.Should().NotContain(g => g.StartsWith("EntityDefinitions(LogicalName='sprk_signal')", StringComparison.Ordinal),
+            "refused straight after the registry mapping, before the host table is resolved");
+    }
+
+    // ─── Task 048 (owner decision 2026-11-04, D-204 extended to updates): changed only by their writers ─────
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task PersistAsync_ARegistryRowTargetingATableOnlyItsWriterChanges_IsRefused_AndNothingIsWritten(string table)
+    {
+        var events = new List<string>();
+        var dataverse = new FakeDataverseUserClient(
+            events, registryTopic: "writer-summary", registryHostEntity: table, registryTargetField: "sprk_description");
+        var persister = new TopicRegistryWorkProductPersister(
+            dataverse, Mock.Of<ILogger<TopicRegistryWorkProductPersister>>());
+        var entry = new SessionOutput
+        {
+            Key = "wp-writer-1",
+            BindingId = BindingId.ToString("D"),
+            UcId = "UC-A-1",
+            Turn = 1,
+            Disposition = "work_product",
+            Payload = ParseJson("""{"tldr":"t"}"""),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var binding = new Binding
+        {
+            BindingId = BindingId,
+            ConsumerType = "chat-summarize",
+            ConsumerCode = "writer-summary",
+            Ucid = "UC-A-1",
+            Disposition = BindingDisposition.WorkProduct,
+        };
+
+        var persist = () => persister.PersistAsync(entry, binding, new ChatHostContext(table, HostRecordId.ToString("D")));
+
+        (await persist.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain($"{table}.sprk_description")
+            .And.Contain(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        events.Should().NotContain("patch", "nothing is written");
+        dataverse.PatchedPath.Should().BeNull();
+        dataverse.Gets.Should().NotContain(g => g.StartsWith($"EntityDefinitions(LogicalName='{table}')", StringComparison.Ordinal),
+            "refused straight after the registry mapping, before the host table is resolved");
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
@@ -202,17 +286,30 @@ public class WorkProductEnvelopePersistenceContractTests
     private sealed class FakeDataverseUserClient : IDataverseUserClient
     {
         private readonly List<string> _events;
+        private readonly string _registryTopic;
+        private readonly string _registryHostEntity;
+        private readonly string _registryTargetField;
 
-        public FakeDataverseUserClient(List<string> events)
+        public FakeDataverseUserClient(
+            List<string> events,
+            string registryTopic = "matter-summary",
+            string registryHostEntity = "sprk_matter",
+            string registryTargetField = "sprk_mattersummary")
         {
             _events = events;
+            _registryTopic = registryTopic;
+            _registryHostEntity = registryHostEntity;
+            _registryTargetField = registryTargetField;
         }
+
+        public List<string> Gets { get; } = new();
 
         public string? PatchedPath { get; private set; }
         public string? PatchedBody { get; private set; }
 
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
         {
+            Gets.Add(relativePath);
             if (relativePath.StartsWith("EntityDefinitions(LogicalName='sprk_aitopicregistry')", StringComparison.Ordinal))
             {
                 return Ok("""{"EntitySetName":"sprk_aitopicregistries"}""");
@@ -223,9 +320,19 @@ public class WorkProductEnvelopePersistenceContractTests
             }
             if (relativePath.StartsWith("sprk_aitopicregistries?", StringComparison.Ordinal))
             {
-                return Ok("""
-                    {"value":[{"sprk_topicname":"matter-summary","sprk_mode":"single","sprk_hostentity":"sprk_matter","sprk_targetfield":"sprk_mattersummary"}]}
-                    """);
+                return Ok(JsonSerializer.Serialize(new
+                {
+                    value = new[]
+                    {
+                        new
+                        {
+                            sprk_topicname = _registryTopic,
+                            sprk_mode = "single",
+                            sprk_hostentity = _registryHostEntity,
+                            sprk_targetfield = _registryTargetField,
+                        },
+                    },
+                }));
             }
             throw new InvalidOperationException($"Unexpected GET: {relativePath}");
         }

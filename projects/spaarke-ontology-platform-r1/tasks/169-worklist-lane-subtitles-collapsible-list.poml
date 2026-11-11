@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="169" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist lanes: subtitles and a card list that starts collapsed and is remembered per device (D-195, UAT round 2 item 4)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-195, owner 2026-10-28)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only change to one shared component (.tsx) and its tests; modifies tests, so code-review and adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One component with exact files and a stated layout; a precedent exists for the persistence.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>frontend,shared-ui,testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 2 (notes/uat-v4-log.md, 2026-10-28, item 4; D-195): the lane titles "Decide" and "Do" don't say enough. The card list should expand and collapse. The title, the Start review / Work through these button and the metric cards stay visible. The list starts collapsed, and the device then remembers the choice.</prompt>
+  <role>SPAARKE front-end engineer (Worklist widget, shared UI).</role>
+  <goal>Each lane shows its short title, a subtitle, the count, the button and the metric cards at all times. Its card list sits behind a toggle that starts collapsed on first use. The device remembers each lane's open state. Clicking a metric card opens that lane's list.</goal>
+
+  <context>
+    <background>
+      Found 2026-10-28:
+      <ul>
+        <li>`Worklist/WorklistLanePanel.tsx:39-42` `LANE_COPY` holds `{heading, start, empty}`: Decide = "Decide" / "Start review", Do = "Do" / "Work through these".</li>
+        <li>Layout: the header `h2` and `CounterBadge` and the primary Button (`:83-105`), then `MetricCardRow layout="wide"` (`:107`), the "Showing n of m / Show all" line (`:109-118`), the aggregate row (`:120`) and `.list` with one `MatterCard` per group (`:122-140`). There is no subtitle slot.</li>
+        <li>The lane key stays `Decide` / `Do`: the BFF, the test ids (`worklist-lane-Decide`) and the admin service use it.</li>
+        <li>`WorklistWidget.tsx:401-413` renders the panels. `onStart` (`:410`) walks `view.visibleIds` from the view model, so it works with the list collapsed. `onSelectKey` (`:408`) sets the filter only.</li>
+        <li>Persistence precedent: `src/solutions/SpaarkeAi/src/hooks/usePaneCollapse.ts` (localStorage, per device).</li>
+        <li>Collapse precedents in the library: the Fluent `Accordion` in `Worklist/WorklistDisclosures.tsx:14-17,109-140`, and `WorkspaceShell/SectionPanel.tsx:60` `collapsible`.</li>
+        <li>Tests: `Worklist/__tests__/WorklistWidget.test.tsx` (lines 73, 90-94, 126, 393, 401), `__tests__/laneCountFilters.test.tsx`, `__tests__/Worklist.test.tsx`.</li>
+      </ul>
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistLanePanel.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistWidget.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistDisclosures.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/__tests__/</file>
+      <file>src/solutions/SpaarkeAi/src/hooks/usePaneCollapse.ts (pattern only)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`LANE_COPY`, the Fluent disclosure pattern in `WorklistDisclosures`, and `usePaneCollapse`'s localStorage pattern.</existing>
+    <extension>Add a `subtitle` to `LANE_COPY` and a toggle around the list region in `WorklistLanePanel`. Persistence is a small hook inside the Worklist folder that copies `usePaneCollapse`'s shape, because the shared library cannot import from SpaarkeAi.</extension>
+    <cost-of-doing-nothing>Both lanes show long card lists, so the user can't see each section, and the titles don't explain the lanes (owner UAT).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-195 wording">The subtitles are exact: Decide is "Items that need your decision", and Do is "Your work that is due soon or overdue". The titles stay "Decide" and "Do". Button labels are unchanged. Use a `Caption1` (or the library's existing secondary-text style) under the `h2`, and give the section an `aria-describedby`.</constraint>
+    <constraint source="D-195 collapse">Inside the collapsible region: the "Showing n of m / Show all" line, the aggregate row and the card list. Always visible: the title, subtitle, count, button and metric cards. The toggle is a button with `aria-expanded` and `aria-controls` and a chevron, labelled "Show items" / "Hide items". On first use (no stored value) the list is collapsed. The open state is stored per lane in localStorage under one namespaced key (for example `spaarke.worklist.laneOpen`). Wrap every read and write in try/catch: if storage fails, the list defaults to collapsed and the toggle still works. Clicking a metric card opens that lane's list and stores the open state. Start review works in either state. Keep the list mounted, or keep the data path independent of the DOM, so the view model is unchanged.</constraint>
+    <constraint source="shared component">The lane key and the test ids are unchanged. No other widget changes. Update the existing tests only where they assume the list is visible, by expanding first. Name each edited assertion in the task notes.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. Run `npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts` in a fresh worktree. No --no-verify, no bare stash, no sub-agents. Run `/conflict-check`: shared UI is a hot path.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor and the reason. Work in `C:\wts-169` on `task/169-worklist-lane-collapse` from `origin/docs/ontology-platform-design`.</step>
+    <step order="1">Failing tests first:
+      <ul>
+        <li>both subtitles render;</li>
+        <li>the list starts collapsed with no stored value;</li>
+        <li>the toggle opens the list and the open state is stored, and a re-mount restores it;</li>
+        <li>storage that throws gives collapsed with a working toggle;</li>
+        <li>clicking a metric card opens the list;</li>
+        <li>Start review works while collapsed;</li>
+        <li>the title, subtitle, button and metric cards are visible while collapsed;</li>
+        <li>the Decide and Do states are independent.</li>
+      </ul>
+    </step>
+    <step order="2">Implement it, run the Worklist jest suite and `tsc` for the package, then open a PR into `docs/ontology-platform-design`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each lane shows its title and the D-195 subtitle. The list is collapsed on first use. The toggle opens and closes it, and the state persists per lane across a re-mount.</criterion>
+    <criterion testable="true">While collapsed, the title, subtitle, count, button and metric cards are visible. Start review and metric-card filtering work, and a metric-card click opens the list.</criterion>
+    <criterion testable="true">Must-not-fire: storage errors never break the panel. The lane keys and test ids are unchanged. The other Worklist tests pass (edits listed in the notes).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Lanes on dev (owner, after Console deploy)"><steps><step>Open the Worklist, toggle a lane open, reload, then click a metric card on the other lane.</step></steps><expected>Both lanes open collapsed the first time. The opened lane stays open after the reload. The metric card opens its lane.</expected></test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If the metric cards or the button cannot stay outside the collapsible region without changing `MetricCardRow`, STOP and report the options.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-195)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-28">
+    The lanes keep their short titles (Decide, Do) and gain the D-195 subtitles. The card list collapses by default and its open state is remembered per device under localStorage key `spaarke.worklist.laneOpen`, one JSON object for both lanes. Every storage access is wrapped in try/catch, so the in-memory toggle still works when storage is blocked. The title, the start button and the metric cards stay pinned, and a metric-card click opens the lane. Review: the Opus pass found tests clicking lines hidden by the collapsed list (F3, 11 + 44 tests). The lane fixed them and proved it with a forced-hidden run (61 fail, then reverted, 256 pass). Client lint flagged the best-effort empty catch, which now has a justified eslint-disable (`be2cd34d0b`). PR #2402 merged to docs (`67313ad46d`); all checks green, none pending. It reaches dev with the next docs-to-master merge (the Console auto-deploys).
+  </completion>
+</task>

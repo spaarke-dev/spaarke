@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0041",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0041","generator_id":"gen_eval_set.py@1 F-0041","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0041.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ravenscroft Yardley PC","firm_invoice_number":"INV-2026-34016","invoice_date":"2025-10-01","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"43167-0006","po_number":null,"fees_total":3470.25,"expenses_total":922.61,"adjustments_total":0.0,"total_due":4392.86,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Marchetti","title":"Partner","rate":525.0,"billed_as":"AM"},{"name":"Dalia Galbraith","title":"Associate","rate":295.0,"billed_as":"DG"},{"name":"Dmitri Rosenthal","title":"Paralegal","rate":125.0,"billed_as":"DR"},{"name":"Samuel Pemberton","title":"Paralegal","rate":165.0,"billed_as":"SP"},{"name":"Victor Dunleavy","title":"Associate","rate":245.0,"billed_as":"VD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-02","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":125.0,"amount":150.0,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-02","timekeeper":"DG","timekeeper_name":"Dalia Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":295.0,"amount":560.5,"narrative":"Revise appellate brief after cite check","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-05","timekeeper":"VD","timekeeper_name":"Victor Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":245.0,"amount":539.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-08","timekeeper":"SP","timekeeper_name":"Samuel Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":165.0,"amount":445.5,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-11","timekeeper":"SP","timekeeper_name":"Samuel Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":165.0,"amount":49.5,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-23","timekeeper":"DG","timekeeper_name":"Dalia Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":295.0,"amount":531.0,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-24","timekeeper":"SP","timekeeper_name":"Samuel Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":165.0,"amount":346.5,"narrative":"Draft notice of appeal and docketing statement for the data incident","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-25","timekeeper":"SP","timekeeper_name":"Samuel Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":165.0,"amount":264.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-26","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":125.0,"amount":112.5,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-29","timekeeper":"SP","timekeeper_name":"Samuel Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.95,"rate":165.0,"amount":156.75,"narrative":"Draft notice of appeal and docketing statement for the distribution agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-29","timekeeper":"AM","timekeeper_name":"Anders Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":525.0,"amount":315.0,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":23.58,"amount":23.58,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.96,"amount":35.96,"narrative":"Overnight courier to Tidewater Retail counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":33.0,"rate":0.62,"amount":20.46,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":842.61,"amount":842.61,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["58 Peachtree Way","Houston","Tax ID 29-1766536"],"template":"T17","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-07-16","matter_close":"2025-12-29","matter_budget":42571.0,"approved_timekeepers":["Anders Marchetti","Victor Dunleavy","Sofia Pemberton","Dalia Galbraith","Katya Fairweather","Dmitri Rosenthal","Samuel Pemberton"],"invoice_received_date":"2025-10-11"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[5],"consequence":"Reject"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

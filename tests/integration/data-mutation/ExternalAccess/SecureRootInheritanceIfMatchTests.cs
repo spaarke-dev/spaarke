@@ -46,7 +46,7 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
 
     private AssignedAccessTestDoubles.FakeAssignedAccessStore Ledger => _fixture.InheritedLedger;
 
-    private static int Mirror => RecordShareLevels.ChildMirrorMask(
+    private static int Mirror => RecordShareLevels.InheritedRootMirrorMask(
         RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights));
 
     private static readonly AssignedAccessLedgerWrite OperatorsDeclinedMarker =

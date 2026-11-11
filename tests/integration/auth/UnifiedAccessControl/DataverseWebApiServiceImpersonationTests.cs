@@ -82,6 +82,75 @@ public class DataverseWebApiServiceImpersonationTests
     }
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 071 fix round 1: a 403 from the impersonated read keeps Dataverse's error code
+    /// and message (<see cref="DataverseForbiddenException"/>), so the family reader can tell a missing table privilege from
+    /// every other refusal; it is still an <see cref="HttpRequestException"/> with status 403 and the usual message.
+    /// </summary>
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_Forbidden_ThrowsWithDataversesErrorCodeAndMessage()
+    {
+        const string body = "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user (Id=44444444-4444-4444-4444-444444444444, "
+                            + "type=8, roleCount=3), is missing prvReadsprk_Policy privilege on OTC=10234.\"}}";
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        thrown.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        thrown.Message.Should().Be("Response status code does not indicate success: 403 (Forbidden).",
+            "the Dataverse text names the principal; it is kept out of the message");
+        thrown.ErrorCode.Should().Be(DataverseWebApiService.AccessCheckDeniedErrorCode);
+        thrown.IsMissingReadPrivilegeOn("sprk_policy").Should().BeTrue();
+        thrown.IsMissingReadPrivilegeOn("sprk_policyversion").Should().BeFalse("another table's privilege is not this one");
+    }
+
+    /// <summary>
+    /// A 403 whose body cannot be read or decoded (a stream fault, or the decoder's own <see cref="InvalidOperationException"/>
+    /// for a bad charset) still throws the 403, with no code or message — never the decoder's exception. The same tolerated set
+    /// as <c>DataverseWebApiClient.CreateFailureAsync</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("invalid-operation")]
+    [InlineData("http-request")]
+    public async Task RetrieveMultipleImpersonatedAsync_ForbiddenWithAnUnreadableBody_StillThrowsTheForbidden(string fault)
+    {
+        Exception thrown = fault switch
+        {
+            "io" => new IOException("The stream was reset."),
+            "invalid-operation" => new InvalidOperationException("The character set provided in ContentType is invalid."),
+            _ => new HttpRequestException("The response ended prematurely."),
+        };
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new FaultingContent(thrown) });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var forbidden = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        forbidden.ErrorCode.Should().BeNull();
+        forbidden.ErrorMessage.Should().BeNull();
+        forbidden.IsMissingReadPrivilegeOn("sprk_policy").Should().BeFalse("an unreadable refusal is never a missing-privilege answer");
+    }
+
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_OtherFailure_ThrowsAPlainHttpRequestException()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<HttpRequestException>()).Which;
+        thrown.Should().NotBeOfType<DataverseForbiddenException>();
+        thrown.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+    }
+
+    /// <summary>
     /// The Job B apply path (task 031): the PATCH runs as the confirming user. The EntitySetName lookup before it
     /// is environment metadata and stays app-only.
     /// </summary>
@@ -122,6 +191,160 @@ public class DataverseWebApiServiceImpersonationTests
             .Which.ParamName.Should().Be("systemUserId");
         handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
         handler.Requests.Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"));
+    }
+
+    // ── ebilling-r1 #2081 round 3: the update-only write (UpdateExistingRecordFieldsAsync, impersonation overload) ─
+    //
+    // The invoice-family guard stops a generic write from CREATING a row (a PATCH without If-Match is an upsert) and
+    // keeps the write running as the caller. Every other test of that path mocks the service interface, so these pin
+    // what actually goes on the wire: dropping the If-Match line or the impersonation argument must fail here.
+
+    private static readonly Dictionary<string, object?> RenamedField = new() { ["sprk_name"] = "renamed" };
+
+    private static SentRequest PatchOf(RecordingHandler handler) =>
+        handler.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Patch).Subject;
+
+    /// <summary>1. PATCH, aimed at the entity set and the row id (not a POST, not a collection URL).</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_SendsAPatchToTheEntitySetAndId()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+        var recordId = Guid.NewGuid();
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", recordId, RenamedField, CallerSystemUserId);
+
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+        var patch = PatchOf(handler);
+        patch.Target!.ToString().Should().EndWith($"sprk_matters({recordId})");
+    }
+
+    /// <summary>2. The update-only header: without it the Web API creates the row when it is missing.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_SendsIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        PatchOf(handler).Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>3a. The write runs as the caller: exactly one MSCRMCallerID, equal to the id.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithCallerId_ImpersonatesTheWrite()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        var patch = PatchOf(handler);
+        patch.Values("MSCRMCallerID").Should().ContainSingle().Which.Should().Be(CallerSystemUserId.ToString());
+        patch.Headers.Keys.Should().NotContain("CallerObjectId");
+        handler.Requests.Where(r => r.Method != HttpMethod.Patch)
+            .Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"), "the metadata lookup stays app-only");
+    }
+
+    /// <summary>3b. The app-only call (null caller): no header names a user, and the write is still update-only.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithNullCaller_IsAppOnlyButStillIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, impersonateSystemUserId: null);
+
+        var patch = PatchOf(handler);
+        patch.Headers.Keys.Should().NotContain("MSCRMCallerID").And.NotContain("CallerObjectId");
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>The no-caller convenience overload is the same app-only update-only write.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithoutACallerOverload_IsAppOnlyAndIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField);
+
+        var patch = PatchOf(handler);
+        patch.Headers.Keys.Should().NotContain("MSCRMCallerID");
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>
+    /// 4. An empty caller id is refused before the write is sent. Only the app-only metadata lookup runs first: the
+    /// builder is reached after it, so the assertion is "no PATCH, and no request names a user".
+    /// </summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithEmptyCallerId_ThrowsAndSendsNoWrite()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, Guid.Empty);
+
+        (await act.Should().ThrowAsync<ArgumentException>().WithMessage("*fail closed*"))
+            .Which.ParamName.Should().Be("systemUserId");
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+        handler.Requests.Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"));
+    }
+
+    /// <summary>5. A missing row (404 under If-Match: *) is KeyNotFound, not a generic HTTP failure.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On404_ThrowsKeyNotFound()
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(HttpStatusCode.NotFound) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    /// <summary>6. A precondition failure (412) is treated the same: never a silent success or a retry that creates.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On412_ThrowsKeyNotFound()
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(HttpStatusCode.PreconditionFailed) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    /// <summary>7. A 204 succeeds.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On204_Succeeds()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>Anything but 404/412 is still a failure the caller sees (a 400 or 403 is not "not found").</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task UpdateExistingRecordFieldsAsync_OnOtherFailures_ThrowsHttpRequestException(HttpStatusCode status)
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(status) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
     }
 
     // ── unified-access-control-r2 task 159 (#1098): the trimmed GET /api/v1/events ──────────────────────────────
@@ -280,6 +503,18 @@ public class DataverseWebApiServiceImpersonationTests
     {
         public IReadOnlyCollection<string> Values(string header) =>
             Headers.TryGetValue(header, out var values) ? values : Array.Empty<string>();
+    }
+
+    /// <summary>A response body whose read throws <paramref name="fault"/>.</summary>
+    private sealed class FaultingContent(Exception fault) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.FromException(fault);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

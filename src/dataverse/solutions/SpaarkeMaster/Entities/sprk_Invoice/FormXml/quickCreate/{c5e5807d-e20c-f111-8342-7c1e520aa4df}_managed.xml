@@ -78,14 +78,6 @@
                       </cell>
                     </row>
                     <row>
-                      <cell id="{a439b0b8-7b1a-4d65-8ec3-63cbd157d140}" locklevel="0" colspan="1" rowspan="1" labelid="{7e7042d4-26e4-46f1-aa82-5d08a001f77f}">
-                        <labels>
-                          <label description="Invoice Status" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_invoicestatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_invoicestatus" disabled="false" />
-                      </cell>
-                    </row>
-                    <row>
                       <cell id="{d75fd025-fc6a-49e0-ba7b-af8e2d1bc623}" locklevel="0" colspan="1" rowspan="1" labelid="{b7a94d46-10a1-4b8a-bd5f-c2f32c89b0a9}">
                         <labels>
                           <label description="Invoice Date" languagecode="1033" />

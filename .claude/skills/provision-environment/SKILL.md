@@ -2088,12 +2088,12 @@ $bffAppRegId        = $isv.bffAppRegId                 # H3 output — the custo
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
-# sprk_solutionversion — ImportedSolutionSet (T218b): "SpaarkeMaster {version} ({managed|unmanaged})" from H6's
-# importedSolutions SpaarkeMaster entry ($null when absent or versionless).
+# sprk_solutionversion — ImportedSolutionSet (T218b; owner 2026-11-10): "SpaarkeMaster {Managed|Unmanaged} {version}"
+# from H6's importedSolutions SpaarkeMaster entry ($null when absent or versionless).
 $deployedSolutionVer = $null
 $pkg = @($isv.importedSolutions) | Where-Object { $_ -and "$($_.solutionUniqueName)".Trim() -ieq 'SpaarkeMaster' } | Select-Object -First 1
 if ($pkg -and -not [string]::IsNullOrWhiteSpace("$($pkg.version)")) {
-  $deployedSolutionVer = "SpaarkeMaster $("$($pkg.version)".Trim()) ($(if ($pkg.isManaged) { 'managed' } else { 'unmanaged' }))"
+  $deployedSolutionVer = "SpaarkeMaster $(if ($pkg.isManaged) { 'Managed' } else { 'Unmanaged' }) $("$($pkg.version)".Trim())"
 }
 
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
@@ -2156,7 +2156,7 @@ if (-not $script:RegistryStale) {
   $fields = @{
     sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
     sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
-    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {version} ({type})" from run.interStepState.importedSolutions (H6, T218b)
+    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {Managed|Unmanaged} {version}" from run.interStepState.importedSolutions (H6, T218b)
     sprk_azuresubscriptionid      = $azureSubId
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName

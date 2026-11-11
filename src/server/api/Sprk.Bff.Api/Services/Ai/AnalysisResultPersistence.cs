@@ -97,9 +97,9 @@ public class AnalysisResultPersistence
                         TargetEntityLogicalName = "sprk_analysis",
                         TargetRecordId = analysisId,
                     }
-                    : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                        new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }))
-                    with { RequestedBy = requestedBy },
+                    : AppOnlyAnalysisService.OwnershipOfNewAnalysis(documentId))
+                    with
+                { RequestedBy = requestedBy },
                 cancellationToken);
 
             if (!owner.IsOwned)
@@ -272,7 +272,6 @@ public class AnalysisResultPersistence
             ContentType: null,
             DocumentId: documentId,
             ParentEntity: null,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "AnalysisOrchestration",
             CorrelationId: analysisId);
 
