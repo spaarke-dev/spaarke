@@ -265,7 +265,10 @@ public class ExternalCollaboratorRoleGuardTests
 
         var asCatalog = Findings(Mutated(f => f["catalogs"]!.AsArray().Add(new JsonObject
         {
-            ["logicalName"] = table, ["access"] = new JsonArray("Read"), ["depth"] = "Global", ["reason"] = "seeded",
+            ["logicalName"] = table,
+            ["access"] = new JsonArray("Read"),
+            ["depth"] = "Global",
+            ["reason"] = "seeded",
         })));
         Assert.Contains(asCatalog, x => x.Contains($"{table}: is a never table and gets a privilege (catalogs)", StringComparison.Ordinal));
     }

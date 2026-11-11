@@ -129,8 +129,14 @@ and they surfaced OQ-1 (`STORED FILE PROFILE` on that team's reader profile).
 
 - ArchTests, full suite: 2476/2476 passed (includes the 46 new ones).
 - Pester 5.7.1, the whole `owner-teams-script-tests` job set (`Set-CustomerOwnerTeams` + this script): 86/86.
-- BFF unit tests: see the PR (first run was cut off by the runner's 50-minute timeout on a loaded machine; no code they
-  cover changed).
+- BFF unit tests: CI's Full Unit Tests (all four shards) pass on the PR. Two local runs on a loaded machine could not
+  finish (tests timed out at 2 to 4 minutes each from contention; the second run was stopped after 75 minutes). This
+  branch changes no BFF or unit-tested code. One local failure is deterministic and comes from master, not this branch:
+  `SecureChildLineageTests.ChildMirrorMask_OnEveryHardDenyTable_CarriesReadOnly` expects the hard-deny lineage children to
+  be policy and policy version only, but master's registry also has rule set, procedure assignment and stored file (after
+  the ebilling merge). It is not fixed here because that file is in 191b's change set; reported to the coordinator.
+- CI Tier 1 Format failed on the first push (whitespace in one object initializer in the ArchTest); fixed with
+  `dotnet format whitespace` in a follow-up commit.
 - Inline review (in place of the Opus pass, see section 7). F2, fixed: the script accepted a platform depth of Deep
   that the ArchTest forbids; both now allow Basic, Local or Global only. Everything else checked
   (privilege reach, silent `-Verify` passes, `-Apply` write scope and order, test strength, Web API assumptions, each
