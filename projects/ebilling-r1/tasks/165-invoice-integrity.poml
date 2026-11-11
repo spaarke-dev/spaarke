@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165" project="ebilling-r1">
+  <metadata>
+    <title>Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources</title>
+    <phase>4 Review</phase>
+    <gate>165a: merged (2fac72b8a5). 165b: 164a and 165a merged into work.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Approval, hold and payment inputs; access-adjacent (uac-r2 classes a/b/c); edits approval and AP export.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting integrity rules across approval, holds, AP export and spend; fail-closed design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceApprovalService and ApExportService; 165a and 165b run one after the other.</parallel-reason>
+    <deps>EB-D-200; 164a-2 (AddedLineIdFor, on the 164a integration branch) for 165b</deps>
+    <tags>bff-api, ebilling, auth, integrity</tags>
+  </metadata>
+
+  <prompt>Binding decisions: projects/ebilling-r1/notes/decisions-log.md EB-D-200 (owner, uac-r2 option D) and EB-D-101/103.
+    The classes are uac-r2's.
+    - (a) Written only on a path users cannot reach. Evidence: the live role privileges, plus the generic-path refusals.
+    - (b) Field-secured, Writers only for writes.
+    - (c) Re-derived or checked by the BFF.
+    The live facts and the per-column classification are kept outside the repository and shared with uac-r2 by message (public-repo rule: no mechanism of an open gap in public text).
+    Wording in commits, notes and the PR stays neutral: "decides only from server-written sources". Never describe a sequence of steps.</prompt>
+
+  <goal>Every hold, approval, AP export and spend decision reads only class (a), (b) or (c) sources.</goal>
+
+  <scope>
+    165a (FIRST; uac-r2 priority):
+    - Inventory every sprk_invoicesubmission column that a hold, approval, AP export or visibility decision reads, and classify each (a), (b) or (c). Keep the table and its evidence outside the repository until the fix is live; the repo notes carry only a neutral summary.
+    - Fix every column outside (a), (b) and (c). Choose per column:
+      - field-secure it, Writers only, with the `sprk_sourceemaildocument` mechanics (SpaarkeMaster source, a script with -WhatIf, apply and -Verify, the owner's go for the dev apply);
+      - or re-derive or cross-check it from a class (a) or (b) source, for example the outcome the persister recorded in the field-secured `sprk_findingsjson`, or the invoice's field-secured `sprk_firmhold`.
+    - A must-fire test for each hold source, each with a must-not-fire control.
+    165b:
+    - (1) Approval refuses a line of unknown origin: the task 164 criterion "approval refuses a line of unknown origin", moved here in full.
+    - (2) Status: approval, AP export and spend count an invoice as Approved, Sent to AP or Paid only when the matching server-written record exists, and otherwise refuse or hold it (409, a distinct code). The records: the approve Decision Record; the export batch or its record for Sent to AP; the paid record. Verify that each one is class (a) or (b). Spend (`FinanceBaseValues`) is ontology-r1's code: make the minimal change and list it for their review.
+    - (3) Totals: approval and AP export check that the stored invoice totals equal `InvoiceTotalsCalculator` over the lines, and refuse on a mismatch (409, a distinct code).
+    - (4) Pending spend (165a notes, open items; a confirmed defect, not a known limit): both pending-spend paths (`FinanceBaseValues`, `FinanceRollupService`; at 165a, `FinanceBaseValues.cs:416` and `FinanceRollupService.cs:344`) exclude every invoice `InvoiceBlockedHold` holds, so pending spend is decided from the same server-written sources as the hold. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
+    Merge note: 165a puts the invoice's own-submission selection in one helper (`InvoiceBlockedHold.ReadOwnSubmissionAsync`); 164a-4a's `InvoiceCorrectionReevaluation.ReadSubmissionAsync` (used by the correction follow-through, the unapplied-corrections read and Add line) calls it since the 165a merge.
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>165b item 1, moved from task 164 verbatim:
+    uac-r2 2026-11-06, part 164a-4a: approval refuses a line of unknown origin.
+      - InvoiceApprovalService refuses (409, nothing written) an invoice with a Fee or Expense line that is neither
+        (i) a linked submission's own line (`line.Id == InvoiceSubmissionPersister.LineIdFor(submissionId, sequence - 1)` for a submission
+        linked to this invoice), nor (ii) the subject of an `add-line` Decision Record that names THIS invoice and THIS line id and was written
+        by the BFF Add line service (app-only).
+      - The reviewer-added marker in `sprk_extractionconfidence` is NOT an exemption. An added line's id is
+        `InvoiceLineAddService.AddedLineIdFor(invoiceId, decisionId)` (164a, merged), and (ii) also requires
+        `line.Id == AddedLineIdFor(this invoice's id, record's decision id)`, reusing `IsReviewerAdded`'s rule rather than a copy.
+        The service creates the row with that id, which also gives the Q3 idempotency.
+      - (ii) must be unforgeable. In the notes and the PR, cite the writer-only or append-only refusal of a user-created or user-updated
+        `sprk_decisionrecord` through the generic BFF paths, and the role privileges on the table that close the direct path.
+      - The line set is re-checked inside the approval's own row-version or lock scope. If it can't be, record a known limit stating what still holds.
+      - The refusal logs a distinct reason code with the table and row id only.
+      - Tests:
+        - must-fire: a line of unknown origin (status Clean or Accepted) is refused;
+        - must-fire: a line of unknown origin carrying the reviewer marker is refused;
+        - must-fire: a line of unknown origin with a user-created `add-line` record is refused;
+        - must-not-fire: intake lines plus an Add line line approve;
+        - must-not-fire: D-96's same-invoice detach and re-attach approves.
+      - One seed: drop the check.
+      - Wording in commits, the PR and notes stays neutral: "approval refuses a line of unknown origin".</criterion>
+    <criterion>165a ships first, in the same release as EB-D-200, and in every case before AP export is turned on in any environment (uac-r2 2026-11-06).</criterion>
+    <criterion>A table of every submission column read by a hold, approval, AP export or visibility decision, with the reader file:line, the class and the evidence, is kept outside the repository and sent to uac-r2; the repo notes say only that every column is class (a), (b) or (c). No column is left outside (a), (b) or (c).</criterion>
+    <criterion>Must-fire, one for each of these, each with a must-not-fire control:
+      - each hold source holds (must-fire) and its server-written release releases (control);
+      - a line of unknown origin is refused at approval;
+      - a status set without its record is refused or held at approval, AP export and spend;
+      - a stored total that differs from the line-derived total is refused at approval and AP export.
+      One seed for each guard: drop the check.</criterion>
+    <criterion>Refusals log a distinct reason code with the table and row id only.</criterion>
+    <criterion>Field security applied to dev only with the owner's go typed in the ebilling session; uac-r2 is told before and after; provisioning gets the ordered prerequisite.</criterion>
+    <criterion>The filtered unit suites (Finance, Submission, Invoice, ApExport, ExternalAccess) and ArchTests pass; the BFF builds; the publish delta is measured against a fresh master build.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A hold source cannot be made (a), (b) or (c) without changing D-101 behaviour visible to reviewers or firms: STOP and report.</trigger>
+    <!-- 165a K6 resolved by EB-D-201 (owner 2026-11-06): the hold stands; task 096b closes the direct-create paths and cleans up the dev records. -->
+  </escalation>
+</task>

@@ -360,6 +360,22 @@ public partial class ContactGrantAuthorizationTests
         AssertNothingWritten();
     }
 
+    /// <summary>
+    /// Fix round 3g, must fire: an existing row of the grantee's whose issuer column the read did not return leaves "who issued it"
+    /// unknown, so nothing is written. The refusal is the one a policy read that failed already gives (503, retryable).
+    /// </summary>
+    [Fact]
+    public async Task Grant_WhenAnExistingRowDidNotCarryTheIssuerColumn_Is503_AndWritesNothing()
+    {
+        _dataverse.SeedReadWithout("_sprk_grantedbycontact_value", Colleague, ProjectId,
+            (int)ExternalAccessLevel.ViewOnly, Today.AddDays(10), issuedByContact: Grantor);
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Status.Should().Be(503);
+        AssertNothingWritten();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 9 — someone else's access is never changed; the caller's own row never goes down
     // ─────────────────────────────────────────────────────────────────────────────
@@ -807,6 +823,57 @@ public partial class ContactGrantAuthorizationTests
 
         Problem(result).Should().Be((503, ContactGrantorAuthorizationFilter.RevokeFailedReasonCode));
         Detail(result).Should().Contain("Nothing was changed");
+    }
+
+    /// <summary>
+    /// Fix round 3g, must fire: the row read for the revoke did not carry its issuer column. It is neither "theirs" nor "somebody
+    /// else's", so it is NOT the uniform 404: it takes the retry answer of a row that could not be read, and nothing changes.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheRowDidNotCarryTheIssuerColumn_Is503_NotThe404_AndNothingChanges()
+    {
+        var row = _dataverse.SeedReadWithout("_sprk_grantedbycontact_value", Colleague, ProjectId,
+            (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+
+        var result = await Revoke(row.Id, Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be((503, ContactGrantorAuthorizationFilter.RevokeFailedReasonCode));
+        row.StateCode.Should().Be(0);
+        _dataverse.Updates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Fix round 3g, must fire: another active row of the same grant did not carry its issuer column. Skipping it would leave a row
+    /// of the caller's standing while reporting the revoke done, so the revoke answers as a read that failed and changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenAnotherRowOfTheGrantDidNotCarryTheIssuerColumn_Is503_AndNothingChanges()
+    {
+        var own = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        var other = _dataverse.SeedReadWithout("_sprk_grantedbycontact_value", Colleague, ProjectId,
+            (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+
+        var result = await Revoke(own.Id, Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be((503, ContactGrantorAuthorizationFilter.RevokeFailedReasonCode));
+        own.StateCode.Should().Be(0);
+        other.StateCode.Should().Be(0);
+        _dataverse.Updates.Should().BeEmpty();
+    }
+
+    /// <summary>Fix round 3g: a listed row needs its issuer and contact columns; an unread one is not shown (positive-only).</summary>
+    [Theory]
+    [InlineData("_sprk_grantedbycontact_value")]
+    [InlineData("_sprk_contact_value")]
+    public async Task List_DoesNotShowARowThatDidNotCarryItsIssuerOrContactColumn(string omitted)
+    {
+        _dataverse.SeedReadWithout(omitted, Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+
+        var result = await ContactGrantEndpoints.ListAsync(
+            new ContactGrantListQuery("project", ProjectId), _dataverse, _participations, Context(Ciam(ExternalAccessLevel.Collaborate)),
+            NullLogger<ContactGrantorAuthorizationFilter>.Instance, CancellationToken.None);
+
+        Ok<ContactIssuedGrantsResponse>(result).Grants.Should().BeEmpty();
     }
 
     [Fact]
@@ -1681,8 +1748,10 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         {
             Id = id ?? NextId(),
             ContactId = contactId,
+            OrganizationId = null,
             ProjectId = onMatter ? null : rootId,
             MatterId = onMatter ? rootId : null,
+            WorkAssignmentId = null,
             AccessLevel = level,
             ExpiresDate = expiry,
             StateCode = 0,
@@ -1697,13 +1766,47 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         return row;
     }
 
+    /// <summary>
+    /// Fix round 3g: <see cref="Seed"/>, and every read of that row (by id or in a query) then returns it WITHOUT the named column
+    /// (absent, as opposed to an explicit null), as the Web API would if the column were not returned.
+    /// </summary>
+    public ExternalGrantRow SeedReadWithout(string omittedColumn, Guid contactId, Guid rootId, int level, DateOnly expiry, Guid? issuedByContact)
+    {
+        var seeded = Seed(contactId, rootId, level, expiry, issuedByContact);
+        _omittedColumnOfRow[seeded.Id] = omittedColumn;
+        return seeded;
+    }
+
+    private readonly Dictionary<Guid, string> _omittedColumnOfRow = new();
+
+    private string WithOmittedColumns(string json)
+    {
+        if (_omittedColumnOfRow.Count == 0) return json;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+        var objects = node is System.Text.Json.Nodes.JsonArray array
+            ? array.OfType<System.Text.Json.Nodes.JsonObject>()
+            : new[] { (System.Text.Json.Nodes.JsonObject)node };
+        foreach (var obj in objects)
+        {
+            if (obj["sprk_externalrecordaccessid"]?.GetValue<Guid>() is { } id && _omittedColumnOfRow.TryGetValue(id, out var column))
+                obj.Remove(column);
+        }
+
+        return node.ToJsonString();
+    }
+
     public ExternalGrantRow SeedOrganization(Guid organizationId, Guid projectId, int level, DateOnly expiry)
     {
         var row = new ExternalGrantRow
         {
             Id = NextId(),
+            ContactId = null,
             OrganizationId = organizationId,
             ProjectId = projectId,
+            MatterId = null,
+            WorkAssignmentId = null,
+            GrantedBySystemUserId = null,
+            GrantedByContactId = null,
             AccessLevel = level,
             ExpiresDate = expiry,
             StateCode = 0,
@@ -1739,7 +1842,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             _ => Array.Empty<object>(),
         };
 
-        return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
+        return Task.FromResult(JsonSerializer.Deserialize<List<T>>(WithOmittedColumns(JsonSerializer.Serialize(rows)))!);
     }
 
     /// <remarks>
@@ -1770,7 +1873,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         if (row is null)
             throw new HttpRequestException("Not found.", null, HttpStatusCode.NotFound);
 
-        return Task.FromResult(JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(row)));
+        return Task.FromResult(JsonSerializer.Deserialize<T>(WithOmittedColumns(JsonSerializer.Serialize(row))));
     }
 
     /// <summary>Runs just before a grant row is created — to stage a concurrent writer racing the same key.</summary>

@@ -12,6 +12,8 @@ import {
   createChildRecordViaBff,
   createRecordViaBffWithWarnings,
   FILING_ONLY_REFILE_TABLES,
+  isBffChildCreateTable,
+  isBffChildRefileTable,
   isFilingKey,
   splitFilingPayload,
   updateChildRecordViaBff,
@@ -53,7 +55,6 @@ describe('BFF child-record writes (task 147 r1)', () => {
         'sprk_analysis',
         'sprk_document',
         'sprk_event',
-        'sprk_invoice',
         'sprk_memo',
         'sprk_reportcard',
         'sprk_todo',
@@ -64,6 +65,23 @@ describe('BFF child-record writes (task 147 r1)', () => {
         'sprk_project',
       ].sort()
     );
+  });
+
+  // ebilling-r1 task 096b (EB-D-201): invoices are created only by submission.
+  it.each(['sprk_invoice', 'sprk_billingevent'])(
+    'does not route a create of %s through the BFF (invoices and lines are created only by submission)',
+    async table => {
+      expect(isBffChildCreateTable(table)).toBe(false);
+      const fetchFn = jest.fn();
+      await expect(createRecordViaBffWithWarnings(fetchFn, BFF, table, { sprk_name: 'x' })).rejects.toThrow(
+        /not created through the BFF/
+      );
+      expect(fetchFn).not.toHaveBeenCalled();
+    }
+  );
+
+  it('still re-files an invoice through the BFF (re-file is unchanged)', () => {
+    expect(isBffChildRefileTable('sprk_invoice')).toBe(true);
   });
 
   it("returns the server's warnings with the id, and none when the body carries none (task 046)", async () => {

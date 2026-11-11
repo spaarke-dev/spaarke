@@ -89,12 +89,14 @@ public class RecordTableRulesRegistryGuardTests
 
     // ── Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table only its writer creates is on no fixed
     //    create accept-list (the service would refuse it there; RecordTableRule.CreatedOnlyByItsWriter). ─────────────────────
+    //    ebilling-r1 task 164a-1 (uac-r2 Q6): nor is a table whose generic create alone is refused (an invoice line); the
+    //    detector reads RecordTableRule.GenericCreateRefused, which covers both.
 
     /// <summary>The detector: each create table <paramref name="writerOnly"/> names.</summary>
     private static IReadOnlyList<string> WriterOnlyTablesIn(IEnumerable<string> createTables, Func<string, bool> writerOnly) =>
         createTables.Where(writerOnly).ToList();
 
-    private static bool IsWriterOnly(string table) => RecordTableRules.Find(table) is { CreatedOnlyByItsWriter: true };
+    private static bool IsWriterOnly(string table) => RecordTableRules.Find(table) is { GenericCreateRefused: true };
 
     [Fact]
     public void NoCreateTable_IsOneOnlyItsWriterCreates()
@@ -105,14 +107,15 @@ public class RecordTableRulesRegistryGuardTests
             "Expected the three ontology writer tables to be flagged; the guard would check nothing.");
         Assert.True(found.Count == 0,
             "These create tables are created only by their writers (RecordTableRule.CreatedOnlyByItsWriter, owner decision " +
-            "D-204), so no fixed create accept-list may name them: " + string.Join(", ", found));
+            "D-204; an invoice line: RecordTableRule.GenericCreateOnlyRefused, ebilling-r1 task 164a-1), so no fixed create " +
+            "accept-list may name them: " + string.Join(", ", found));
     }
 
     [Fact]
     public void WriterOnlyGuard_MustFire_ACreateListNamingAWriterOnlyTable_IsReported()
     {
-        Assert.Equal(["sprk_signal", "SPRK_BudgetRevision"],
-            WriterOnlyTablesIn(CreateTables().Append("sprk_signal").Append("SPRK_BudgetRevision"), IsWriterOnly));
+        Assert.Equal(["sprk_signal", "SPRK_BudgetRevision", "sprk_billingevent"],
+            WriterOnlyTablesIn(CreateTables().Append("sprk_signal").Append("SPRK_BudgetRevision").Append("sprk_billingevent"), IsWriterOnly));
     }
 
     [Fact]

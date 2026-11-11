@@ -61,7 +61,7 @@ public sealed class LineCodingService : ILineCodingService
         ArgumentNullException.ThrowIfNull(request.Lines);
         RequireUniqueKeys(request.Lines);
 
-        var codeSet = await _resolver.ResolveAsync(request.CoreRecord, request.Lines, cancellationToken).ConfigureAwait(false);
+        var codeSet = await _resolver.ResolveAsync(request.CoreRecord, request.Lines, request.IncludeFirmCodes, cancellationToken).ConfigureAwait(false);
         var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
         var chunkSize = Math.Clamp(settings.CodingChunkSize, MinChunkSize, MaxChunkSize);
 

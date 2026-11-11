@@ -56,6 +56,15 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlySet<string> AppendOnlyTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
 
+    /// <summary>
+    /// DEF-061 fix round 1: <c>sprk_procedureversion</c> is in the registry only for its writer-only publish stamp
+    /// (<see cref="RecordTableRule.WriterOnlyColumns"/>). A Procedure Version is created, owned and changed by <c>ProcedureService</c>, so
+    /// registering it must not make Repair read, map into or re-own it: it stays exactly what it was before the entry, a table this service
+    /// does not create (<see cref="RecordRepairReason.TableUnsupported"/>, neutral wording; not "append-only", which it is not).
+    /// </summary>
+    private static readonly IReadOnlySet<string> NotCreatedHereTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_procedureversion" };
+
     /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
     internal const string RepairSourceUnreadableWarning =
         "The related record could not be read, so no fields were copied from it.";
@@ -86,7 +95,7 @@ internal sealed partial class RecordCreationService
         }
 
         var rule = TableRules(table);
-        if (rule is null)
+        if (rule is null || NotCreatedHereTables.Contains(table))
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is not one this service creates; not repaired", table, id);
             return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableUnsupported);

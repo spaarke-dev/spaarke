@@ -3,22 +3,26 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Resolution;
 
 /// <summary>
-/// <see cref="IInvoiceResolutionService"/> over Dataverse: reads the firm's roster and the rate rows in force once per invoice, then runs the
-/// pure resolvers (<see cref="TimekeeperMatcher"/>, <see cref="RateCardResolver"/>, <see cref="ArithmeticChecker"/>) and the
-/// <see cref="CombinedConfidenceCalculator"/>.
+/// <see cref="IInvoiceResolutionService"/> over Dataverse: reads the firm's roster, the Procedure Versions chosen for the invoice (082) and the
+/// rate rows of their cards in force, once per invoice, then runs the pure resolvers (<see cref="TimekeeperMatcher"/>,
+/// <see cref="RateCardResolver"/>, <see cref="ArithmeticChecker"/>) and the <see cref="CombinedConfidenceCalculator"/>.
 /// </summary>
 /// <remarks>
-/// <para><b>Reads.</b> At most two query streams per invoice, each paged: the firm's <c>sprk_timekeeper</c> rows (all statuses, so an
-/// unapproved person can be told from an unknown one), and the <c>sprk_ratecardrate</c> rows of the firm's Published cards in force
-/// across the invoice's line dates, joined to their card. A read is skipped when no line needs it (no timekeeper names / no matched
-/// fee line with a date). Line count never changes the number of reads. Firm, status and scope conditions are in the query to keep the
-/// read small; the resolvers apply them again on the rows, so a query that returned too much cannot change a result.</para>
-/// <para><b>Failure.</b> A Dataverse failure propagates (a resolution made from half-read reference data would be wrong either way);
-/// only the AI-assisted name match degrades, to "unmatched".</para>
+/// <para><b>Reads.</b> Per invoice: the firm's <c>sprk_timekeeper</c> rows (all statuses, so an unapproved person can be told from an
+/// unknown one); the Procedure rows <see cref="ProcedureResolver"/> reads once (082; <see cref="ProcedureResolution.RulesOn"/> then runs in
+/// memory for each distinct line work date); and the <c>sprk_ratecardrate</c> rows of the Published cards of the Procedure Versions that
+/// resolution chose, in force across the invoice's line dates, joined to their card (085, model 7.1). A read is skipped when no line needs
+/// it (no timekeeper names / no matched fee line with a date / no version chosen). Line count never changes the number of reads. Firm,
+/// status and version conditions are in the query to keep the read small; the resolver applies them again on the rows, so a query that
+/// returned too much cannot change a result.</para>
+/// <para><b>Failure.</b> A Dataverse failure propagates (a resolution made from half-read reference data would be wrong either way), and so
+/// does a <see cref="ProcedureResolutionFaultException"/>: no rate is used on a partial set. Only the AI-assisted name match degrades, to
+/// "unmatched".</para>
 /// <para><b>Logging</b> carries counts only, never names or amounts (ADR-015).</para>
 /// </remarks>
 public sealed class InvoiceResolutionService : IInvoiceResolutionService
@@ -30,12 +34,8 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
 
     private const int PageSize = 5000;
 
-    private static readonly (string Column, CoreRecordKind Kind)[] ScopeColumns =
-    [
-        ("sprk_matter", CoreRecordKind.Matter),
-        ("sprk_project", CoreRecordKind.Project),
-        ("sprk_workassignment", CoreRecordKind.WorkAssignment),
-    ];
+    /// <summary><c>sprk_ratecard.sprk_procedureversion</c>: the Procedure Version a card belongs to (D-120: cards hang from it, not from a core record).</summary>
+    internal const string CardProcedureVersionColumn = "sprk_procedureversion";
 
     private readonly IGenericEntityService _entities;
     private readonly IEbillingSettingsReader _settings;
@@ -60,9 +60,10 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Header);
         ArgumentNullException.ThrowIfNull(input.Lines);
+        // The empty id is never "no firm" (task 095c-3: null is, and reads no roster or rate card).
         if (input.FirmId == Guid.Empty)
         {
-            throw new ArgumentException("The submission context has no firm, so no roster or rate card can be chosen.", nameof(input));
+            throw new ArgumentException("The submission context names the empty firm id; no roster or rate card can be chosen.", nameof(input));
         }
 
         var settings = await _settings.GetAsync(ct);
@@ -82,26 +83,54 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
                 .Select(x => new TimekeeperMatchRequest(x.Line.TimekeeperAsBilled.Value, x.Line.Date.Value))
                 .ToList();
 
-            var needsRoster = requests.Any(r => !string.IsNullOrWhiteSpace(r.BilledName) && r.LineDate.HasValue);
-            var roster = needsRoster ? await ReadRosterAsync(input.FirmId, ct) : [];
-            rosterRows = roster.Count;
-
-            var matches = await _matcher.MatchAsync(
-                input.FirmId, roster, input.TimekeeperSummaryNames, requests, settings.ReliabilityThreshold, ct);
-            for (var i = 0; i < feeLines.Count; i++)
+            if (input.FirmId is { } firmId)
             {
-                timekeepers[feeLines[i].Index] = matches[i];
+                var needsRoster = requests.Any(r => !string.IsNullOrWhiteSpace(r.BilledName) && r.LineDate.HasValue);
+                var roster = needsRoster ? await ReadRosterAsync(firmId, ct) : [];
+                rosterRows = roster.Count;
+
+                var matches = await _matcher.MatchAsync(
+                    firmId, roster, input.TimekeeperSummaryNames, requests, settings.ReliabilityThreshold, ct);
+                for (var i = 0; i < feeLines.Count; i++)
+                {
+                    timekeepers[feeLines[i].Index] = matches[i];
+                }
+            }
+            else
+            {
+                // Task 095c-3: no firm, so no roster to match against (and no AI-assisted match): the match is not established.
+                foreach (var (_, index) in feeLines)
+                {
+                    timekeepers[index] = new TimekeeperResolution
+                    {
+                        Stage = TimekeeperMatchStage.None,
+                        MatchConfidence = 0m,
+                        Reason = TimekeeperUnmatchedReason.None,
+                    };
+                }
             }
         }
 
-        // ── Rates (matched fee lines with a date): one rate read. ───────────────────────────────────────────
+        // ── Rates (matched fee lines with a date): one Procedure resolution, then one rate read. ────────────
         var dated = feeLines
             .Where(x => timekeepers[x.Index].IsMatched && x.Line.Date.Value.HasValue)
             .Select(x => x.Line.Date.Value!.Value)
             .ToList();
-        IReadOnlyList<RateRow> rates = dated.Count > 0
-            ? await ReadRatesAsync(input.FirmId, input.CoreRecord, dated.Min(), dated.Max(), ct)
-            : [];
+        IReadOnlyList<RateRow> rates = [];
+        var chosenByDate = new Dictionary<DateOnly, IReadOnlyDictionary<Guid, ProcedureRank>>();
+        if (dated.Count > 0 && input.FirmId is { } rateFirm)
+        {
+            // 085: the versions come from 082's resolver, once per invoice; a fault propagates (the job retries), so no rate is ever
+            // judged on a partial set. RulesOn runs in memory, once per distinct work date.
+            var procedures = await ProcedureResolver.ReadAsync(_entities, _logger, input.CoreRecord, rateFirm, ct);
+            foreach (var date in dated.Distinct())
+            {
+                chosenByDate[date] = procedures.RulesOn(date).Procedures.ToDictionary(p => p.ProcedureVersionId, p => p.Rank);
+            }
+
+            var versionIds = chosenByDate.Values.SelectMany(v => v.Keys).Distinct().ToList();
+            rates = versionIds.Count > 0 ? await ReadRatesAsync(rateFirm, versionIds, dated.Min(), dated.Max(), ct) : [];
+        }
 
         // ── Assemble: per line, per field. ──────────────────────────────────────────────────────────────────
         var lines = new List<ResolvedInvoiceLine>(input.Lines.Count);
@@ -115,7 +144,9 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
             if (line.LineType == InvoiceLineType.Fee)
             {
                 timekeeper = timekeepers[i];
-                rate = RateCardResolver.Resolve(rates, input.FirmId, input.CoreRecord, timekeeper, line.Date.Value);
+                rate = input.FirmId is { } lineFirm
+                    ? RateCardResolver.Resolve(rates, lineFirm, ChosenOn(chosenByDate, line.Date.Value), timekeeper, line.Date.Value)
+                    : new RateResolution { Status = RateResolutionStatus.NotFound, Reason = RateNotFoundReason.TimekeeperUnmatched };
                 if (!timekeeper.IsMatched)
                 {
                     findingInputs.Add(new ApprovedTimekeeperFindingInput(
@@ -266,30 +297,25 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
         return rows;
     }
 
+    private static IReadOnlyDictionary<Guid, ProcedureRank> ChosenOn(
+        Dictionary<DateOnly, IReadOnlyDictionary<Guid, ProcedureRank>> chosenByDate, DateOnly? date) =>
+        date is { } d && chosenByDate.TryGetValue(d, out var chosen) ? chosen : new Dictionary<Guid, ProcedureRank>();
+
     private async Task<IReadOnlyList<RateRow>> ReadRatesAsync(
-        Guid firmId, CoreRecordReference? coreRecord, DateOnly earliest, DateOnly latest, CancellationToken ct)
+        Guid firmId, IReadOnlyCollection<Guid> procedureVersionIds, DateOnly earliest, DateOnly latest, CancellationToken ct)
     {
-        var query = BuildRateQuery(firmId, coreRecord, earliest, latest);
+        var query = BuildRateQuery(firmId, procedureVersionIds, earliest, latest);
 
         var rows = new List<RateRow>();
         await foreach (var row in PagesAsync(query, ct))
         {
-            var scopes = new List<CoreRecordReference>();
-            foreach (var (column, kind) in ScopeColumns)
-            {
-                if (Aliased(row, column) is EntityReference scope)
-                {
-                    scopes.Add(new CoreRecordReference(kind, scope.Id));
-                }
-            }
-
             rows.Add(new RateRow(
                 RateId: row.Id,
                 CardId: row.GetAttributeValue<EntityReference>("sprk_ratecard")?.Id ?? Guid.Empty,
                 CardFirmId: (Aliased(row, "sprk_firm") as EntityReference)?.Id,
                 CardPublished: (Aliased(row, "statuscode") as OptionSetValue)?.Value == RateCardStatus.Published
                     && (Aliased(row, "statecode") as OptionSetValue)?.Value == 0,
-                CardScopes: scopes,
+                ProcedureVersionId: (Aliased(row, CardProcedureVersionColumn) as EntityReference)?.Id,
                 CardEffectiveFrom: ToDate(Aliased(row, "sprk_effectivefrom") as DateTime?),
                 CardEffectiveTo: ToDate(Aliased(row, "sprk_effectiveto") as DateTime?),
                 RateActive: row.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0,
@@ -304,8 +330,15 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
         return rows;
     }
 
-    internal static QueryExpression BuildRateQuery(Guid firmId, CoreRecordReference? coreRecord, DateOnly earliest, DateOnly latest)
+    /// <summary>
+    /// The active rates of the firm's Published cards whose Procedure Version is one of <paramref name="procedureVersionIds"/> (the versions
+    /// 082 chose; model 7.1), in force across [earliest, latest]. No core-record lookup of the card is read: a card belongs to a Procedure
+    /// Version, not to a core record (D-120).
+    /// </summary>
+    internal static QueryExpression BuildRateQuery(
+        Guid firmId, IReadOnlyCollection<Guid> procedureVersionIds, DateOnly earliest, DateOnly latest)
     {
+        ArgumentNullException.ThrowIfNull(procedureVersionIds);
         var query = new QueryExpression(RateEntity)
         {
             ColumnSet = new ColumnSet(
@@ -321,29 +354,12 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
         var card = query.AddLink(RateCardEntity, "sprk_ratecard", "sprk_ratecardid", JoinOperator.Inner);
         card.EntityAlias = CardAlias;
         card.Columns = new ColumnSet(
-            "sprk_firm", "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_effectivefrom", "sprk_effectiveto",
-            "statecode", "statuscode");
+            CardProcedureVersionColumn, "sprk_firm", "sprk_effectivefrom", "sprk_effectiveto", "statecode", "statuscode");
         card.LinkCriteria = new FilterExpression(LogicalOperator.And);
         card.LinkCriteria.AddCondition("sprk_firm", ConditionOperator.Equal, firmId);
         card.LinkCriteria.AddCondition("statuscode", ConditionOperator.Equal, RateCardStatus.Published);
+        card.LinkCriteria.AddCondition(CardProcedureVersionColumn, ConditionOperator.In, procedureVersionIds.Cast<object>().ToArray());
         card.LinkCriteria.AddFilter(Overlapping("sprk_effectivefrom", "sprk_effectiveto", earliest, latest));
-
-        // Firm-wide cards, plus the cards scoped to this invoice's core record. Cards scoped to other core records are not read.
-        var scope = new FilterExpression(LogicalOperator.Or);
-        var firmWide = new FilterExpression(LogicalOperator.And);
-        foreach (var (column, _) in ScopeColumns)
-        {
-            firmWide.AddCondition(column, ConditionOperator.Null);
-        }
-
-        scope.AddFilter(firmWide);
-        if (coreRecord is not null)
-        {
-            var column = ScopeColumns.First(s => s.Kind == coreRecord.Kind).Column;
-            scope.AddCondition(column, ConditionOperator.Equal, coreRecord.Id);
-        }
-
-        card.LinkCriteria.AddFilter(scope);
         return query;
     }
 

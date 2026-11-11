@@ -130,6 +130,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
 - 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
+- 2026-11-08 — Owner ruling on D-70 (task 130-0, final): firm-match policy. An external contact sees only its own firms' invoices on records it can access; a contact with no firm sees no invoices; a firm read that fails hides everything. (An earlier relayed ruling to the contrary was withdrawn the same day.)
 - 2026-10-15 — D-71: legacy Finance extraction deleted; confirm route redirected into 044; ontology-r1 confirmed no dependency 2026-10-15; keep `sprk_totalamount` + matter/project lookup for `FinanceBaseValues`; send the 050 PR to ontology-r1 for review.
 
 - 2026-10-15 — D-72 (F-2): approve with undecided Clean lines allowed (Accepted in bulk, not labels).
@@ -140,6 +141,13 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-77: any user with Write on the invoice decides lines.
 - 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
+  **Amended 2026-11-09 by EB-D-209 (owner):** with the flag off the firm sees the reason only: no clause text, no section reference, **no rule set name**.
+- 2026-11-09 — EB-D-210 (owner, option C): every rejection a firm sees carries its reason code plus a description from a closed firm-safe text table in code (every `RejectCapableReasons` code, guard-enforced, no interpolated data, generic fallback), shown whatever the flag; a non-blank `sprk_signal.sprk_firmreason` replaces it. The DEF-060 writer is in R1 scope (design reviewed by uac-r2 and ontology-r1 before build). Task 130d.
+- 2026-11-10 — EB-D-211 (owner, task 116 gate): `sprk_procedureversion.sprk_notconverted` stays Yes/No and means "drafted" (written Yes last); a new field-secured memo column on `sprk_procedureversion` holds the not-converted JSON list. Additive, added by 080's script; no dev column delete.
+- 2026-11-10 — EB-D-212 (owner, DEF-060 option A): the firm override text is a per-rule admin description `sprk_policyversion.sprk_firmdescription`, copied onto the Signal with its reason code at create. The design goes to uac-r2 and ontology-r1 before it is built.
+- 2026-11-10 — EB-D-213 (owner, DEF-060): `sprk_policyversion.sprk_firmdescription` is NOT field-secured (the ontology tables carry no field security profiles); firm safety rests on the shared validator run by the mapper, the replay and the projection, and the BFF refuses a change to a published version's text.
+- 2026-11-10 — EB-D-214 (owner, task 116): a successful replacement upload on a Draft Procedure Version makes it draftable again; the upload clears the drafted state before staging the file and is refused if the clear fails.
+- 2026-11-10 — EB-D-215 (owner, F3b): the invoice walk has its own bound of 5 hops (`InvoiceLinks`), the task 188 narrowing stays at 3, only child-to-child hops count, a service request counts as a hop, and a row past the bound fails closed.
 - 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
 - 2026-10-15 — D-81: extraction GO on Content Understanding with a preview exception (path A): preview analyzer primary, GA fallback analyzer kept in step and selectable by config, REST client for both versions (no beta SDK), 161 / 162 measure both.
 - 2026-10-17 — D-96: an invoice core-lookup change is refused if its lines name another core; the line check runs as the app identity.
@@ -161,13 +169,17 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
 
 ## 4. Coordination
 
+- **This project's own session is `ebilling-r1`** (a Claude Desktop session, from 2026-11-10, replacing the VS Code session `spaarke-wt-ebilling-r1-c7`). Peers address it by that name. Only one session writes to this worktree at a time.
+
 - **spaarke-ontology-platform-r1** owns the Signals, rules and Decision Record code: `Services/Signals/**`, `FinanceBaseValues.cs`, `PolicyVersionValidator`, `RuleBodyDescriber`, `DecisionActionCatalog`.
   - **#1111 merged to master 2026-10-15 (`f292ad119`)** and was merged into `work/ebilling-r1` the same day. It provides the Signal writer, rule grammar and evaluator, the Decision Record writer (`WriteAsync` for humans, `WriteGateDecisionAsync` for the gate) and `GET /api/v1/signals/worklist`. ontology-r1 reviews eBilling PRs into master.
   - ontology-r1 reviews FR-09, FR-15, FR-24 and FR-30, plus the `CountedInvoiceStatuses` change in 015.
   - Notify ontology-r1 when the `sprk_invoicestatus` retirement PR and the schema PRs open.
-- **unified-access-control-r2** reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
+- **unified-access-control-r2** (session **`uac-r2`**, a Claude Code desktop session, from 2026-11-08, replacing `spaarke-wt-unified-access-control-r2-20`; a held message means the owner approves it there) reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
+- **External Access R4** (successor to R3, which is closed; session **`spa-r4`** from 2026-11-08, replacing `spaarke-wt-spa-external-access-platform-ad`; worktree spaarke-wt-SPA-external-access-platform-r4; it receives the 082c-3/114 master PR review) wants a copy of anything that changes the SPA invoice or record-modal UI.
 - **spaarke-SPA-external-access-platform-r3** shares the external SPA (`src/client/external-spa/**`) and `deploy-external-spa.yml`. Coordinate on the Invoices widget and the SPA notification feed.
-- **customer-provisioning-orchestration-r1** received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
+- **spaarkeai-word-add-in-r1** (session **`word-add-in-r1`**, a desktop session, from 2026-11-08) is owed the master SHA of the dev deploy carrying 095c-2..4 (it releases pane PR #2552) and the 095a/095b/151e PR + SHA.
+- **customer-provisioning-orchestration-r1** (session **`provisioning-r1`**, a desktop session, from 2026-11-08; owed: the master SHA plus the profile grants on `sprk_totalamount`/`sprk_approvedtotal` after 166 merges, and the 089d option R SHA for H7c #2429) received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
 - **notification-spine-r1 / ADR-047** — notifications (132) go through the spine.
 - **spaarkeai-tuning-and-feedback-r1** consumes our correction records later. Do not build anything for it in R1 beyond the D-64 record.
 - **Prototype** (`spaarke-prototype/projects/ebilling.r1`) is the reference UI for 108–111. Its components are mocks: map them to real shared components (WizardShell, FormModal, ConsoleKit, StatusBadge, AiFieldTag, PanelSplitter / useTwoPanelLayout, DataGrid). Never import from the prototype repo.

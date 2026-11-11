@@ -345,6 +345,7 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         await using var host = await Host.StartAsync();
         host.GrantRights();
         host.World.SetSubmission(InvoiceSubmissionStatus.Accepted, null);
+        host.World.SetRecordedKind(SubmissionEvaluationKind.Accepted); // task 165a: an Accepted outcome is recorded as one
 
         var response = await host.SendAsync(Request("POST", Url("override"), ReasonBody()));
 

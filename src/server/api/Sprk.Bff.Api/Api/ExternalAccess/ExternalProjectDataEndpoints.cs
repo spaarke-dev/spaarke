@@ -120,8 +120,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get a single Secure Project by ID")
             .Produces<ExternalProjectDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/documents
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
@@ -580,12 +579,17 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            return DenyProject();
 
+        // Fix round 3: a project in the caller's set that is no longer there gets the same response, body included.
         var project = await dataService.GetProjectByIdAsync(id, ct);
-        return project is null ? Results.NotFound() : Results.Ok(project);
+        return project is null ? DenyProject() : Results.Ok(project);
     }
+
+    /// <summary>The ONE refusal of the single-project read: no Read on it, or it is not there.</summary>
+    private static IResult DenyProject() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "You do not have access to this project");
 
     // -------------------------------------------------------------------------------------------
     // Documents on every core record (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
@@ -623,7 +627,10 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
 
-        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct);
+        // Task 130-0 fix round 1: a document that belongs to an invoice the caller may not see (sprk_invoice or sprk_relatedinvoice)
+        // is hidden, even when it is also filed under this record (one seam call per page).
+        var documents = await HideInvoiceLinkedAsync(
+            await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct), callerContext, hideInvoices, logger, "documents", ct);
         return Results.Ok(new ExternalDocumentListResponse
         {
             Value = documents.Value,
@@ -684,7 +691,10 @@ public static class ExternalProjectDataEndpoints
         //     downloaded it through P's route.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
         var documentName = document.DocumentName;
-        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
+        var (readable, invoiceFaulted) = await IsDocumentReadableUnderAsync(
+            document, documentId, id, callerContext, dataService, ct, hideInvoices, logger);
+        if (invoiceFaulted) return InvoiceUnreadableProblem();
+        if (!readable)
         {
             logger.LogWarning(
                 "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
@@ -738,7 +748,8 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -754,7 +765,9 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        var todos = await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct);
+        // Task 130-0 fix round 1: a to-do that belongs to an invoice the caller may not see is hidden (one seam call per page).
+        var todos = await HideInvoiceLinkedAsync(
+            await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct), callerContext, hideInvoices, logger, "todos", ct);
         if (!callerContext.DataverseConfirmsWrites)
             return Results.Ok(todos);
 
@@ -1289,7 +1302,10 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.ServiceRequest:
                 try
                 {
-                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null, none);
+                    var serviceRequest = await RightsForServiceRequestAsync(
+                        caller, parentId, dataService, modules, withState: false, ct, hideInvoices);
+                    // F3b: a decision on the request's invoice that could not be made is the invoice-unreadable 503.
+                    return serviceRequest.InvoiceFaulted ? (none, InvoiceUnreadableProblem(), none) : (serviceRequest.Rights, null, none);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -1308,11 +1324,7 @@ public static class ExternalProjectDataEndpoints
                 {
                     // Same posture as the service request: an unreadable invoice is a fault (503), never "no access" and
                     // never access. Nothing has touched SPE or been written.
-                    return (none, Results.Problem(
-                        statusCode: StatusCodes.Status503ServiceUnavailable,
-                        title: "Invoice unavailable",
-                        detail: "The invoice could not be checked right now. Try again shortly.",
-                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }), none);
+                    return (none, InvoiceUnreadableProblem(), none);
                 }
             default:
                 return (none, null, none);
@@ -1343,28 +1355,40 @@ public static class ExternalProjectDataEndpoints
     /// <summary>The 503 reason code when an invoice's parents could not be read (task 031, owner option A).</summary>
     internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
 
+    /// <summary>The 503 answered when an invoice could not be checked (generic detail; leaks nothing). Since ebilling-r1 task 130-0
+    /// fix round 1 (K1) also the message routes' answer when the invoice decision faulted for a caller who reaches the invoice.</summary>
+    internal static IResult InvoiceUnreadableProblem() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Invoice unavailable",
+            detail: "The invoice could not be checked right now. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode });
+
     /// <summary>
     /// ebilling-r1 task 098: whether the (a') predicate leaves <paramref name="invoiceId"/> visible to <paramref name="caller"/>.
-    /// False when no predicate is given, when it hides the invoice, and when its read failed (fail closed).
+    /// Not visible when no predicate is given, when it hides the invoice, and when its read failed (fail closed).
+    /// Task 130-0 fix round 1 (K1): <c>Faulted</c> says the read failed (<see cref="InvoiceVisibilityResult.Faulted"/>), so a caller
+    /// already known to reach the invoice can be told "could not check" (503) rather than "no access".
     /// </summary>
-    private static async Task<bool> InvoiceVisibleToAsync(
+    private static async Task<(bool Visible, bool Faulted)> InvoiceVisibleToAsync(
         CallerPrincipal caller, Guid invoiceId, ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
     {
         if (hideInvoices is null)
         {
             logger.LogError(
                 "[EXT-INVOICE-DOCS] No invoice (a') predicate is configured; invoice {InvoiceId} is denied (fail closed).", invoiceId);
-            return false;
+            return (false, false);
         }
 
         var decision = await hideInvoices(caller, new[] { invoiceId }, ct).ConfigureAwait(false);
         if (decision.IsVisible(invoiceId))
-            return true;
+            return (true, false);
 
         logger.LogInformation(
             "[EXT-INVOICE-DOCS] Invoice {InvoiceId} hidden by the (a') predicate ({Reasons}); denied like a missing invoice.",
             invoiceId, decision.HiddenSummary());
-        return false;
+        // Fix round 3 (Q2): this invoice's own failed decision is a fault too, not only a whole failed read.
+        return (false, decision.IsFaultedFor(invoiceId));
     }
 
     /// <summary>
@@ -1402,24 +1426,43 @@ public static class ExternalProjectDataEndpoints
         ExternalInvoiceHiding? hideInvoices = null)
     {
         var denied = new ConfirmedRights(Spaarke.Dataverse.AccessRights.None, Spaarke.Dataverse.AccessRights.None);
-        if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
+        if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any()
+            && caller.GetAccessibleWorkAssignmentIds().Count == 0)
             return denied;
 
         var parents = await dataService.GetInvoiceParentsAsync(invoiceId, ct);
         if (parents is not { } invoiceParents)
             return denied;
 
-        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
-        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
-        // and a failed predicate read deny too (fail closed; never "unknown means visible").
-        if (!await InvoiceVisibleToAsync(caller, invoiceId, hideInvoices, dataService.Logger, ct).ConfigureAwait(false))
-            return denied;
-
+        // Task 130-0 fix round 2 (K3, D-28): the invoice's core record is exactly one of matter, project or work assignment, so the
+        // union covers all three, through the same RightsForRoot the root routes use.
         var rights = Spaarke.Dataverse.AccessRights.None;
         if (invoiceParents.MatterId is { } matterId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, matterId);
         if (invoiceParents.ProjectId is { } projectId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
+        if (invoiceParents.WorkAssignmentId is { } workAssignmentId)
+            rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, workAssignmentId);
+
+        // Task 130-0 fix round 2 (K1): no Read through any parent is the uniform refusal BEFORE the invoice decision, so the seam is
+        // asked only for a caller who reaches the invoice (no timing difference). The steps below only widen a parent that holds Read.
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return denied;
+
+        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
+        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
+        // and a failed predicate read deny too (fail closed; never "unknown means visible").
+        // Task 130-0 fix round 1 (K1): a failed predicate read is the InvoiceUnreadableReasonCode 503 instead, but only AFTER the record
+        // check: the invoice exists (its parents were read) and the caller holds Read through one of them. Any other caller gets the
+        // uniform `denied`, so the 503 is no existence oracle.
+        var (invoiceVisible, invoiceFaulted) =
+            await InvoiceVisibleToAsync(caller, invoiceId, hideInvoices, dataService.Logger, ct).ConfigureAwait(false);
+        if (!invoiceVisible)
+        {
+            if (invoiceFaulted)
+                throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+            return denied;
+        }
 
         // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
         // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.
@@ -1461,26 +1504,27 @@ public static class ExternalProjectDataEndpoints
     /// <see cref="ExternalDataService.ServiceRequestOpenState.Unknown"/> unless it was asked for AND the caller holds
     /// rights: a caller without rights never has a state to use.
     /// </summary>
-    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State)>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State, bool InvoiceFaulted)>
         RightsForServiceRequestAsync(
             CallerPrincipal caller,
             Guid serviceRequestId,
             ExternalDataService dataService,
             ExternalModuleRegistry modules,
             bool withState,
-            CancellationToken ct)
+            CancellationToken ct,
+            ExternalInvoiceHiding? hideInvoices = null)
     {
         const ExternalDataService.ServiceRequestOpenState noState = ExternalDataService.ServiceRequestOpenState.Unknown;
         var entity = ExternalDataService
             .GetDocumentParentBinding(ExternalDataService.DocumentParentKind.ServiceRequest).EntityLogicalName;
         var module = modules.FindByEntity(entity);
         if (module is null)
-            return (Spaarke.Dataverse.AccessRights.None, noState);
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
 
         // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
         // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
         if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
-            return (Spaarke.Dataverse.AccessRights.None, noState);
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
 
         // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
         // DataverseUnavailableException, which the caller turns into 503.
@@ -1497,9 +1541,24 @@ public static class ExternalProjectDataEndpoints
             requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
         }
 
-        return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
-            ? (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state)
-            : (Spaarke.Dataverse.AccessRights.None, noState);
+        if (requester is not { } requesterId || !module.IsRecordAccessible(caller, requesterId))
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
+
+        // ebilling-r1 task 130-0b F3b (uac-r2 ruling): a service request follows the child rule - one that links to an invoice the
+        // caller may not see is refused like an absent one (the uniform refusal), and a decision that could not be made is the
+        // invoice-unreadable 503. Only a caller who passed the requester gate reaches this read, so it is no existence oracle.
+        var links = await dataService.GetServiceRequestInvoiceLinksAsync(serviceRequestId, ct);
+        if (links is { Length: > 0 })
+        {
+            var decided = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+                caller, links, hideInvoices, dataService.Logger, "service request", ct);
+            if (decided == ExternalDataService.InvoiceLinkedRowState.Faulted)
+                return (Spaarke.Dataverse.AccessRights.None, noState, true);
+            if (decided == ExternalDataService.InvoiceLinkedRowState.Hidden)
+                return (Spaarke.Dataverse.AccessRights.None, noState, false);
+        }
+
+        return (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state, false);
     }
 
     /// <summary>The noun a document parent is named by in a ProblemDetails detail.</summary>
@@ -1523,13 +1582,21 @@ public static class ExternalProjectDataEndpoints
     /// or ancestor Restricted, or an internal-only / non-Open communication on the bounded parent walk). The secure flags
     /// of its unreadable linked roots are read app-only, only once the document is known to be under the route parent; a
     /// document not under it is refused without that read, and one the root rule refuses without the narrowing read.
+    /// <para>ebilling-r1 task 130-0 fix round 1: AND every invoice the document links to (<c>sprk_invoice</c>,
+    /// <c>sprk_relatedinvoice</c>; <see cref="InvoiceLinks"/>) is visible to the caller (<paramref name="hideInvoices"/>, the
+    /// caller-aware seam). A document of an invoice the caller may not see, no seam and a faulted decision all give the same
+    /// refusal, decided last, so the answer cannot tell why.</para>
+    /// <para>Task 130-0 fix round 2 (fault ruling) and round 3 (Q2): a document that passes every other check but whose invoice
+    /// decision could not be made (the caller's firms could not be read, no seam is configured, or a linked invoice's own decision
+    /// failed) is not refused: <c>InvoiceFaulted</c> is set and the route answers the invoice-unreadable 503. A linked invoice that is
+    /// decided not visible keeps the refusal.</para>
     /// </summary>
-    private static async Task<bool> IsDocumentReadableUnderAsync(
+    private static async Task<(bool Readable, bool InvoiceFaulted)> IsDocumentReadableUnderAsync(
         ExternalDataService.DocumentScopeRead document, Guid documentId, Guid routeParentId, CallerPrincipal caller,
-        ExternalDataService dataService, CancellationToken ct)
+        ExternalDataService dataService, CancellationToken ct, ExternalInvoiceHiding? hideInvoices, ILogger logger)
     {
         if (!document.IsUnder(routeParentId))
-            return false;
+            return (false, false);
         // Task 187: the live roots of the document's other parents join its own root links (one bounded walk, then the one
         // secure-flag read over the union).
         var live = await dataService.ReadLiveParentRootsAsync(new[] { document.Roots.LiveParents }, ct);
@@ -1537,10 +1604,67 @@ public static class ExternalProjectDataEndpoints
         var flags = await dataService.ReadSecureRootFlagsAsync(
             caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
         if (!document.IsReadableUnder(routeParentId, caller, flags, live))
-            return false;
+            return (false, false);
         // Task 188: the same refusal for a document the narrowing hides, so the answer cannot tell why.
-        return await dataService.IsDocumentVisibleAsync(caller, documentId, document, ct);
+        if (!await dataService.IsDocumentVisibleAsync(caller, documentId, document, ct))
+            return (false, false);
+        // Task 130-0 fix round 1: the same refusal for a document whose invoice the caller may not see.
+        // Fix round 2: a faulted decision is the 503, not the refusal.
+        // Fix round 3 (Q2): a decision that could not be made, whether the caller's firms or this document's own invoice decision,
+        // is the 503; only a decided "not visible" is the refusal.
+        // F3b: and by EVERY invoice link up its parent document chain (the list's walk and bound); a chain that cannot be read or
+        // decided is the same 503 unless a read link is decided not visible.
+        InvoiceLinks.RowInvoiceLinks chain;
+        try
+        {
+            chain = await dataService.ReadDocumentAncestorLinksAsync(documentId, document.Roots.Row, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return (false, true);
+        }
+
+        var links = ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, document.Roots.Row)
+            .Concat(chain.Invoices.Where(invoice => invoice != ExternalDocumentNarrowing.UnreadableLink))
+            .Distinct()
+            .ToList();
+        var state = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+            caller, links, hideInvoices, logger, "document", ct, chain.ChainUndecidable);
+        return (state == ExternalDataService.InvoiceLinkedRowState.Visible, state == ExternalDataService.InvoiceLinkedRowState.Faulted);
     }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: <paramref name="page"/> minus the rows that belong to an invoice <paramref name="caller"/> may
+    /// not see (<see cref="ExternalDataService.HideInvoiceLinkedRowsAsync"/>: one seam call for the page; a fault hides every
+    /// invoice-linked row and the list says <c>Truncated</c>). Every other field of the response is kept.
+    /// </summary>
+    private static async Task<ExternalCollectionResponse<T>> HideInvoiceLinkedAsync<T>(
+        ExternalCollectionResponse<T> page, CallerPrincipal caller, ExternalInvoiceHiding? hideInvoices, ILogger logger,
+        string surface, CancellationToken ct)
+    {
+        var (visible, truncated) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            caller, page.Value, InvoiceLinksOfDto, hideInvoices, logger, surface, ct);
+        return visible.Count == page.Value.Count
+            ? page
+            : new ExternalCollectionResponse<T>
+            {
+                Value = visible,
+                Truncated = page.Truncated || truncated,
+                CanCreate = page.CanCreate,
+            };
+
+        // Task 130-0 fix round 2 (K1): a row whose links were never set (null) is hidden, as an unreadable link is.
+        static IReadOnlyList<Guid> InvoiceLinksOfDto(T row) => (row switch
+        {
+            ExternalTodoDto todo => todo.InvoiceLinks,
+            ExternalEventDto calendarEvent => calendarEvent.InvoiceLinks,
+            ExternalDocumentDto document => document.InvoiceLinks,
+            _ => throw new InvalidOperationException($"{typeof(T).Name} carries no invoice links."),
+        }) ?? LinksNotRead;
+    }
+
+    /// <summary>Task 130-0 fix round 2 (K1): what a row whose invoice links were not read decides as (never visible).</summary>
+    private static readonly IReadOnlyList<Guid> LinksNotRead = new[] { ExternalDocumentNarrowing.UnreadableLink };
 
     /// <summary>
     /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent,
@@ -1556,27 +1680,31 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetServiceRequestDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetInvoiceDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
@@ -1587,30 +1715,30 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadMatterDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadWorkAssignmentDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadServiceRequestDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadInvoiceDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1647,9 +1775,10 @@ public static class ExternalProjectDataEndpoints
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
@@ -1663,30 +1792,34 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetServiceRequestDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static Task<IResult> GetInvoiceDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1711,18 +1844,18 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetMatterTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetWorkAssignmentTodos(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListTodosForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListTodosForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> CreateTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
@@ -2137,7 +2270,10 @@ public static class ExternalProjectDataEndpoints
         // Fix round for task 039 (ExternalMultiRootRule, owner option B): as the download route, a document also filed to a
         // SECURE root the caller cannot read is the same uniform 403 as one not under this parent.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
+        var (readable, invoiceFaulted) = await IsDocumentReadableUnderAsync(
+            document, documentId, id, callerContext, dataService, ct, hideInvoices, logger);
+        if (invoiceFaulted) return InvoiceUnreadableProblem();
+        if (!readable)
         {
             logger.LogWarning(
                 "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
@@ -2212,7 +2348,8 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -2221,7 +2358,9 @@ public static class ExternalProjectDataEndpoints
         if (!RightsForRoot(callerContext, rootKind, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        var events = await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct);
+        // Task 130-0 fix round 1: an event that belongs to an invoice the caller may not see is hidden (one seam call per page).
+        var events = await HideInvoiceLinkedAsync(
+            await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct), callerContext, hideInvoices, logger, "events", ct);
 
         // Task 036 fix round 1 (F4): as the to-do list, but only a PROJECT has an event create route, so only a project's
         // list says, and only to a caller whose access Dataverse decided (AppendTo on the project + prvCreatesprk_Event).
@@ -2243,20 +2382,20 @@ public static class ExternalProjectDataEndpoints
     /// <summary>GET /api/v1/external/projects/{id}/events — calendar events for a project.</summary>
     private static Task<IResult> GetEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/matters/{id}/events — calendar events for a matter (task 039).</summary>
     private static Task<IResult> GetMatterEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>GET /api/v1/external/workassignments/{id}/events — calendar events for a work assignment (task 039).</summary>
     private static Task<IResult> GetWorkAssignmentEvents(
         Guid id, HttpContext httpContext, ExternalDataService dataService, CallerRecordAccessProbe probe,
-        ILogger<Program> logger, CancellationToken ct) =>
-        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct);
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, probe, logger, ct, hideInvoices);
 
     /// <summary>
     /// POST /api/v1/external/projects/{id}/events — create a calendar event on a project.
@@ -2364,7 +2503,8 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -2382,9 +2522,9 @@ public static class ExternalProjectDataEndpoints
         // "unreadable" (see its remarks) — both land in the deny paths below, which is the point.
         var (rootKind, rootId, todoName) = await dataService.GetTodoRootAsync(id, ct);
 
+        // Fix round 3: a to-do that is not there gets the same response, body included, as one the caller may not change.
         if (todoName is null)
-            return Results.Problem(statusCode: 404, title: "Not Found",
-                detail: "To-do not found");
+            return DenyTodoWrite();
 
         // Scope on whichever of the three A-9 root sets the to-do is parented to. Owner decision
         // 2026-08-24: matter and work assignment get the same functionality as project.
@@ -2444,6 +2584,25 @@ public static class ExternalProjectDataEndpoints
             default:
                 return DenyTodoWrite();
         }
+
+        // ebilling-r1 task 130-0 fix round 2 (F1): a caller cannot change what it cannot see. A to-do that links to an invoice the caller
+        // may not see (any invoice link column, InvoiceLinks) is refused with the same response, and nothing is written; a decision that
+        // could not be made is the 503. Asked only after the rights and live-parent checks, so neither answer is an existence oracle. The
+        // links are read by the delete-own row read (the one app-only by-id read of a to-do with a fault contract).
+        ExternalDataService.DeleteTarget? linkRead;
+        try
+        {
+            linkRead = await dataService.GetDeleteTargetAsync(ExternalDataService.DeletableKind.Todo, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return TodoWriteUnavailable();
+        }
+
+        var (linksAllowed, linksFaulted) = await InvoiceLinkWriteDecisionAsync(
+            callerContext, linkRead?.InvoiceLinks, hideInvoices, logger, "todo-update", ct);
+        if (!linksAllowed)
+            return linksFaulted ? TodoWriteUnavailable() : DenyTodoWrite();
 
         if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
             return badDueDate;
@@ -2612,7 +2771,43 @@ public static class ExternalProjectDataEndpoints
             }
         }
 
+        // (4) ebilling-r1 task 130-0 fix round 2 (F1): a caller cannot change what it cannot see. A row that links to an invoice the
+        //     caller may not see, through ANY invoice link column of its table (InvoiceLinks: a document's sprk_invoice AND
+        //     sprk_relatedinvoice), is refused with the same 403; links not read refuse too (fail closed). A decision that could not be
+        //     made is the 503, reached only after the record and rights checks above, and nothing is deleted.
+        var (linksAllowed, linksFaulted) = await InvoiceLinkWriteDecisionAsync(
+            caller, target.InvoiceLinks, hideInvoices, logger, $"delete-{kind}", ct);
+        if (!linksAllowed)
+        {
+            logger.LogWarning("[EXT-DELETE] {Kind} {Id}: it belongs to an invoice the caller may not see (faulted={Faulted}); nothing deleted",
+                kind, id, linksFaulted);
+            return linksFaulted ? DeleteOwnUnavailable() : DenyDeleteOwn();
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 2 (F1): whether a write may touch a row that links to <paramref name="links"/>: every linked invoice
+    /// must be visible to <paramref name="caller"/> (the full decision, <see cref="ExternalDataService.HideInvoiceLinkedRowsAsync"/>). No
+    /// link allows it and asks nothing. Links not read (<see langword="null"/>), an unreadable link and a hidden invoice refuse; no seam,
+    /// a throw and a faulted decision refuse with <c>Faulted</c> (the route's 503).
+    /// </summary>
+    internal static async Task<(bool Allowed, bool Faulted)> InvoiceLinkWriteDecisionAsync(
+        CallerPrincipal caller, IReadOnlyList<Guid>? links, ExternalInvoiceHiding? hideInvoices, ILogger logger, string surface,
+        CancellationToken ct)
+    {
+        if (links is null)
+            return (false, false);
+        if (links.Count == 0)
+            return (true, false);
+        // EB-D-215: a single-record WRITE (delete-own, to-do PATCH) refuses an undecidable link with the uniform 403, so it never says
+        // truncated; only a list does. A single-record READ with an undecidable chain (the document GET, decided by
+        // ExternalDataService.DecideInvoiceLinkedRowAsync) answers 503 instead, per D-70 (a single faulted record returns 503); that
+        // is pinned by Single_AMalformedLinkOnTheChain_IsThe503.
+        var (visible, faulted) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
+            caller, new[] { links }, l => l, hideInvoices, logger, surface, ct, undecidableTruncates: false).ConfigureAwait(false);
+        return (visible.Count == 1, visible.Count == 0 && faulted);
     }
 
     private static IResult DenyDeleteOwn() =>
@@ -2797,23 +2992,30 @@ public static class ExternalProjectDataEndpoints
     /// </remarks>
     private static async Task<IResult> DeleteOwnServiceRequest(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        ILogger<Program> logger, CancellationToken ct)
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // ONE row read gives the requester and the state. The requester gate decides first (a non-requester never has the
         // state used); a read that fails is the existing 503 service_request_unreadable and nothing is deleted.
+        // F3b: a request that links to an invoice the caller may not see is the uniform refusal; an undecidable one is the
+        // invoice-unreadable 503; nothing is deleted either way.
         Spaarke.Dataverse.AccessRights rights;
         ExternalDataService.ServiceRequestOpenState state;
+        bool invoiceFaulted;
         try
         {
-            (rights, state) = await RightsForServiceRequestAsync(callerContext, id, dataService, modules, withState: true, ct);
+            (rights, state, invoiceFaulted) = await RightsForServiceRequestAsync(
+                callerContext, id, dataService, modules, withState: true, ct, hideInvoices);
         }
         catch (ExternalDataService.DataverseUnavailableException)
         {
             return ServiceRequestUnreadableProblem();
         }
+
+        if (invoiceFaulted)
+            return InvoiceUnreadableProblem();
 
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {

@@ -42,6 +42,36 @@ internal static class NoAccessEnforcementTestDoubles
 
         public bool FailEntryRead { get; set; }
 
+        /// <summary>Fix round 3e: when an entry id has JSON here, <see cref="ReadEntryAsync"/> reads it through the PRODUCTION
+        /// <see cref="NoAccessEnforcementStore.EntryFrom"/> (so a column the row does not carry is what the store makes of it).</summary>
+        public ConcurrentDictionary<Guid, string> EntryRowJson { get; } = new();
+
+        /// <summary>Fix round 3e: when set, <see cref="ReadOwnerAsync"/> reads this row through the PRODUCTION
+        /// <see cref="NoAccessEnforcementStore.OwnerFrom"/>.</summary>
+        public string? OwnerRowJson { get; set; }
+
+        /// <summary>Fix round 3e: the entry as a Web API row carrying every column the store requires (an empty lookup is an explicit
+        /// null), except those named in <paramref name="without"/>. Built from the seeded snapshot.</summary>
+        public string EntryJson(Guid entryId, params string[] without)
+        {
+            var e = Entries[entryId];
+            var values = new Dictionary<string, object?>
+            {
+                ["sprk_noaccessentryid"] = e.Row.sprk_noaccessentryid,
+                ["_sprk_subjectcontact_value"] = e.Row._sprk_subjectcontact_value,
+                ["_sprk_subjectorganization_value"] = e.Row._sprk_subjectorganization_value,
+                ["_sprk_subjectsystemuser_value"] = e.Row._sprk_subjectsystemuser_value,
+                ["_sprk_objectorganization_value"] = e.Row._sprk_objectorganization_value,
+                ["_sprk_objectrecordtype_value"] = e.Row._sprk_objectrecordtype_value,
+                ["sprk_objectrecordid"] = e.Row.sprk_objectrecordid,
+                ["statecode"] = e.StateCode,
+                ["_modifiedby_value"] = e.ModifiedBy,
+            };
+            foreach (var column in without)
+                values.Remove(column);
+            return System.Text.Json.JsonSerializer.Serialize(values);
+        }
+
         public bool FailEntryScan { get; set; }
 
         public bool FailPeopleRead { get; set; }
@@ -98,6 +128,12 @@ internal static class NoAccessEnforcementTestDoubles
         internal override Task<NoAccessEntrySnapshot?> ReadEntryAsync(Guid entryId, CancellationToken ct)
         {
             EntryReads.Enqueue(entryId);
+            if (EntryRowJson.TryGetValue(entryId, out var json))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                return Task.FromResult(NoAccessEnforcementStore.EntryFrom(doc.RootElement, entryId));
+            }
+
             return FailEntryRead
                 ? throw new HttpRequestException("Simulated entry read failure.")
                 : Task.FromResult(Entries.TryGetValue(entryId, out var e) ? e : null);
@@ -155,7 +191,9 @@ internal static class NoAccessEnforcementTestDoubles
         /// <see cref="DefaultOwningUserId"/> — a user no test walls or shares with.
         /// </summary>
         internal override Task<DataversePrincipalRef?> ReadOwnerAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
-            => FailOwnerRead
+            => OwnerRowJson is { } ownerJson
+                ? Task.FromResult(NoAccessEnforcementStore.OwnerFrom(System.Text.Json.JsonDocument.Parse(ownerJson).RootElement))
+                : FailOwnerRead
                 ? throw new HttpRequestException("Simulated owner read failure.")
                 : Task.FromResult<DataversePrincipalRef?>(
                     OwningTeams.TryGetValue(recordId, out var t) ? DataversePrincipalRef.Team(t)

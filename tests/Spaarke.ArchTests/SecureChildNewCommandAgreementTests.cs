@@ -33,6 +33,9 @@ public class SecureChildNewCommandAgreementTests
     private static string DeployFile => Path.Combine(Root, "scripts", "Deploy-SecureChildNewCommands.ps1");
     private static string ChildRecordEndpointsFile => Path.Combine(Root, "src", "server", "api", "Sprk.Bff.Api", "Api", "ChildRecordEndpoints.cs");
     private static string AnalysisRibbonFile => Path.Combine(Root, "infrastructure", "dataverse", "ribbon", "AnalysisRibbons", "Entities", "sprk_analysis", "RibbonDiff.xml");
+    private static string BillingEventRibbonFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_BillingEvent", "RibbonDiff.xml");
+    private static string InvoiceRibbonFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_Invoice", "RibbonDiff.xml");
+    private static string ScriptMasterCopyFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "WebResources", "sprk_", "scripts", "secure_child_ribbon.js");
 
     /// <summary>
     /// EVERY subgrid of an ownership-child table on an active main form (live inventory, spaarkedev1, read-only, 2026-10-04;
@@ -90,10 +93,16 @@ public class SecureChildNewCommandAgreementTests
         var served = ScriptTables();
         var analysisHidesNative = File.ReadAllText(AnalysisRibbonFile)
             .Contains("Location=\"Mscrm.SubGrid.sprk_analysis.AddNewStandard\"", StringComparison.Ordinal);
+        // ebilling-r1 task 096b (EB-D-201): an invoice line's platform "+ New" is hidden outright (no replacement: lines are created only
+        // by submission and Add line), read from the SpaarkeMaster source of the table's ribbon.
+        var billingEventHidesNative = File.ReadAllText(BillingEventRibbonFile)
+            .Contains("Location=\"Mscrm.SubGrid.sprk_billingevent.AddNewStandard\"", StringComparison.Ordinal);
 
         var uncovered = ChildSubgridsOnMainForms
             .Where(s => !PartyHosts.Contains(s.Host))
-            .Where(s => !served.Contains(s.Child) && !(s.Child == "sprk_analysis" && analysisHidesNative))
+            .Where(s => !served.Contains(s.Child)
+                && !(s.Child == "sprk_analysis" && analysisHidesNative)
+                && !(s.Child == "sprk_billingevent" && billingEventHidesNative))
             .Select(s => $"{s.Host} -> {s.Child}")
             .ToList();
 
@@ -153,6 +162,14 @@ public class SecureChildNewCommandAgreementTests
         Assert.Equal(server, client);
     }
 
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201; before it 164a-1, uac-r2 Q6): tables the script does NOT serve and whose platform "+ New" is
+    /// hidden outright in the SpaarkeMaster source (<see cref="BillingEventRibbonFile"/>), because a new row has one server-side owner
+    /// elsewhere and the BFF refuses the table's generic create (<c>RecordTableRule.GenericCreateRefused</c>). An invoice line is
+    /// created by extraction, a line decision or Add line in the invoice's review.
+    /// </summary>
+    private static readonly string[] HiddenOutrightWithNoRibbonCreate = { "sprk_billingevent" };
+
     [Fact]
     public void EveryServedTable_HasACreateSurface_AndEveryCreateThenOpenTable_IsOnTheBffCreateRoute()
     {
@@ -170,6 +187,34 @@ public class SecureChildNewCommandAgreementTests
         var withoutSurface = ScriptTables().Except(wizards).Except(createThenOpen).Except(ownBranches).ToList();
         Assert.True(withoutSurface.Count == 0, "Served with no create surface: " + string.Join(", ", withoutSurface));
 
+        // The no-create tables are not served, have no create surface here, have their platform "+ New", "New" and "Save & New" hidden
+        // outright, and are refused by the BFF's generic create, so the exception cannot outlive its reason.
+        var billingEventRibbon = File.ReadAllText(BillingEventRibbonFile);
+        Assert.All(HiddenOutrightWithNoRibbonCreate, t =>
+        {
+            Assert.DoesNotContain(t, ScriptTables());
+            Assert.DoesNotContain(t, wizards);
+            Assert.DoesNotContain(t, createThenOpen);
+            Assert.DoesNotContain(t, Sprk.Bff.Api.Api.ChildRecordEndpoints.CreateTables);
+            Assert.True(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(t) is { GenericCreateRefused: true },
+                $"{t} has no ribbon create only while the BFF refuses its generic create.");
+            foreach (var location in new[] { "Mscrm.Form.{0}.NewRecord", "Mscrm.Form.{0}.SaveAndNew", "Mscrm.HomepageGrid.{0}.NewRecord",
+                         "Mscrm.SubGrid.{0}.AddNewStandard", "Mscrm.SubGrid.{0}.NewRecord" })
+            {
+                Assert.Contains($"Location=\"{string.Format(location, t)}\"", billingEventRibbon, StringComparison.Ordinal);
+            }
+
+            // No create command is left behind in the ribbon (the earlier "New Billing Event" button).
+            Assert.DoesNotContain("sprk.SecureChild.", billingEventRibbon, StringComparison.Ordinal);
+        });
+
+        // EB-D-201: an invoice is created only by submission, so the route's create set holds neither invoice table, while the invoice
+        // keeps its Invoice wizard entry (a submission) and its re-file.
+        Assert.DoesNotContain("sprk_invoice", Sprk.Bff.Api.Api.ChildRecordEndpoints.CreateTables);
+        Assert.Contains("sprk_invoice", wizards);
+        Assert.DoesNotContain("sprk_invoice", createThenOpen);
+        Assert.Contains("sprk_invoice", Sprk.Bff.Api.Api.ChildRecordEndpoints.RefileTables);
+
         var createTables = Quoted(Regex.Match(File.ReadAllText(ChildRecordEndpointsFile),
             @"CreateTables\s*=\s*new HashSet<string>\(StringComparer\.OrdinalIgnoreCase\)\s*\{(?<list>[^}]*)\}").Groups["list"].Value);
         var notOnRoute = createThenOpen.Except(createTables).ToList();
@@ -178,6 +223,86 @@ public class SecureChildNewCommandAgreementTests
 
         var stamped = Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables;
         Assert.All(createThenOpen, t => Assert.Contains(t, stamped));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): no user-reachable path creates an invoice outside the submission operation. Every platform
+    /// "New" of the invoice is hidden in the SpaarkeMaster source: the three earlier hides (form New, form Save and New, homepage
+    /// grid New) and the two subgrid ones (AddNewStandard, NewRecord), by the exact ids the billing event's hides use.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceRibbon_HidesEveryPlatformNew_FormGridAndSubgrid()
+    {
+        var hides = XDocument.Load(InvoiceRibbonFile).Descendants("HideCustomAction")
+            .ToDictionary(h => (string)h.Attribute("HideActionId")!, h => (string)h.Attribute("Location")!, StringComparer.Ordinal);
+
+        foreach (var (id, location) in new[]
+                 {
+                     ("sprk.Mscrm.Form.sprk_invoice.NewRecord.Hide", "Mscrm.Form.sprk_invoice.NewRecord"),
+                     ("sprk.Mscrm.Form.sprk_invoice.SaveAndNew.Hide", "Mscrm.Form.sprk_invoice.SaveAndNew"),
+                     ("sprk.Mscrm.HomepageGrid.sprk_invoice.NewRecord.Hide", "Mscrm.HomepageGrid.sprk_invoice.NewRecord"),
+                     ("sprk.Mscrm.SubGrid.sprk_invoice.AddNewStandard.Hide", "Mscrm.SubGrid.sprk_invoice.AddNewStandard"),
+                     ("sprk.Mscrm.SubGrid.sprk_invoice.NewRecord.Hide", "Mscrm.SubGrid.sprk_invoice.NewRecord"),
+                 })
+        {
+            Assert.True(hides.TryGetValue(id, out var actual), $"The invoice ribbon does not carry the hide {id}.");
+            Assert.Equal(location, actual);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): the Invoice wizard ("New Invoice", a submission) is the one "New" of an invoice subgrid on every
+    /// core-record host (<c>ROOTS</c>: matter, project, work assignment), and the platform subgrid "+ New" is closed on every host. Both rules receive the table, the script closes the tables in
+    /// <c>NATIVE_NEW_CLOSED</c> before it reads any host flag, and the template and the invoice ribbon pass it.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceWizardCommand_IsAvailableOnEveryCoreRecordHost_AndThePlatformSubgridNew_IsClosedOnEveryHost()
+    {
+        var script = File.ReadAllText(ScriptFile);
+        Assert.Equal(new[] { "sprk_invoice" }, ScriptMapKeys("NATIVE_NEW_CLOSED"));
+        Assert.Contains("sprk_invoice", ScriptTables());
+
+        string Body(string name) => Regex.Match(script, $@"ns\.{name}\s*=\s*function[^{{]*\{{(?<body>.*?)\n    \}};", RegexOptions.Singleline)
+            .Groups["body"].Value;
+        Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.nativeNewAllowed\s*=\s*function[^{]*").Value);
+        Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.newChildAvailable\s*=\s*function[^{]*").Value);
+        // The closed table is answered before the flag is read: no host (secure, not secure, unreadable, a party) re-opens it.
+        // Both indexes are asserted present first: IndexOf is -1 when a guard is absent, and -1 < n would pass vacuously.
+        foreach (var function in new[] { "nativeNewAllowed", "newChildAvailable" })
+        {
+            var body = Body(function);
+            var guard = body.IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal);
+            var flagRead = body.IndexOf("hostSecureFlag", StringComparison.Ordinal);
+            Assert.True(guard >= 0, $"{function} does not consult NATIVE_NEW_CLOSED.");
+            Assert.True(flagRead >= 0, $"{function} does not read the host flag.");
+            Assert.True(guard < flagRead, $"{function} reads the host flag before it answers for a NATIVE_NEW_CLOSED table.");
+        }
+        // The wizard is offered only on a core-record host (the records the submission route accepts), never on any saved host.
+        Assert.Contains("ns.ROOTS[host.entity]", Body("newChildAvailable"));
+
+        // The table reaches both rules: the template for every entity ({{entity}}), the invoice ribbon for sprk_invoice.
+        foreach (var (file, value) in new[] { (TemplateFile, "{{entity}}"), (InvoiceRibbonFile, "sprk_invoice") })
+        {
+            var rules = XDocument.Load(file).Descendants("CustomRule").ToList();
+            foreach (var function in new[] { "nativeNewAllowed", "newChildAvailable" })
+            {
+                var rule = rules.Single(r => (string?)r.Attribute("FunctionName") == $"Spaarke.SecureChild.Ribbon.{function}");
+                Assert.Equal(new[] { "PrimaryControl" }, rule.Elements("CrmParameter").Select(p => (string)p.Attribute("Value")!));
+                Assert.Equal(new[] { value }, rule.Elements("StringParameter").Select(p => (string)p.Attribute("Value")!));
+            }
+        }
+
+        // The invoice's "New Invoice" command opens the wizard and is enabled by the table-aware rule alone.
+        var invoiceRibbon = XDocument.Load(InvoiceRibbonFile);
+        var command = invoiceRibbon.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "sprk.SecureChild.sprk_invoice.New.Command");
+        Assert.Equal(new[] { "sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule" }, command.Descendants("EnableRule").Select(r => (string)r.Attribute("Id")!));
+        Assert.Contains(command.Descendants("StringParameter"), p => (string?)p.Attribute("Value") == "sprk_invoice");
+    }
+
+    [Fact]
+    public void TheWebResource_AndItsSpaarkeMasterCopy_AreIdentical()
+    {
+        Assert.Equal(File.ReadAllText(ScriptFile).ReplaceLineEndings(), File.ReadAllText(ScriptMasterCopyFile).ReplaceLineEndings());
     }
 
     [Fact]

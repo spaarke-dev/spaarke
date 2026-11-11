@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Role id="{a8308e87-b0e0-4cd1-9c66-3672e9bdad16}" name="Spaarke Decision Record Reader" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <IsCustomizable>1</IsCustomizable>
+  <IsAutoAssigned>0</IsAutoAssigned>
+  <AppliesTo>All users</AppliesTo>
+  <Description>Spaarke Decision Record reader (ebilling-r1 DEF-059): organization-wide read of Decision Records for the BFF application identity only. Read only: creating Decision Records stays with the server writer identity (Spaarke Ontology Service). Never assign to people or to the writer identity.</Description>
+  <SummaryOfCoreTablePermissions>Read</SummaryOfCoreTablePermissions>
+  <RolePrivileges>
+    <RolePrivilege name="prvReadsprk_DecisionRecord" level="Global" />
+  </RolePrivileges>
+</Role>

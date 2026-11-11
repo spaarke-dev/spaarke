@@ -81,6 +81,12 @@ public class DelegationRuleTestFixture : WorkspaceTestFixture
         {
             Id = accessRecordId,
             ContactId = contactId,
+            OrganizationId = null,
+            ProjectId = null,
+            MatterId = null,
+            WorkAssignmentId = null,
+            GrantedBySystemUserId = null,
+            GrantedByContactId = null,
             AccessLevel = 1,
             StateCode = 0
         };

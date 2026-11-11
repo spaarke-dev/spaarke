@@ -47,7 +47,7 @@ internal sealed class InMemoryBlobGateway : BlobGateway
     /// <summary>When set, every call throws it (a storage fault).</summary>
     public Exception? FailEverything { get; set; }
 
-    /// <summary>When set, only calls of this op ("create", "props", "tags", "open", "list", "delete") throw <see cref="FailEverything"/>-like faults.</summary>
+    /// <summary>When set, only calls of this op ("create", "overwrite", "props", "tags", "open", "list", "delete") throw <see cref="FailEverything"/>-like faults.</summary>
     public Dictionary<string, Exception> FailOp { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Runs before every call ("op", "container/name"): lets a test change state between two calls (a concurrent writer).</summary>
@@ -94,21 +94,56 @@ internal sealed class InMemoryBlobGateway : BlobGateway
         return Task.CompletedTask;
     }
 
-    public override async Task<BlobCreateOutcome> CreateIfNotExistsAsync(
+    public override async Task<BlobCreateResult> CreateIfNotExistsAsync(
         string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata, CancellationToken cancellationToken)
     {
         Record("create", container, blobName);
         if (_blobs.ContainsKey((container, blobName)))
         {
-            return BlobCreateOutcome.AlreadyExists;
+            return new BlobCreateResult(BlobCreateOutcome.AlreadyExists);
         }
 
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
         var blob = Seed(container, blobName, buffer.ToArray(), metadata.ToDictionary(k => k.Key, v => v.Value));
         blob.ContentType = contentType;
-        return BlobCreateOutcome.Created;
+        return new BlobCreateResult(BlobCreateOutcome.Created, blob.ETag);
     }
+
+    /// <summary>
+    /// DEF-044: the conditional overwrite with the real service's semantics. A blob whose ETag is not <paramref name="ifMatch"/> is
+    /// <see cref="BlobOverwriteOutcome.PreconditionFailed"/> (a 412) and left unchanged; a missing blob is
+    /// <see cref="BlobOverwriteOutcome.NotFound"/>. A write replaces the content, content type and metadata whole, gives the blob a NEW
+    /// ETag and stamps Last-Modified with <see cref="Now"/>. The index tags are KEPT (the worst case, as <see cref="Overwrite"/>: the old
+    /// scan verdict stays on the blob, so only the scan-time-versus-Last-Modified rule can hold it Pending).
+    /// </summary>
+    public override async Task<BlobOverwriteResult> OverwriteIfMatchAsync(
+        string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata, ETag ifMatch,
+        CancellationToken cancellationToken)
+    {
+        Record("overwrite", container, blobName);
+        if (Get(container, blobName) is not { } blob)
+        {
+            return new BlobOverwriteResult(BlobOverwriteOutcome.NotFound);
+        }
+
+        if (blob.ETag != ifMatch)
+        {
+            return new BlobOverwriteResult(BlobOverwriteOutcome.PreconditionFailed);
+        }
+
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+        blob.Content = buffer.ToArray();
+        blob.ContentType = contentType;
+        blob.Metadata = new Dictionary<string, string>(metadata, StringComparer.Ordinal);
+        blob.LastModified = Now;
+        blob.ETag = NextETag();
+        return new BlobOverwriteResult(BlobOverwriteOutcome.Overwritten, blob.ETag);
+    }
+
+    /// <summary>Removes a blob out of band (another process deleted it); no call is recorded and no hook runs.</summary>
+    public bool Remove(string container, string name) => _blobs.TryRemove((container, name), out _);
 
     public override Task<(BinaryData Content, string? ContentType)?> DownloadContentAsync(string container, string blobName, CancellationToken cancellationToken)
     {
@@ -252,12 +287,36 @@ internal sealed class RecordingRightsProbe : CallerRecordAccessProbe
 
     public ConcurrentQueue<(string Set, Guid Id, string? Token)> Calls { get; } = new();
 
+    /// <summary>Records the probe answers as "unknown" (a 429, a 5xx, an OBO or WhoAmI failure): the gate variant reads it as None, the OrUnknown variant keeps it null.</summary>
+    public HashSet<(string Set, Guid Id)> Unknown { get; } = new();
+
     public void Grant(string set, Guid id, AccessRights rights) => Rights[(set, id)] = rights;
 
     public override Task<AccessRights> GetCallerRightsAsync(string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
     {
         Calls.Enqueue((entitySet, recordId, callerBearerToken));
         return Task.FromResult(callerBearerToken is not null && Rights.TryGetValue((entitySet, recordId), out var r) ? r : AccessRights.None);
+    }
+
+    /// <summary>The unknown-keeping variant, as the real one answers: one entry per target in order, null for an unknown (recorded in <see cref="Calls"/> like the single ask).</summary>
+    public override Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
+        string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct = default)
+    {
+        var answers = new AccessRights?[targets.Count];
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var (set, id) = targets[i];
+            Calls.Enqueue((set, id, callerBearerToken));
+            if (callerBearerToken is null || Unknown.Contains((set, id)))
+            {
+                answers[i] = null;
+                continue;
+            }
+
+            answers[i] = Rights.TryGetValue((set, id), out var r) ? r : AccessRights.None;
+        }
+
+        return Task.FromResult<IReadOnlyList<AccessRights?>>(answers);
     }
 }
 

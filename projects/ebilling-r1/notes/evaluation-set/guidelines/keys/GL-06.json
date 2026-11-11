@@ -1,0 +1,401 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "guideline-key",
+ "id": "GL-06-KEY",
+ "guideline_id": "GL-06",
+ "rule_set_id": "RS-06",
+ "set": "F",
+ "meta": {
+  "title": "State of Westmark Office of the Attorney General: Special Counsel Billing Requirements",
+  "issuer": "State of Westmark, Office of the Attorney General",
+  "issuer_type": "state",
+  "version": "FY2026",
+  "effective": "2025-07-01",
+  "generator_id": "build_guidelines.py",
+  "licence": "Synthetic - authored for this evaluation set",
+  "licence_status": "synthetic",
+  "pii_note": "Fictional organisation; no personal data.",
+  "label_method": "authored-from-rule-set",
+  "storage": {
+   "location": "committed",
+   "path": "guidelines/GL-06.md"
+  },
+  "rendered": [
+   "local/guidelines/GL-06.docx",
+   "local/guidelines/GL-06.pdf"
+  ]
+ },
+ "profile": {
+  "persona": "P6b: state attorney general retaining special counsel (large public-sector department)",
+  "organisation": "State attorney general's office representing state agencies; mid-size state (E)",
+  "in_house_lawyers": "about 140 (E; Florida reports 450 in-house lawyers, S, secondary)",
+  "outside_counsel_spend": "about $12M a year on special counsel (E; Florida spent about $250M, S, secondary)",
+  "litigation_share": "about 70% (E): tort and civil-rights defence of state agencies, employment, construction claims",
+  "firms": "firms under 200 lawyers in the state capital and regional cities; the $455 partner maximum sits inside the $325-755 partner range in West Virginia University's outside-counsel contracts (S)",
+  "style": "statutory special-counsel appointment with a named personnel list, many expense limits, monthly invoices due within 30 days and matter budgets (Delaware DOJ, Wyandotte County, Ohio AG shape)"
+ },
+ "rate_schedule": {
+  "name": "Appendix A",
+  "currency": "USD",
+  "unit": "hour",
+  "maximum_rates": {
+   "Partner": 455,
+   "Of Counsel": 400,
+   "Senior Associate": 315,
+   "Associate": 245,
+   "Paralegal": 130,
+   "Legal Assistant": 105
+  }
+ },
+ "rules": [
+  {
+   "rule_id": "RS-06-R01",
+   "rule_type": "ApprovedTimekeeper",
+   "params": {
+    "approved_names": "context.approved_timekeepers"
+   },
+   "consequence": "Reject",
+   "clause_ref": {
+    "section": "2.1",
+    "heading": "Personnel"
+   },
+   "paraphrase": "Only approved personnel may bill; otherwise the invoice is returned.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "ApprovedTimekeeper"
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R02",
+   "rule_type": "ApprovedRate",
+   "params": {
+    "rates": {
+     "Partner": 455,
+     "Of Counsel": 400,
+     "Senior Associate": 315,
+     "Associate": 245,
+     "Paralegal": 130,
+     "Legal Assistant": 105
+    }
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "3.1",
+    "heading": "Rates"
+   },
+   "paraphrase": "Rates are capped by classification (Appendix A); excess is reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "ApprovedRate",
+      "tolerancePercent": 0
+     }
+    ],
+    "consequence": "SuggestAdjustment",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R03",
+   "rule_type": "ExpenseRule",
+   "params": {
+    "non_reimbursable": [
+     "E103",
+     "E104",
+     "E106"
+    ]
+   },
+   "consequence": "Disallow",
+   "clause_ref": {
+    "section": "5.1",
+    "heading": "Expenses"
+   },
+   "paraphrase": "E103, E104 and E106 are not reimbursable.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "ExpenseRule",
+      "nonReimbursableCodes": [
+       "E103",
+       "E104",
+       "E106"
+      ]
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R04",
+   "rule_type": "ExpenseRule",
+   "params": {
+    "caps": {
+     "E101": 0.15,
+     "E107": 40.0
+    }
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "5.2",
+    "heading": "Expenses"
+   },
+   "paraphrase": "Copying capped at $0.15 per page and deliveries at $40.00 each.",
+   "expressible": true,
+   "production": {
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+   }
+  },
+  {
+   "rule_id": "RS-06-R05",
+   "rule_type": "CoreRecordWindow",
+   "params": {
+    "require_within_matter_dates": true,
+    "budget_cap": true
+   },
+   "consequence": "Flag",
+   "clause_ref": {
+    "section": "6.3",
+    "heading": "Invoices"
+   },
+   "paraphrase": "Entries outside the matter dates, and invoices over the matter budget, are referred for review.",
+   "expressible": true,
+   "production": {
+    "status": "partial",
+    "rules": [
+     {
+      "type": "CoreRecordWindow",
+      "graceDays": 0
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+   }
+  },
+  {
+   "rule_id": "RS-06-R06",
+   "rule_type": "InvoiceAge",
+   "params": {
+    "max_days_after_period_end": 30
+   },
+   "consequence": "Flag",
+   "clause_ref": {
+    "section": "6.1",
+    "heading": "Invoices"
+   },
+   "paraphrase": "Invoices received more than 30 days after the period end are referred for review.",
+   "expressible": true,
+   "production": {
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+   }
+  },
+  {
+   "rule_id": "RS-06-R07",
+   "rule_type": "DailyHoursCap",
+   "params": {
+    "max_hours_per_timekeeper_per_day": 10
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "4.2",
+    "heading": "Recording time"
+   },
+   "paraphrase": "At most 10 hours per timekeeper per day; excess is reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "DailyHoursCap",
+      "maxHoursPerDay": 10
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R08",
+   "rule_type": "TimeIncrement",
+   "params": {
+    "increment_hours": 0.1
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "4.1",
+    "heading": "Recording time"
+   },
+   "paraphrase": "0.1-hour increments; other increments are reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "TimeIncrement",
+      "incrementHours": 0.1
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R09",
+   "rule_type": "Duplicate",
+   "params": {
+    "match_on": [
+     "timekeeper",
+     "date",
+     "hours",
+     "narrative"
+    ]
+   },
+   "consequence": "Disallow",
+   "clause_ref": {
+    "section": "6.4",
+    "heading": "Invoices"
+   },
+   "paraphrase": "Duplicate entries are disallowed.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "Duplicate",
+      "matchFields": [
+       "timekeeper",
+       "lineDate",
+       "hours",
+       "narrative"
+      ]
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R10",
+   "rule_type": "RequiredData",
+   "params": {
+    "codes_required": true
+   },
+   "consequence": "Reject",
+   "clause_ref": {
+    "section": "6.2",
+    "heading": "Invoices"
+   },
+   "paraphrase": "Codes required on every time entry; otherwise the invoice is returned.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "RequiredData",
+      "fields": [
+       "taskCode",
+       "activityCode"
+      ]
+     }
+    ],
+    "consequence": "Reject",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-06-R11",
+   "rule_type": "AiObservation",
+   "params": {
+    "observations": [
+     "vague_description"
+    ]
+   },
+   "consequence": "Flag",
+   "clause_ref": {
+    "section": "4.3",
+    "heading": "Recording time"
+   },
+   "paraphrase": "Vague descriptions are referred for review.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "AiObservation",
+      "observation": "vagueDescription",
+      "minConfidence": 0.7
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  }
+ ],
+ "unmapped_provisions": [
+  {
+   "clause_ref": {
+    "section": "1.1",
+    "heading": "Appointment"
+   },
+   "paraphrase": "No representation adverse to the State.",
+   "reason": "not-billing"
+  },
+  {
+   "clause_ref": {
+    "section": "1.2",
+    "heading": "Appointment"
+   },
+   "paraphrase": "Invoices may be public; descriptions must not disclose privileged strategy.",
+   "reason": "judgement"
+  },
+  {
+   "clause_ref": {
+    "section": "3.2",
+    "heading": "Rates"
+   },
+   "paraphrase": "Rates no higher than the firm's lowest public-client rates (not visible on the invoice).",
+   "reason": "judgement"
+  },
+  {
+   "clause_ref": {
+    "section": "5.3",
+    "heading": "Expenses"
+   },
+   "paraphrase": "Out-of-state travel needs advance approval.",
+   "reason": "judgement"
+  },
+  {
+   "clause_ref": {
+    "section": "6.5",
+    "heading": "Invoices"
+   },
+   "paraphrase": "Final invoice within 60 days of closing.",
+   "reason": "needs-new-type"
+  },
+  {
+   "clause_ref": {
+    "section": "6.7",
+    "heading": "Invoices"
+   },
+   "paraphrase": "No interest or late fees.",
+   "reason": "not-billing"
+  }
+ ]
+}

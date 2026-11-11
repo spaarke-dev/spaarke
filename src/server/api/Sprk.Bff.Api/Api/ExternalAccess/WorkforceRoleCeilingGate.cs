@@ -59,6 +59,9 @@ internal static class WorkforceRoleCeilingGate
     internal const string CommunicationTable = "sprk_communication";
     internal const string GrantTable = "sprk_externalrecordaccess";
     internal const string InvoiceSubmissionTable = "sprk_invoicesubmission";
+    internal const string BillingEventTable = "sprk_billingevent";
+    internal const string DecisionRecordTable = "sprk_decisionrecord";
+    internal const string SignalTable = "sprk_signal";
 
     // ── The route map (design note §0, owner round 101; review round 1 F1: every workforce-reachable route) ──────────
     // Each set is derived from what the route reads or writes: a read needs Read on every table whose rows it returns (the
@@ -199,11 +202,32 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceToWorkAssignment = SubmitInvoiceTo(WorkAssignmentTable);
 
     /// <summary>
-    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c>: Read on <c>sprk_invoicesubmission</c>. The view
-    /// returns only the ids of the document and the core record, so neither table is read for the caller.
+    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c> since ebilling-r1 task 130-0 fix round 1: Read on
+    /// <c>sprk_invoicesubmission</c> and on <c>sprk_invoice</c>. Both routes read the submission's invoice: its status drives the
+    /// view's warning and replaced-by note, and a submission is shown only when its invoice is visible to the caller.
     /// </summary>
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissions = Set(
-        (InvoiceSubmissionTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissionsWithInvoice = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/invoices/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoice</c> (status, tracking number,
+    /// totals), on <c>sprk_billingevent</c> (the decided and reviewer-added lines and the invoice-level adjustments it returns), on
+    /// <c>sprk_decisionrecord</c> (the reviewer's reason of each decided line) and on <c>sprk_signal</c> (the firm reason of a cited
+    /// rule). Fix round 2 (owner ruling): the policy, version, rule set and Procedure tables are NOT declared; a rule citation is shown
+    /// only as the policy's firm flag publishes it (<c>FirmFindingsProjection</c>).
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceOutcome = Set(
+        (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read),
+        (DecisionRecordTable, AccessRights.Read), (SignalTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/submissions/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoicesubmission</c> (status and
+    /// tracking number), and, because an accepted submission's outcome is its invoice's, Read on <c>sprk_invoice</c> and
+    /// <c>sprk_billingevent</c>, <c>sprk_decisionrecord</c> and <c>sprk_signal</c> as <see cref="ReadInvoiceOutcome"/>.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadSubmissionOutcome = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read),
+        (DecisionRecordTable, AccessRights.Read), (SignalTable, AccessRights.Read));
 
     /// <summary>
     /// <c>GET /invoice-submissions/firm-records</c>: Read on the three core tables whose ids it returns, and Create on

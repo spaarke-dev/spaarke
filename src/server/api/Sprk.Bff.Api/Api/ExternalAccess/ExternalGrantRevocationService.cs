@@ -255,8 +255,8 @@ public sealed class ExternalGrantRevocationService
                 // silent partial revocation A-11 describes, so refusing is the fail-closed answer.
                 _logger.LogError(
                     "[EXT-REVOKE] Access record {AccessRecordId} has no derivable grant key (no root " +
-                    "and/or no grantee lookup). Refusing to revoke: sibling rows cannot be identified, so " +
-                    "success cannot be guaranteed.", accessRecordId);
+                    "and/or no grantee lookup, or a root/grantee column the read did not return). Refusing to revoke: " +
+                    "sibling rows cannot be identified, so success cannot be guaranteed.", accessRecordId);
 
                 return GrantRevocation.Refused(GrantRevocationStatus.NoGrantKey);
             }
@@ -578,6 +578,18 @@ public sealed class ExternalGrantRevocationService
 
         var truncated = false;
         var failed = 0;
+        if (organizations.UnreadableRows > 0)
+        {
+            // Fix round 3e: a membership row whose organization column was not returned names an organization that cannot be
+            // resolved. It is counted here, with every other part of the cleanup that could not be checked, so the cleanup
+            // reports not completed (Completed = false) and the removal step is retried.
+            _logger.LogError(
+                "[EXT-REMOVE-PERSON] {Count} organization membership row(s) of contact {ContactId} did not carry the organization " +
+                "column; the organizations they name cannot be resolved and are counted as not completed.",
+                organizations.UnreadableRows, contactId);
+            failed += organizations.UnreadableRows;
+        }
+
         var roots = new HashSet<(ExternalGrantRootType RootType, Guid RootId)>();
         foreach (var organizationId in organizations.ContactIds)
         {
@@ -611,7 +623,18 @@ public sealed class ExternalGrantRevocationService
 
             foreach (var row in grants.Take(MaxOrganizationGrantsPerPersonCleanup))
             {
-                if (ExternalGrantLifecycle.DeriveKey(row) is { IsOrganizationGrant: true } key)
+                if (!row.KeyLookupsRead)
+                {
+                    // Fix round 3g: a grant row that did not carry a root, contact or organization column cannot be placed on a
+                    // root, so its container cannot be derived. Counted with every other part of the cleanup that could not be
+                    // checked: the cleanup reports not completed and the removal step is retried.
+                    _logger.LogError(
+                        "[EXT-REMOVE-PERSON] Organization grant {AccessRecordId} did not carry every root, contact and " +
+                        "organization column; its container cannot be derived and is counted as not completed.",
+                        row.Id);
+                    failed++;
+                }
+                else if (ExternalGrantLifecycle.DeriveKey(row) is { IsOrganizationGrant: true } key)
                 {
                     roots.Add((key.RootType, key.RootId));
                 }
@@ -885,6 +908,18 @@ public sealed class ExternalGrantRevocationService
                 continue;
             }
 
+            if (!row.ContactRead || !row.OrganizationRead)
+            {
+                // Fix round 3g: a conferring row that did not carry the contact or the organization column names a grantee
+                // that cannot be told. The set of contacts it still entitles is not known, which is this method's own null:
+                // no permission is kept on the strength of another grant (fail closed).
+                logger.LogWarning(
+                    "[EXT-REVOKE] A remaining grant on {RootType} {RootId} did not carry the contact or the organization " +
+                    "column; the contacts it entitles cannot be told, so no permission is kept on the strength of another " +
+                    "grant (fail closed).", rootType, rootId);
+                return null;
+            }
+
             if (row.ContactId is { } contactId)
             {
                 entitled.Add(contactId);
@@ -918,6 +953,17 @@ public sealed class ExternalGrantRevocationService
                 logger.LogWarning(
                     "[EXT-REVOKE] Organization {OrganizationId} (still granted {RootType} {RootId}) exceeds the member "
                     + "sweep bound; the overlap check fails closed.", organizationId, rootType, rootId);
+                return null;
+            }
+
+            if (members.UnreadableRows > 0)
+            {
+                // Fix round 3e: a membership row that did not carry the contact column cannot be attributed to anyone, so the
+                // member list is not known; the same answer as a list past the bound.
+                logger.LogWarning(
+                    "[EXT-REVOKE] Organization {OrganizationId} (still granted {RootType} {RootId}) has {Count} membership "
+                    + "row(s) that did not carry the contact column; the overlap check fails closed.",
+                    organizationId, rootType, rootId, members.UnreadableRows);
                 return null;
             }
 
@@ -1111,6 +1157,18 @@ public sealed class ExternalGrantRevocationService
         var failed = 0;
         var retained = 0;
         var noKey = 0;
+        if (memberSet.UnreadableRows > 0)
+        {
+            // Fix round 3e: a membership row that did not carry the contact column names a member who cannot be resolved. It
+            // is counted as Failed, like any member whose permission could not be checked, so the outcome is Failed (never a
+            // clean result) and the revoke is retried. The members that were read are still swept.
+            failed += memberSet.UnreadableRows;
+            _logger.LogError(
+                "[EXT-REVOKE] {Count} membership row(s) of Organization {OrganizationId} did not carry the contact column; " +
+                "those members cannot be resolved and are counted as Failed. Continuing with the rest.",
+                memberSet.UnreadableRows, organizationId);
+        }
+
         // #2104 round 3: members whose Failed is an ambiguous or unverifiable match (counted in `failed` too) — the part
         // a retry cannot fix.
         var ambiguous = 0;

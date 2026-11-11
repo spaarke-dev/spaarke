@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -19,6 +20,14 @@ public static class ApExportCodes
     public const string Unavailable = "ebilling.export.unavailable";
     public const string InvoiceConflict = "ebilling.export.invoice_conflict";
     public const string FileFailed = "ebilling.export.file_failed";
+
+    /// <summary>
+    /// 409: the acting user's business unit cannot own export files (the root unit, or any other state of the restricted-content owner team that a
+    /// retry cannot change). Nothing was exported; an administrator must run the export from a user in a business unit. Distinct from
+    /// <see cref="FileFailed"/>, which is a transient fault (503, retry).
+    /// </summary>
+    public const string OwnerUnitNotAllowed = "ebilling.export.owner_unit_not_allowed";
+
     public const string FileTooLarge = "ebilling.export.file_too_large";
     public const string TransitionFailed = "ebilling.export.transition_failed";
     public const string TransitionIncomplete = "ebilling.export.transition_incomplete";
@@ -47,6 +56,29 @@ public static class ApExportCodes
     public const string ReasonNotApproved = "invoice_not_approved";
     public const string ReasonAlreadyExported = "invoice_already_exported";
     public const string ReasonNotFound = "invoice_not_found";
+
+    /// <summary>Task 095c-4: the invoice has no firm, or a submission of it is held "firm needed" (<see cref="InvoiceFirmHold"/>). It cannot have been
+    /// approved through the approval gate; export refuses it anyway (defence in depth).</summary>
+    public const string ReasonFirmMissing = "invoice_firm_missing";
+
+    /// <summary>409 (task 095c-4): after the claim, an invoice of the batch had no firm or was held "firm needed"; nothing was exported.</summary>
+    public const string FirmMissing = "ebilling.export.firm_missing";
+
+    /// <summary>Task 165b-3 part B (EB-D-208): the invoice is Approved but has no approve Decision Record the writer identity created, so it is not
+    /// counted as approved. A per-invoice reason of <see cref="SelectionRefused"/>; the candidate list leaves the invoice out.</summary>
+    public const string ReasonApprovalNotRecorded = "approval_not_recorded";
+
+    /// <summary>The log code of <see cref="ReasonApprovalNotRecorded"/> (logged with the table and the row id only). Task 165b-3 part B fix round
+    /// (K1): also the 409 <c>errorCode</c> of Mark Paid on a Sent to AP invoice without that record (nothing is written).</summary>
+    public const string ApprovalNotRecorded = "ebilling.apexport.approval_not_recorded";
+
+    /// <summary>Task 165b-2 (EB-D-200 item 3): a stored total of the invoice differs from what <see cref="InvoiceTotalsCalculator"/> derives from its lines
+    /// (<see cref="InvoiceTotalsService.StoredTotalsOf"/>). A per-invoice reason of <see cref="SelectionRefused"/>; the candidate list leaves the invoice out.</summary>
+    public const string ReasonTotalsMismatch = "totals_mismatch";
+
+    /// <summary>The log code of <see cref="ReasonTotalsMismatch"/> (logged with the table and the row id only), and the 409 <c>errorCode</c> when the
+    /// re-check after the claim finds the difference (nothing is exported).</summary>
+    public const string TotalsMismatch = "ebilling.apexport.totals_mismatch";
 }
 
 /// <summary>Stable codes of <c>POST /api/finance/invoices/{invoiceId}/mark-paid</c> (task 151a). A refused move carries the lifecycle's own <see cref="InvoiceTransitionReasons"/> code.</summary>
@@ -90,6 +122,9 @@ public enum ApExportOutcome
 
     /// <summary>The batch total is outside what <c>sprk_billingexport.sprk_totalamount</c> can hold (400, nothing claimed or written).</summary>
     TotalOutOfRange,
+
+    /// <summary>The acting user's business unit cannot own the export files (409; a retry cannot change it; nothing exported).</summary>
+    OwnerUnitNotAllowed,
 }
 
 /// <summary>The answer of <see cref="ApExportService.CreateBatchAsync"/>: a created batch, or one outcome with its stable code.</summary>
@@ -110,7 +145,9 @@ public sealed record ApExportResult(
 /// </summary>
 /// <remarks>
 /// <para><b>Order.</b> (1) validate the request; (2) <see cref="ApExportAuthorization.AuthorizeExportAsync"/> (EB-D-178; the whole batch or nothing, before any read
-/// of the invoices' state); (3) read the mapping and check the file store (before any claim: a fault here writes nothing); (4) read and check the
+/// of the invoices' state); (3) read the mapping, check the file store, and ask who would own the files (<see cref="StoredFileService.ResolveOwnerForAppAsync"/>:
+/// before the batch is created and before any claim, so a fault or a refusal here writes nothing; a refusal a retry cannot change, such as a caller in the root
+/// business unit, is 409 <see cref="ApExportCodes.OwnerUnitNotAllowed"/>); (4) read and check the
 /// selection (each invoice Approved with an empty batch lookup, else 400 with per-invoice reasons, nothing claimed; and the batch total fits the batch total column, else 400 <c>batch_total_out_of_range</c>, nothing claimed); (5) create the batch, status
 /// Generating; (6) claim every invoice in id order with <c>IfRowVersionMatches</c> on the version read in (4): a conflict releases this batch's claims,
 /// marks the batch Failed and answers 409 (ordered claims make exactly one of two overlapping batches win); (7) re-check that every claimed invoice is
@@ -123,6 +160,10 @@ public sealed record ApExportResult(
 /// <c>ebilling.export.transition_incomplete</c> naming the batch for the operator. Known limit, recorded in the task notes.</para>
 /// <para><b>Not guaranteed here.</b> A process crash between (5) and (10) leaves a Generating batch holding claims; nothing sweeps it in R1 (the claim
 /// is the double-payment guard, so it fails safe: the invoices cannot be exported again until an operator clears the batch).</para>
+/// <para><b>The only writer of <see cref="BatchLookup"/> (EB-D-207, task 165d).</b> The claim and the release go through this class's own
+/// <c>IGenericEntityService</c> calls and never ask <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>. Every generic writer does ask it, and it
+/// refuses a payload naming this column on <c>sprk_invoice</c> for every identity (<c>RecordTableRule.WriterOnlyColumns</c>; the column is also
+/// mapping-protected). <c>BillingExportClaimWriterOnlyGuardTests</c> pins both facts.</para>
 /// </remarks>
 public sealed class ApExportService
 {
@@ -155,7 +196,10 @@ public sealed class ApExportService
     [
         "statuscode", BatchLookup, "versionnumber", "sprk_invoicenumber", "sprk_trackingnumber", "sprk_invoicedate", "sprk_invoiceduedate",
         "sprk_billingperiodstart", "sprk_billingperiodend", "sprk_currency", "sprk_totalamount", "sprk_lineadjustmentstotal",
-        "sprk_invoiceadjustmentstotal", "sprk_approvedtotal", "sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
+        "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+        // Task 165b-2: with the four above, the stored totals InvoiceTotalsService.StoredTotalsOf compares with the lines.
+        InvoiceTotalsService.InvoiceFeesTotal, InvoiceTotalsService.InvoiceExpensesTotal,
+        "sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
         "sprk_regardingagreement", "sprk_regardingrecordnumber", "sprk_regardingrecordname",
     ];
 
@@ -166,8 +210,11 @@ public sealed class ApExportService
     private readonly StoredFileService _files;
     private readonly StoredFileBlobs _blobs;
     private readonly IRecordOwnershipResolver _owners;
+    private readonly BillingDecisionRecorder _recorder;
     private readonly ILogger<ApExportService> _logger;
 
+    /// <param name="recorder">Task 165b-3 part B: the source of the writer identity only (<see cref="BillingDecisionRecorder.WriterUserIdAsync"/>),
+    /// so the export counts an invoice as approved only with the approve record that identity created. The export writes no Decision Record.</param>
     public ApExportService(
         IGenericEntityService entities,
         IInvoiceLifecycleService lifecycle,
@@ -176,6 +223,7 @@ public sealed class ApExportService
         StoredFileService files,
         StoredFileBlobs blobs,
         IRecordOwnershipResolver owners,
+        BillingDecisionRecorder recorder,
         ILogger<ApExportService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -185,6 +233,7 @@ public sealed class ApExportService
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _blobs = blobs ?? throw new ArgumentNullException(nameof(blobs));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
+        _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -246,6 +295,36 @@ public sealed class ApExportService
             return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The file store is not available. Nothing was exported.");
         }
 
+        // (3b) Who would own the files, asked BEFORE the batch row exists and before any invoice is claimed, so a refusal writes nothing (dev incident
+        // 2026-11-03: the batch was created first, the file's owner question then refused the root business unit, and a Failed batch was left behind).
+        // The question is the FILE's own, not a copy of it: StoredFileService builds it from the same spec and the same acting user it will use to write
+        // each file, and the restricted-content owner team rule (RestrictedContentOwnerTeam) runs inside the resolver both go through, so the pre-check
+        // and the file's check cannot be asked differently. They can still disagree only if the world changes between them (the user's unit moved, a
+        // member added to the owner team): the file's own check then still refuses, the batch is compensated (a Failed batch blocks nothing) and the answer
+        // is the file's. The pre-check is an early exit and never a grant: only a resolved owner passes it; a fault, an unreadable or unknown answer
+        // and any refusal other than the deterministic one are a retryable 503 with nothing written, never 409 and never "allowed".
+        var batchId = Guid.NewGuid();
+        var batchName = batchId.ToString("D");
+        RecordOwnerResolution fileOwner;
+        try
+        {
+            fileOwner = await _files.ResolveOwnerForAppAsync(
+                ExportFileSpec(batchId, $"ap-export-{batchName}.csv", "text/csv"), callerSystemUserId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "AP export: the owner of the export files could not be resolved; nothing was created");
+            return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "Who would own the export files could not be confirmed. Nothing was exported. Try again.");
+        }
+
+        if (!fileOwner.IsOwned)
+        {
+            _logger.LogWarning("AP export: the export files cannot be owned for the caller ({Code}); nothing was created", fileOwner.RefusalCode);
+            return fileOwner.IsRefused && IsOwnerUnitRefusal(fileOwner.RefusalCode)
+                ? ApExportResult.Refused(ApExportOutcome.OwnerUnitNotAllowed, ApExportCodes.OwnerUnitNotAllowed, OwnerUnitNotAllowedDetail)
+                : ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The export files could not be created. Nothing was exported.");
+        }
+
         // (4) The selection: every invoice Approved with an empty batch lookup, else the whole request is refused with the reasons.
         var selected = new List<Entity>();
         var refusals = new List<ApExportInvoiceRefusal>();
@@ -271,10 +350,74 @@ public sealed class ApExportService
             return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
         }
 
+        // Task 095c-4: an invoice that needs a firm is never exported, whatever its firm column says now (the stored hold, InvoiceFirmHold).
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> firmHeld;
+            try
+            {
+                firmHeld = await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "AP export: the firm holds of the selected invoices could not be read; nothing was claimed");
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => InvoiceFirmHold.HasNoFirm(r) || firmHeld.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonFirmMissing));
+            }
+        }
+
+        // Task 165b-3 part B (EB-D-208): AP export decides only from server-written sources. An Approved invoice without the writer-created approve
+        // record is refused per invoice (the request is refused as a whole, as for every other reason; nothing is claimed). One batched read.
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> recorded;
+            try
+            {
+                recorded = await ApproveRecordedAsync(selected, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError("AP export: the approve records of the selected invoices could not be read ({ExceptionType}); nothing was claimed", ex.GetType().Name);
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => !recorded.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonApprovalNotRecorded));
+            }
+        }
+
+        // Task 165b-2 (EB-D-200 item 3): an invoice whose stored totals differ from what the calculator derives from its lines is refused per invoice, the
+        // same way (nothing is claimed). One batched line read.
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> matching;
+            try
+            {
+                matching = await TotalsMatchAsync(selected, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError("AP export: the lines of the selected invoices could not be read ({ExceptionType}); nothing was claimed", ex.GetType().Name);
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => !matching.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonTotalsMismatch));
+            }
+        }
+
         if (refusals.Count > 0)
         {
-            return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused,
-                "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported.", null, refusals, null);
+            return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused, SelectionRefusedDetail(refusals), null, refusals, null);
         }
 
         // The batch total, computed once here: it is written to the batch at the very end, after the invoices were sent to AP, so a total the column
@@ -289,8 +432,6 @@ public sealed class ApExportService
 
         // (5) The batch, Generating. Owned like any user-owned row the caller creates (the caller's business-unit team), so the people who can see
         // the invoices can see the batch (D-90).
-        var batchId = Guid.NewGuid();
-        var batchName = batchId.ToString("D");
         RecordOwnerResolution owner;
         try
         {
@@ -350,14 +491,56 @@ public sealed class ApExportService
             }
 
             // (7) Still Approved after the claim (a status change does not look at the batch lookup).
+            // Task 095c-4: and still has a firm and no "firm needed" hold. This is the guard of the Sent to AP writer (step 9, the only caller of
+            // the lifecycle's move to Sent to AP): it runs after the claim and before any file or status write, so nothing irreversible follows it.
+            var freshRows = new List<Entity>(selected.Count);
             foreach (var row in selected)
             {
-                var fresh = await _entities.RetrieveAsync(InvoiceEntity, row.Id, ["statuscode", BatchLookup], ct).ConfigureAwait(false);
+                // Task 165b-2: with the stored totals, re-compared with the lines below.
+                var fresh = await _entities.RetrieveAsync(
+                    InvoiceEntity, row.Id, ["statuscode", BatchLookup, "sprk_vendororg", .. InvoiceTotalsService.StoredTotalsColumns], ct).ConfigureAwait(false);
+                freshRows.Add(fresh);
                 if (StatusOf(fresh) != InvoiceStatusCodes.Approved || BatchOf(fresh) != batchId)
                 {
                     throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
                         "An invoice in the selection changed while the export was being prepared. Nothing was exported. Reload and try again.");
                 }
+
+                if (InvoiceFirmHold.HasNoFirm(fresh))
+                {
+                    throw FirmMissingStop(InvoiceFirmNeed.NoFirm);
+                }
+            }
+
+            // Task 095c-5: the invoice's own hold and the submissions' (InvoiceFirmHold), read app-only.
+            if ((await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false)).Count > 0)
+            {
+                throw FirmMissingStop(InvoiceFirmNeed.Held);
+            }
+
+            // Task 165b-3 part B (EB-D-208): and each still has its writer-created approve record, before any file or Sent to AP write. One batched read.
+            var stillRecorded = await ApproveRecordedAsync(selected, ct).ConfigureAwait(false);
+            if (selected.Any(r => !stillRecorded.Contains(r.Id)))
+            {
+                throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
+                    "An invoice in the selection changed while the export was being prepared. Nothing was exported. Reload and try again.");
+            }
+
+            // Task 165b-2 (EB-D-200 item 3): and each one's stored totals, as read now, still equal the calculator over its lines, before any file or
+            // Sent to AP write. One batched line read.
+            var stillMatching = await TotalsMatchAsync(freshRows, ct).ConfigureAwait(false);
+            // Fix round 1 (K2): the files are written from the rows read BEFORE the claim (step 8), so the totals the re-check just validated must be the
+            // ones those rows carry: a row whose stored totals changed after the selection read stops the batch the same way. No extra query.
+            var changed = selected.Zip(freshRows).Where(p => !StoredTotalsUnchanged(p.First, p.Second)).Select(p => p.First).ToList();
+            foreach (var row in changed.Where(r => stillMatching.Contains(r.Id)))
+            {
+                _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.TotalsMismatch, InvoiceEntity, row.Id);
+            }
+
+            if (changed.Count > 0 || freshRows.Any(r => !stillMatching.Contains(r.Id)))
+            {
+                throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.TotalsMismatch,
+                    "The stored totals of an invoice changed or no longer match its lines. Repeat the last line or adjustment decision on it, then export again. Nothing was exported.");
             }
 
             // (8) The values, read once; the files, written once.
@@ -380,15 +563,7 @@ public sealed class ApExportService
 
                 var contentType = format == "csv" ? "text/csv" : "application/json";
                 var name = $"ap-export-{batchName}.{format}";
-                var spec = new StoredFileRowSpec
-                {
-                    FileId = StoredFileIds.New(),
-                    Purpose = StoredFilePurpose.ExportFile,
-                    Parent = new StoredFileParent(StoredFileParentKind.BillingExport, batchId),
-                    Name = name,
-                    ContentType = contentType,
-                    FirmVisible = false,
-                };
+                var spec = ExportFileSpec(batchId, name, contentType);
                 progress.Files.Add(spec.FileId);
                 StoredFileCreateResult created;
                 try
@@ -404,10 +579,18 @@ public sealed class ApExportService
 
                 if (!created.IsCreated)
                 {
-                    _logger.LogWarning("AP export: the file store refused the {Format} file of batch {BatchId} ({Code})", format, batchId, created.RefusalCode);
-                    throw created.RefusalCode == StoredFileRefusal.SizeOutOfRange
-                        ? new Stopped(ApExportOutcome.Failed, ApExportCodes.FileTooLarge, "The export file is too large to store. Nothing was exported. Select fewer invoices.")
-                        : new Stopped(ApExportOutcome.Failed, ApExportCodes.FileFailed, "The export file could not be stored. Nothing was exported. Try again.");
+                    _logger.LogWarning("AP export: the file store refused the {Format} file of batch {BatchId} ({Code}, owner {OwnerCode})",
+                        format, batchId, created.RefusalCode, created.OwnerRefusalCode);
+                    // The pre-check at (3b) normally answers an owner refusal first; this is the same refusal arriving AFTER the batch exists (the world
+                    // changed between the two asks), so it is the same non-retryable answer, compensated like any other failure here.
+                    throw created.RefusalCode switch
+                    {
+                        StoredFileRefusal.SizeOutOfRange =>
+                            new Stopped(ApExportOutcome.Failed, ApExportCodes.FileTooLarge, "The export file is too large to store. Nothing was exported. Select fewer invoices."),
+                        StoredFileRefusal.OwnerUnresolved when IsOwnerUnitRefusal(created.OwnerRefusalCode) =>
+                            new Stopped(ApExportOutcome.OwnerUnitNotAllowed, ApExportCodes.OwnerUnitNotAllowed, OwnerUnitNotAllowedDetail),
+                        _ => new Stopped(ApExportOutcome.Failed, ApExportCodes.FileFailed, "The export file could not be stored. Nothing was exported. Try again."),
+                    };
                 }
 
                 written.Add(new ApExportFileDto(spec.FileId, format, name, contentType));
@@ -485,6 +668,30 @@ public sealed class ApExportService
         var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.ToList();
         var truncated = rows.Count > CandidateCap;
         rows = rows.Take(CandidateCap).ToList();
+
+        // 095c-4 review K2: an invoice the export would refuse (no firm, or held for one by its own hold or a submission's, task 095c-5) is
+        // not offered. The same reader as the selection, app-only; a read fault throws (the route answers unavailable, nothing is shown).
+        if (rows.Count > 0)
+        {
+            var firmHeld = await InvoiceFirmHold.HeldInvoicesAsync(_entities, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+            rows = rows.Where(r => !InvoiceFirmHold.HasNoFirm(r) && !firmHeld.Contains(r.Id)).ToList();
+        }
+
+        // Task 165b-3 part B (EB-D-208): an Approved invoice without the writer-created approve record is not offered. One batched read; a fault
+        // (the read or the writer identity) throws, so nothing is shown.
+        if (rows.Count > 0)
+        {
+            var recorded = await ApproveRecordedAsync(rows, ct).ConfigureAwait(false);
+            rows = rows.Where(r => recorded.Contains(r.Id)).ToList();
+        }
+
+        // Task 165b-2 (EB-D-200 item 3): nor one whose stored totals differ from its lines, so the other candidates export without it. One batched line
+        // read per chunk; a fault throws, so nothing is shown.
+        if (rows.Count > 0)
+        {
+            var matching = await TotalsMatchAsync(rows, ct).ConfigureAwait(false);
+            rows = rows.Where(r => matching.Contains(r.Id)).ToList();
+        }
 
         var allowed = await _authorization.FilterExportableAsync(caller, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
         if (allowed is null)
@@ -651,6 +858,94 @@ public sealed class ApExportService
     }
 
     /// <summary>
+    /// Task 165b-3 part B (EB-D-208): the invoices of <paramref name="rows"/> that have the approve Decision Record the writer identity created
+    /// (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, one batched read). Each one without it is logged with the code, the
+    /// table and the row id only. Throws on a read fault.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> ApproveRecordedAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        var recorded = await InvoiceApprovalService.InvoicesWithApproveRecordAsync(
+            _entities, rows.Select(r => r.Id).ToList(), _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        foreach (var row in rows.Where(r => !recorded.Contains(r.Id)))
+        {
+            _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.ApprovalNotRecorded, InvoiceEntity, row.Id);
+        }
+
+        return recorded;
+    }
+
+    /// <summary>
+    /// Task 165b-2 (EB-D-200 item 3): the invoices among <paramref name="rows"/> whose stored totals equal what <see cref="InvoiceTotalsCalculator"/> derives
+    /// from their lines (<see cref="InvoiceTotalsService.InvoicesWithMatchingStoredTotalsAsync"/>, one batched line read per chunk). Each other one is logged
+    /// with the code, the table and the row id only. Throws on a read fault.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> TotalsMatchAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        var matching = await InvoiceTotalsService.InvoicesWithMatchingStoredTotalsAsync(_entities, rows, ct).ConfigureAwait(false);
+        foreach (var row in rows.Where(r => !matching.Contains(r.Id)))
+        {
+            _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.TotalsMismatch, InvoiceEntity, row.Id);
+        }
+
+        return matching;
+    }
+
+    /// <summary>
+    /// Task 165b-2 fix round 1 (K2): whether the invoice's stored totals (<see cref="InvoiceTotalsService.StoredTotalsColumns"/>) on <paramref name="fresh"/>,
+    /// read after the claim, equal the ones on <paramref name="before"/>, the row the export values are read from. Pure.
+    /// </summary>
+    private static bool StoredTotalsUnchanged(Entity before, Entity fresh) =>
+        InvoiceTotalsService.StoredTotalsColumns.All(c => before.GetAttributeValue<Money>(c)?.Value == fresh.GetAttributeValue<Money>(c)?.Value);
+
+    /// <summary>
+    /// Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid's approval check. <c>Recorded</c> is true when the invoice has the writer-created
+    /// approve record under its approval's key (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, the export's own batched
+    /// read). Otherwise <c>Invoice</c> is the invoice's status as read now (null when the invoice does not exist), so Mark Paid can answer for an
+    /// invoice that is not Sent to AP as before without moving anything. Read app-only. Throws on a read fault (Mark Paid answers 503).
+    /// </summary>
+    public async Task<(bool Recorded, Entity? Invoice)> MarkPaidApprovalAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var recorded = await InvoiceApprovalService.InvoicesWithApproveRecordAsync(_entities, [invoiceId], _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        if (recorded.Contains(invoiceId))
+        {
+            return (true, null);
+        }
+
+        var query = new QueryExpression(InvoiceEntity) { ColumnSet = new ColumnSet("statuscode"), TopCount = 1 };
+        query.Criteria.AddCondition(InvoiceEntity + "id", ConditionOperator.Equal, invoiceId);
+        return (false, (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault());
+    }
+
+    /// <summary>The 409 <see cref="ApExportCodes.FirmMissing"/> of step 7, worded for why the invoice needs a firm (095c-4 review K1).</summary>
+    private static Stopped FirmMissingStop(InvoiceFirmNeed need) => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing, need == InvoiceFirmNeed.Held
+        ? "An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first."
+        : "An invoice in the selection has no firm. Nothing was exported. A reviewer must add the firm first.");
+
+    /// <summary>
+    /// The sentence of a 400 <see cref="ApExportCodes.SelectionRefused"/>, fitted to the reasons (095c-4 review F1): a selection refused only for a
+    /// missing firm does not say "only Approved invoices".
+    /// </summary>
+    internal static string SelectionRefusedDetail(IReadOnlyCollection<ApExportInvoiceRefusal> refusals)
+    {
+        if (refusals.All(r => r.Reason == ApExportCodes.ReasonApprovalNotRecorded))
+        {
+            return "An invoice in the selection has no recorded approval: an administrator must review it. Nothing was exported.";
+        }
+
+        if (refusals.All(r => r.Reason == ApExportCodes.ReasonTotalsMismatch))
+        {
+            return "An invoice in the selection has stored totals that do not match its lines. Repeat the last line or adjustment decision on it, then select the invoice again. Nothing was exported.";
+        }
+
+        var firm = refusals.Count(r => r.Reason == ApExportCodes.ReasonFirmMissing);
+        return firm == 0
+            ? "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported."
+            : firm == refusals.Count
+                ? "An invoice in the selection has no firm, or is waiting for one: a reviewer must add the firm first. Nothing was exported."
+                : "Only Approved invoices that have a firm and are not yet in an export batch can be exported. Nothing was exported.";
+    }
+
+    /// <summary>
     /// Whether the invoice is (or, when its status cannot be read, may be) sent: Sent to AP or Paid. Any other status (still Approved, or moved elsewhere
     /// by someone else) is NOT sent by this batch, so its claim is released. Unknown counts as sent: its claim is kept (fail safe).
     /// </summary>
@@ -722,6 +1017,36 @@ public sealed class ApExportService
     // =============================================================================================================================
     // Helpers
     // =============================================================================================================================
+
+    /// <summary>The answer when the acting user's business unit cannot own export files. Names no id; says what an administrator must do.</summary>
+    private const string OwnerUnitNotAllowedDetail =
+        "Your business unit cannot own export files, so nothing was exported, and trying again will not help. " +
+        "An administrator must run the export from a user in a business unit that can own them.";
+
+    /// <summary>
+    /// The one spec of an export file: the batch as parent, internal only. The write loop and the owner pre-check (3b) both build it here, so the
+    /// question the pre-check asks is the question the write asks.
+    /// </summary>
+    private static StoredFileRowSpec ExportFileSpec(Guid batchId, string name, string contentType) => new()
+    {
+        FileId = StoredFileIds.New(),
+        Purpose = StoredFilePurpose.ExportFile,
+        Parent = new StoredFileParent(StoredFileParentKind.BillingExport, batchId),
+        Name = name,
+        ContentType = contentType,
+        FirmVisible = false,
+    };
+
+    /// <summary>
+    /// True for the owner refusals that a retry cannot change: the resolver's <see cref="RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved"/>. It is
+    /// the ONE code the resolver gives when the restricted-content owner team cannot be used for the acting user's business unit
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>: the answer is in the root unit or the Secure Record unit, the
+    /// unit chain is unreadable or loops, or the named team is missing, ambiguous or has a member). Every status behind it is a fact about configuration, not
+    /// a fault: a read that faults throws instead, and never reaches here. This names the code; it does not decide the rule. Any other code, or none, is
+    /// not matched, so it stays the retryable answer.
+    /// </summary>
+    private static bool IsOwnerUnitRefusal(string? ownerRefusalCode) =>
+        string.Equals(ownerRefusalCode, RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved, StringComparison.Ordinal);
 
     private static (IReadOnlyList<Guid> Ids, IReadOnlyList<string> Formats)? Validate(ApExportRequest request)
     {
@@ -888,7 +1213,8 @@ public sealed class ApExportService
                 ColumnSet = new ColumnSet(
                     "sprk_eventdate", "sprk_costtype", "sprk_timekeeper", "sprk_quantity", "sprk_rate", "sprk_amount", "sprk_approvedamount", "sprk_linestatus",
                     "sprk_linesequence", "sprk_taskcode", "sprk_activitycode", "sprk_expensecode", "sprk_taskcodeasbilled", "sprk_activitycodeasbilled",
-                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState),
+                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState, InvoiceSubmissionPersister.LineExtractionConfidence,
+                    InvoiceTotalsService.LineInvoiceLookup), // the reviewer-added rule reads the line's invoice (164a fix round K2)
                 Criteria = new FilterExpression(LogicalOperator.And),
                 PageInfo = new PagingInfo { PageNumber = 1, Count = ReadLimit },
             };
@@ -921,12 +1247,15 @@ public sealed class ApExportService
                 }
                 else
                 {
-                    billed = amount;
+                    // 164a-2 F2 (EB-D-192): the firm did not bill a reviewer-added line, so it is outside the invoice's BilledTotal and its
+                    // billed is 0, as for an Adjustment line; its approved is its contribution (the amount, the approved amount when Reduced,
+                    // 0 when Disallowed), which is part of the ApprovedTotal. Same read as the totals (the marker AND the derived id).
+                    billed = ExtractionProvenance.IsReviewerAdded(line) ? 0m : amount;
                     approved = line.GetAttributeValue<OptionSetValue>("sprk_linestatus")?.Value switch
                     {
                         (int)InvoiceLineStatus.Disallowed => 0m,
-                        (int)InvoiceLineStatus.Reduced => Dec(line, "sprk_approvedamount") ?? billed,
-                        _ => billed,
+                        (int)InvoiceLineStatus.Reduced => Dec(line, "sprk_approvedamount") ?? amount,
+                        _ => amount,
                     };
                 }
 
