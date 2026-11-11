@@ -40,7 +40,7 @@
 
 **Worktree cleanup (use `scripts/worktree/Remove-WorktreeSafe.ps1` only):** 176/177 agent worktrees removed 2026-11-11 (tips verified inside #2666 / master). Left: task174 `agent-a87a71b050eceafb1` under `C:/code_files/spaarke/.claude/worktrees/` (after #2580/#2579 merge).
 
-**ebilling master PR:** not open yet. When it is, review ontology-owned files; their test-world fix `49a49437bc` (176 control test, +3 lines seeding the service request) already accepted by message 2026-11-11.
+**ebilling master PR [#2689](https://github.com/spaarke-dev/spaarke/pull/2689):** ontology scope **APPROVED 2026-11-11 at `ec11c6d0e2`** (PR comment 6799396706; one adversarial review, no F-class; DEF-061 `340b6c53ad` approved explicitly; test fixes `49a49437bc` + `14e54c9e06` accepted). Public K1 (`sprk_publishedon` before BFF), K3, K5 on the PR; K2/K4 PRIVATE, sent to ebilling by message. Merges after uac-r2 + spa-r4 too; ebilling sends the SHA. If the head moves before merge, re-check only the delta in our scope.
 
 ## Dev state
 
