@@ -1,7 +1,14 @@
 # Current Task State
 
 > **Last Updated**: 2026-11-11 (session `ebilling-r1`, Claude Desktop; the only writer to this worktree). The previous long version is `notes/handoff-history/current-task-2026-11-11a.md`; read it for history.
-> Work head: `origin/work/ebilling-r1` at `64ec7a15b9`. It contains the task-130 batch and F3b (merge `017a965312`), the default-team exclusion (`a945c34a3d`), and the master sync through master `df93d2029c` (sync branch `14e54c9e06`, fast-forwarded; script-guard fix `aa2fe4feab`; comment fix `64ec7a15b9`). It is not on master or dev yet. uac-r2's `--remerge-diff` read was asked 2026-11-11; only `ExternalDataService.cs` was resolved by hand (merge `07ed87e2d4`).
+> **State at 2026-11-11 evening:**
+> - **#2689 MERGED** to master as `2fc434c912` (head `60628550fb`).
+> - **Dev:** uac-r2 deployed the dev BFF `b3ca99cad5`, a local merge of master `ddae82fa90` with mcp-r1's spike `755987b385`, never pushed. Every later dev deploy must include the spike.
+> - **164 ribbon `-Apply`:** done on dev; `-Verify` PASS; uac-r2 notified before and after.
+> - **116:** merged into work (`cd9d90aaa0`, pushed). Not on master yet.
+> - **Follow-up PR #2708** (branch `fix/ebilling-2689-followups`, worktree `C:\wtfx2689`): fixes the hard-deny child test pin that has failed on master since #2689, and adds the Tier 2 shard `api-ai-finance-external` (api-seam timed out). uac-r2 APPROVED it. It merges only with the owner's go.
+> - **uac-r2 SecureChild `-Verify` on dev: 10 FAILs**, all from 096b's invoice side (the web resource is stale; the `sprk_invoice` hides and the closed-table StringParameter are not live). Native invoice New is still open on dev. The 096b live steps need the owner's go, then notices to uac-r2 before and after. If the owner declines, file it and send uac-r2 the issue number.
+> - **word-add-in-r1 is unreachable:** it is still owed the dev sha `b3ca99cad5` (095a and the others are live).
 
 ## Quick recovery
 
