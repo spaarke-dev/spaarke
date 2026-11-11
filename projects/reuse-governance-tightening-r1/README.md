@@ -1,5 +1,7 @@
 # Reuse Governance Tightening R1
 
+> **Portfolio**: [Project #2682](https://github.com/spaarke-dev/spaarke/issues/2682) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#427](https://github.com/spaarke-dev/spaarke/issues/427) · label `reuse-governance-tightening-r1` — _registered 2026-11-11 (19 tasks planned)_
+
 > **Last Updated**: 2026-11-11
 >
 > **Status**: In Progress

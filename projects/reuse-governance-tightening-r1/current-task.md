@@ -7,7 +7,8 @@
 
 **Phase**: `/project-pipeline` ran 2026-11-11 (owner-approved spec). README, plan, project CLAUDE.md, `notes/decisions.md` and 19 POMLs + `tasks/TASK-INDEX.md` exist; Completeness Lint PASS (19 clean).
 **Active task**: none — execution not started.
-**Next action**: after commit, push and GitHub registration (Epic #427), start Wave 1: task 001 in the main session, with 041 + 042 as Group A sub-agents (see TASK-INDEX "Parallel Execution Plan"). Owner gates: 010, 030, 035, and each PR.
+**Registered**: Project Issue #2682 under Epic #427, Board #2 (Status Active, 19 tasks planned), label `reuse-governance-tightening-r1`.
+**Next action**: start Wave 1: task 001 in the main session, with 041 + 042 as Group A sub-agents (see TASK-INDEX "Parallel Execution Plan"). Owner gates: 010, 030, 035, and each PR.
 **design-to-spec outcomes**: SpaarkeAi hot-path corrected to **Y** (item 4's three actions change `src/solutions/SpaarkeAi`) and the XML `<hot-path-declaration>` added to design.md. Owner accepted defaults: items 1–3 one PR, item 4 package actions their own PR(s), one adversarial pass over 1–4; dry-run rule both-caught→go / one-missed→owner sees `medium` cost / both-missed→no-go; FR-09 waits on owner approval of `package-reviews.md`.
 
 ## Where things stand (2026-11-10)
@@ -26,7 +27,7 @@
      - (e) **Re-arm `CS0618`** (remove the stale downgrade, fix callers, narrow `DiagnosticId` suppression only where a caller can't migrate).
      - (f) C# LSP A/B trial: 3 gates, half-day time-box.
 - **Open questions**: all 16 (OQ-1..OQ-16) decided. The ROI review revised OQ-3, OQ-5, OQ-6, OQ-10, OQ-12 and OQ-14, and made OQ-13 and OQ-16 moot; see design.md §11. Every cut is recorded in §10.7.
-- **Portfolio**: no Project Issue yet; register at `/project-pipeline` Step 4.2. Epic #427 (OQ-9).
+- **Portfolio**: Project Issue #2682, Epic #427 (OQ-9).
 - **Already done elsewhere**: F-1 (enumerate ADR-012's shared-package list + `SharedPackageCensusTests`) shipped in PR #2656 — 6 Sanctioned, 9 Grandfathered. Workstream 4 starts from that census.
 
 ## Standing directives (owner)
