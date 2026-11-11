@@ -50,7 +50,10 @@
 - **Merged:** 198b as `c398d2cecd` (#2677), and #2669 as `a7d7aad31f` (#2679). Worktrees `C:\wt198b` and `C:\wt188t` were removed. #2678 was filed.
 - **Audit of the open tasks:** every code item is merged and on dev, except the 198 chain. What is left is owner UAT, owner decisions, and 090.
 - **Owner table:** `notes/wrap-up-uat-and-decisions-2026-11-11.md` (D-1..D-12, U-1..U-11). Waiting on the owner's answers. Private item P-1 (dev app user named "...-prod" holding System Administrator in the root BU) was raised in chat only.
-- **Deploy order (D-2):** master now carries 198, so 054b must come before any dev deploy from master. I asked fm to confirm, and whether 054b is ready.
+- **Deploy order (D-2, revised):** 054b is still being built (fm). 198 is inert on dev, because `DirectMessage:BusinessUnitName` / `OwnerTeamName` are unset there; NotConfigured → `IsDirectOwnerTeamAsync` = false → no grant, no assignment.
+  - **BINDING:** those two settings stay unset on any environment until 054b's field security verifies there.
+  - **Order:** dev BFF from master now (mcp-r1 coordinated) → 054b → Direct setup plus the settings (owner go here) → 054c Stamp → piece 3 → 054c Move.
+  - Sent to fm.
 - **Next:** on the owner's D-1, run 090 through task-execute: reconcile the index, defer disposition, test-diet, H-8a, docs for 058/082/087/089, lessons learned, README Complete.
 
 ## Open owner items
