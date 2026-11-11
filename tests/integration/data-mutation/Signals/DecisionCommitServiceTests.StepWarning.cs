@@ -19,7 +19,8 @@ public sealed partial class DecisionCommitServiceTests
         rig.Executors["send-budget-inquiry"].Result = DecisionActionOutcome.Done(
             "send-budget-inquiry",
             new DecisionRecordRef("sprk_servicerequest", ServiceRequestId), new DecisionRecordRef("sprk_communication", CommunicationId))
-            with { Warning = "inquiry_email_not_archived" };
+            with
+        { Warning = "inquiry_email_not_archived" };
 
         var result = await rig.CommitAsync(PathBReview());
 

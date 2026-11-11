@@ -104,9 +104,9 @@ public class GateCombinationConstructibilityTests
     public static IEnumerable<object[]> Combos()
     {
         foreach (var di in new[] { true, false })
-        foreach (var an in new[] { true, false })
-        foreach (var rm in new[] { true, false })
-            yield return new object[] { di, an, rm, true };
+            foreach (var an in new[] { true, false })
+                foreach (var rm in new[] { true, false })
+                    yield return new object[] { di, an, rm, true };
 
         // DocIntel and Analysis on, AI Search endpoint empty (RecordMatching must stay off: its validator demands the endpoint).
         yield return new object[] { true, true, false, false };

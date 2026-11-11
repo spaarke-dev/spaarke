@@ -82,7 +82,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         _user.RowValues[id] = new Dictionary<string, object?>
         {
-            ["_sprk_matter_value"] = matter.ToString("D"), ["_sprk_invoice_value"] = invoice.ToString("D"),
+            ["_sprk_matter_value"] = matter.ToString("D"),
+            ["_sprk_invoice_value"] = invoice.ToString("D"),
         };
         _world.WithRecord("sprk_billingevent", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) });

@@ -344,9 +344,9 @@ public static class ExternalIntakeEndpoints
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
-               {
-                   Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-               }))
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        }))
         {
             writer.WriteStartObject();
             foreach (var property in clientAnswers.EnumerateObject())

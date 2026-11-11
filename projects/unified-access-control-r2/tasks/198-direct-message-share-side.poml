@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="198" project="unified-access-control-r2">
+  <metadata>
+    <title>Direct 1:1 messages owned by the Direct owner team: participant grants, durable re-grant, keep-on-filing, gate Decision Record mirror, and the Direct-BU setup mode (share side of fm task 054)</title>
+    <phase>Final push (round 90 rules)</phase>
+    <gate>Owner rulings 2026-11-08 (Direct 1:1 messages: option (a), a dedicated memberless owner team outside the BU tree, participants shared in) and 2026-11-09 (typed in uac-r2: "Yes start fm task 054"; "Yes keep access" = after a Direct message is filed to a record its participants keep access, except on secure or Restricted targets). Lands before or with fm 054a's deploy. Parts C and E start only after fm sends the sha of its generalised owner-team lookup; Part E's D-123/D-169 change needs ontology-r1's OK (or the owner's ruling if ontology objects).</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: who can read a message changes when its owner becomes a memberless team; share grants, revokes and a re-grant job; field-security-adjacent setup script.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed share reasoning across three writers (fm's owner rule, uac's grants, ontology's gate-record sharing) and a live-setup script.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits DirectThreadAccessService and GateDecisionRecordSharing (shared with fm 054a and ontology 042b) and Set-CustomerOwnerTeams.ps1 (shared with 194b's owner teams).</parallel-reason>
+    <deps>fm 054a lookup sha (Parts C, E); ontology-r1 OK (Part E)</deps>
+    <tags>bff-api, dataverse, security, sharing, testing</tags>
+    <estimated-effort>2-3 sessions</estimated-effort>
+  </metadata>
+
+  <prompt>fm task 054 makes every Direct 1:1 message that is not filed under a record owned by a named, memberless Direct owner team (in a Direct business unit, a direct child of the root beside Secure Record). Nobody reads such a message by ownership, so the participants' Read shares are the ONLY way anyone reads it, including its sender. This task is the share side: it makes those shares correct, durable and kept on filing, and sets up the team. fm owns the owner rule, the thread-flag lock, the existing-row move and the 409 refusal.</prompt>
+  <role>SPAARKE platform developer, access control. Security fails closed: a missed grant never widens access, and nothing is shared beyond the thread's participants.</role>
+  <goal>A Direct-team-owned message (and every content row a participant needs to read it) is readable by exactly its thread's two participants; a failed grant is retried durably until it lands; after the message is filed to an ordinary record the participants keep their shares, on a secure target the secure synchronizer decides, on a Restricted target barred participants lose them; the Direct team and its role are set up and verified by script.</goal>
+
+  <context>
+    <background>
+      - Today a Direct message is user-owned by its sender; `DirectThreadAccessService.GrantMessageAccessAsync` grants Read to the thread's participants (thread owner ∪ thread POA sharees, `ReadDirectParticipantsForGrantAsync`) and, ONLY when the message is user-owned (`:219-220`), mirrors the shares onto its gate Decision Records (`GateDecisionRecordSharing.MirrorCommunicationSharesAsync`, ontology 042b, D-169). Grants are best-effort (`GrantReadAccessToPrincipalsAsync` logs and continues).
+      - After 054a the message is owned by the Direct team: `ReadMessageOwnershipAsync` returns (ordinary, owningTeam = Direct team), participants are still granted, but the mirror is skipped (`messageOwningTeam is not null`) and `GateDecisionRecordSharing` shares only user-owned records of user-owned communications (D-123). A failed grant now leaves the message unreadable by that participant, the sender included: there is no owner fallback.
+      - Filing re-owns the message to the record's team (fm) and runs `SecureChildReconciler.AfterRefileAsync` → `GateDecisionRecordSharing.ReownAfterFilingAsync`, which re-owns gate records and revokes EVERY share on them (D-169). Message POA shares are not revoked by any ordinary filing path today (verify: Step 1); a secure filing's shares are `SecureChildShareSynchronizer`'s (revokes non-root sharees); `RestrictedExternalShareRemover` / `NoAccessShareEnforcer` remove external shares on Restricted rows (verify they cover `sprk_communication`).
+      - `scripts/Set-CustomerOwnerTeams.ps1` already sets up memberless owner teams with a Basic-Read role per declared config file in a customer top unit; it REFUSES the root and Secure Record. The Direct BU is neither a customer unit nor Secure: it needs its own mode that does not loosen the customer-unit refusals.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs (Part B, C, E)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordSharing.cs (Part E; ontology-owned file, change only after ontology-r1's OK)</file>
+      <file role="modify">scripts/Set-CustomerOwnerTeams.ps1 + new config/direct-message-owner-role.json (Part A)</file>
+      <file role="reuse">the re-grant: an EXISTING job (first candidate `Services/Communication/Membership/MembershipReconcileJob.cs`, an IJobHandler; scheduled backstop: extend an existing IScheduledJob such as `SecureChildShareReconciliationJob` or `CommunicationThreadFilingSweepJob`) — no new hand-rolled timer (ADR-036/052); §11 answers if anything new</file>
+      <file role="reuse">fm 054a's generalised owner-team lookup (merged by exact sha; do not write a second lookup)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs (Resolve/CannotBe owner-team pair, share-equality pattern); Api/ExternalAccess/InternalShareEndpoints.cs (ClassifyEligibility / IsBarredOnRestricted — the ONE eligibility rule)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Direct BU setup item; with fm's)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branch">`git switch -c task/uac-198-direct-share-side` from `work/unified-access-control-r2` tip. Parts C and E merge fm's lookup sha first (`git merge --no-ff &lt;sha&gt;`), never cherry-pick a copy.</constraint>
+    <constraint source="audience">The audience of a Direct-team-owned message is EXACTLY the thread's participants as the join fixed them (#1629: the topology is the join's, not a re-read). Never the Direct team's members (it has none), never the anchor record's grantees, never a team share. The sender is a participant and must be granted (they no longer own the row).</constraint>
+    <constraint source="fail closed">A grant that fails is retried durably; until it lands, the participant does not read the message. The owner is never rolled back, and no fallback owner or wider share is used. When the Direct team cannot be resolved (fm's Refusal), nothing is granted and the message is queued for re-grant; log with ids only (ADR-015).</constraint>
+    <constraint source="keep on filing (owner 2026-11-09)">Filing a Direct message to an ORDINARY record keeps the participants' Read shares on the message and on the content rows they were granted. Secure target: `SecureChildShareSynchronizer` decides (unchanged). Restricted target: a participant for whom `IsBarredOnRestricted` is true loses the shares (reuse the existing remover if it covers communications; otherwise extend it). The rule lives in ONE place (a code rule, not an operator setting).</constraint>
+    <constraint source="D-123 / D-169 (ontology)">Do not edit `GateDecisionRecordSharing.cs` before ontology-r1's OK is recorded in the task notes. Narrowest change: the Direct team is the only team treated like a user owner for the mirror; any other team owner still revokes the pass.</constraint>
+    <constraint source="setup script">The Direct-BU mode refuses: the root; the Secure Record unit; a unit that is not a direct child of the root; a unit with any user; a team with any member; ambiguous names. It does not create the business unit. -Apply never removes members, moves teams or takes roles off other principals (same as the existing modes). The customer-unit mode's refusals are unchanged, and `RestrictedContentOwnerRoleGuardTests`'s declared-set rule stays exact (the Direct mode has its own declared set).</constraint>
+    <constraint source="public repo">Commits, comments, test names and notes state rules only — no description of who could read what before the change.</constraint>
+    <constraint source="ADR-002 / ADR-004 / ADR-036 / ADR-038 / §10 / §11">No plugin. Re-grant through an existing job mechanism. KEEP test paths only (`tests/unit/Sprk.Bff.Api.Tests/`). Publish delta vs fresh master and CVE check. §11 answers for every new surface.</constraint>
+    <constraint source="live">No live write, script -Apply or deploy in this task. Dev -DryRun / -Verify of the script are allowed (read-only).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; conflict-check against fm's task/fm-054a and ebilling's 130 branches.</step>
+    <step order="1">Census (read-only, notes §1, file:line): (a) every path that revokes or reduces POA shares on `sprk_communication` on filing/unfiling/re-file; (b) how a participant reads a Direct message's content rows today (attachments, artifacts, gate Decision Records): cascade share, own share, or ownership; (c) whether `RestrictedExternalShareRemover` / `NoAccessShareEnforcer` cover `sprk_communication`; (d) any "leave conversation" path for Direct threads. STOP and report to the main session if (a) finds an ordinary-filing revoke of participant shares, or (b) finds a content row that reaches participants only through the message owner.</step>
+    <step order="2">Part A: Set-CustomerOwnerTeams.ps1 `-DirectMessageBusinessUnitName` mode + `config/direct-message-owner-role.json` (team 'Spaarke Direct Message Owners', role 'Direct Message Owner', Read at Basic on exactly the tables fm 054a assigns to the team — the list comes from fm; until then, sprk_communication only, marked TODO-fm). Dry run / -Apply / -Verify as the existing modes; Pester or the script's existing test harness for every refusal (must-fire) and a clean unit (must-not-fire).</step>
+    <step order="3">Part B: participant grants on a Direct-team-owned message: confirm `GrantMessageAccessAsync` grants both participants (sender included) when the owning team is the Direct team; grant the content rows from step 1(b) that need a share, with the same audience. Tests: must-fire (both participants granted; content rows granted), must-not-fire (no team expansion; record-anchored and secure messages unchanged).</step>
+    <step order="4">Part C (after fm's sha): durable re-grant. A failed participant grant (or a Direct-team Refusal) on a Direct-team-owned message enqueues a re-grant through the reused job; the handler re-reads the thread's participants (the join's audience, stored or re-derivable without re-reading owner-writable flags — say how in the notes), grants the missing ones, is idempotent, and never grants beyond the participants. Scheduled backstop finds Direct-team-owned messages missing a participant share (bounded scan). Tests: must-fire (a failed grant is retried and lands; a second run grants nothing), must-not-fire (a non-participant is never granted).</step>
+    <step order="5">Part D: keep on filing. Pin by tests that filing a Direct message to an ordinary record keeps both participants' message shares (and content-row shares); secure target → synchronizer outcome; Restricted target → barred participant's shares removed, the other kept. Implement only what step 1 shows is missing.</step>
+    <step order="6">Part E (after ontology's OK): the gate Decision Record mirror treats a Direct-team-owned communication like a user-owned unfiled one (`DirectThreadAccessService.cs:219` condition + `GateDecisionRecordSharing` owner checks), and on filing keeps the participants' shares per ontology's answer. Tests per ontology's ruling, including must-not-fire for every other team owner.</step>
+    <step order="7">Docs (deployment guide setup item, jointly with fm's); build; verify-suites; publish delta vs fresh master; CVE; one Opus adversarial pass plus a second (security tag). Send the diff to the main session (uac-r2) and the sha to fm.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: a Direct-team-owned unfiled message is readable by both thread participants (sender included) and by no one else; its content rows needed to read it follow the same audience.</criterion>
+    <criterion testable="true">AC2: a failed grant or an unresolved Direct team never widens access and is retried until it lands; the retry is idempotent and grants only participants.</criterion>
+    <criterion testable="true">AC3: filing to an ordinary record keeps the participants' shares; secure target → synchronizer outcome; Restricted target → `IsBarredOnRestricted` participants lose them.</criterion>
+    <criterion testable="true">AC4: gate Decision Records of a Direct-team-owned message are shared exactly with the message's internal sharees (after ontology's OK); any other team owner still revokes.</criterion>
+    <criterion testable="true">AC5: the Direct-BU script mode refuses each bad state listed in the constraints, applies idempotently, and -Verify exits 1 on each drift and 0 on a clean unit; the customer-unit mode's behaviour and guard are unchanged.</criterion>
+    <criterion testable="true">AC6 (must not fire): record-anchored messages, secure messages, the per-user master thread, unfiled inbound email and user-owned Direct messages (pre-054a rows) behave exactly as before.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Step 1 stop conditions (an ordinary-filing revoke of participant shares; a content row reachable only through the owner).</trigger>
+    <trigger>fm's lookup shape differs from a (TeamId | Refusal) resolve plus a cheap not-the-Direct-team check: report before adapting.</trigger>
+    <trigger>Ontology objects to Part E: stop Part E and report; the main session takes it to the owner.</trigger>
+    <trigger>Any need to change a role, field security or a setting live: stop; owner's go in the uac-r2 session only.</trigger>
+  </escalation>
+
+  <notes>Created 2026-11-09 by the uac-r2 desktop session on the owner's go ("Yes start fm task 054"; "Yes keep access").</notes>
+</task>

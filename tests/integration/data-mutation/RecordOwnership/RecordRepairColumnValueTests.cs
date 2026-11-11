@@ -186,9 +186,15 @@ public sealed class RecordRepairColumnValueTests
     {
         _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
         {
-            Id = Guid.NewGuid(), Name = "status", SourceField = string.Empty, TargetField = Status,
-            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
-            DefaultValue = "100000001", ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = "status",
+            SourceField = string.Empty,
+            TargetField = Status,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet,
+            MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+            DefaultValue = "100000001",
+            ExecutionOrder = 1,
+            IsActive = true,
         }, ClientTemplate());
         _world.ColumnOverrides[("sprk_event", Status)] = RepairWorld.Typed(Status, "Picklist") with { OptionValues = choices };
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
@@ -209,9 +215,14 @@ public sealed class RecordRepairColumnValueTests
         _world.Directory.Row("sprk_matter", RepairWorld.Matter)[Areas] = new OptionSetValueCollection([new(1), new(2)]);
         _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
         {
-            Id = Guid.NewGuid(), Name = "areas", SourceField = Areas, TargetField = Areas,
-            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-            ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = "areas",
+            SourceField = Areas,
+            TargetField = Areas,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet,
+            MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+            ExecutionOrder = 1,
+            IsActive = true,
         }, ClientTemplate());
         _world.ColumnOverrides[("sprk_event", Areas)] = RepairWorld.Typed(Areas, "Virtual") with { OptionValues = choices };
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
@@ -230,9 +241,14 @@ public sealed class RecordRepairColumnValueTests
         _world.Directory.Row("sprk_matter", RepairWorld.Matter)[Areas] = new OptionSetValueCollection();
         _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
         {
-            Id = Guid.NewGuid(), Name = "areas", SourceField = Areas, TargetField = Areas,
-            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-            ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = "areas",
+            SourceField = Areas,
+            TargetField = Areas,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet,
+            MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+            ExecutionOrder = 1,
+            IsActive = true,
         }, ClientTemplate());
         _world.ColumnOverrides[("sprk_event", Areas)] = RepairWorld.Typed(Areas, "Virtual") with { OptionValues = [1, 2, 3] };
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
@@ -274,16 +290,27 @@ public sealed class RecordRepairColumnValueTests
 
     private static FieldMappingRuleEntity NumberDefault(string value) => new()
     {
-        Id = Guid.NewGuid(), Name = "amount", SourceField = string.Empty, TargetField = Amount,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
-        DefaultValue = value, ExecutionOrder = 1, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = "amount",
+        SourceField = string.Empty,
+        TargetField = Amount,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber,
+        MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+        DefaultValue = value,
+        ExecutionOrder = 1,
+        IsActive = true,
     };
 
     private static FieldMappingRuleEntity NumberCopy(string source) => new()
     {
-        Id = Guid.NewGuid(), Name = "amount", SourceField = source, TargetField = Amount,
-        TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-        ExecutionOrder = 1, IsActive = true,
+        Id = Guid.NewGuid(),
+        Name = "amount",
+        SourceField = source,
+        TargetField = Amount,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber,
+        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = 1,
+        IsActive = true,
     };
 
     private static FieldMappingRuleEntity ClientTemplate() =>

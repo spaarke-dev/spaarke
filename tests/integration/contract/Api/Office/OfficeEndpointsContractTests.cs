@@ -1269,18 +1269,18 @@ public sealed class OfficeVersionSaveWorld
     public static SaveRequest VersionSave(
         Guid existingDocumentId, byte[] bytes, bool isNewVersion = true, string fileName = "Brief.docx",
         string? comment = "Second draft") => new()
-    {
-        ContentType = SaveContentType.Document,
-        TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
-        Document = new DocumentMetadata
         {
-            FileName = fileName,
-            ContentBase64 = Convert.ToBase64String(bytes),
-            IsNewVersion = isNewVersion,
-            ExistingDocumentId = existingDocumentId,
-            VersionComment = comment,
-        },
-    };
+            ContentType = SaveContentType.Document,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Document = new DocumentMetadata
+            {
+                FileName = fileName,
+                ContentBase64 = Convert.ToBase64String(bytes),
+                IsNewVersion = isNewVersion,
+                ExistingDocumentId = existingDocumentId,
+                VersionComment = comment,
+            },
+        };
 
     /// <summary>The refusal invariant: no row, no SPE item, no SPE version, no job, no finalization.</summary>
     public void ShouldHaveWrittenNothing()

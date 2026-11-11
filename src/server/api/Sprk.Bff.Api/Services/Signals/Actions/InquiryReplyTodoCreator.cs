@@ -92,7 +92,7 @@ public sealed class InquiryReplyTodoCreator(
         if (await ExistsAsync(todoId, ct).ConfigureAwait(false))
             return InquiryReplyTodoOutcome.AlreadyExists;
 
-        var name =request.GetAttributeValue<string>("sprk_name")?.Trim();
+        var name = request.GetAttributeValue<string>("sprk_name")?.Trim();
 
         var entity = new Entity(Todo, todoId);
         entity["sprk_name"] = TodoName;

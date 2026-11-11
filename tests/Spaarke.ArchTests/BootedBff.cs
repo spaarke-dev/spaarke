@@ -108,7 +108,8 @@ public sealed class BootedApp : IDisposable
                     options.Ssl = false;
                     options.Protocol = StackExchange.Redis.RedisProtocol.Resp2;
                     return StackExchange.Redis.ConnectionMultiplexer.Connect(options);
-                });
+                }
+            );
         }
 
         try
@@ -449,20 +450,20 @@ internal sealed class HandshakeOnlyRedis : IDisposable
                 return Simple("$-1");
             case "SUBSCRIBE":
             case "PSUBSCRIBE":
-            {
-                subscribed = true;
-                var kind = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
-                var reply = new List<byte>();
-                for (var i = 1; i < command.Count; i++)
                 {
-                    reply.AddRange("*3\r\n"u8.ToArray());
-                    reply.AddRange(Bulk(kind));
-                    reply.AddRange(Bulk(command[i]));
-                    reply.AddRange(Simple($":{i}"));
-                }
+                    subscribed = true;
+                    var kind = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
+                    var reply = new List<byte>();
+                    for (var i = 1; i < command.Count; i++)
+                    {
+                        reply.AddRange("*3\r\n"u8.ToArray());
+                        reply.AddRange(Bulk(kind));
+                        reply.AddRange(Bulk(command[i]));
+                        reply.AddRange(Simple($":{i}"));
+                    }
 
-                return reply.ToArray();
-            }
+                    return reply.ToArray();
+                }
 
             case "CLUSTER":
                 return Simple("-ERR This instance has cluster support disabled");

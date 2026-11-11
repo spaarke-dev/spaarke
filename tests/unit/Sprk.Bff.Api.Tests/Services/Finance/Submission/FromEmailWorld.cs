@@ -129,7 +129,11 @@ internal sealed class FromEmailWorld
 
     public static AttachmentReference Attachment(string name, byte[] bytes, string type) => new()
     {
-        AttachmentId = "att-" + name, FileName = name, Size = bytes.Length, ContentType = type, ContentBase64 = Convert.ToBase64String(bytes),
+        AttachmentId = "att-" + name,
+        FileName = name,
+        Size = bytes.Length,
+        ContentType = type,
+        ContentBase64 = Convert.ToBase64String(bytes),
     };
 
     public static readonly AttachmentReference Invoice = Attachment("Invoice 1001.pdf", PdfBytes, "application/pdf");
@@ -137,7 +141,10 @@ internal sealed class FromEmailWorld
 
     public static FromEmailMark Mark(AttachmentReference a, string mark) => new()
     {
-        FileName = a.FileName, Size = a.Size, ContentType = a.ContentType, Mark = mark,
+        FileName = a.FileName,
+        Size = a.Size,
+        ContentType = a.ContentType,
+        Mark = mark,
     };
 
     public static EmailMetadata Email(params AttachmentReference[] attachments) => new()
@@ -151,15 +158,15 @@ internal sealed class FromEmailWorld
 
     public static FromEmailSubmissionInput Input(
         IReadOnlyList<FromEmailMark>? marks = null, EmailMetadata? email = null, string? number = "1001", string mode = "New", Guid? firm = null) => new()
-    {
-        CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
-        SaveEntityType = "Matter",
-        Email = email ?? Email(),
-        Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
-        FirmId = firm ?? FirmId,
-        FirmInvoiceNumber = number,
-        Mode = mode,
-    };
+        {
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
+            SaveEntityType = "Matter",
+            Email = email ?? Email(),
+            Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
+            FirmId = firm ?? FirmId,
+            FirmInvoiceNumber = number,
+            Mode = mode,
+        };
 
     public static HttpContext Http()
     {

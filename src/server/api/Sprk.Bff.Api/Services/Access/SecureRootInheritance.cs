@@ -1857,7 +1857,11 @@ public sealed partial class SecureRootInheritance
 
                 rows.Add(new AssignedAccessLedgerRow
                 {
-                    Id = created, SourceField = source, StateValue = (int)write.State, Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+                    Id = created,
+                    SourceField = source,
+                    StateValue = (int)write.State,
+                    Reason = write.Reason,
+                    GrantedLevel = write.GrantedLevel,
                     SystemUserId = intent.Principal.Kind == DataversePrincipalKind.SystemUser ? intent.Principal.Id : null,
                     SubjectTeamId = intent.Principal.Kind == DataversePrincipalKind.Team ? intent.Principal.Id : null,
                 });
@@ -1948,7 +1952,11 @@ public sealed partial class SecureRootInheritance
 
             rows.Add(new AssignedAccessLedgerRow
             {
-                Id = created, SourceField = source, StateValue = (int)write.State, Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+                Id = created,
+                SourceField = source,
+                StateValue = (int)write.State,
+                Reason = write.Reason,
+                GrantedLevel = write.GrantedLevel,
                 SystemUserId = outcome.Principal.Kind == DataversePrincipalKind.SystemUser ? outcome.Principal.Id : null,
                 SubjectTeamId = outcome.Principal.Kind == DataversePrincipalKind.Team ? outcome.Principal.Id : null,
             });
@@ -2051,8 +2059,11 @@ public sealed partial class SecureRootInheritance
 
         var reopened = new AssignedAccessLedgerRow
         {
-            Id = id, SourceField = AssignedAccessStore.InheritedSourceField(parent.Table, parent.Id), StateValue = (int)write.State,
-            Reason = write.Reason, GrantedLevel = write.GrantedLevel,
+            Id = id,
+            SourceField = AssignedAccessStore.InheritedSourceField(parent.Table, parent.Id),
+            StateValue = (int)write.State,
+            Reason = write.Reason,
+            GrantedLevel = write.GrantedLevel,
             SystemUserId = outcome.Principal.Kind == DataversePrincipalKind.SystemUser ? outcome.Principal.Id : null,
             SubjectTeamId = outcome.Principal.Kind == DataversePrincipalKind.Team ? outcome.Principal.Id : null,
         };

@@ -499,6 +499,9 @@ public partial class ChildAccessPermissionReconcileTests
             ["sprk_parentdocument"] = true,
         };
 
+        /// <summary>uac-r2 task 198 Part D: each system user's stored <c>sprk_isexternal</c> (<c>null</c> = blank).</summary>
+        public Dictionary<Guid, bool?> Users { get; } = new();
+
         /// <summary>Which reads (counted from 1) throw.</summary>
         public Func<int, bool>? Fails { get; set; }
 
@@ -509,6 +512,17 @@ public partial class ChildAccessPermissionReconcileTests
             string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
             CancellationToken cancellationToken = default)
         {
+            // uac-r2 task 198 Part D: the Restricted filing bar's user-flag read (sprk_isexternal; a user not in Users is not returned).
+            if (entitySetName == "systemusers")
+            {
+                var users = Regex.Matches(filter ?? string.Empty, @"systemuserid eq ([0-9a-fA-F-]{36})")
+                    .Select(m => Guid.Parse(m.Groups[1].Value))
+                    .Where(Users.ContainsKey)
+                    .Select(id => new Dictionary<string, object?> { ["systemuserid"] = id, ["sprk_isexternal"] = Users[id] })
+                    .ToList();
+                return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(users))!);
+            }
+
             var table = AttributesOf.Match(entitySetName);
             var column = LogicalNameIs.Match(filter ?? string.Empty);
             if (!table.Success || !column.Success || select != "IsSecured")

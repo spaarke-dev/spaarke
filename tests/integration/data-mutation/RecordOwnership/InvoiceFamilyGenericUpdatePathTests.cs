@@ -217,7 +217,11 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private static readonly FieldMappingRuleDto ProjectRule = new()
     {
-        SourceField = "sprk_project", TargetField = "sprk_project", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        SourceField = "sprk_project",
+        TargetField = "sprk_project",
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 1,
     };
 
     [Fact]
@@ -248,8 +252,11 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", Matter)]);
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_regardingmatter", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_regardingmatter",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(

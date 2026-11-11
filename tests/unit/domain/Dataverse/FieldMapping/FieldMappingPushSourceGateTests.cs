@@ -55,7 +55,8 @@ public class FieldMappingPushSourceGateTests
     {
         var source = new Entity("sprk_matter", MatterId)
         {
-            ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()), ["sprk_issecure"] = true,
+            ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()),
+            ["sprk_issecure"] = true,
         };
         var world = new World(source, childOwner: new EntityReference("systemuser", Guid.NewGuid()));
 
@@ -85,7 +86,8 @@ public class FieldMappingPushSourceGateTests
     {
         var source = new Entity("sprk_matter", MatterId)
         {
-            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam),
+            ["sprk_issecure"] = false,
         };
         var world = new World(source, childOwner: new EntityReference("team", OrdinaryTeam));
 
@@ -182,7 +184,8 @@ public class FieldMappingPushSourceGateTests
 
     private static Entity TeamOwnedUnflaggedMatter() => new("sprk_matter", MatterId)
     {
-        ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+        ["ownerid"] = new EntityReference("team", OrdinaryTeam),
+        ["sprk_issecure"] = false,
     };
 
     [Fact]
@@ -342,7 +345,8 @@ public class FieldMappingPushSourceGateTests
     {
         var source = new Entity("sprk_matter", MatterId)
         {
-            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam),
+            ["sprk_issecure"] = false,
         };
         var world = new World(source, new EntityReference("team", OrdinaryTeam), filedUnderMatter: MatterId);
 
@@ -372,7 +376,8 @@ public class FieldMappingPushSourceGateTests
     {
         var source = new Entity("sprk_matter", MatterId)
         {
-            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam),
+            ["sprk_issecure"] = false,
         };
         var world = new World(source, new EntityReference("team", OrdinaryTeam), filedUnderMatter: MatterId);
 
@@ -402,8 +407,13 @@ public class FieldMappingPushSourceGateTests
 
     private static FieldMappingRuleDto AccountRule() => new()
     {
-        Id = Guid.NewGuid(), SourceField = "sprk_client", SourceFieldType = "Lookup", TargetField = AccountColumn,
-        TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+        Id = Guid.NewGuid(),
+        SourceField = "sprk_client",
+        SourceFieldType = "Lookup",
+        TargetField = AccountColumn,
+        TargetFieldType = "Lookup",
+        Priority = 1,
+        MappingType = "Copy",
     };
 
     [Fact]
@@ -449,7 +459,8 @@ public class FieldMappingPushSourceGateTests
     {
         var source = new Entity("sprk_matter", MatterId)
         {
-            ["ownerid"] = new EntityReference("team", OrdinaryTeam), ["sprk_issecure"] = false,
+            ["ownerid"] = new EntityReference("team", OrdinaryTeam),
+            ["sprk_issecure"] = false,
         };
         var world = new World(source, new EntityReference("team", OrdinaryTeam), childColumns: PairOnAccountA());
 
@@ -465,7 +476,8 @@ public class FieldMappingPushSourceGateTests
     /// <summary>A secure matter as Dataverse holds one: flagged, owned by the Secure Record owner team.</summary>
     private static Entity SecureMatter() => new("sprk_matter", MatterId)
     {
-        ["ownerid"] = new EntityReference("team", SecureTeam), ["sprk_issecure"] = true,
+        ["ownerid"] = new EntityReference("team", SecureTeam),
+        ["sprk_issecure"] = true,
     };
 
     private sealed class World

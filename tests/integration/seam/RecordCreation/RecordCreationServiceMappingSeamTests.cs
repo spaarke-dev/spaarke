@@ -1139,15 +1139,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
     private static FieldMappingRuleEntity Rule(
         string? sourceField, string targetField, int targetFieldType, int mappingType = Copy, string? defaultValue = null) => new()
-    {
-        Name = $"{sourceField ?? "default"} to {targetField.Trim()}",
-        SourceField = sourceField ?? string.Empty,
-        TargetField = targetField,
-        TargetFieldType = targetFieldType,
-        MappingType = mappingType,
-        DefaultValue = defaultValue,
-        IsActive = true,
-    };
+        {
+            Name = $"{sourceField ?? "default"} to {targetField.Trim()}",
+            SourceField = sourceField ?? string.Empty,
+            TargetField = targetField,
+            TargetFieldType = targetFieldType,
+            MappingType = mappingType,
+            DefaultValue = defaultValue,
+            IsActive = true,
+        };
 
     private RecordCreationService Service()
     {
