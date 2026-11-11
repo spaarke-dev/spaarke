@@ -31,10 +31,18 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private const int ReadAccessMask = 1;
 
     /// <summary>
-    /// Bounds the find-or-create candidate scan (threads owned by one side of the pair) — a defensive cap,
-    /// not an expected R1 ceiling (a user with more than this many Direct threads is not expected in R1).
+    /// uac-r2 198b: one page of the find-or-create candidate scan (the Direct threads one side of the pair owns, newest first).
     /// </summary>
-    private const int MaxCandidateThreads = 50;
+    private const int CandidatePageSize = 50;
+
+    /// <summary>
+    /// uac-r2 198b: the bound of the find-or-create candidate scan, per direction — 10 pages of <see cref="CandidatePageSize"/>.
+    /// Each candidate costs two reads (the thread row and its shares, fm's strict-pair reader), so the bound keeps a first
+    /// message from a user with very many Direct threads to a bounded number of reads. The pair's thread is normally recent, and
+    /// the scan is newest-first. Past the bound reuse is NOT decided: a new thread is created and a Warning says a duplicate is
+    /// possible (NFR-03: a cap is visible).
+    /// </summary>
+    private const int MaxCandidateThreads = 500;
 
     private const string MessageEntity = "sprk_communication";
 
@@ -618,17 +626,24 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     // ── find-or-create helper ───────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Looks for a Direct thread owned by <paramref name="ownerCandidateId"/> that is shared to
-    /// <paramref name="sharedCandidateId"/>. Bounded scan (<see cref="MaxCandidateThreads"/>) over the
-    /// owner's Direct threads — a per-share POA read is unavoidable (POA has no "shared to X AND owned by
-    /// Y" composite filter), but R1's per-user Direct-thread count is expected to be small.
+    /// Looks for the strict 1:1 Direct thread of the pair among the Direct threads <paramref name="ownerCandidateId"/> owns.
+    /// <para><b>The match is fm 054a's one strict-pair rule</b> (uac-r2 198b;
+    /// <see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>): a candidate matches only when it is a strict pair whose
+    /// {owner, other} is exactly {<paramref name="ownerCandidateId"/>, <paramref name="sharedCandidateId"/>}. A thread that
+    /// merely includes the other user (a third principal, a team share, a typed regarding, privacy not confirmed Open) is never
+    /// reused as the 1:1 thread: a message sent there would reach more than the two. A candidate that is not a strict pair is
+    /// logged (Information) and skipped; one whose read faults is logged (Warning) and skipped, never a match.</para>
+    /// <para><b>The scan</b>: the owner's Direct threads newest first (<c>createdon</c> descending, the id as tie-break so the
+    /// paging cookie is stable), paged by <see cref="PagingInfo"/> (never a skip), to <see cref="MaxCandidateThreads"/>. The
+    /// share seam has no "records shared to principal X" read (every <see cref="IDataverseRecordShareService"/> read is per
+    /// record), so each candidate is read on its own. When the bound is hit with no match, reuse is not decided and a Warning
+    /// says so: the caller then creates a thread, and a duplicate is possible.</para>
     /// </summary>
     private async Task<Guid?> FindExistingAsync(Guid ownerCandidateId, Guid sharedCandidateId, CancellationToken ct)
     {
         var query = new QueryExpression(ThreadEntity)
         {
             ColumnSet = new ColumnSet(false),
-            TopCount = MaxCandidateThreads,
             Criteria =
             {
                 Conditions =
@@ -638,28 +653,69 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 },
             },
         };
+        query.AddOrder("createdon", OrderType.Descending);
+        query.AddOrder("sprk_communicationthreadid", OrderType.Descending);
 
-        var candidates = await _entityService.RetrieveMultipleAsync(query, ct);
-        foreach (var candidate in candidates.Entities)
+        string? cookie = null;
+        for (var page = 1; ; page++)
         {
-            IReadOnlyList<Guid> shared;
-            try
+            query.PageInfo = new PagingInfo { Count = CandidatePageSize, PageNumber = page, PagingCookie = cookie };
+            var candidates = await _entityService.RetrieveMultipleAsync(query, ct);
+            foreach (var candidate in candidates.Entities)
             {
-                shared = await GetSharedSystemUserIdsAsync(candidate.Id, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                // 198 pass 2 item 7: the strict read throws where the soft read answered empty; a candidate that cannot be
-                // read is skipped, exactly as before.
-                _logger.LogWarning(ex, "Failed to read Direct thread {ThreadId} POA shares; the candidate is skipped.", candidate.Id);
-                continue;
+                if (await IsThePairsStrictThreadAsync(candidate.Id, ownerCandidateId, sharedCandidateId, ct))
+                    return candidate.Id;
             }
 
-            if (shared.Contains(sharedCandidateId))
-                return candidate.Id;
+            if (!candidates.MoreRecords)
+                return null;
+
+            if (page * CandidatePageSize >= MaxCandidateThreads)
+            {
+                _logger.LogWarning(
+                    "Direct thread lookup for owner {Owner} and participant {Other} reached its bound of {Bound} candidate threads " +
+                    "with no strict 1:1 match; reuse was not decided for the threads past it, so a new thread is created and a " +
+                    "duplicate Direct thread is possible.",
+                    ownerCandidateId, sharedCandidateId, MaxCandidateThreads);
+                return null;
+            }
+
+            cookie = candidates.PagingCookie;
+        }
+    }
+
+    /// <summary>
+    /// <c>true</c> when <paramref name="threadId"/> is a strict 1:1 Direct thread (fm's
+    /// <see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>) of exactly the pair {<paramref name="first"/>,
+    /// <paramref name="second"/>}. A thread that is not a strict pair is logged and skipped; a read fault is logged as a
+    /// Warning and skipped. A strict pair of other people is skipped silently (an ordinary other conversation).
+    /// </summary>
+    private async Task<bool> IsThePairsStrictThreadAsync(Guid threadId, Guid first, Guid second, CancellationToken ct)
+    {
+        var shape = await DirectMessageRecipient.ReadStrictPairShapeAsync(_entityService, _accessGrant, threadId, ct);
+        if (shape.IsStrictPair)
+        {
+            return (shape.OwnerId == first && shape.OtherId == second)
+                || (shape.OwnerId == second && shape.OtherId == first);
         }
 
-        return null;
+        if (shape.Reason == DirectPairShapeReason.ParticipantReadFault)
+        {
+            _logger.LogWarning(
+                shape.Fault,
+                "Direct thread {ThreadId} could not be read for the pair lookup ({Reason}); the candidate is skipped, never reused.",
+                threadId, shape.Reason);
+        }
+        else
+        {
+            // Debug, not Information (fm review): the lookup runs on every routed send, so the same old non-strict threads would
+            // log on every message. A read fault stays a Warning.
+            _logger.LogDebug(
+                "Direct thread {ThreadId} is not a strict 1:1 thread ({Reason}); it is not reused for the pair lookup.",
+                threadId, shape.Reason);
+        }
+
+        return false;
     }
 
     /// <summary>
