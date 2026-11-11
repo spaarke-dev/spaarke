@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>BFF matter/work-assignment event routes, per-record canCreate, delete-409 ProblemDetails (FR-08, FR-09)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>startable after the owner reviews the plan and tasks (owner directive 2026-11-10)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, endpoints, authorization; adds external write routes (.cs)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization-sensitive write routes on the shared external-access surface (uac-r2, ebilling-r1)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, endpoints, authorization, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add `POST /api/v1/external/{matters|workassignments}/{id}/events` by generalising the project event create over the root kind (as `CreateTodoForRoot` does), make the to-do, event and message lists tell every caller whether the matching create would be admitted (`canCreate`), and give the document-delete lock 409 the checkout 409's ProblemDetails `status`/`title` (#2271 residual).</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, endpoint authorization on the external plane, and xUnit integration tests. Follow ADRs strictly.</role>
+  <goal>The two event routes answer 201 for a caller with Create on that root and the event is regarding that root; the project route behaves exactly as before; list reads carry a `canCreate` that equals the create route's own decision; the delete 409 parses as ProblemDetails with `checkedOutBy`; contract, regression and arch tests pass; UAC's review is recorded.</goal>
+
+  <context>
+    <background>Spec FR-08, FR-09, FR-06. Event create is project-only; `ListEventsForRoot` returns `canCreate` only for a project (`ExternalProjectDataEndpoints.cs:2226-2229`); the to-do list only to `DataverseConfirmsWrites` callers (`:758-772`); the message list never. The documents list returns it to every caller (`:619-633`) — the model. #2271: the checkout 409 has `status`/`title` (`DocumentOperationsEndpoints.cs:158-177`); the delete 409 (`:497-500`) serialises the bare `DocumentLockedError`.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforceRoleCeilingGate.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentOperationsEndpoints.cs</file>
+      <file role="new">tests/integration/contract/Api/ExternalAccess/ExternalRootEventCreateContractTests.cs</file>
+      <file role="new">tests/integration/regression/Issue2271_DeleteLockedDocumentProblemDetailsTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/DocumentDestroyAuthorizationTestFixture.cs</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/ExternalMessageEndpointsTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/WorkforceCeilingRouteFamilyTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalProjectEventContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalRootEventReadTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 / FR-08">Both new routes are mapped in the same `/api/v1/external` group as the project route (inheriting `ExternalCollaboration` + `CallerPrincipalAuthorizationFilter`) and carry `.RequireWorkforceCeiling(...)` with new `CreateMatterEvent` / `CreateWorkAssignmentEvent` = `CreateChildUnder(MatterTable|WorkAssignmentTable, EventTable)` next to `CreateProjectEvent` (`WorkforceRoleCeilingGate.cs:124`), and the same `.Produces`/`.ProducesProblem` set as the project route.</constraint>
+    <constraint source="FR-08">One handler `CreateEventForRoot(rootKind, …)` decides all three roots: `RightsForRootWriteAsync(… EventEndpoints.CreateEventPrivilege …)`, the 503 for an unanswered Dataverse question, the 403 `reasonCode = sdap.access.deny.insufficient_rights`, the 400 checks, `ResolveChildOwnerAsync` on the root's entity, and the creator stamp from the resolved principal. The parent comes only from the route; the request DTO gains no regarding member. The project route's responses (status, body, reasonCode, Location) do not change.</constraint>
+    <constraint source="FR-08">`ExternalDataService.CreateEventAsync` / `BuildEventCreatePayload` (:2364, :2433) take the root kind and bind through `TryGetRootBinding(rootKind)` (:1571), as the to-do create does; never a client-supplied lookup.</constraint>
+    <constraint source="FR-06 (enabler)">GET `/{projects|matters|workassignments}/{id}/todos`, `/{…}/events` and `/{root}/{id}/messages` return an additive `canCreate` to EVERY caller that equals the matching POST's own Create decision for that caller and record (no extra Dataverse read for a caller whose access Dataverse does not decide). Fields already sent keep their names and values. An unanswered Dataverse question reads as `canCreate: false`.</constraint>
+    <constraint source="FR-09 / ADR-019">The delete 409 in `DeleteDocument` (`DocumentOperationsEndpoints.cs:497-500`) returns `status = 409`, `title = "Document Locked"`, `error`, `detail`, `checkedOutBy`, `checkedOutAt`, `correlationId` — the exact shape of the checkout 409 (:165-177). `.Produces&lt;DocumentLockedError&gt;(409)` stays. No other delete outcome changes.</constraint>
+    <constraint source="R3 gotcha">No DELETE route is added; `TheExternalPlane_MapsExactlyFourDeleteRoutes` stays green unchanged.</constraint>
+    <constraint source="bff-extensions">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`): extends existing external-access endpoints in place. Measure the publish-size delta against a fresh master build (report both sizes, the delta, the zip tool; ≤ 60 MB total; ≥ +5 MB needs justification). No new HIGH CVE (`dotnet list package --vulnerable --include-transitive`). No new DI registration, package or background work (NFR-05). Tests ship with every `Api/` and `Services/` change.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the PR (shared surface with unified-access-control-r2 and ebilling-r1). Never deploy the dev BFF directly — task 018 requests the deploy through uac-r2 (`docs/procedures/dev-bff-deploy-coordination.md`). Build only on the net10 SDK.</constraint>
+    <constraint source="NFR-04">Logs and problem bodies added here carry no tenant, oid, UPN, email or token.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Root-generalised create" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs">`CreateTodoForRoot` (:776) and its three adapters (:1731-1745): copy this shape for events.</pattern>
+      <pattern name="List canCreate for every caller" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs">Documents list (:619-633) computes `CanCreate` from the same rights the write route checks.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add the two ceiling sets to `WorkforceRoleCeilingGate.cs`; map the two POST routes next to the project route.</step>
+    <step order="2">Refactor `CreateEvent` into `CreateEventForRoot` with three thin adapters; parameterise `CreateEventAsync`/`BuildEventCreatePayload` by root kind.</step>
+    <step order="3">Make the to-do, event and message list reads return `canCreate` per the FR-06 constraint.</step>
+    <step order="4">Give the delete 409 the checkout 409's shape.</step>
+    <step order="5">Write `ExternalRootEventCreateContractTests.cs` (theory over the two segments) for the route criteria below.</step>
+    <step order="6">Extend the list tests (`ExternalTodoScopeTests.cs`, `ExternalMessageEndpointsTests.cs`, the new event file) for the `canCreate` criterion.</step>
+    <step order="7">Write `Issue2271_DeleteLockedDocumentProblemDetailsTests.cs` on `DocumentDestroyAuthorizationTestFixture` (add a checked-out outcome to `RecordingCheckoutService`, :418).</step>
+    <step order="8">Update the route ledger (`RouteAuthorizationGuardTests.Ledger.cs` HandlerDecision entries near :2091), `AuthenticationSchemeCensusTests.cs` (:117) and `WorkforceCeilingRouteFamilyTests.cs` (:82) for the two routes, with reasons.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (re-run any host-timeout failures in isolation — R3 gotcha) and `dotnet test tests/Spaarke.ArchTests/`; measure publish size and CVEs; record both in the task notes.</step>
+    <step order="10">Run `/conflict-check`; request UAC's review of the routes and the canCreate change (uac-r2 session) and record the outcome in the task notes and the PR.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="12">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-002-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `sprk_event` has no regarding lookup for matter or work assignment under the binding `TryGetRootBinding` gives (the payload would need a different navigation property), STOP and escalate rather than inventing a binding.</trigger>
+    <trigger>If returning `canCreate` on the message list needs more than the one rights probe the POST already performs, or would change any existing response field, STOP and escalate (UAC review).</trigger>
+    <trigger>If UAC asks for a different authorization model for the new routes, STOP; do not merge until the owner decides.</trigger>
+    <trigger>If the publish size passes 60 MB or a new HIGH CVE appears, STOP (bff-hygiene item 4/5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`POST /projects/{id}/events` (`ExternalProjectDataEndpoints.cs:456`, handler :2269); `CreateTodoForRoot` (:776); documents list `canCreate` (:633).</existing>
+    <extension>Yes, and this task does it: the project handler is generalised; the two routes are thin adapters with ceilings from the existing `CreateChildUnder`; `canCreate` already exists on `ExternalCollectionResponse` (`ExternalProjectDtos.cs:38`).</extension>
+    <cost-of-doing-nothing>"Add event" on a matter or work assignment has no route (404/405) although the caller holds Create, and the SPA cannot tell a partner's per-record right on matters, so FR-06's "no offered action answers 403" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF and ArchTests</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforceRoleCeilingGate.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentOperationsEndpoints.cs</output>
+    <output type="test">tests/integration/contract/Api/ExternalAccess/ExternalRootEventCreateContractTests.cs</output>
+    <output type="test">tests/integration/regression/Issue2271_DeleteLockedDocumentProblemDetailsTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-002-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire: a caller with Create on a matter (and on a work assignment) POSTs an event and gets 201 with an `ExternalEventDto`; the Dataverse payload binds that root's regarding lookup and the root's owning team.</criterion>
+    <criterion testable="true">Must not fire: a View-only caller gets 403 with `reasonCode = sdap.access.deny.insufficient_rights` and nothing is written.</criterion>
+    <criterion testable="true">Must not fire: a record outside the caller's accessible set gets the same status the project route gives (403) and nothing is written.</criterion>
+    <criterion testable="true">Must not fire: a request without a valid external-plane bearer gets 401, as the project route does.</criterion>
+    <criterion testable="true">A missing `sprk_name` gets 400; an unanswered Dataverse rights question gets the retryable 503; a refused owner writes nothing — same bodies as the project route.</criterion>
+    <criterion testable="true">The project event route's existing contract tests pass unchanged.</criterion>
+    <criterion testable="true">For matter and work assignment, the to-do, event and message lists return `canCreate: true` to a Create holder and `false` to a View-only holder, and in each case the matching POST answers 201 / 403 respectively.</criterion>
+    <criterion testable="true">The delete 409 body parses as ProblemDetails (status 409, title "Document Locked") and carries `checkedOutBy`, `checkedOutAt`, `error`, `detail` with unchanged names and shapes.</criterion>
+    <criterion testable="true">The route ledger, the authentication-scheme census and the ceiling route-family tests list the two new routes; `TheExternalPlane_MapsExactlyFourDeleteRoutes` passes unchanged.</criterion>
+    <criterion testable="true">Build is green; BFF unit/integration tests and ArchTests pass; publish size (both sizes, delta, zip tool) is recorded and ≤ 60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">UAC's review of the new routes and the list `canCreate` change is recorded in the task notes and cited in the PR.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the must-fire/must-not-fire and edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08, FR-09, FR-06, NFR-05, §Hot-Path Declaration. Copy the `CreateEvent_*` tests (`ExternalProjectEventContractTests.cs:177-225`, fixture `ExternalAccessContractFixture`). Anchors re-verified 2026-11-10: project POST map `:456`; GETs `:439/:447`; handler `:2269`; delete 409 `DocumentOperationsEndpoints.cs:497-500` (spec said ~494-498). The spec's FR-08 says "errorCode"; the project route's denials carry `reasonCode` — match whatever the project route sends, field for field. The `canCreate` widening is included here because FR-06 has no other server source for a partner's per-record right on matters and work assignments (`/me` lists project levels only — `bff-client.ts:170`). Two adversarial-review passes (authorization).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

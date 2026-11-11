@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>acme readability-proof fault: owner-approved read-only checks, then the data fix with a recorded rollback (FR-31 a, b; #2578)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>owner-gated: the owner sees and approves each read-only command before it runs, and approves the data fix and its rollback before any change</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live read-only checks and an owner-approved data change; no code (phase 4, explicit constraints)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook-style live checks with exact commands; every judgment goes to the owner</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live reads and a live data change, owner-gated</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, azure</tags>
+    <estimated-effort>2-3 hours plus owner wait time</estimated-effort>
+  </metadata>
+
+  <prompt>Find out, with read-only checks the owner has approved, why the identity-link reconciliation's readability proof fails every 5 minutes for the registered spaarke-acme environment; then make the data fix the owner chooses, with the prior state and the rollback recorded.</prompt>
+  <role>SPAARKE platform developer and operator. Follow ADRs strictly. Careful with live Dataverse and Azure: read-only unless the owner approves a change.</role>
+  <goal>The three checks' results are recorded (no secrets or identifiers); the owner's chosen fix is applied with its rollback recorded; the uac-r2 gate (or App Insights) shows 0 acme faults in 30 minutes, or the fault is logged at Warning once task 047 is deployed.</goal>
+
+  <context>
+    <background>design.md §7.2 (#2578): every 5 minutes the readability proof's WhoAmI read answers 403 0x80072560 "not a member of the organization" for https://spaarke-acme.crm.dynamics.com, and the reconciliation aborts that environment (IdentityLinkReconciliationJob.cs:376-386). Each fault pairs with that job line (uac-r2 gate on 20669df6a9, 2026-11-06). Likely cause: no application user for the BFF identity in spaarke-acme, or a registry row that should not be reconciled. How acme is reached: the job reads the registry (`sprk_dataverseenvironments` with `sprk_isactive eq true`, DataverseEnvironmentService.cs:172-186, in the environment named by the BFF's `DATAVERSE_URL` setting), keeps rows whose `sprk_setupstatus` is null or Ready (IdentityLinkReconciliationJob.cs:167-171), and reconciles each through `RegistrationDataverseService.ContactBinderFor(url)` (RegistrationDataverseService.cs:616) with that service's TokenCredential. The proof checks the BFF identity can read the binding columns (ContactIdentityStore.cs:500-503: sprk_externalobjectid, sprk_identityplane) and the collision columns (:511-514), both field-secured (#2105 identity columns, ContactBindingDecision.cs:1884-1963). #2270 (foreign-environment contact owner) is with uac-r2, whose owner-chosen option (a) adds a customer-BU column to `sprk_dataverseenvironment` — tell uac-r2 before changing that row.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-046-acme-record.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-046-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Owner-gated; may run at any time</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec MUST / FR-31 a">Before ANY live read, show the owner the exact command for each of the three checks below and get approval. Run only what was approved, exactly as shown.</constraint>
+    <constraint source="NFR-04 / root CLAUDE.md §9">Never print, log or record a token, secret, email, UPN or object id. Acquire tokens into a variable that is never echoed; select only the columns named below; record results as booleans, counts, status values and option-set values. Do not select sprk_adminemails, sprk_tenantid, sprk_azuresubscriptionid, sprk_keyvaultname or any id beyond what the check needs.</constraint>
+    <constraint source="spec FR-31 b">No data change without the owner's explicit approval of the exact change AND a written rollback (prior values + reverse command) recorded in notes/task-046-acme-record.md before the change runs.</constraint>
+    <constraint source="project">No change to app registrations, credentials, Key Vault secrets, or App Service settings in this task; if the fix needs one, STOP (see escalation). Any Key Vault or credential work follows .claude/constraints/provisioning.md "KV credential lifecycle" and ADR-028, outside this task.</constraint>
+    <constraint source="project coordination">Tell uac-r2 (owner of #2270 and the dev BFF gate) before changing the acme registry row, and ask it to report the acme fault count in its next gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+    </files>
+    <patterns>
+      <pattern name="Owner-gated live read" location="projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml">Show, approve, run, record — the R3 live-action discipline (R3 CLAUDE.md §5).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">From code (no live call): determine which identity the registration channel uses for a provisioning target (RegistrationDataverseService's TokenCredential: the BFF's user-assigned managed identity or another); record its NAME/role, not its ids.</step>
+    <step order="2">Write the three read-only commands into notes/task-046-acme-record.md and show them to the owner. Check A — the acme registry row: in the `DATAVERSE_URL` environment, GET `sprk_dataverseenvironments?$filter=contains(sprk_dataverseurl,'spaarke-acme')&amp;$select=sprk_name,sprk_dataverseurl,sprk_isactive,sprk_isdefault,sprk_setupstatus`. Check B — is the step-1 identity an application user in spaarke-acme: GET `systemusers?$filter=applicationid eq @appId&amp;$select=isdisabled,accessmode` (count + flags only; the app id is passed from a variable, not echoed), plus its role names. Check C — the binding and collision columns and their FLS in spaarke-acme: `EntityDefinitions(LogicalName='contact')/Attributes?$select=LogicalName,IsSecured` filtered to the columns at ContactIdentityStore.cs:500-514, and whether a field-security profile held by that identity has canread on each.</step>
+    <step order="3">Owner approves (or edits) the commands. Run only the approved commands; record the results (booleans, counts, status values) in the record.</step>
+    <step order="4">Write the fix options with impact and rollback for the owner: (a) add the identity as an application user in spaarke-acme with the role and FLS profile the proof needs; (b) set the acme row inactive (`sprk_isactive` = false) or its setup status not Ready, so it is not reconciled; (c) other, from the findings. Recommend one with a reason.</step>
+    <step order="5">Owner chooses. Record the prior values and the exact reverse command in the record; tell uac-r2; then apply ONLY the approved change.</step>
+    <step order="6">Verify: ask uac-r2's gate (or query App Insights read-only, owner-approved) for acme faults over 30 minutes after the change; record the count. If 047 is deployed instead, record that the fault now logs at Warning.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in projects/spaarke-SPA-external-access-platform-r4/notes/task-046-notes.md; close #2578 (and confirm #2163 is closed as its duplicate) only when 047's acceptance is also met.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any check shows the fix needs an app-registration, credential, Key Vault or App Service setting change, STOP and raise 🔔 Human Input Required (root CLAUDE.md §6, §9) — not in this task.</trigger>
+    <trigger>If spaarke-acme turns out to be a customer-facing or production environment rather than a dev test environment, STOP and ask the owner before any further read.</trigger>
+    <trigger>If a check's output would include a token, email, UPN or object id, stop the output, discard it, rewrite the command, and show the owner the revised command.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">PowerShell with az / Invoke-RestMethod (token held in a variable, never printed)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-046-acme-record.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-046-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The record holds the three approved commands, the owner's approval, and each check's result (registry row state; application-user presence and flags; column existence and FLS read) with no token, secret, email, UPN or object id.</criterion>
+    <criterion testable="true">The record holds the fix options, the owner's choice, the prior values, the reverse command, and the time the change ran.</criterion>
+    <criterion testable="true">uac-r2 was told before the registry row changed (if it changed).</criterion>
+    <criterion testable="true">After the fix, 30 minutes show 0 acme readability faults, or the fault is logged at Warning (with 047 deployed); the evidence is recorded.</criterion>
+    <criterion testable="true">Negative: no unapproved read or change ran; no app registration, credential, Key Vault or App Service setting changed.</criterion>
+    <criterion testable="true">UAC's review of the fix is recorded (FR-31).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-31 (a, b); issue #2578 (duplicate #2163). Owner directive 2026-11-10: no task execution before the owner reviews the final plan and tasks. Deps "none" per the task table (it may run any time), an exception to the phase-deploy convention. Check A's filter uses the environment host from design.md's evidence; adjust the filter if the row stores a different spelling (e.g. an .api. host).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

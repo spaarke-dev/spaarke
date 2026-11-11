@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Record actions open child dialogs inside the parent SprkModal + focus/Esc test (FR-03)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 005</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx components and adds tests (tags frontend, fluent-ui, unit-test)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified conversion to existing SprkModal presets with canonical references (FormModal, ConfirmModal, DeleteOwn.tsx)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential chain on the template files: 003 → 005 → 004 → 006 → 007</parallel-reason>
+    <deps>005</deps>
+    <tags>frontend, fluent-ui, react, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the template's Upload, New message, Add to-do and Add event toolbar actions open their dialogs as SprkModal presets mounted inside the parent record modal, convert the SPA's remaining raw Fluent `Dialog`s used from a record (upload, versions, create event, create task) to presets, and prove with a test that focus stays inside the parent and child and that Esc closes the child first.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 dialogs, focus management and React Testing Library. Follow ADRs strictly.</role>
+  <goal>No record child dialog is a raw Fluent `Dialog`; each is FormModal/ConfirmModal/BrowseModal rendered as a descendant of the parent `RecordTemplateModal`; the four toolbar actions open them; a vitest test proves focus containment, Esc order and Cancel-left.</goal>
+
+  <context>
+    <background>Spec FR-03, NFR-02; design §3 ("siblings let focus escape" — prototype finding); spec §ADR Tensions: MODAL-DECISION-CRITERIA Path C (same chrome family, guarded by this test). Raw Fluent dialogs today: `DocumentLibrary.tsx` `VersionHistoryPanel` (:382, `Dialog` :433) and `UploadDialog` (:508, `Dialog` :596); `EventsCalendar.tsx` `CreateEventDialog` (:368, `Dialog` :439); `SmartTodo.tsx` `CreateTaskDialog` (:448, `Dialog` :494). Already presets: `DeleteOwn.tsx:109` (ConfirmModal), `ServiceRequestActions.tsx:232` (FormModal). Messages compose is inline in `RecordMessages.tsx`.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/SmartTodo.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/DocumentsSection.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/MessagesSection.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/TasksEventsSection.tsx</file>
+      <file role="new">src/client/external-spa/tests/RecordTemplateChildDialogs.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DeleteOwn.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/detail/ServiceRequestActions.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/FormModal.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Section components and toolbar wiring in the template</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050 / FR-03">Every dialog this task touches is a SprkModal preset: create/upload/new-message forms → `FormModal`; confirmations → `ConfirmModal`; version history → `BrowseModal` (or base `SprkModal` if BrowseModal's contract does not fit — record why). Cancel is in the left footer slot (the presets' default); no hand-built footers.</constraint>
+    <constraint source="FR-03">When opened from the record template, each child dialog is rendered as a React descendant of the parent `RecordTemplateModal` (inside its tree), never as a sibling at the page root.</constraint>
+    <constraint source="FR-03">The toolbar actions Upload, New message, Add to-do and Add event open the corresponding dialog. Inside the template, the sections' own create buttons are not rendered, so each action has one entry point; on `ProjectPage` and other non-template hosts those buttons stay as they are.</constraint>
+    <constraint source="project">Visibility of the four actions in this task follows exactly the rule each section's own button uses today (`uploadOverride`/`canCreate`, the to-do and event `allowCreate`/`canCreate` logic, the message thread's availability). Task 006 changes the rule source; do not change it here.</constraint>
+    <constraint source="project">Request payloads, validation, error texts and success behaviour (list refresh, kept draft on failure) of each dialog are unchanged; New message posts through the existing message client used by `RecordMessages` and then refreshes the thread.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Preset usage in the SPA" location="src/client/external-spa/src/components/detail/ServiceRequestActions.tsx">FormModal at :232 — the SPA's existing preset call shape.</pattern>
+      <pattern name="Confirm" location="src/client/external-spa/src/components/DeleteOwn.tsx">ConfirmModal at :109.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Convert `UploadDialog`, `VersionHistoryPanel`, `CreateEventDialog` and `CreateTaskDialog` to presets; give each a controlled `open` the host can drive.</step>
+    <step order="2">Add a New-message FormModal that reuses the message client and texts of `RecordMessages`.</step>
+    <step order="3">Wire the four toolbar actions in `RecordTemplateModal` to open the dialogs rendered inside the template tree; hide the sections' own create buttons inside the template only.</step>
+    <step order="4">Write `tests/RecordTemplateChildDialogs.test.tsx`: for one form dialog and one confirm dialog — Tab and Shift+Tab never move focus outside the child while it is open; Esc closes the child and leaves the parent open with focus back on the invoking toolbar button; a second Esc closes the parent; Cancel renders in the left footer slot.</step>
+    <step order="5">Run the existing DocumentLibrary, SmartTodo, EventsCalendar and ProjectPage tests to prove the non-template hosts are unchanged.</step>
+    <step order="6">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa`.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-004-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Fluent's focus trap cannot be observed reliably in vitest/jsdom, STOP and propose the alternative (a browser test through the ui-test skill) to the owner; do not ship a focus test that cannot fail.</trigger>
+    <trigger>If a nested preset inside SprkModal shows a z-order, focus or dismissal defect that needs a SprkModal change, STOP and escalate (shared component; the MODAL-DECISION-CRITERIA Path C condition no longer holds).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The upload, versions, create-event and create-task dialogs exist (`DocumentLibrary.tsx:382/:508`, `EventsCalendar.tsx:368`, `SmartTodo.tsx:448`); the message send exists inline in `RecordMessages.tsx`; the presets exist in `SprkModal/presets/`.</existing>
+    <extension>Yes, and this task does it: the existing dialogs are converted in place to presets. The only new surface is a New-message FormModal wrapper that reuses RecordMessages' send client and texts, and the focus/Esc test file.</extension>
+    <cost-of-doing-nothing>The toolbar's New message has nothing to open, the raw Fluent dialogs violate the ADR-050 MUST rule, and nothing guards the MODAL-DECISION-CRITERIA Path C condition (focus escaping a nested dialog).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Child dialog focus and Esc order">
+      <url>{spa-dev-url}/?record=project:{project-id}</url>
+      <steps><step>As a Collaborate user, open a project; click Add to-do.</step><step>Tab repeatedly, then Shift+Tab repeatedly.</step><step>Press Esc, then Esc again.</step></steps>
+      <expected>Focus cycles inside the to-do dialog only; first Esc closes the dialog with focus back on Add to-do; second Esc closes the record.</expected>
+    </test>
+    <test name="Each action opens its dialog">
+      <steps><step>On a project, use Upload, New message, Add to-do and Add event in turn; cancel each.</step><step>Check the console.</step></steps>
+      <expected>Each opens a preset with Cancel on the left; cancel returns to the record unchanged; no console errors.</expected>
+    </test>
+    <test name="Dark Mode (ADR-021)">
+      <steps><step>Repeat in dark theme and in the Teams host.</step></steps>
+      <expected>Dialogs use semantic tokens; the backdrop layering is correct.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint and vitest in src/client/external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/DocumentLibrary.tsx</output>
+    <output type="code">src/client/external-spa/src/components/EventsCalendar.tsx</output>
+    <output type="code">src/client/external-spa/src/components/SmartTodo.tsx</output>
+    <output type="code">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</output>
+    <output type="test">src/client/external-spa/tests/RecordTemplateChildDialogs.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-004-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Upload, New message, Add to-do and Add event, when visible, each open a SprkModal preset rendered inside the parent record modal.</criterion>
+    <criterion testable="true">A test proves focus stays inside the child while it is open (Tab and Shift+Tab), Esc closes the child first and leaves the parent open, and a second Esc closes the parent.</criterion>
+    <criterion testable="true">Every touched dialog has Cancel in the left footer slot (ADR-050).</criterion>
+    <criterion testable="true">Negative: a grep of `DocumentLibrary.tsx`, `EventsCalendar.tsx` and `SmartTodo.tsx` finds no `&lt;Dialog` from `@fluentui/react-components`.</criterion>
+    <criterion testable="true">Submitting each dialog sends the same request as before and refreshes the same list; a failed submit keeps the dialog open with the existing error text.</criterion>
+    <criterion testable="true">Inside the template the sections show no second create button; on `ProjectPage` the existing buttons and tests are unchanged.</criterion>
+    <criterion testable="true">typecheck, lint and the vitest suite pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03, NFR-02, §ADR Tensions (MODAL-DECISION-CRITERIA, Path C). Dialog anchors verified 2026-11-10 (see background). `InviteUserDialog.tsx:348` is a page-level dialog, not opened from a record: out of scope. FR-34(b) (task 080) proposes documenting the in-parent rule.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
