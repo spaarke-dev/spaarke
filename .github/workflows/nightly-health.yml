@@ -1175,11 +1175,21 @@ jobs:
             jobs: dep-audit
           - check: nightly-health/graph-app-role-parity
             jobs: graph-app-role-parity
+          # Not a job result: decided from knowledge/REFRESH-LOG.md in the decide step.
+          # Named monthly/ because it tracks a monthly ritual (it is evaluated nightly,
+          # which is cheap and lets the alert close the day the log gets a new entry).
+          - check: monthly/knowledge-refresh
+            jobs: ""
     steps:
-      - name: Checkout (local action only)
+      # Non-cone sparse checkout: the knowledge-refresh check reads one file and
+      # knowledge/ itself is large (curated sample repos).
+      - name: Checkout (local action + refresh log only)
         uses: actions/checkout@v6
         with:
-          sparse-checkout: .github/actions
+          sparse-checkout: |
+            /.github/actions/
+            /knowledge/REFRESH-LOG.md
+          sparse-checkout-cone-mode: false
 
       - name: Decide status
         id: decide
@@ -1188,10 +1198,13 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           CHECK: ${{ matrix.check }}
           CHECK_JOBS: ${{ matrix.jobs }}
+          REFRESH_LOG: knowledge/REFRESH-LOG.md
+          REFRESH_MAX_AGE_DAYS: "35"
         run: |
           set -euo pipefail
           status=ok
           summary=""
+          custom_summary=0
 
           for j in $CHECK_JOBS; do
             result="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
@@ -1238,7 +1251,36 @@ jobs:
             fi
           fi
 
-          if [ "$status" = "failing" ]; then
+          # Knowledge-base refresh watchdog (reuse-governance-tightening-r1, FR-11): the
+          # newest `## YYYY-MM-DD` heading of ANY kind in the refresh log (monthly refresh,
+          # interim update, new topic) counts as a refresh. More than REFRESH_MAX_AGE_DAYS
+          # days old is failing. A missing or unparsable log is failing too, never a pass.
+          # This only decides a status: it never fails the workflow.
+          if [ "$CHECK" = "monthly/knowledge-refresh" ]; then
+            custom_summary=1
+            newest=""
+            if [ -f "$REFRESH_LOG" ]; then
+              newest="$(grep -oE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}' "$REFRESH_LOG" | sed 's/^## //' | sort | tail -n 1 || true)"
+            fi
+            if [ -z "$newest" ] || ! newest_epoch="$(date -u -d "$newest" +%s 2>/dev/null)"; then
+              status=failing
+              summary="- \`${REFRESH_LOG}\` is missing or has no parsable \`## YYYY-MM-DD\` heading, so the last refresh date is unknown. An unknown date is a failing check, not a pass."$'\n'
+            else
+              today_epoch="$(date -u -d "$(date -u +%Y-%m-%d)" +%s)"
+              age_days=$(( (today_epoch - newest_epoch) / 86400 ))
+              if [ "$age_days" -gt "$REFRESH_MAX_AGE_DAYS" ]; then
+                status=failing
+                summary="- The newest entry in \`${REFRESH_LOG}\` is dated **${newest}**, ${age_days} days ago (limit ${REFRESH_MAX_AGE_DAYS})."$'\n'
+                summary+="- Run the monthly refresh in \`knowledge/REFRESH-PROCEDURE.md\` and add a \`## YYYY-MM-DD\` entry to the log (or log \"no refresh this month, reason: ...\"). This alert closes itself on the first run after the entry lands on master."$'\n'
+              else
+                summary="Newest refresh-log entry is ${newest} (${age_days} days ago, limit ${REFRESH_MAX_AGE_DAYS})."
+              fi
+            fi
+          fi
+
+          if [ "$custom_summary" = "1" ]; then
+            :
+          elif [ "$status" = "failing" ]; then
             summary+=$'\n'"Re-run the failing job from the workflow run linked above; artifacts (TRX, coverage) are attached to it."$'\n'
           else
             summary="All jobs for this check succeeded."
