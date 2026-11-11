@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-09 (by context-handoff — session moving from VS Code `spaarke-wt-spaarkeai-mcp-bff-api-r1-68` to Claude Code desktop session **`mcp-r1`**)
+> **Last Updated**: 2026-11-11 (mcp-r1, rebuilt from git: 002 (a)–(c) done, dev now `b3ca99cad5`)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 002: A10 connector client registration (dev). Phase 0. Pipeline Step 5, option C. Phase A (011, 013, 014, 015, 016, 017, 018) is complete. |
-| **Step** | (a) ✅ done · (b) **in progress, waiting on the owner** · (c) and (d) pending |
-| **Status** | blocked on owner (Developer Portal UI step) |
-| **Next Action** | Wait for the owner to send: the Dev Portal **OAuth client registration ID**, the **redirect URI**, and the client-secret **expiry date**. NEVER accept or handle the secret value. Then: (1) `az ad app update --id 04f37fe4-5714-46f9-8796-5363a7a52244 --web-redirect-uris <portal redirect>` (Web platform, not Mobile and desktop) and verify with `az ad app show`; (2) fill (b) in `notes/phase0-registration-facts.md` (registration ID, redirect, expiry, owner); (3) guide (c), the M365 admin center connector "Spaarke" pointing at `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` with OAuth 2.0 and the (b) registration ID, never Entra SSO; (4) (d) T5 with a licensed non-admin user, then task 003. Tell `uac-r2` before the 003 test window. |
+| **Step** | (a) ✅ · (b) ✅ (registration re-created 2026-11-10, Base URL = full MCP URL) · (c) ✅ connector "Spaarke MCP" linked 2026-11-10; first authenticated MCP handshake 18:59Z · (d) **T5 pending** |
+| **Status** | blocked on owner: T5 needs a licensed **non-admin** user (the 2026-11-10 attempt was the owner's admin account, a pre-check only; Copilot searched the Dataverse MCP instead, no `tools/call` reached the BFF) |
+| **Next Action** | Owner runs T5: a licensed non-admin user, in Copilot Chat with **Spaarke MCP** explicitly selected, asks it to call `spike_whoami`. Verify in App Insights that a `tools/call` reached `/mcp/legal-operations` and the caller is that user (OBO). Record in `notes/phase0-registration-facts.md` (d). If sign-in fails with `AADSTS50011`, fix the Web redirect to the URI the error names. Then task 003; tell `uac-r2` before the 003 window. |
 
 ### Files Modified This Session (all committed and pushed)
 - `notes/phase0-registration-facts.md`: created; facts for (a) and the secret decision for (b).
@@ -32,7 +32,7 @@
 
 ## Active Lanes
 - None running. Runbook: `notes/drafts/connector-registration-runbook.md` (its step (b) says Mobile and desktop and no secret; that is **superseded**: Web platform plus a secret, see decisions 2026-11-08).
-- **Spike on dev:** `755987b385` (= master `26d135bc8f`, which includes ontology #2660 / task 176, + spike), deployed 2026-11-10 by mcp-r1. The owner's per-SHA go was relayed by uac-r2 and confirmed in this session. Verified: remote DLL ProductVersion, SHA-256 of 4 files, /healthz 200, anonymous MCP POST 401. Replaces `6fbb3a7642`. The spike stays off master: 2 spike-only commits, master→spike merges only, PR #2615 is a draft. Every `uac-r2` dev deploy carries the spike until we declare Phase 0 done. PR #2615 is never merged.
+- **Dev BFF now runs `b3ca99cad5`** (2026-11-11, deployed by uac-r2): a LOCAL, never-pushed merge of origin/master `ddae82fa90` + spike tip `755987b385` (unchanged). One conflict, the `RouteAuthorizationGuardTests.Ledger.cs` endpoint-file count, resolved to 153 (master 152 + the spike file). uac-r2 reports ArchTests 2431/2431, /healthz 200, anonymous MCP POST 401. Earlier the same day: `dc4f28ded8` (master `df93d2029c` + spike). Spike tip `755987b385` itself was first deployed 2026-11-10 by mcp-r1. **Standing rule (confirmed to uac-r2 2026-11-11):** every uac-r2 dev deploy is a local merge with the spike tip until we declare Phase 0 done. The spike stays off master: master→spike merges only; PR #2615 is a draft and is never merged.
 
 ## Next Actions (after 002)
 1. 003: Phase 0 live tests (T0–T14, E1–E5) into `notes/phase0-results.md`. The size-test widgets (1/3/6 MB) are not built yet and would need a new spike SHA. Notify `uac-r2` before the window and when Phase 0 is done.
@@ -40,7 +40,7 @@
 3. Owed: the dev connector **secret rotation runbook** (`docs/guides/`, with task 052) and the **ADR-028 A10 follow-up note** (the Dev Portal requires a secret; public client is not possible).
 
 ## Open Owner Questions / Blockers
-- 002 (b): the owner is completing the Dev Portal registration.
+- 002 (d): T5 with a licensed non-admin user (owner).
 - The owner reviews PR #2622 (Compose fix, ISS-002 / #2620, ready since 2026-11-08).
 - Billing review in Copilot (next slice) vs EB-D-194: does not block v1.
 
