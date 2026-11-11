@@ -178,7 +178,13 @@ Build 0/0; ArchTests 2200/2200; filtered 9461/0. **The round 3 re-check APPROVED
 
 Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
 
-## Queued: default-team exclusion in our scripts (from provisioning-r1, 2026-11-10)
+## DONE: default-team exclusion, merged into work at `a945c34a3d` (2026-11-10)
+
+- Commits: `805ce2872a` (helper copied from provisioning `77446a5222`) and `c8e7eac231` (six scripts, Pester 50/50, 47 fail-before).
+- The SHA has been sent to provisioning-r1; they drop our four baseline entries.
+- The privilege scan in the Procedure script (~:1001) is deliberately left unchanged.
+
+The original brief follows (historical):
 
 provisioning's task 267 (#2618, not on master) puts the ontology writer in its own unit whose default team must hold NO field-security profile (H7b v8 quarantines otherwise). Our scripts add every default team. **After 116 merges into work** (116 edits `Deploy-EbillingProcedureSchema.ps1`), one change: resolve that unit by name, skip its default team in apply, and fail `-Verify` if it holds the profile. The places: `Deploy-EbillingProcedureSchema.ps1:739,1001`; `Deploy-EbillingStoredFileSchema.ps1:529`; `Set-EbillingInvoiceMoneyFieldSecurity.ps1:510`; `Set-EbillingInvoiceFirmHoldColumn.ps1:340`; `Set-EbillingResubmissionOfFieldSecurity.ps1:284`; `Set-EbillingFirmReasonFieldSecurity.ps1:140` (FormsViews :282 is saved views, not teams). Consider one shared helper (§11). Pester must-fire and must-not-fire tests. The SHA goes in the provisioning master-merge message. Needed before our master merge.
 
