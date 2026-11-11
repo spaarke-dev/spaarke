@@ -526,10 +526,8 @@ public class SecureChildLineageTests
             RecordShareLevels.ChildMirrorMask(table, 327703 | 524288 | 32).Should().Be(1, $"{table} is a hard-deny table");
 
         // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same).
-        // Task 191b: ebilling 086 / 089a made the stored file, the Procedure assignment and the record-scoped rule set secure
-        // children too (this pin still named only the two #2084 tables, so it failed on master).
         SecureChildLineage.Children.Keys.Where(RecordOwnershipResolver.IsRestrictedContentTable)
-            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion", "sprk_procedureassignment", "sprk_ruleset", "sprk_storedfile");
+            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion");
     }
 
     [Fact]

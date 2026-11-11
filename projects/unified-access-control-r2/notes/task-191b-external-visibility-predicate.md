@@ -11,7 +11,7 @@
 | `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs` | Its two table lists now derive from the registry markers. Contents unchanged (pinned by tests). |
 | `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs` | "No second table → internal-only map" guard (must-fire / must-not-fire controls, reasoned baseline of 6), predicate added to the 188 seam allow-list. |
 | `tests/Spaarke.ArchTests/ExternalLookupAbsentReadGuardTests.cs`, `ExternalInvoiceVisibilityGuardTests.cs` | Reviewed entries for the predicate's lookup read and its (a′) call (review finding 1). |
-| `tests/unit/...` | `ExternalVisibilityTests` (new), `SecureChildLineageTests` (marker pins; stale hard-deny pin corrected — it had been failing on master since ebilling 089a). |
+| `tests/unit/...` | `ExternalVisibilityTests` (new), `SecureChildLineageTests` (marker pins). `ChildMirrorMask_OnEveryHardDenyTable_CarriesReadOnly` fails on master already (#2689 added three hard-deny lineage children). ebilling PR #2708 fixes it, so 191b leaves that test as it is on master. |
 
 ## Marker assignment (36 lineage tables + 1 outside)
 
