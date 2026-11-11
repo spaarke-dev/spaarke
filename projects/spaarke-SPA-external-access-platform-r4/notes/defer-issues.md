@@ -9,6 +9,7 @@ marker with the issue number.
 | D-1 | 2026-11-11, task 002 review pass 2 (F1, pre-existing) | External event create does not write the ADR-024 resolver fields | Defect (user-visible) | #2686 |
 | D-2 | 2026-11-11, task 002 review pass 2 (K1, pre-existing) | External event create's `Location` header names a route that does not exist | Defect (contract) | #2687 |
 | D-3 | 2026-11-11, task 002 review pass 2 (K4) | Documents-list `canCreate` ceiling is tested for service requests only | Test gap | #2688 |
+| D-4 | 2026-11-11, task 003 review (K2, owner question) | Copy link omits the `?customer=` key the grant email carries | UX (multi-customer users) | #2693 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -57,3 +58,23 @@ assignment use the same map entry shape but are not driven over HTTP.
 
 **Fix shape.** Extend the document-route fixture to serve a project/matter/WA document list for a workforce contact
 and add the three cases.
+
+## D-4 — Copy link omits the `?customer=` key the grant email carries
+
+**Where.** `recordLinkFor` in `src/client/external-spa/src/components/detail/record-targets.ts`, called by Copy link in
+`components/record/RecordTemplateModal.tsx` (task 003).
+
+**What.** Task 003's POML fixes the link as `{origin}{path}?record={token}:{id}`, the inverse of `parseRecordLink`.
+The grant email's link is `{PortalUrl}/?customer={key}&record={type}:{id}` (`GrantAccessNotifier.cs` ~`:546`). The
+backend for a fresh tab is chosen at bootstrap (`resolveBackendSelection`): a `?customer=` key wins, else the tab's
+active key (sessionStorage, so not carried to a new tab), else the only candidate, else the picker.
+
+**Effect.** A single-customer user is unaffected. A CIAM user with several customers who opens a copied link in a new
+tab (or a colleague of theirs) gets the customer picker before the record opens; choosing the other customer shows
+"You don't have access to this record". Nothing leaks: the selection fails closed and the read is scoped by the server.
+
+**Why deferred.** The link shape is a spec/POML decision (FR-04); adding the active customer key changes it.
+
+**Fix shape.** If the owner agrees: pass the tab's active customer key (the `backend-selection` seam, never a host)
+to `recordLinkFor` and emit `?customer={key}&record=…`, the same shape as the grant email; extend the round-trip
+tests. Owner question.

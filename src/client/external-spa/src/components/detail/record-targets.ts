@@ -91,6 +91,25 @@ export function parseRecordLink(search: string): RecordTarget | null {
   return { entityName, recordId: recordId.toLowerCase() };
 }
 
+/**
+ * The shareable link to a record: `{origin}{pathname}?record={token}:{id}` (R4 task 003, FR-04 Copy link). It is the
+ * inverse of {@link parseRecordLink}: the token is the record's own key in {@link RECORD_LINK_TOKENS} and the id its
+ * lowercase GUID, so `parseRecordLink` of the link's query string gives back the same target. Null for an entity with no
+ * token or an id that is not a GUID (never a link that the parser would ignore).
+ *
+ * Only the origin and the path of `base` are used: every other query parameter and the hash are dropped, so the link
+ * carries nothing but the record (a link can only ask to open a record; it grants nothing).
+ */
+export function recordLinkFor(
+  entityName: string,
+  recordId: string,
+  base: { origin: string; pathname: string }
+): string | null {
+  const token = Object.keys(RECORD_LINK_TOKENS).find(key => RECORD_LINK_TOKENS[key] === entityName);
+  if (!token || !isGuid(recordId)) return null;
+  return `${base.origin}${base.pathname}?${RECORD_PARAM}=${token}:${recordId.toLowerCase()}`;
+}
+
 /** The query string without its `record` parameter (every other parameter, e.g. `customer`, is kept as written). */
 export function withoutRecordParam(search: string): string {
   const params = new URLSearchParams(search);

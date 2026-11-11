@@ -4,7 +4,7 @@
     <title>RecordTemplateConfig + record template shell: layout, states, deep links (FR-01 config, FR-02)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Creates new .tsx/.ts files in the external SPA (tags frontend, fluent-ui; code implementation)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -150,7 +150,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01, FR-02, NFR-01, NFR-03. Anchors verified 2026-11-10: SprkModal `size="lg"` at `RecordDetailModal.tsx:617`, `onBeforeNavigate` :622, reads :86-227, `RECORD_DETAIL_ENTITIES` `RecordDetailFields.tsx:73`, `RECORD_LINK_TOKENS` `record-targets.ts:35`, `thinScrollbarStyle` `theme/scrollbar.ts:32`. SprkModal's body is the `overflowY: auto` region (`SprkModal.tsx:109-117`): make the template root fill it (height 100%) so the body never scrolls and the inner content region does. Width tests at 1440/1000/375 are ui-tests (jsdom has no layout). External SPA tests run under vitest (`npm test` = `vitest run`).</notes>
+  <notes>Spec FR-01, FR-02, NFR-01, NFR-03. Anchors verified 2026-11-10: SprkModal `size="lg"` at `RecordDetailModal.tsx:617`, `onBeforeNavigate` :622, reads :86-227, `RECORD_DETAIL_ENTITIES` `RecordDetailFields.tsx:73`, `RECORD_LINK_TOKENS` `record-targets.ts:35`, `thinScrollbarStyle` `theme/scrollbar.ts:32`. SprkModal's body is the `overflowY: auto` region (`SprkModal.tsx:109-117`): make the template root fill it (height 100%) so the body never scrolls and the inner content region does. Width tests at 1440/1000/375 are ui-tests (jsdom has no layout). External SPA tests run under vitest (`npm test` = `vitest run`).
+
+Completion (2026-11-11): `components/record/` holds recordTemplate.types.ts, recordTemplates.ts (six configs, FR-01 table exact, tabs off), recordReads.ts (R3 reads moved unchanged; only `export` added), RecordTemplateHeader.tsx and RecordTemplateModal.tsx; `recordLinkFor` added to record-targets.ts; RecordDetailModal.tsx imports the moved reads. Header built from Fluent primitives, not RecordHeaderShell (reasons in notes/task-003-notes.md). Escalation 2 fired softly: Matter "Responsible attorney"/"Last modified" and Project "Project lead" have no data source and are left out (no column added). RecordOpener still opens the R3 modal. 40 new vitest tests; suite 1332/1332, typecheck and lint clean. Review: no open F-class; D-4 (Copy link without `?customer=`, owner question) filed PENDING. Width/theme checks are ui-tests for task 018. Detail: notes/task-003-notes.md.
+rework: none task 003</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

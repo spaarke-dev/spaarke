@@ -7,28 +7,33 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 1 (P1): 001 + 002, both ✅ done by sub-agents |
-| **Step** | Post-wave: build verified (BFF build 0 errors; shared-lib `tsc --noEmit` exit 0) → file defer issues → commit + push |
-| **Status** | in-progress (main-session wrap-up of wave 1) |
-| **Next Action** | 1) File GitHub issues for D-1, D-2 and D-3 in `notes/defer-issues.md` (label `spaarke-SPA-external-access-platform-r4`) and replace PENDING with the issue numbers. 2) Commit all wave-1 changes (message file + `git commit -F`), push. 3) Tell ebilling-r1 about the overlap (below). 4) Next wave: 003 (sequential, opus) → 005 → 004 → 006 → 007. |
+| **Task** | 003 — RecordTemplateConfig + record template shell (`tasks/003-record-template-shell.poml`) |
+| **Step** | Step 10 done (POML completed, TASK-INDEX ✅, drift check exit 0) |
+| **Status** | completed and committed |
+| **Next Action** | Begin task 005 (`tasks/005-*.poml`, opus/high, sequential) via task-execute |
 
-### Uncommitted (all wave-1 work)
-- Shared lib: `src/client/shared/Spaarke.UI.Components/src/components/RecordCommandBar/` (new), `components/index.ts`
-- BFF: `DocumentOperationsEndpoints.cs`, `Api/ExternalAccess/{ExternalProjectDataEndpoints,ExternalMessageEndpoints,WorkforceRoleCeilingGate}.cs`, `Dtos/ExternalProjectDtos.cs`, `Infrastructure/ExternalAccess/ExternalDataService.cs`
-- Tests: ArchTests ledger/census, integration (new `ExternalRootEventCreateContractTests.cs`, `regression/Issue2271_DeleteLockedDocumentProblemDetailsTests.cs`, others modified), unit Events/ExternalAccess
-- Project: POMLs 001/002 (completed), TASK-INDEX, `notes/task-001-notes.md`, `notes/task-002-notes.md`, `notes/defer-issues.md`
+**Rigor Level:** FULL. Hot-path check done by main session: no watchlist trigger.
 
 ### Critical Context
-- Owner 2026-11-11: "you can use auto fix; continue" → Auto-fix is ON for draft PR #2681; execution started; 002's widened scope (list `canCreate`) accepted.
-- 002 results: 1656/1656 filtered BFF tests, 2145/2145 ArchTests; publish +2,459 B; **UAC review PENDING** (four items in `notes/task-002-notes.md`). Must go to uac-r2 before the P1 deploy request (task 018).
-- **Hard overlap:** the unmerged `origin/work/ebilling-r1` task-130 batch heavily changes `ExternalProjectDataEndpoints.cs` and `ExternalDataService.cs` (and three more of 002's files). Merge order needs coordinating with ebilling-r1.
-- 001: RecordCommandBar, 14/14 tests, full shared-lib suite 6112/6112; ADR-012 Path C approved; second consumer = `Spaarke.Communication.Components/.../EmailToolbar.tsx`. Browser UI tests deferred to task 003.
-- D-1 is a real user-visible pre-existing defect (external events are missing the ADR-024 resolver fields), filed rather than fixed. The owner decides whether R4 adds a follow-up task.
+- Task 003 output: `src/client/external-spa/src/components/record/` (types, configs, moved reads, header, modal),
+  `recordLinkFor` in `detail/record-targets.ts`, `tests/RecordTemplateModal.test.tsx` (40 tests). Suite 1332/1332,
+  typecheck and lint clean. Detail: `notes/task-003-notes.md`.
+- RecordOpener still opens the R3 modal; task 005 switches it and supplies `renderSection`.
+- Handoff to 005: Refresh while a section is busy + failed re-read unmounts the sections (review R3, K1).
+- UI tests for 001 and 003 are listed for deploy task 018.
+
+## Files Modified This Session (uncommitted)
+- `src/client/external-spa/src/components/record/*` (new, 5 files)
+- `src/client/external-spa/src/components/detail/RecordDetailModal.tsx`, `record-targets.ts`
+- `src/client/external-spa/tests/RecordTemplateModal.test.tsx` (new)
+- `projects/.../tasks/003-record-template-shell.poml`, `tasks/TASK-INDEX.md`, `notes/task-003-notes.md`, `notes/defer-issues.md` (D-4)
 
 ## Open owner questions
-- D-1: add an R4 follow-up task, or hand it to the event/write-path owner?
-- D-2: the `Location` header contract choice.
+- D-4 #2693: should Copy link carry `?customer={activeKey}` like the grant email?
+- D-1 #2686: R4 follow-up task, or hand to the event/write-path owner?
+- D-2 #2687: the `Location` header contract choice.
+- 002 UAC review PENDING (four items in `notes/task-002-notes.md`) before task 018.
 
 ## Quick Reference
-- Project CLAUDE.md, tasks/TASK-INDEX.md, plan.md, spec.md
+- Project CLAUDE.md, tasks/TASK-INDEX.md, spec.md FR-01/FR-02, notes/task-003-notes.md
 - PR #2681 (draft, Auto-fix on); Project issue #2680; Epic #2099
