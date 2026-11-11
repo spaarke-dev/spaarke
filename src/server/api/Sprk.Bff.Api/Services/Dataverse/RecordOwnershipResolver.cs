@@ -1802,7 +1802,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
          // are no ownership parent; they are listed so the assignment's whole citation set is one declaration.
          ("sprk_procedureassignment", "sprk_excludedpolicy"),
          ("sprk_procedureassignment", "sprk_procedure"),
-         ("sprk_procedureassignment", "sprk_pinnedversion")], CitationComparer.Instance);
+         ("sprk_procedureassignment", "sprk_pinnedversion"),
+         // 089a review K7: a legacy uploaded rule set carries the document it was read from (RuleSetService stamps it). The document
+         // is an ownership-parent table; read as a parent it would file the set under that document (and under its record's
+         // isolation). A rule set is filed under its Procedure or core record only; the document link is provenance, not parentage.
+         // ebilling-r1 task 116: the column stays until Remove-EbillingSourceDocumentColumns.ps1 runs with -Delete (after this BFF is
+         // deployed); rows can still hold it until then. Remove this entry in the same change as that -Delete run, not before.
+         ("sprk_ruleset", "sprk_sourcedocument")], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>
