@@ -581,8 +581,8 @@ public static class RuleSetEndpoints
     /// <item>Only then the set's home, read app-only (<see cref="RuleSetService.RecordHomeOfRuleSetAsync"/>). Not record-scoped, or no set:
     /// the route continues unchanged (the Procedure filter where the route has one, then the service and its own 404).</item>
     /// <item>(B) A record-scoped set: the caller's access to its core record through the evaluator the record's own routes use
-    /// (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, as the caller), asking Read. A Billing Administrator holds Read at
-    /// Deep on <c>sprk_ruleset</c>, so (A) alone would pass a set whose record (a Restricted or Secure one) the caller cannot see.</item>
+    /// (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, as the caller), asking Read. Read on the rule set does not
+    /// imply access to the set's core record, so (A) alone is not enough for a record-scoped set.</item>
     /// <item>Both passed: 409 <see cref="CodeRecordScoped"/>, naming the record kind and its override routes, logged under the code.</item>
     /// </list>
     /// Any refusal, no answer, or a set with no single core record is the route's uniform 404 (<see cref="RuleSetService.RuleSetNotFound{T}"/>),
