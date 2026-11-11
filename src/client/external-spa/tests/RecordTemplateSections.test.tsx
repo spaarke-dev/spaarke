@@ -1,7 +1,12 @@
 /**
- * R3 task 050 (FR-01 / FR-02 / FR-03) — opening a grid row in the external SPA / Teams tab shows a read-only detail view.
+ * R4 task 005 (FR-01 / FR-02) — the record template's sections for all six types, opened from a grid row. Ported from
+ * R3's `RecordDetailModal.test.tsx` (R3 task 050, FR-01 / FR-02 / FR-03) when the template replaced R3's stacked modal:
+ * every R3 assertion is kept except the modal title, which is now "{type} {number}" (owner 2026-11-08, FR-02); the
+ * assertion inventory is in notes/task-005-notes.md. New here: the FR-01 left / right sections per type, in order, and
+ * the negative case (a type with no template opens nothing, from the grid and from `RecordOpener`).
  *
- * What runs for real: the six widget bodies (`createGridWidgetBody`), `RecordDetailModal`, `RecordDetailFields`, the
+ * What runs for real: the six widget bodies (`createGridWidgetBody`), `RecordTemplateModal` and its sections,
+ * `RecordDetailFields`, the
  * canonical `SprkModal` shell, and the existing `EventsCalendar` / `SmartTodo` / `web-api-client`. What is substituted:
  * the network seam (`bffApiCall`, answering the module read seam's routes — the id-filtered fetch is the ONE detail
  * read for all six entities; the mock models the real server, which attaches `@formattedValues` on the fetch seam only), the shared grid (a fake that reports its rows
@@ -87,6 +92,7 @@ import ProjectsWidgetBody from '../src/widgets/ProjectsWidget';
 import ServiceRequestsWidgetBody from '../src/widgets/ServiceRequestsWidget';
 import WorkAssignmentsWidgetBody from '../src/widgets/WorkAssignmentsWidget';
 import { createGridWidgetBody } from '../src/widgets/GridWidgetBody';
+import { RecordOpenerProvider, useOpenRecord } from '../src/components/detail/RecordOpener';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -113,7 +119,7 @@ interface Case {
   nameAttribute: string;
   /** Grid rows. The grid shows its own row text; the detail's value comes from the READ, so it differs on purpose. */
   rowIds: string[];
-  /** Detail title and one field value the read returns for the first row. */
+  /** Modal title ("{type} {number}", FR-02) and one field value the read returns for the first row. */
   title: string;
   fieldTestId: string;
   fieldValue: string;
@@ -128,7 +134,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_projectid',
     nameAttribute: 'sprk_projectnumber',
     rowIds: ID.project,
-    title: 'Project Read-Name',
+    title: 'Project PRJ-READ-1',
     fieldTestId: 'record-detail-field-sprk_projectnumber',
     fieldValue: 'PRJ-READ-1',
   },
@@ -140,7 +146,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_matterid',
     nameAttribute: 'sprk_matternumber',
     rowIds: ID.matter,
-    title: 'Matter Read-Name',
+    title: 'Matter MAT-READ-1',
     fieldTestId: 'record-detail-field-sprk_matternumber',
     fieldValue: 'MAT-READ-1',
   },
@@ -152,7 +158,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_workassignmentid',
     nameAttribute: 'sprk_name',
     rowIds: ID.wa,
-    title: 'WA Read-Name',
+    title: 'Work assignment WA-READ-1',
     fieldTestId: 'record-detail-field-sprk_workassignmentnumber',
     fieldValue: 'WA-READ-1',
   },
@@ -164,7 +170,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_documentid',
     nameAttribute: 'sprk_documentname',
     rowIds: ID.document,
-    title: 'Document Read-Name',
+    title: 'Document Document Read-Name',
     fieldTestId: 'record-detail-field-sprk_documenttype',
     fieldValue: 'Contract',
   },
@@ -176,7 +182,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_invoiceid',
     nameAttribute: 'sprk_name',
     rowIds: ID.invoice,
-    title: 'INV-READ-1',
+    title: 'Invoice INV-READ-1',
     fieldTestId: 'record-detail-field-statuscode',
     fieldValue: 'Approved',
   },
@@ -188,7 +194,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_servicerequestid',
     nameAttribute: 'sprk_name',
     rowIds: ID.sr,
-    title: 'SR Read-Name',
+    title: 'Service request SR-READ-1',
     fieldTestId: 'record-detail-field-sprk_servicerequestnumber',
     fieldValue: 'SR-READ-1',
   },
@@ -359,7 +365,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe.each(CASES)('$label grid', c => {
-  it("opens the detail modal with the record's read-only fields when a row is clicked", async () => {
+  it("opens the record template with the record's read-only fields when a row is clicked", async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     renderWidget(c.Body);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -445,26 +451,26 @@ describe('browsing', () => {
     installDetailRead('sprk_matter', id => ({
       sprk_matterid: id,
       sprk_mattername: `Matter ${id.slice(-3)}`,
-      sprk_matternumber: id,
+      sprk_matternumber: `M-${id.slice(-3)}`,
     }));
     renderWidget(matter.Body);
 
     // Open the SECOND row: the counter starts at 2 of 3.
     fireEvent.click(gridRow(matter, 2));
     const dialog = await screen.findByRole('dialog');
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
     expect(within(dialog).getByText('2 of 3')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 203'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-203'));
     expect(within(dialog).getByText('3 of 3')).toBeTruthy();
     // Last row: Next is disabled.
     expect((within(dialog).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Previous record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Previous record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
     expect(within(dialog).getByText('1 of 3')).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -480,13 +486,15 @@ describe('browsing', () => {
   it("shows a denied record's state while browsing, then the next accessible record", async () => {
     // The second matter is outside the caller's set: the fetch returns no row for it.
     installDetailRead('sprk_matter', id =>
-      id === ID.matter[1] ? null : { sprk_matterid: id, sprk_mattername: `Matter ${id.slice(-3)}` }
+      id === ID.matter[1]
+        ? null
+        : { sprk_matterid: id, sprk_mattername: `Matter ${id.slice(-3)}`, sprk_matternumber: `M-${id.slice(-3)}` }
     );
     renderWidget(matter.Body);
 
     fireEvent.click(gridRow(matter, 1));
     const dialog = await screen.findByRole('dialog');
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
     await within(dialog).findByTestId('record-detail-denied');
@@ -495,7 +503,7 @@ describe('browsing', () => {
     expect(within(dialog).getByText('2 of 3')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 203'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-203'));
     expect(within(dialog).queryByTestId('record-detail-denied')).toBeNull();
   });
 
@@ -522,7 +530,13 @@ describe('browsing', () => {
         const detail = detailReadOf(body);
         if (detail) {
           return {
-            entities: [{ [detail.c.idAttribute]: detail.id, sprk_mattername: `Matter ${detail.id.slice(-3)}` }],
+            entities: [
+              {
+                [detail.c.idAttribute]: detail.id,
+                sprk_mattername: `Matter ${detail.id.slice(-3)}`,
+                sprk_matternumber: `M-${detail.id.slice(-3)}`,
+              },
+            ],
             moreRecords: false,
           };
         }
@@ -531,7 +545,7 @@ describe('browsing', () => {
       renderWidget(matter.Body);
       fireEvent.click(gridRow(matter, 1));
       const dialog = await screen.findByRole('dialog');
-      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
       await within(dialog).findByTestId('record-messages-empty');
       fireEvent.change(within(dialog).getByRole('textbox', { name: 'Write a message' }), {
         target: { value: 'in flight' },
@@ -555,7 +569,7 @@ describe('browsing', () => {
       // The guard answers on a microtask; give it (and a would-be record read) the chance to run.
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(within(dialog).getByText('1 of 3')).toBeTruthy();
-      expect(titleOf(dialog)).toBe('Matter 201');
+      expect(titleOf(dialog)).toBe('Matter M-201');
       expect(matterReads()).toEqual([ID.matter[0]]);
       expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(true);
 
@@ -586,7 +600,7 @@ describe('browsing', () => {
 
       expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(false);
       fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
       fireEvent.click(within(dialog).getByText('Close'));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     });
@@ -958,7 +972,7 @@ describe('negative cases', () => {
     let fail = true;
     installDetailRead('sprk_matter', id => {
       if (fail) throw new ApiError(500, 'boom');
-      return { sprk_matterid: id, sprk_mattername: 'Recovered' };
+      return { sprk_matterid: id, sprk_mattername: 'Recovered', sprk_matternumber: 'M-OK' };
     });
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
@@ -969,7 +983,7 @@ describe('negative cases', () => {
 
     fail = false;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Recovered'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-OK'));
   });
 
   it('a 403 from the fetch is the denied state, not an error', async () => {
@@ -992,5 +1006,103 @@ describe('negative cases', () => {
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
     await screen.findByTestId('record-detail-notfound');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-01 — each type renders exactly its template's left / right sections, in order (R4 task 005)
+// ---------------------------------------------------------------------------
+
+describe('FR-01 template sections', () => {
+  const LAYOUT: Record<string, { left: string[]; right: string[] }> = {
+    sprk_project: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
+    sprk_matter: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
+    sprk_workassignment: { left: ['information', 'documents'], right: ['messages', 'tasksEvents'] },
+    sprk_invoice: { left: ['information', 'files'], right: ['messages'] },
+    sprk_servicerequest: { left: ['information', 'documents'], right: ['messages'] },
+    sprk_document: { left: ['information', 'preview'], right: [] },
+  };
+
+  const sectionIds = (column: HTMLElement): string[] =>
+    Array.from(column.querySelectorAll('[data-testid^="record-section-"]'))
+      // Only the column's own section cards (a section never nests another).
+      .map(el => (el.getAttribute('data-testid') ?? '').replace('record-section-', ''));
+
+  it.each(CASES.map(c => [c.entityName, c] as const))(
+    '%s: the FR-01 left and right sections, in order',
+    async (_e, c) => {
+      renderWidget(c.Body);
+      fireEvent.click(gridRow(c, 1));
+      const dialog = await screen.findByRole('dialog');
+      const left = await within(dialog).findByTestId('record-template-left');
+      const want = LAYOUT[c.entityName];
+
+      expect(sectionIds(left)).toEqual(want.left);
+      if (want.right.length === 0) {
+        // Document: no right column at all; the left one is full width.
+        expect(within(dialog).queryByTestId('record-template-right')).toBeNull();
+        expect(within(dialog).getByTestId('record-template-columns').getAttribute('data-columns')).toBe('1');
+      } else {
+        expect(sectionIds(within(dialog).getByTestId('record-template-right'))).toEqual(want.right);
+        expect(within(dialog).getByTestId('record-template-columns').getAttribute('data-columns')).toBe('2');
+      }
+      // Every section is a labelled region (its card header names it).
+      for (const id of [...want.left, ...want.right]) {
+        expect(within(dialog).getByTestId(`record-section-${id}`).getAttribute('aria-label')).toBeTruthy();
+      }
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Negative (R4 task 005): a type with no template opens nothing and throws nothing
+// ---------------------------------------------------------------------------
+
+describe('a type with no template', () => {
+  it('RecordOpener opens nothing, makes no BFF call, throws nothing, and ends the opening', async () => {
+    const onTerminal = vi.fn();
+    let open!: ReturnType<typeof useOpenRecord>;
+    const Probe: React.FC = () => {
+      open = useOpenRecord();
+      return null;
+    };
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordOpenerProvider>
+          <Probe />
+        </RecordOpenerProvider>
+      </FluentProvider>
+    );
+
+    expect(() =>
+      act(() => {
+        open({ entityName: 'sprk_gridconfiguration', recordId: guid(1) }, { onTerminal });
+      })
+    ).not.toThrow();
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(bffApiCall).not.toHaveBeenCalled();
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('RecordOpener still opens a type that has one (must-not-fire pair)', async () => {
+    let open!: ReturnType<typeof useOpenRecord>;
+    const Probe: React.FC = () => {
+      open = useOpenRecord();
+      return null;
+    };
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordOpenerProvider>
+          <Probe />
+        </RecordOpenerProvider>
+      </FluentProvider>
+    );
+    act(() => {
+      open({ entityName: 'sprk_matter', recordId: ID.matter[0] });
+    });
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter MAT-READ-1'));
   });
 });

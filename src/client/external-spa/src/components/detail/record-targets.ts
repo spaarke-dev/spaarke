@@ -11,7 +11,7 @@
  *   - a notification's `recordType`, which is an API ROUTE SEGMENT (`projects` | `matters` | `workassignments` |
  *     `invoices` | `servicerequests`; task 037), not an SPA route. {@link FEED_RECORD_TYPES} maps it to the detail view's entity.
  *
- * What comes out is a {@link RecordTarget}: an entity name `RecordDetailModal` knows and a lowercase GUID. It carries no
+ * What comes out is a {@link RecordTarget}: an entity name the record view (`RecordTemplateModal`) knows and a lowercase GUID. It carries no
  * URL, host or scope, and it grants nothing: the detail view reads the record through the caller's own external-plane
  * token, and the server answers "denied" for a record outside the caller's set. A link can therefore only ever ASK to
  * open a record; it cannot widen what the caller may see.

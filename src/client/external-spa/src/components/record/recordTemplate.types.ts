@@ -13,7 +13,9 @@
  * and no read (asserted in `tests/RecordTemplateModal.test.tsx`).
  */
 import type { RecordActionIconId } from '@spaarke/ui-components/components/RecordCommandBar';
-import type { DetailFieldDef } from '../detail/RecordDetailFields';
+import type { CallerIdentity } from '../../api/delete-own';
+import type { ExternalUserContextResponse } from '../../auth/bff-client';
+import type { DetailFieldDef, DetailRecord, RecordDetailEntity } from '../detail/RecordDetailFields';
 
 /** The body sections a record can show. Each renders through the modal's `renderSection` (task 005 supplies them). */
 export type RecordSectionId =
@@ -76,4 +78,60 @@ export interface RecordTemplateConfig {
   right: readonly RecordSectionId[];
   /** Toolbar actions this type can offer, in order. Each is still shown only when the caller may use it. */
   toolbar: readonly RecordToolbarActionId[];
+}
+
+// ---------------------------------------------------------------------------
+// What the modal hands a section and an action host (task 005)
+// ---------------------------------------------------------------------------
+
+/** What the modal knows about the shown record and the caller; shared by sections and action hosts. */
+export interface RecordViewContext {
+  config: RecordTemplateConfig;
+  /** The entity's read description (fields, documents root, invoices lookup...). */
+  detail: RecordDetailEntity;
+  recordId: string;
+  record: DetailRecord;
+  /** The modal title ("Matter MAT-001"). */
+  title: string;
+  /** The caller's `/me` context, read once per opening; null while unknown or when the read failed (fail closed). */
+  callerContext: ExternalUserContextResponse | null;
+  /** Who the caller is (for the delete-own and requester checks); null while unknown. */
+  caller: CallerIdentity | null;
+  /**
+   * Report an operation in flight (a message send, a recall post). While anything is busy, browsing, Close and Refresh
+   * are held so the operation's result is not lost. Clear it when the operation settles and on unmount.
+   */
+  onBusyChange: (busy: boolean) => void;
+  /** The record was deleted by an action in this view: the modal shows the deleted state and tells its opener. */
+  onRecordDeleted: () => void;
+  /** Ask one section of this record to re-read (the service request recall re-reads the Messages thread). */
+  refreshSection: (section: RecordSectionId) => void;
+}
+
+/** What a section renderer gets. */
+export interface RecordSectionContext extends RecordViewContext {
+  /** True when the section is shown alone on its own tab, full width. */
+  full: boolean;
+  /**
+   * Changes when the user presses Refresh (or Try again), or when an action asks this section to re-read
+   * (`refreshSection`). A section with its own reads re-reads then.
+   */
+  refreshSignal: number;
+}
+
+/** A toolbar action an action host offers: hidden unless `visible` (hide, don't disable). */
+export interface RecordHostAction {
+  visible: boolean;
+  onClick: () => void;
+  /** Overrides the action's default tooltip (= accessible name); must contain the action's label (WCAG 2.5.3). */
+  tooltip?: string;
+}
+
+/**
+ * What an action host gets. An action host owns one toolbar action that needs more than a click handler (its dialogs,
+ * its notices): it renders those in the record's content and reports the action through `onActionChange`.
+ */
+export interface RecordActionHostContext extends RecordViewContext {
+  /** Offer (or withdraw, with `null`) this host's toolbar action. Stable for the host's lifetime. */
+  onActionChange: (action: RecordHostAction | null) => void;
 }

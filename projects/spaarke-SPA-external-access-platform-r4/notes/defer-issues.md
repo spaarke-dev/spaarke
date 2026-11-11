@@ -10,6 +10,7 @@ marker with the issue number.
 | D-2 | 2026-11-11, task 002 review pass 2 (K1, pre-existing) | External event create's `Location` header names a route that does not exist | Defect (contract) | #2687 |
 | D-3 | 2026-11-11, task 002 review pass 2 (K4) | Documents-list `canCreate` ceiling is tested for service requests only | Test gap | #2688 |
 | D-4 | 2026-11-11, task 003 review (K2, owner question) | Copy link omits the `?customer=` key the grant email carries | UX (multi-customer users) | #2693 |
+| D-5 | 2026-11-11, task 005 review (K4, pre-existing) | external-spa test files are never type-checked | Tooling gap | #2699 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -78,3 +79,24 @@ tab (or a colleague of theirs) gets the customer picker before the record opens;
 **Fix shape.** If the owner agrees: pass the tab's active customer key (the `backend-selection` seam, never a host)
 to `recordLinkFor` and emit `?customer={key}&record=…`, the same shape as the grant email; extend the round-trip
 tests. Owner question.
+
+## D-5 — external-spa test files are never type-checked
+
+**Issue: #2699**
+
+**Where.** `src/client/external-spa/tsconfig.json` (`"include": ["src"]`), used by `npm run typecheck`; vitest
+transpiles tests with esbuild and does not type-check them.
+
+**What.** No script or CI step type-checks `src/client/external-spa/tests/**`. A type error in a test (a wrong prop on
+a component under test, a stale mock shape) passes typecheck, lint and vitest. An ad-hoc check of the task 005 test
+files (a temporary tsconfig including them) found one pre-existing error: `tests/DetailDocumentsDelete.test.tsx:412`
+TS6133 (unused parameter `path`); none from task 005.
+
+**Effect.** No user-visible effect; tests can drift from the component contracts they exercise without a signal.
+
+**Why deferred.** Outside task 005's scope (a tooling change for the whole SPA test tree); the full test tree may hold
+more pre-existing errors that need a ratchet baseline.
+
+**Fix shape.** Add a `tsconfig.test.json` (extends `tsconfig.json`, includes `tests`) and a `typecheck:tests` script;
+run it in the SPA CI job with a baseline of the existing errors (new errors fail, known ones listed and worked down),
+per root `CLAUDE.md` §16 enforcement ladder.

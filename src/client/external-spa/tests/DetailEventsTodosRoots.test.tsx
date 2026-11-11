@@ -2,7 +2,8 @@
  * R3 task 057 (FR-03 client) - events and to-dos on the Matter and Work Assignment detail views, generalised from the
  * Project section by root kind.
  *
- * What runs for real: `RecordDetailModal` (every section: fields, documents, events and tasks, messages), `EventsCalendar`,
+ * What runs for real: `RecordTemplateModal` (R4 task 005; was R3's `RecordDetailModal`) with every section (fields,
+ * documents, events and tasks, messages), `EventsCalendar`,
  * `SmartTodo`, `DocumentLibrary`, `RecordMessages`, the shared `SprkModal` / `ConfirmModal`, `BffAccessState`, `delete-own`,
  * `web-api-client` (the routes) and Fluent v9. What is substituted: the network seam (`bffApiCall`, answering the external
  * routes and throwing `ApiError` exactly as bff-client builds it) and MSAL's `useMsal` (BffAccessState reads it).
@@ -33,7 +34,8 @@ vi.mock('@azure/msal-react', () => ({
 import { AccessLevel, ApiError } from '../src/types';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { SmartTodo } from '../src/components/SmartTodo';
-import { RecordDetailModal } from '../src/components/detail/RecordDetailModal';
+import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
+import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import { getRootEvents, getRootTodos, getEvents, getProjectTodos } from '../src/api/web-api-client';
 import type { CallerIdentity } from '../src/api/delete-own';
 
@@ -158,10 +160,10 @@ function renderModal(key: Key): ReturnType<typeof render> {
   const e = ENTITY[key];
   return render(
     <FluentProvider theme={webLightTheme}>
-      <RecordDetailModal
+      <RecordTemplateModal
         open
         onClose={() => undefined}
-        entityName={e.entity}
+        config={RECORD_TEMPLATES[e.entity]}
         recordIds={[e.id]}
         index={0}
         onIndexChange={() => undefined}

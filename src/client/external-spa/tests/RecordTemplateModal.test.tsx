@@ -4,8 +4,10 @@
  *
  * What runs for real: `RecordTemplateModal`, `RecordTemplateHeader`, the moved R3 read (`useRecord`), the canonical
  * `SprkModal`, the shared `RecordCommandBar`, `record-targets`. What is substituted: the network seam (`bffApiCall`,
- * answering the module fetch the record read uses) and the clipboard (jsdom has none). Section renderers are test
- * stand-ins (task 005 supplies the real ones); the default placeholder is used where a test does not care.
+ * answering the module fetch the record read uses), the caller's `/me` read (`getExternalUserContext`) and the clipboard
+ * (jsdom has none). Section renderers are test stand-ins (`renderSection`; the real sections and the action hosts are
+ * proven in RecordTemplateSections.test.tsx and the ported R3 suites, task 005); the default stand-in renders an empty
+ * labelled card per section where a test does not care.
  *
  * Layout at 1440 / 1000 / 375px is a browser check (jsdom has no layout): here the CSS contract is proven instead — the
  * columns element carries exactly the 66/34 + stack-below-1000px classes, and the content element the thin scrollbar.
@@ -18,11 +20,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { FluentProvider, makeStyles, webLightTheme } from '@fluentui/react-components';
 import { thinScrollbarStyle } from '@spaarke/ui-components/theme/scrollbar';
 
-const h = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
+const h = vi.hoisted(() => ({ bffApiCall: vi.fn(), getExternalUserContext: vi.fn() }));
 
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
-  return { ...actual, bffApiCall: h.bffApiCall };
+  return { ...actual, bffApiCall: h.bffApiCall, getExternalUserContext: h.getExternalUserContext };
 });
 
 import { ApiError } from '../src/types';
@@ -34,7 +36,11 @@ import {
   recordLinkFor,
 } from '../src/components/detail/record-targets';
 import { RECORD_TEMPLATES, getRecordTemplate } from '../src/components/record/recordTemplates';
-import type { RecordSectionId, RecordTemplateConfig } from '../src/components/record/recordTemplate.types';
+import {
+  RECORD_SECTION_LABELS,
+  type RecordSectionId,
+  type RecordTemplateConfig,
+} from '../src/components/record/recordTemplate.types';
 import { RecordTemplateModal, type RecordSectionContext } from '../src/components/record/RecordTemplateModal';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +98,11 @@ interface HarnessProps {
   renderSection?: (id: RecordSectionId, ctx: RecordSectionContext) => React.ReactNode;
 }
 
+/** The default section stand-in: an empty labelled card per section (no reads of its own). */
+const standInSection = (id: RecordSectionId): React.ReactNode => (
+  <section aria-label={RECORD_SECTION_LABELS[id]} data-testid={`record-section-${id}`} />
+);
+
 /** The modal with its browse index held in state, as an opener holds it. */
 const Harness: React.FC<HarnessProps> = ({ config = RECORD_TEMPLATES.sprk_matter, ids = IDS, start = 0, ...rest }) => {
   const [index, setIndex] = React.useState(start);
@@ -106,7 +117,7 @@ const Harness: React.FC<HarnessProps> = ({ config = RECORD_TEMPLATES.sprk_matter
         onIndexChange={setIndex}
         onRecordDeleted={rest.onRecordDeleted}
         onSettled={rest.onSettled}
-        renderSection={rest.renderSection}
+        renderSection={rest.renderSection ?? standInSection}
       />
     </FluentProvider>
   );
@@ -138,6 +149,8 @@ function atomicClassesOf(style: Parameters<typeof makeStyles>[0][string]): strin
 
 beforeEach(() => {
   h.bffApiCall.mockReset();
+  h.getExternalUserContext.mockReset();
+  h.getExternalUserContext.mockResolvedValue({ contactId: guid(7), email: 'me@example.test', projects: [] });
   installRead((entity, id) => (entity === 'sprk_matter' ? matterRow(id) : rowFor(entity, id)));
 });
 
@@ -636,5 +649,74 @@ describe('holding navigation', () => {
     expect(footerClose.disabled).toBe(false);
     fireEvent.click(footerClose);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Task 003 review R3 (K1), decided in task 005: Refresh respects the hold. A re-read must never replace the sections
+  // (unmounting the busy one and losing its result) while an operation is in flight.
+  describe('Refresh and the hold (task 005)', () => {
+    const toolbarNames = (dialog: HTMLElement): Array<string | null> =>
+      within(within(dialog).getByRole('toolbar', { name: 'Matter actions' }))
+        .getAllByRole('button')
+        .map(b => b.getAttribute('aria-label'));
+
+    it('Refresh is hidden while a section is busy, and offered again once it is not', async () => {
+      const dialog = await openReady({ renderSection: busySection });
+      expect(toolbarNames(dialog)).toEqual(['Refresh', 'Copy link']);
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'start send' }));
+      await waitFor(() => expect(toolbarNames(dialog)).toEqual(['Copy link']));
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'finish send' }));
+      await waitFor(() => expect(toolbarNames(dialog)).toEqual(['Refresh', 'Copy link']));
+    });
+
+    /** Opens matter 1 with its re-read held until `fail` rejects it. */
+    async function refreshInFlight(): Promise<{ dialog: HTMLElement; fail: () => Promise<void> }> {
+      let reject: ((err: unknown) => void) | null = null;
+      let reads = 0;
+      installRead((_e, id) => {
+        reads += 1;
+        if (reads === 1) return matterRow(id);
+        return new Promise((_resolve, rejectRead) => {
+          reject = rejectRead;
+        });
+      });
+      const dialog = await openReady({ renderSection: busySection });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh' }));
+      await waitFor(() => expect(fetchCalls()).toHaveLength(2));
+      return {
+        dialog,
+        fail: async () => {
+          await act(async () => {
+            reject?.(new ApiError(500, 'boom'));
+          });
+        },
+      };
+    }
+
+    it('a refresh in flight when a section turns busy keeps that section on screen if the re-read fails, until the hold releases', async () => {
+      const { dialog, fail } = await refreshInFlight();
+      // The record (and its sections) stay on screen while the re-read is in flight; the section starts its send.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'start send' }));
+      await fail();
+      await new Promise(r => setTimeout(r, 20));
+
+      // The failed answer does not replace the busy section: it is still mounted, with the record's chrome.
+      expect(within(dialog).queryByTestId('record-detail-error')).toBeNull();
+      expect(within(dialog).getByRole('button', { name: 'finish send' })).toBeTruthy();
+      expect(titleOf(dialog)).toBe('Matter MAT-201');
+
+      // Once the operation settles, the answer is shown.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'finish send' }));
+      const error = await within(dialog).findByTestId('record-detail-error');
+      expect(error.textContent).toContain('This record could not be loaded just now.');
+    });
+
+    it('with nothing busy, a failed refresh shows the error state at once (must-not-fire pair)', async () => {
+      const { dialog, fail } = await refreshInFlight();
+      await fail();
+      await within(dialog).findByTestId('record-detail-error');
+      expect(within(dialog).queryByRole('button', { name: 'start send' })).toBeNull();
+    });
   });
 });

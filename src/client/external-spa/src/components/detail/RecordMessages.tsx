@@ -295,9 +295,16 @@ interface MessageThreadProps {
   recordId: string;
   onSendingChange?: (sending: boolean) => void;
   refreshSignal?: number;
+  embedded?: boolean;
 }
 
-const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSendingChange, refreshSignal = 0 }) => {
+const MessageThread: React.FC<MessageThreadProps> = ({
+  root,
+  recordId,
+  onSendingChange,
+  refreshSignal = 0,
+  embedded = false,
+}) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
   const [refreshFailed, setRefreshFailed] = React.useState(false);
@@ -403,9 +410,15 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
 
+  // Embedded in a host's section card (the record template), the card is the region and draws the heading.
+  const Root = embedded ? 'div' : 'section';
   return (
-    <section className={styles.section} aria-label="Messages" data-testid="record-detail-messages">
-      <h3 className={styles.heading}>Messages</h3>
+    <Root
+      className={styles.section}
+      aria-label={embedded ? undefined : 'Messages'}
+      data-testid="record-detail-messages"
+    >
+      {!embedded && <h3 className={styles.heading}>Messages</h3>}
 
       {thread.status === 'loading' && <Spinner size="small" label="Loading messages..." />}
 
@@ -501,7 +514,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
           )}
         </div>
       )}
-    </section>
+    </Root>
   );
 };
 
@@ -518,13 +531,30 @@ export interface RecordMessagesProps {
   onSendingChange?: (sending: boolean) => void;
   /** Changing this number re-reads the thread (a host posted to it elsewhere, e.g. the service request recall). */
   refreshSignal?: number;
+  /**
+   * Rendered inside a host's own titled section (the record template's section card): no region and no heading of its
+   * own, so the page has one "Messages" region and one heading. Default false (its own section and heading).
+   */
+  embedded?: boolean;
 }
 
-export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId, onSendingChange, refreshSignal }) => {
+export const RecordMessages: React.FC<RecordMessagesProps> = ({
+  entity,
+  recordId,
+  onSendingChange,
+  refreshSignal,
+  embedded,
+}) => {
   const root = messageRootFor(entity);
   if (!root) return null;
   return (
-    <MessageThread root={root} recordId={recordId} onSendingChange={onSendingChange} refreshSignal={refreshSignal} />
+    <MessageThread
+      root={root}
+      recordId={recordId}
+      onSendingChange={onSendingChange}
+      refreshSignal={refreshSignal}
+      embedded={embedded}
+    />
   );
 };
 

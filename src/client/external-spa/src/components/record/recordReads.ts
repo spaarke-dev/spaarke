@@ -1,10 +1,10 @@
 /**
- * recordReads — the record detail reads, shared by the R3 `RecordDetailModal` and the R4 `RecordTemplateModal`
+ * recordReads — the record detail reads, used by the R4 `RecordTemplateModal` and its sections
  * (spaarke-SPA-external-access-platform-r4 task 003, FR-01 / FR-02).
  *
  * MOVED, NOT CHANGED: `buildFetchXml`, `postFetch`, `useRecord` and `useRelatedRows` (and the private helpers they need)
- * are the code that lived in `detail/RecordDetailModal.tsx` up to R4 task 003, byte for byte apart from `export`. No new
- * server read and no change to what is fetched: every call is the external module read seam
+ * are the code that lived in R3's record-detail modal (retired in R4 task 005) up to R4 task 003, byte for byte apart
+ * from `export`. No new server read and no change to what is fetched: every call is the external module read seam
  * (POST /api/v1/external/api/dataverse/fetch) through `bffApiCall`, single-entity, join-free, allow-listed columns only.
  * Why the fetch seam and not the record route: see `detail/RecordDetailFields.tsx`.
  */

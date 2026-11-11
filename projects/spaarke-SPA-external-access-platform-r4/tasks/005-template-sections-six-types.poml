@@ -4,7 +4,7 @@
     <title>Section renderers for all six record types; retire the R3 stacked modal (FR-01)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 003</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactor across .tsx files and consumers (tags frontend, fluent-ui, refactoring)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -152,7 +152,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01; plan Risk R4. Consumers verified 2026-11-10: `RecordOpener.tsx:16` and `GridWidgetBody.tsx:49` import `RecordDetailModal`; test files referencing it or its test ids: RecordDetailModal, DetailDocumentsDelete, DetailEventsTodosRoots, DocumentDetail.hasFile, DocumentDownload, RecordMessages, RecordDeepLink, NotificationBell, NotificationBell.noInteraction, App.notificationBell, App.deepLinkSignIn (all under `src/client/external-spa/tests/`). `DocumentDownload` already honours `hasFile === false` (`RecordDetailModal.tsx:436`, R3 ISS-011), so part of #1886 is on master; task 023 covers the rest. Toolbar create actions (Upload, New message, Add to-do, Add event) are task 004; visibility is task 006.</notes>
+  <notes>Spec FR-01; plan Risk R4. Consumers verified 2026-11-10: `RecordOpener.tsx:16` and `GridWidgetBody.tsx:49` import `RecordDetailModal`; test files referencing it or its test ids: RecordDetailModal, DetailDocumentsDelete, DetailEventsTodosRoots, DocumentDetail.hasFile, DocumentDownload, RecordMessages, RecordDeepLink, NotificationBell, NotificationBell.noInteraction, App.notificationBell, App.deepLinkSignIn (all under `src/client/external-spa/tests/`). `DocumentDownload` already honours `hasFile === false` (`RecordDetailModal.tsx:436`, R3 ISS-011), so part of #1886 is on master; task 023 covers the rest. Toolbar create actions (Upload, New message, Add to-do, Add event) are task 004; visibility is task 006.
+
+Completion (2026-11-11): `components/record/sections/` holds one renderer per section id (Information, Documents, Files interim, Invoices, Messages, Tasks & events, Preview interim) behind `renderRecordSection`; `components/record/actions/` holds the toolbar action hosts (Download, Delete request) keyed by action id, so the modal stays entity-agnostic. RecordTemplateModal reads `/me` once per opening, holds browsing/Close/Refresh while a section or host is busy (Refresh hidden; a failed in-flight refresh is held until release: task 003 K1 decided), and refreshes every section. RecordOpener and GridWidgetBody open the template; a type with no template opens nothing (opener reports terminal). RecordDetailModal.tsx and its test deleted after the port (47/47 R3 cases ported; only title strings changed, by FR-02). ArchTest walk path re-pointed to InvoicesSection.tsx. Suite 1343 tests in 48 files (load timeouts in 14 auth files re-run green), typecheck and lint clean. Review: no open F-class; D-5 (tests outside typecheck) filed PENDING. Detail: notes/task-005-notes.md.
+rework: none task 005</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -1,7 +1,8 @@
 /**
  * R3 task 054 (FR-24 documents on the detail view, FR-26 delete own) - what the SPA shows and does.
  *
- * What runs for real: `DocumentLibrary`, `SmartTodo`, `EventsCalendar`, `RecordDetailModal` and the six widget bodies,
+ * What runs for real: `DocumentLibrary`, `SmartTodo`, `EventsCalendar`, `RecordTemplateModal` (R4 task 005; was R3's
+ * `RecordDetailModal`) and the six widget bodies,
  * the shared `SprkModal` / `ConfirmModal`, `RecordMessages`, `delete-own` (the creator rule and the failure messages),
  * `web-api-client` (routes) and Fluent v9. What is substituted: the network seam (`bffApiCall` / `bffApiBlob`, answering
  * the external routes and throwing `ApiError` exactly as bff-client builds it: the raw ProblemDetails body is the
@@ -44,7 +45,7 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
 }));
 vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
 
-// The shared grid, as in RecordDetailModal.test.tsx: reports its rows and opens one through `onRecordOpen`.
+// The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
   return {
@@ -92,7 +93,8 @@ import { DocumentLibrary } from '../src/components/DocumentLibrary';
 import { SmartTodo } from '../src/components/SmartTodo';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { RecordMessages } from '../src/components/detail/RecordMessages';
-import { RecordDetailModal } from '../src/components/detail/RecordDetailModal';
+import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
+import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import {
   callerIdentityOf,
   deleteFailureOf,
@@ -1416,10 +1418,10 @@ describe('the record detail view', () => {
       const Host: React.FC = () => {
         const [index, setIndex] = React.useState(0);
         return (
-          <RecordDetailModal
+          <RecordTemplateModal
             open
             onClose={() => undefined}
-            entityName="sprk_matter"
+            config={RECORD_TEMPLATES.sprk_matter}
             recordIds={[MATTER, NEXT]}
             index={index}
             onIndexChange={setIndex}
@@ -2110,10 +2112,10 @@ describe('service request: after a delete (review fixes 2026-10-12)', () => {
       const Host: React.FC = () => {
         const [index, setIndex] = React.useState(1);
         return (
-          <RecordDetailModal
+          <RecordTemplateModal
             open
             onClose={() => undefined}
-            entityName="sprk_servicerequest"
+            config={RECORD_TEMPLATES.sprk_servicerequest}
             recordIds={[SERVICE_REQUEST, SR_2, SR_3]}
             index={index}
             onIndexChange={setIndex}
@@ -2164,10 +2166,10 @@ describe('service request: after a delete (review fixes 2026-10-12)', () => {
       );
       const onRecordDeleted = vi.fn();
       renderInTheme(
-        <RecordDetailModal
+        <RecordTemplateModal
           open
           onClose={() => undefined}
-          entityName="sprk_servicerequest"
+          config={RECORD_TEMPLATES.sprk_servicerequest}
           recordIds={[SERVICE_REQUEST]}
           index={0}
           onIndexChange={() => undefined}

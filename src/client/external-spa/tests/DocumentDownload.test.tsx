@@ -2,7 +2,8 @@
  * R3 task 066 (owner check 3, items 2-3) - an external user downloads a document from the document detail window, and a
  * failed download is always visible (document detail AND DocumentLibrary).
  *
- * What runs for real: the Documents widget body, `RecordDetailModal`, `RecordDetailFields`, `DocumentLibrary`, the shared
+ * What runs for real: the Documents widget body, `RecordTemplateModal` (R4 task 005: Download is its toolbar action),
+ * `RecordDetailFields`, `DocumentLibrary`, the shared
  * `SprkModal` and Fluent v9. What is substituted: the network seam (`bffApiCall` / `bffApiBlob`, throwing `ApiError` the way
  * bff-client builds it), the shared grid (reports its rows, opens one on click) and the browser-only helpers jsdom lacks
  * (object URLs, the anchor click that starts a download).
@@ -33,7 +34,7 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
 }));
 vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
 
-// The shared grid, as in RecordDetailModal.test.tsx: reports its rows and opens one through `onRecordOpen`.
+// The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
   return {
