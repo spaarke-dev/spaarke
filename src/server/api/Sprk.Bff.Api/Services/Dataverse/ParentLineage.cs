@@ -655,6 +655,72 @@ internal static class InheritedAccessPermission
     };
 
     /// <summary>
+    /// fm task 054b: the reason code when a caller-, model- or configuration-supplied payload names one of the BFF-owned columns
+    /// of a communication or its thread (<see cref="BffOwnedCommunicationColumns"/>; <see cref="RefuseBffOwnedCommunicationColumn"/>).
+    /// </summary>
+    internal const string BffOwnedCommunicationColumnReasonCode = "sdap.access.communication_bff_column_server_only";
+
+    /// <summary>
+    /// fm task 054b: the columns of a communication and of its thread that only the BFF's own typed writers write, per table.
+    /// <list type="bullet">
+    /// <item><c>sprk_communicationthread</c>: <c>sprk_threadtype</c> (Direct or Record-Anchored) and <c>sprk_isdefaultthread</c>
+    /// (the per-record default and the per-user master). Written at create by the thread creators, and on update only by the
+    /// filing reconcile's whole-thread anchor (<c>ThreadResolver.AnchorThreadForFilingAsync</c>, owner decision 2026-11-11).</item>
+    /// <item><c>sprk_communication</c>: <c>sprk_sentby</c> and <c>sprk_directrecipient</c> (a Direct message's two participants,
+    /// the audience its participant grants read) and the thread lookup <c>sprk_communicationthread</c> (the unfile step derives
+    /// the thread participants from it). Written by the create paths' typed stamps and the one thread filing write
+    /// (<c>DirectMessageRecipient.WriteThreadFilingAsync</c>).</item>
+    /// </list>
+    /// <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> field-secures exactly these columns for the BFF's writer profile, so a
+    /// person's own write of one fails at Dataverse; the BFF's generic writers run as the BFF or carry a payload a person,
+    /// model or configuration chose, so this refusal is what stops them. The script's list and this set are equal
+    /// (<c>CommunicationBffOwnedColumnRefusalTests</c> reads the script). Built from the owners' constants, so it cannot drift
+    /// from them.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> BffOwnedCommunicationColumns =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DirectMessageParticipantShares.ThreadTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                DirectMessageParticipantShares.ThreadTypeColumn,
+                DirectMessageParticipantShares.DefaultThreadColumn,
+            },
+            [DirectMessageParticipantShares.CommunicationTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                DirectMessageParticipantShares.SentByColumn,
+                DirectMessageParticipantShares.DirectRecipientColumn,
+                DirectMessageParticipantShares.ThreadLookup,
+            },
+        };
+
+    /// <summary>
+    /// fm task 054b: the first BFF-owned column of <paramref name="table"/> (<see cref="BffOwnedCommunicationColumns"/>) that
+    /// <paramref name="keys"/> names, in any form a writer sends (any case, surrounding space, <c>{nav}@odata.bind</c>,
+    /// <c>_{column}_value</c>), or <see langword="null"/>. The table is matched trimmed and in any case. Shape only: reads nothing.
+    /// </summary>
+    internal static string? BffOwnedCommunicationColumnIn(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (table is null || !BffOwnedCommunicationColumns.TryGetValue(table.Trim(), out var owned))
+            return null;
+
+        return keys.Select(k => SecureRootInheritance.NormalizeColumn(k).Trim()).FirstOrDefault(owned.Contains);
+    }
+
+    /// <summary>
+    /// fm task 054b: the refusal when a payload names a BFF-owned column of a communication or its thread
+    /// (<see cref="BffOwnedCommunicationColumnIn"/>), or <see langword="null"/>. Asked whatever identity the write runs as: by
+    /// <see cref="RefuseAppOnlyWrite"/> (every app-only generic writer and the field-mapping push) and by the shared update-side
+    /// column check <c>RecordTableRules.RefuseFixedAfterCreateColumns</c> (every generic update path, a confirmed proposal
+    /// written as its user included). Nothing is written.
+    /// </summary>
+    internal static RecordOwnerResolution? RefuseBffOwnedCommunicationColumn(string? table, IEnumerable<string> keys) =>
+        BffOwnedCommunicationColumnIn(table, keys) is { } named
+            ? RecordOwnerResolution.Refused(BffOwnedCommunicationColumnReasonCode,
+                $"{named} of a {table!.Trim().ToLowerInvariant()} is set by Spaarke (it decides who may read a message), so it was not written")
+            : null;
+
+    /// <summary>
     /// #2247: the reason code when an app-only generic writer names a row's owner (<see cref="OwnerColumns"/>;
     /// <see cref="RefuseAppOnlyWrite"/>), on any table.
     /// </summary>
@@ -1184,13 +1250,13 @@ internal static class InheritedAccessPermission
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after
     /// trimming is refused first (<see cref="AppOnlyTableNameInvalidReasonCode"/>): the write would paste it into a URL.</para>
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,
-    /// which runs as its caller) asks the table-name check and only the refusals it asked before #2251 (the document codes,
-    /// the owner, the creator); the three #2251-and-later sets are left to that person's own Dataverse privileges and field
-    /// security.</para>
+    /// which runs as its caller) asks the table-name check, the refusals it asked before #2251 (the document codes, the
+    /// owner, the creator) and the BFF-owned columns of a communication and its thread (fm task 054b); the three
+    /// #2251-and-later sets are left to that person's own Dataverse privileges and field security.</para>
     /// <para><b>Precedence</b> (the first match decides the code): a table that is not an identifier; then an access table;
     /// then, on a document, its Access Permission or own-narrowing record, then its D7 links, then its BFF-owned columns;
-    /// then a secure root's columns; then a non-root table's access columns; then, on every table, the owner, then the
-    /// creator.</para>
+    /// then a secure root's columns; then a non-root table's access columns; then, on a communication or its thread,
+    /// its BFF-owned columns (fm task 054b, every identity); then, on every table, the owner, then the creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     /// <param name="table">The table the write names (trimmed here).</param>
@@ -1261,6 +1327,12 @@ internal static class InheritedAccessPermission
                 $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke (it decides who may see what), so it was " +
                 "not written");
         }
+
+        // fm task 054b: a communication's participants and thread lookup, and its thread's type and default flag, are the BFF's
+        // own (BffOwnedCommunicationColumns). Every identity; asked after the app-only access columns so a column in both
+        // sets keeps its access-column code app-only, and is still refused as the caller.
+        if (RefuseBffOwnedCommunicationColumn(trimmed, columns) is { } communicationColumn)
+            return communicationColumn;
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
         if (columns.FirstOrDefault(OwnerColumns.Contains) is { } owner)

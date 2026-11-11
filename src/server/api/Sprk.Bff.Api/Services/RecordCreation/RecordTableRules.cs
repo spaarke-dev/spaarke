@@ -467,21 +467,28 @@ internal static partial class RecordTableRules
     /// <c>_{column}_value</c>) is matched by its column (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn"/>).
     /// Never asked by a create: the create paths take these columns (<see cref="RecordTableRule.TableServerOwnedColumns"/> is the
     /// create-side refusal).
+    /// <para>fm task 054b: the same check also refuses an update naming a BFF-owned column of a communication or its thread
+    /// (<see cref="InheritedAccessPermission.RefuseBffOwnedCommunicationColumn"/>, code
+    /// <see cref="InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode"/>), for every payload source and identity,
+    /// a proposal confirmed by the user the write impersonates included. Every generic update path already asks this check
+    /// (ArchTest <c>CoreRecordPairUpdateCheckGuardTests</c>), so a new one inherits the refusal. The BFF's typed writers of
+    /// those columns do not use these paths.</para>
     /// </summary>
     /// <param name="table">The table the update names.</param>
     /// <param name="keys">The payload's keys, in any form a writer sends.</param>
     internal static RecordOwnerResolution? RefuseFixedAfterCreateColumns(string? table, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        var keyList = keys as IReadOnlyCollection<string> ?? keys.ToList();
         if (Find(table) is not { FixedAfterCreateColumns.Count: > 0 } rule)
-            return null;
+            return InheritedAccessPermission.RefuseBffOwnedCommunicationColumn(table, keyList);
 
         // Trimmed after the normalization too, so a space before the '@' of a bind key ("sprk_corerecordtype @odata.bind")
         // still names its column.
-        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+        var named = keyList.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
             .FirstOrDefault(rule.FixedAfterCreateColumns.Contains);
         return named is null
-            ? null
+            ? InheritedAccessPermission.RefuseBffOwnedCommunicationColumn(table, keyList)
             : RecordOwnerResolution.Refused(FixedAfterCreateReasonCode,
                 $"{named} of a {rule.Table} is set when the record is created and cannot be changed");
     }

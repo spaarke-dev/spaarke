@@ -800,9 +800,13 @@ public class AccessTableAppOnlyWriterTests
 
         foreach (var (table, columns) in TableAccessColumns)
         {
-            foreach (var column in columns)
+            // fm task 054b: a thread's type is also BFF-owned, which is refused whatever the identity.
+            foreach (var column in columns.Where(c => InheritedAccessPermission.BffOwnedCommunicationColumnIn(table, [c]) is null))
                 CallerCode(table, column).Should().BeNull($"{column} on {table}: the caller's own privileges decide");
         }
+
+        CallerCode("sprk_communicationthread", "sprk_threadtype")
+            .Should().Be(InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode, "a thread's type is the BFF's own");
     }
 
     [Fact]

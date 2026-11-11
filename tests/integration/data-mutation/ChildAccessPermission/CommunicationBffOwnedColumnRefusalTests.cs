@@ -1,0 +1,384 @@
+using System.Text.RegularExpressions;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.FieldMappings;
+using Sprk.Bff.Api.Api.FieldMappings.Dtos;
+using Sprk.Bff.Api.Models.FieldMapping;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
+
+/// <summary>
+/// fm task 054b: a communication's participants (<c>sprk_sentby</c>, <c>sprk_directrecipient</c>) and thread lookup
+/// (<c>sprk_communicationthread</c>), and its thread's type and default flag (<c>sprk_threadtype</c>,
+/// <c>sprk_isdefaultthread</c>), are written only by the BFF's own typed writers
+/// (<see cref="InheritedAccessPermission.BffOwnedCommunicationColumns"/>): they decide who may read a message. Every generic
+/// writer refuses a payload naming one, whatever its identity: <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>
+/// (app-only and caller), the one update-side check <see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/> (every
+/// update path, a confirmed proposal written as its user included), the create service's caller column policy
+/// (<see cref="RecordCreationService.CallerBlockedColumnRefusal"/>, except the "for" person the server stamps itself), and the
+/// field-mapping push (the rule is skipped). <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> secures the same five columns.
+/// Must fire: each column, in its plain, case-variant, <c>@odata.bind</c> and <c>_{column}_value</c> forms. Must not fire:
+/// neighbouring names, the same names on other tables, a server-stamped "for" person, and the typed thread-filing writer.
+/// </summary>
+public class CommunicationBffOwnedColumnRefusalTests
+{
+    private static readonly Guid Row = Guid.Parse("054b0000-0000-4000-8000-000000000001");
+    private static readonly Guid Caller = Guid.Parse("054b0000-0000-4000-8000-0000000000ca");
+    private static readonly Guid Thread = Guid.Parse("054b0000-0000-4000-8000-0000000000e1");
+
+    private static readonly (string Table, string Column)[] Owned =
+    [
+        ("sprk_communicationthread", "sprk_threadtype"),
+        ("sprk_communicationthread", "sprk_isdefaultthread"),
+        ("sprk_communication", "sprk_sentby"),
+        ("sprk_communication", "sprk_directrecipient"),
+        ("sprk_communication", "sprk_communicationthread"),
+    ];
+
+    private readonly Mock<IFieldMappingDataverseService> _writes = new();
+
+    /// <summary>Each owned column in each form a payload key can take, with its table and the column it names.</summary>
+    public static TheoryData<string, string, string> EveryForm()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var (table, column) in Owned)
+        {
+            data.Add(table, column, column);
+            data.Add(table, $" {column.ToUpperInvariant()} ", column);
+            data.Add(table, $"{column}@odata.bind", column);
+            data.Add(table, $"_{column}_value", column);
+        }
+
+        return data;
+    }
+
+    // ── The set and the refusals themselves ───────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheOwnedSet_IsExactlyTheseColumns()
+    {
+        InheritedAccessPermission.BffOwnedCommunicationColumns.Keys.Should()
+            .BeEquivalentTo(Owned.Select(o => o.Table).Distinct());
+        foreach (var group in Owned.GroupBy(o => o.Table))
+        {
+            InheritedAccessPermission.BffOwnedCommunicationColumns[group.Key].Should()
+                .BeEquivalentTo(group.Select(o => o.Column), group.Key);
+        }
+    }
+
+    [Fact]
+    public void TheOwnedSet_IsBuiltFromTheTypedWritersOwnConstants()
+    {
+        // One source of truth with the writers: a renamed writer constant drifts here.
+        InheritedAccessPermission.BffOwnedCommunicationColumns["sprk_communication"].Should()
+            .Contain(ThreadResolver.ThreadLookupOnCommunication)
+            .And.Contain(Sprk.Bff.Api.Services.Ai.Handlers.EmailDraftToolHandler.SenderLookupColumn);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryForm))]
+    public void AnOwnedColumn_InAnyForm_IsRefusedForEveryIdentity(string table, string key, string column)
+    {
+        foreach (var identity in new[] { InheritedAccessPermission.WriteIdentity.AppOnly, InheritedAccessPermission.WriteIdentity.Caller })
+        {
+            var refusal = InheritedAccessPermission.RefuseAppOnlyWrite(table, ["sprk_name", key], identity);
+
+            refusal.Should().NotBeNull($"{key} on {table} as {identity}");
+            // A thread's type is also an app-only access column (#2253), which answers first for the app-only identity.
+            refusal!.RefusalCode.Should().Be(
+                identity == InheritedAccessPermission.WriteIdentity.AppOnly && column == "sprk_threadtype"
+                    ? InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode
+                    : InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode);
+            refusal.Reason.Should().StartWith(column + " ");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryForm))]
+    public void AnOwnedColumn_InAnyForm_IsRefusedByTheOneUpdateSideCheck(string table, string key, string column)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, ["sprk_name", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode);
+        refusal.Reason.Should().StartWith(column + " ").And.Contain("set by Spaarke");
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_sentbyname")]
+    [InlineData("sprk_communication", "sprk_sentbyx")]
+    [InlineData("sprk_communication", "xsprk_sentby")]
+    [InlineData("sprk_communication", "sprk_directrecipients")]
+    [InlineData("sprk_communication", "sprk_communicationthreadname")]
+    [InlineData("sprk_communication", "sprk_subject")]
+    [InlineData("sprk_communication", "sprk_regardingmatter")]
+    [InlineData("sprk_communication", "sprk_threadtype")]
+    [InlineData("sprk_communicationthread", "sprk_isdefaultthreadx")]
+    [InlineData("sprk_communicationthread", "sprk_name")]
+    [InlineData("sprk_communicationthread", "sprk_sentby")]
+    public void ANeighbouringName_OrAnotherOwnedTablesColumn_IsNotRefused(string table, string key)
+    {
+        InheritedAccessPermission.BffOwnedCommunicationColumnIn(table, [key]).Should().BeNull();
+        RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]).Should().BeNull();
+        InheritedAccessPermission.RefuseAppOnlyWrite(table, [key], InheritedAccessPermission.WriteIdentity.Caller).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("sprk_todo")]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_document")]
+    [InlineData("sprk_matter")]
+    public void EveryOwnedColumn_IsNotRefusedOnAnotherTable(string table)
+    {
+        var columns = Owned.Select(o => o.Column).ToArray();
+        InheritedAccessPermission.BffOwnedCommunicationColumnIn(table, columns).Should().BeNull();
+        RecordTableRules.RefuseFixedAfterCreateColumns(table, columns).Should().BeNull();
+        InheritedAccessPermission.RefuseAppOnlyWrite(table, columns, InheritedAccessPermission.WriteIdentity.Caller).Should().BeNull();
+    }
+
+    // ── The create service's caller column policy ─────────────────────────────────────────────────────────────────
+
+    /// <summary><see cref="EveryForm"/> on the communication: the thread has no create rule (the service never creates one).</summary>
+    public static TheoryData<string, string, string> EveryCommunicationForm()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var row in EveryForm().Where(r => (string)r[0] == "sprk_communication"))
+            data.Add((string)row[0], (string)row[1], (string)row[2]);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryCommunicationForm))]
+    public void ACallersCreatePayload_NamingAnOwnedColumn_IsRefused(string table, string key, string column)
+    {
+        RecordTableRules.Find("sprk_communicationthread").Should().BeNull("the create service never creates a thread");
+        var refusal = RecordCreationService.CallerBlockedColumnRefusal(RuleFor(table), "record", ["sprk_name", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.Code.Should().Be(RecordCreationRefusal.BlockedColumnCode);
+        refusal.Detail.Should().Contain($"'{column}'");
+    }
+
+    [Fact]
+    public void TheForPersonTheServerStampsItself_IsNotRefused_ButTheOtherOwnedColumnsStillAre()
+    {
+        var rule = RuleFor("sprk_communication");
+        var serverSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_sentby" };
+
+        RecordCreationService.CallerBlockedColumnRefusal(rule, "communication", ["sprk_subject", "sprk_SentBy@odata.bind"], serverSet)
+            .Should().BeNull("the server stamped the 'for' person itself");
+        RecordCreationService.CallerBlockedColumnRefusal(rule, "communication", ["sprk_sentby"], serverSet).Should().BeNull();
+        RecordCreationService.CallerBlockedColumnRefusal(
+                rule, "communication", ["sprk_sentby", "sprk_DirectRecipient@odata.bind"], serverSet)!
+            .Detail.Should().Contain("'sprk_directrecipient'");
+        RecordCreationService.CallerBlockedColumnRefusal(rule, "communication", ["sprk_subject"]).Should().BeNull();
+    }
+
+    // ── Update Record node / action seam: every payload source and identity ───────────────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(EveryForm))]
+    public async Task APlaybookUpdate_NamingAnOwnedColumn_IsRefused_AndNothingIsWritten(string table, string key, string column)
+    {
+        _ = column;
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                table, Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_name"] = "x", [key] = Thread.ToString("D") },
+                Lookups: null),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().BeOneOf(
+            InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode,
+            InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("nothing of the payload is written");
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryForm))]
+    public async Task AConfirmedProposalWrittenAsItsUser_NamingAnOwnedColumn_IsRefused_AndNothingIsWritten(
+        string table, string key, string column)
+    {
+        _ = column;
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                table, Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_name"] = "x", [key] = Thread.ToString("D") },
+                Lookups: null, ImpersonateSystemUserId: Caller, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode,
+                "the impersonated write inherits the refusal from the one update-side check");
+        _writes.Invocations.Should().BeEmpty("nothing of the payload is written");
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_subject")]
+    [InlineData("sprk_communicationthread", "sprk_name")]
+    public async Task AConfirmedProposalWrittenAsItsUser_OfAnotherColumn_IsWritten(string table, string column)
+    {
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                table, Row, FieldMappings: null, LegacyFields: new Dictionary<string, string?> { [column] = "x" },
+                Lookups: null, ImpersonateSystemUserId: Caller, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), Caller, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // ── Output mapping (DataverseUpdateHandler, app-only) ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(EveryForm))]
+    public async Task AnOutputMapping_NamingAnOwnedColumn_IsRefused_AndNothingIsWritten(string table, string key, string column)
+    {
+        _ = column;
+        var act = () => Handler().UpdateAsync(
+            table, Row, new Dictionary<string, object?> { ["sprk_name"] = "x", [key] = Thread.ToString("D") },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().BeOneOf(
+            InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode,
+            InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("nothing of the payload is written");
+    }
+
+    // ── Field-mapping push (a rule targeting an owned column is skipped; the rest of the push applies) ────────────
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_sentby")]
+    [InlineData("sprk_communication", "sprk_directrecipient")]
+    [InlineData("sprk_communication", "SPRK_CommunicationThread")]
+    [InlineData("sprk_communicationthread", "sprk_isdefaultthread")]
+    public async Task APushRule_TargetingAnOwnedColumn_IsSkipped_AndTheOtherColumnsArePushed(string table, string target)
+    {
+        var (updated, failed, skipped, errors, results) = await Push(
+            table, Rule("sprk_name", "sprk_description"), Rule("sprk_name", target));
+
+        (updated, failed, skipped).Should().Be((1, 0, 0));
+        errors.Should().BeEmpty();
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
+        results.Should().ContainSingle(r => r.TargetField == target)
+            .Which.Should().Match<FieldMappingResultDto>(r =>
+                r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
+    }
+
+    // ── The typed writers are not generic writers (must not fire) ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheTypedThreadFilingWriter_StillWritesTheThreadLookupAndTheParticipants_AppOnly()
+    {
+        var entities = new Mock<IGenericEntityService>();
+        var person = new EntityReference("systemuser", Caller);
+
+        await DirectMessageRecipient.WriteThreadFilingAsync(
+            entities.Object, NullLogger.Instance, Row, Thread,
+            new Dictionary<string, object> { ["sprk_sentby"] = person, ["sprk_directrecipient"] = person },
+            CancellationToken.None);
+
+        entities.Verify(e => e.UpdateAsync(
+            "sprk_communication", Row,
+            It.Is<Dictionary<string, object>>(f =>
+                ((EntityReference)f[ThreadResolver.ThreadLookupOnCommunication]).Id == Thread
+                && f.ContainsKey("sprk_sentby") && f.ContainsKey("sprk_directrecipient")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── The field-security script secures exactly this set ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheFieldSecurityScript_SecuresExactlyTheOwnedSet()
+    {
+        var listed = ScriptTargets(File.ReadAllText(ScriptPath()));
+
+        listed.Should().HaveCount(Owned.Length, "the script's target lines are parsed, not missed");
+        listed.Should().BeEquivalentTo(Owned, "the script secures exactly the columns the BFF refuses");
+    }
+
+    [Fact]
+    public void TheScriptCheck_FiresOnAColumnTheOwnedSetLacks()
+    {
+        // Must-fire control for the test above: the script's list with one column the set does not hold.
+        var widened = Regex.Replace(
+            File.ReadAllText(ScriptPath()), @"(Table\s*=\s*'sprk_communication'\s*;\s*Columns\s*=\s*@\()", "$1'sprk_notbffowned', ");
+
+        ScriptTargets(widened).Except(Owned).Should().Equal(("sprk_communication", "sprk_notbffowned"));
+    }
+
+    /// <summary>The (table, column) pairs of the script's target lines (<c>@{ Table = '...'; Columns = @('...', ...) }</c>).</summary>
+    private static IReadOnlyList<(string Table, string Column)> ScriptTargets(string script) =>
+        Regex.Matches(script, @"@\{\s*Table\s*=\s*'([^']+)'\s*;\s*Columns\s*=\s*@\(([^)]*)\)\s*\}")
+            .SelectMany(m => Regex.Matches(m.Groups[2].Value, @"'([^']+)'").Select(c => (m.Groups[1].Value, c.Groups[1].Value)))
+            .ToArray();
+
+    private static string ScriptPath() => Path.Combine(RepoRoot(), "scripts", "Set-ThreadFlagFieldSecurity.ps1");
+
+    private static string RepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var git = Path.Combine(dir, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return dir;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Repository root not found above " + AppContext.BaseDirectory);
+    }
+
+    // ── harness ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private static RecordTableRule RuleFor(string table) =>
+        RecordTableRules.Find(table) ?? throw new InvalidOperationException($"No create rule for {table}.");
+
+    private static FieldMappingRuleDto Rule(string source, string target) =>
+        new() { SourceField = source, TargetField = target, SourceFieldType = "Text", TargetFieldType = "Text" };
+
+    private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
+        string table, params FieldMappingRuleDto[] rules) =>
+        FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
+            _writes.Object,
+            new StampWorld().Restamper,
+            rules,
+            new Dictionary<string, object?> { ["sprk_name"] = "Thread 054b" },
+            table,
+            new[] { Row },
+            Caller,
+            NullLogger.Instance,
+            CancellationToken.None);
+
+    private UpdateRecordActionCore Core() => new(
+        _writes.Object,
+        new ServiceCollection().AddSingleton(EntitySetNameFixtures.Service()).BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>(),
+        NullLogger.Instance);
+
+    private DataverseUpdateHandler Handler()
+    {
+        var world = new StampWorld();
+        return new DataverseUpdateHandler(
+            _writes.Object, world.Service, world.Restamper, new RecordOwnershipResolverDouble(),
+            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            SecureChildReconcilerFixtures.OverEmptyWorld());
+    }
+}

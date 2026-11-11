@@ -462,7 +462,7 @@ internal sealed partial class RecordCreationService
             // The table's own server-owned columns first (the child-record route's order) — its autonumber among them: the
             // platform issues the number, as the Office create's protected list says — then the ones every app-only create
             // owns, with the creator person (the G5 core's first check, the same words).
-            if (CallerBlockedColumnRefusal(rule, noun, item.Columns) is { } blockedColumn)
+            if (CallerBlockedColumnRefusal(rule, noun, item.Columns, request.ServerSetLookupColumns) is { } blockedColumn)
                 return Decision.Refuse(blockedColumn);
 
             // Task 018a (K-3): the references the request names — optional values the caller chose — are asked alone, as the
@@ -2039,8 +2039,12 @@ internal sealed partial class RecordCreationService
     /// confirmation — task 017 review F-2 — from this rule, not a copy of it): the table's own server-owned columns and its
     /// autonumber first (the child-record route's order), then the ones every app-only create owns and the creator person
     /// (the G5 core's first check, the same words). Null when the payload names none.
+    /// <para>fm task 054b: then a BFF-owned column of a communication or its thread
+    /// (<see cref="InheritedAccessPermission.BffOwnedCommunicationColumns"/>), the same words, unless the server set it itself
+    /// (<paramref name="serverSet"/>: the "for" person the chat create and the email draft stamp, <c>sprk_sentby</c>).</para>
     /// </summary>
-    internal static RecordCreationRefusal? CallerBlockedColumnRefusal(RecordTableRule rule, string noun, IEnumerable<string> columns)
+    internal static RecordCreationRefusal? CallerBlockedColumnRefusal(
+        RecordTableRule rule, string noun, IEnumerable<string> columns, IReadOnlySet<string>? serverSet = null)
     {
         var named = columns as IReadOnlyCollection<string> ?? columns.ToList();
         if (named.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
@@ -2055,6 +2059,15 @@ internal sealed partial class RecordCreationService
             return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
                 RecordCreationRefusal.BlockedColumnCode,
                 $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it.");
+        }
+
+        if (InheritedAccessPermission.BffOwnedCommunicationColumnIn(
+                rule.Table, named.Where(c => serverSet?.Contains(SecureRootInheritance.NormalizeColumn(c).Trim()) != true))
+            is { } bffColumn)
+        {
+            return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                RecordCreationRefusal.BlockedColumnCode,
+                $"Column '{bffColumn}' is set by the server on a record the application creates for you — omit it.");
         }
 
         return null;

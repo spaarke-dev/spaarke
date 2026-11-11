@@ -475,6 +475,18 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                     OwnedCreateResult(tool, tablename, forMapped, outcome, startedAt), stopwatch);
             }
 
+            // fm task 054b: a communication's participants and thread lookup, and a thread's type and default flag, are the BFF's
+            // own (InheritedAccessPermission.BffOwnedCommunicationColumns): the run-as-user create below never takes one from the
+            // model's item. The same words as the service's step-2 refusal (RecordCreationService.CallerBlockedColumnRefusal).
+            if (InheritedAccessPermission.BffOwnedCommunicationColumnIn(tablename, mapped.Item!.Columns) is { } bffColumn)
+            {
+                var blocked = new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn, RecordCreationRefusal.BlockedColumnCode,
+                    $"Column '{bffColumn}' is set by the server on a record the application creates for you — omit it.");
+                return LogOutcome(context, tablename,
+                    Error(tool, RefusalText(blocked, tablename, context.DecisionId.ToString("N")), RefusalErrorCode(blocked), startedAt),
+                    stopwatch);
+            }
+
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a
             // SECURE record cannot be re-owned here and must not sit in the caller's ordinary business unit: refused
             // (fail closed). Filed under ordinary records — or under nothing — it stays a run-as-user create.
