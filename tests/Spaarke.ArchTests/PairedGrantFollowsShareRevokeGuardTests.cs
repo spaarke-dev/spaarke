@@ -42,6 +42,12 @@ public class PairedGrantFollowsShareRevokeGuardTests
             "decision records: not a grant root, so no grant is paired there",
         ["Sprk.Bff.Api.Services.Ai.PlaybookSharingService"] =
             "playbooks: not a grant root, so no grant is paired there",
+        ["Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"] =
+            "uac-r2 task 198 Part D (merged from master): a filed communication and its content rows (attachments, " +
+            "participants, review logs, documents): not a grant root, so no grant is paired there",
+        ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
+            "uac-r2 task 198 Part C (merged from master): a Direct message's participant shares on the communication and its " +
+            "content rows: not a grant root, so no grant is paired there",
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() =>

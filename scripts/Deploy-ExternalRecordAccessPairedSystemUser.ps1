@@ -150,6 +150,7 @@ function New-Label([string]$Text) {
 
 $IsDryRun = -not $Apply.IsPresent
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot 'common/OntologyWriterUnit.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -241,7 +242,9 @@ foreach ($appId in $BffApplicationIds) {
     if (-not $u) { Report 'FAIL' "no application user for appId $appId in this environment"; continue }
     $bffUsers += $u
 }
-$defaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name&$filter=isdefault eq true').value)
+# Task 267 (#2618): every default team but the ontology writer unit's -- that team must be in NO field-security profile (H7b S24).
+$defaultTeamSplit = Split-DvDefaultTeamsByOntologyWriterUnit -Api $Api -Headers $headers -DefaultTeams @((Invoke-DvGet 'teams?$select=teamid,name,_businessunitid_value&$filter=isdefault eq true').value)
+$defaultTeams = $defaultTeamSplit.ReaderTeams
 function Ensure-Member([string]$ProfileId, [string]$ProfileName, [string]$Nav, [string]$Set, $Id, [string]$Label) {
     if (-not $ProfileId) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "$ProfileName member: $Label"; return }
     $key = if ($Set -eq 'teams') { 'teamid' } else { 'systemuserid' }
@@ -254,6 +257,9 @@ function Ensure-Member([string]$ProfileId, [string]$ProfileName, [string]$Nav, [
 }
 foreach ($u in $bffUsers) { Ensure-Member $writerId $WriterProfileName 'systemuserprofiles_association' 'systemusers' $u.systemuserid "app user '$($u.fullname)'" }
 foreach ($t in $defaultTeams) { Ensure-Member $readerId $ReaderProfileName 'teamprofiles_association' 'teams' $t.teamid "default team '$($t.name)'" }
+foreach ($t in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $Api -Headers $headers -ProfileId $readerId -WriterUnitTeams $defaultTeamSplit.WriterUnitTeams)) {
+    Report 'FAIL' "default team '$($t.name)' of the '$OntologyWriterBusinessUnitName' business unit is on $ReaderProfileName -- the ontology writer's unit team must be in NO field-security profile (H7b S24 refuses it); remove it from the profile by hand"
+}
 
 # The writer profile's membership IS the lock: a human — or a team — added to it could pair a grant with somebody else.
 # So every member that is not one of the -BffApplicationIds users is FAIL, in every mode. Reported, never removed: who
