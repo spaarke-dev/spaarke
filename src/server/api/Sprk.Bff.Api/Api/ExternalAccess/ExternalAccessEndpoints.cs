@@ -72,8 +72,8 @@ public static class ExternalAccessEndpoints
         // scheme (task 025), so a CIAM external contact AND a workforce (Teams-host) user authenticate
         // here. The group-level CallerPrincipalAuthorizationFilter then resolves either token to a
         // plane-agnostic CallerPrincipal (with its Tier-2 record scope) on HttpContext.Items — the CIAM
-        // strategy reproduces the old ExternalCallerAuthorizationFilter byte-for-byte (FR-15). Every
-        // handler in this group is principal-agnostic (no if(ciam)…else…).
+        // strategy runs the same contact-plane composition and veto pipeline as the workforce contact
+        // plane (uac-r2 task 135, C1). Every handler in this group is principal-agnostic (no if(ciam)…else…).
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
             .RequireAuthorization(AuthPolicies.ExternalCollaboration)
