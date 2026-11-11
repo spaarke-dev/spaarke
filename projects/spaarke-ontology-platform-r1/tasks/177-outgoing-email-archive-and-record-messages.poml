@@ -4,7 +4,7 @@
     <title>Every outgoing email filed to a record is archived as an .eml Document, and a record's Messages list shows every message filed to it (D-217)</title>
     <phase>11 UAT</phase>
     <gate>startable: D-217 recorded (owner, 2026-11-10); 176 on master (26d135bc8f)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes .cs in the shared BFF communication send path (archive rule for every sender) and the record Messages read (what an internal or external caller sees).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -58,4 +58,12 @@
     </files>
   </knowledge>
   <review>uac-r2 reviews the read change (visibility) and the diff; one independent adversarial review. Dev deploy only with the owner's go, under D-126.</review>
+  <completion date="2026-11-10" pr="2666">
+    <summary>Merged into docs/ontology-platform-design as 52d02a66f3 (squash of 212d1c1d30, 5e93b883de, 9f48ed7876, 2fbe93772a, 8382047421). Filed signal: IsFiledToRecord over RegardingFieldMap.AllRegardingFields on the created row (preparedRecord), one ShouldArchiveOutgoing shared by both send paths. Read union: ReadThreadsOfFiledMessagesAsync through QueryVisibleMessagesAsync. A3 (D-218, uac-r2 Option A): the outgoing .eml carries one record link via a new raw-row DocumentAssociationMap.TryApply overload, Sent only, then RefreshInheritedAccessPermissionAsync (non-fatal). Review F1b + uac-r2 F-177-R2-1: on send and on demand, the .eml's own Access Permission is the most restrictive of its embedded sources, written with its own-narrowing record in the same create.</summary>
+    <acceptance>All 8 criteria pass, the D-218 archive-link criterion included. Fail-first and mutation runs for each round are listed in the PR.</acceptance>
+    <review>One independent adversarial review (F1a/F1b/F2/F3 fixed), a scoped re-check of the fix diff (no F; K1 fixed), uac-r2 review of the read change, A3 and both fix rounds: approved at 8382047421 (F-177-R2-1 closed).</review>
+    <gates>BFF build 0 errors; filtered BFF tests 6600/0 (A3 round) and 3621/0 (final round); ArchTests 2131/2131 on the task branch and 2144/2144 after master was merged into docs (e2e3f88c4c). Publish size +2,073 B against fresh master 2eee4dfb76 (191/191 files, Compress-Archive); later rounds add source only, not re-measured. No vulnerable packages.</gates>
+    <deploy-note>An environment needs sprk_accesspermission and sprk_accessinheritance on sprk_document before this BFF goes out (both on dev, task 189). Dev deploy only with the owner's go (D-126), given in uac-r2's session.</deploy-note>
+    <known-limits>DI-148 #2671 (no truncation flag; newest-lost; filed query re-reads anchored messages). DI-149 #2672 (opt-out read only with FromMailbox). K-177-3 a message with no thread is not added. K3 an added thread's count is the filed messages only. R1 an environment without the access columns fails the .eml create (send succeeds with the archival warning). K-177-5 MDA parity accepted.</known-limits>
+  </completion>
 </task>

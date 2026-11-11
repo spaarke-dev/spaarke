@@ -256,7 +256,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔄 174 | [BFF: Console decision route refuses billing Signals; worklist names each billing item's invoice](174-billing-signals-route-refusal-and-invoice-review-target.poml) | FULL | sonnet/high | — | P-207 | **D-207** (owner, EB-D-194): billing decisions only in Invoice Review |
 | 🔄 175 | [Console: Invoice decisions card; billing Work Items open Invoice Review as a pop-up](175-worklist-invoice-decisions-card-and-invoice-review-popup.poml) | FULL | sonnet/high | 174 (contract) | P-207 | **D-207**; deploy after ebilling 112 puts the page on dev |
 | ✅ 176 | [Budget inquiry email and replies filed under the inquiry AND the matter, internal-only, matter thread, archived (D-216)](176-budget-inquiry-email-filed-under-matter.poml) | FULL | **opus**/high | 070, 160 | N | Owner UAT of 161 (2026-11-09); internal-only relayed by uac-r2 2026-11-10; uac-r2 reviews · **[uac]** |
-| 🔄 177 | [Every outgoing email filed to a record is archived as .eml; a record's Messages shows every message filed to it (D-217)](177-outgoing-email-archive-and-record-messages.poml) | FULL | **opus**/high | 176 | N | Owner UAT after 176 (2026-11-10); uac-r2 reviews the read change · **[uac]** |
+| ✅ 177 | [Every outgoing email filed to a record is archived as .eml; a record's Messages shows every message filed to it (D-217)](177-outgoing-email-archive-and-record-messages.poml) | FULL | **opus**/high | 176 | N | Owner UAT after 176 (2026-11-10); uac-r2 reviews the read change · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
