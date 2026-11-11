@@ -96,7 +96,7 @@
    - The format nit is fixed (`338e3f79ee`).
    - **RUNNING:** the master-sync agent (Opus, `merge/ebilling-master-sync` from `338e3f79ee`). A dry run found 11 conflicted files: docs, `Set-CustomerOwnerTeams` and its tests, `ExternalModuleDataEndpoints.cs`, `FeatureRolePrivilegeGuardTests.cs`, `RuleSetServiceTests`, `InvoiceComplianceEvaluatorTests`, Issue963, and a UI test.
    - **RUNNING:** the default-team exclusion (Sonnet, `task/ebilling-default-team-exclusion`, all 7 sites now; 116 resolves its `Deploy-EbillingProcedureSchema.ps1` conflict at its merge).
-   - **Then:** fast-forward work, measure the publish size against fresh master, and **ask the owner for the go to open the work→master PR** (the 4th; earlier ones were #1911, #2507, #2526, #2530; review by ontology-r1, uac-r2 and R4).
+   - **Then:** fast-forward work; send uac-r2 the sync SHA and the list of hand-resolved files (they read `--remerge-diff` for the ExternalAccess files and the guard file before the PR opens; for guards and ratchets, no entry is dropped and no count is raised without a reason); measure the publish size against fresh master, and **ask the owner for the go to open the work→master PR** (the 4th; earlier ones were #1911, #2507, #2526, #2530; review by ontology-r1, uac-r2 and R4).
    - Dev deploy: uac-r2 coordinates with mcp-r1 (dev carries mcp-r1's spike `755987b385`), and the owner gives the go in uac-r2's session. We do not deploy.
 4. **Batch merge DONE 2026-11-10: work = `017a965312`** (batch tip `7543ccd56e`; build 0/0, ArchTests 2250/2250, filtered unit 19082/0 after one flake rerun; housekeeping `8a8f20389a`; TASK-INDEX and CLAUDE.md §3 `ea2f0685ce`; guard re-key `7543ccd56e`). Batch diff note sent to uac-r2 (asked: deploy the batch alone, or wait for 116); spa-r4 told. **Left:** confirm the 130d TASK-INDEX row's rigor and model (guessed FULL, sonnet/high); remove the agent worktrees below plus the merge agent's `agent-a27d62a7e79fae1cf`. Original plan text: batch merge once F3b is approved: 130-0 (`79f5d1a508`) + 130-0b `0f6b49b5ab` + 130a/130b `2367fbab2c` + 130c `3a49f67f65` + 130d `69a8b2db72` + F3b (it already contains 130-0, 3g and 130-0b), into work.
    - Expect conflicts in the notes and in `WorkforceRoleCeilingGate.cs`.
@@ -168,7 +168,13 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
 - K2: the take-back writes `DBNull`, not the cleared envelope.
 - K4: ledger prose.
 
-**Fix round 3 RUNNING** (Opus, in the 116 worktree, from `61d133463d`): those four items; the draft-supersede behaviour is excluded pending the owner. After that: the (c) build if the owner picks it, the ledger prose, a scoped re-check, then the diff to uac-r2.
+**Fix round 3 DONE `cf323d251f`**:
+- 301c0c9417: citation kept until the column `-Delete`.
+- ee62764e0c: the first reset writes No only for a list with no file id; the precheck asks `CanStageAsync`.
+- 9c382eb8ae: `/draft` returns the no-Read 404 before reading the version; the "Procedure row missing" body is now the version 404.
+- 0854ddff14: the take-back writes `ClearedNotConverted`.
+
+Build 0/0; ArchTests 2200/2200; filtered 9461/0. **Running:** a scoped Sonnet re-check of `61d133463d..cf323d251f`. The draft-supersede behaviour is still excluded pending the owner. After that: the (c) build if the owner picks it, the ledger prose, a scoped re-check, then the diff to uac-r2.
 
 Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
 
