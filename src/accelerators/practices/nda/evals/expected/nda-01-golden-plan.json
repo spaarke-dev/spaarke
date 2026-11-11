@@ -1,0 +1,283 @@
+{
+  "author": "Spaarke Reviewer",
+  "initials": "SR",
+  "date": "2026-10-31T12:00:00Z",
+  "strip_drawings_in_clean": false,
+  "provenance": "Standards: Spaarke baseline positions (not tailored) v0.1.0 · Skill: nda-review v0.1.1-mvp",
+  "agreement": {
+    "title": "Mutual Nondisclosure Agreement",
+    "parties": ["Bluefin Robotics, Inc.", "Harbor Analytics LLC"],
+    "file_name": "nda-01-bluefin-harbor-mutual.docx"
+  },
+  "review_basis": {
+    "playbook": null,
+    "version": "0.1.0",
+    "source": "spaarke-baseline",
+    "side": "mutual",
+    "posture": "balanced"
+  },
+  "bookmarks": {
+    "This Mutual Nondisclosure": "NDA_Preamble",
+    "1. Confidential Information.": "NDA_Sec1",
+    "2. Exclusions.": "NDA_Sec2",
+    "4. Representatives.": "NDA_Sec4",
+    "5. Anonymized Data.": "NDA_Sec5",
+    "6. Compelled Disclosure.": "NDA_Sec6",
+    "7. Return of Information.": "NDA_Sec7",
+    "8. Residuals.": "NDA_Sec8",
+    "9. Term.": "NDA_Sec9",
+    "10. Non-Solicitation.": "NDA_Sec10",
+    "13. Assignment.": "NDA_Sec13",
+    "14. Governing Law": "NDA_Sec14"
+  },
+  "unchanged": [
+    "§2(b) prior possession (fallback)",
+    "§2(d) third-party source (fallback)",
+    "§3 Use and Protection",
+    "§11 Remedies",
+    "§12 No License; As Is"
+  ],
+  "edits": [
+    {
+      "para": "This Mutual Nondisclosure",
+      "find": "July 9, 2017",
+      "topic": "nda.housekeeping",
+      "comment": "Please confirm the effective date: the draft shows 9 July 2017.",
+      "summary": {
+        "n": 1,
+        "section": "Preamble",
+        "bookmark": "NDA_Preamble",
+        "issue": "Effective date looks stale (2017)",
+        "revision": "Confirm date (comment only)",
+        "priority": "Low"
+      }
+    },
+
+    {
+      "para": "1. Confidential Information.",
+      "find": "(10)",
+      "old": "10",
+      "replace": "30",
+      "topic": "nda.oral-disclosure"
+    },
+    {
+      "para": "1. Confidential Information.",
+      "find": "within ten",
+      "old": "ten",
+      "replace": "thirty",
+      "topic": "nda.oral-disclosure",
+      "comment": "Extended the written-summary window for oral disclosures to 30 days, our standard fallback.",
+      "summary": {
+        "n": 2,
+        "section": "§1 Oral disclosure",
+        "bookmark": "NDA_Sec1",
+        "issue": "10-day window to confirm oral disclosures",
+        "revision": "30 days",
+        "priority": "Medium"
+      }
+    },
+    {
+      "para": "1. Confidential Information.",
+      "after": "at the time of disclosure",
+      "insert": ", or that a reasonable person would understand to be confidential given the nature of the information and the circumstances of its disclosure",
+      "topic": "nda.definition-unmarked",
+      "comment": "Added a reasonable-person limb so that a failure to mark does not forfeit protection.",
+      "summary": {
+        "n": 3,
+        "section": "§1 Definition",
+        "bookmark": "NDA_Sec1",
+        "issue": "Marking-only definition",
+        "revision": "Add reasonable-person standard",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "2. Exclusions.",
+      "after": "is independently developed by the Recipient",
+      "insert": " without use of or reference to the Disclosing Party’s Confidential Information",
+      "topic": "nda.exclusion-independent-development",
+      "comment": "Independent development must be without use of the other party's information.",
+      "summary": {
+        "n": 4,
+        "section": "§2(c) Independent development",
+        "bookmark": "NDA_Sec2",
+        "issue": "No “without use of” qualifier",
+        "revision": "Add qualifier",
+        "priority": "Medium"
+      }
+    },
+
+    {
+      "para": "4. Representatives.",
+      "after": "(“Representatives”).",
+      "insert": " Representatives must be bound by obligations of confidentiality at least as protective as this Agreement, and each party is responsible for any breach of this Agreement by its Representatives.",
+      "topic": "nda.representatives",
+      "comment": "Added the binding-obligation requirement and responsibility for Representatives' breaches.",
+      "summary": {
+        "n": 5,
+        "section": "§4 Representatives",
+        "bookmark": "NDA_Sec4",
+        "issue": "No responsibility for Representatives",
+        "revision": "Bound + responsible",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "5. Anonymized Data.",
+      "find": "The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services.",
+      "replace": "Intentionally Omitted.",
+      "topic": "nda.data-use-licence-back",
+      "comment": "Deleted: permits use of data derived from the other party's information for the recipient's own products. Escalate if the counterparty insists.",
+      "summary": {
+        "n": 6,
+        "section": "§5 Anonymized Data",
+        "bookmark": "NDA_Sec5",
+        "issue": "Derived-data use for own products (prohibited)",
+        "revision": "Intentionally Omitted",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "6. Compelled Disclosure.",
+      "after": "court order",
+      "insert": ", provided that, where legally permitted, the Recipient gives the Disclosing Party prompt written notice, reasonably cooperates at the Disclosing Party’s expense in seeking a protective order, and discloses only the portion legally required",
+      "topic": "nda.compelled-disclosure",
+      "comment": "Added notice, cooperation and a limit to what is legally required.",
+      "summary": {
+        "n": 7,
+        "section": "§6 Compelled Disclosure",
+        "bookmark": "NDA_Sec6",
+        "issue": "No notice before compelled disclosure",
+        "revision": "Notice, cooperation, limit",
+        "priority": "Medium"
+      }
+    },
+
+    {
+      "para": "7. Return of Information.",
+      "after": "in its possession",
+      "insert": " within thirty (30) days and, on request, certify the return or destruction in writing; routine backups and copies required by law may be retained subject to this Agreement",
+      "topic": "nda.return-destruction",
+      "comment": "Added a 30-day deadline and certification, with the usual backup exception.",
+      "summary": {
+        "n": 8,
+        "section": "§7 Return",
+        "bookmark": "NDA_Sec7",
+        "issue": "No deadline or certification",
+        "revision": "30 days + certification",
+        "priority": "Medium"
+      }
+    },
+
+    {
+      "para": "8. Residuals.",
+      "find": "Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel.",
+      "replace": "Intentionally Omitted.",
+      "topic": "nda.residuals",
+      "comment": "Escalate: residuals clause lets either party use information retained in memory. Deleted; senior approval needed to accept any version.",
+      "summary": {
+        "n": 9,
+        "section": "§8 Residuals",
+        "bookmark": "NDA_Sec8",
+        "issue": "Residuals clause (prohibited)",
+        "revision": "Intentionally Omitted; escalate",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "9. Term.",
+      "find": "terminate upon expiration of this Agreement",
+      "replace": "survive for three (3) years after the date of each disclosure, and with respect to trade secrets for as long as the information remains a trade secret under applicable law",
+      "topic": "nda.term",
+      "comment": "Obligations survived only for the one-year agreement term. Now three years from disclosure, and indefinitely for trade secrets.",
+      "summary": {
+        "n": 10,
+        "section": "§9 Term",
+        "bookmark": "NDA_Sec9",
+        "issue": "Obligations end with the agreement",
+        "revision": "3 years from disclosure; trade secrets protected",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "10. Non-Solicitation.",
+      "after": "employee of the other party",
+      "insert": " with whom it had contact in connection with the Purpose; general solicitations not targeted at such employees do not breach this Section",
+      "topic": "nda.non-solicit"
+    },
+    { "para": "10. Non-Solicitation.", "find": "(18)", "old": "18", "replace": "12", "topic": "nda.non-solicit" },
+    {
+      "para": "10. Non-Solicitation.",
+      "find": "eighteen",
+      "replace": "twelve",
+      "topic": "nda.non-solicit",
+      "comment": "Reduced to 12 months, limited to employees met through the discussions, with a general-solicitation exception.",
+      "summary": {
+        "n": 11,
+        "section": "§10 Non-Solicitation",
+        "bookmark": "NDA_Sec10",
+        "issue": "18-month non-solicit, no exception",
+        "revision": "12 months; contact-limited; exception",
+        "priority": "High"
+      }
+    },
+
+    {
+      "para": "13. Assignment.",
+      "find": "without the consent of the other party.",
+      "replace": "without the other party’s prior written consent, except to a successor to all or substantially all of the relevant business that assumes this Agreement in writing.",
+      "topic": "nda.assignment"
+    },
+    {
+      "para": "13. Assignment.",
+      "find": "Either party may",
+      "old": "Either",
+      "replace": "Neither",
+      "topic": "nda.assignment",
+      "comment": "Assignment now needs consent, except to a successor of the relevant business.",
+      "summary": {
+        "n": 12,
+        "section": "§13 Assignment",
+        "bookmark": "NDA_Sec13",
+        "issue": "Free assignment",
+        "revision": "Consent; successor exception",
+        "priority": "Medium"
+      }
+    },
+
+    {
+      "para": "14. Governing Law",
+      "find": "exclusive jurisdiction",
+      "old": "exclusive",
+      "replace": "non-exclusive",
+      "topic": "nda.governing-law-venue"
+    },
+    {
+      "para": "14. Governing Law",
+      "find": "Travis County, Texas",
+      "replace": "the State of Delaware",
+      "topic": "nda.governing-law-venue"
+    },
+    {
+      "para": "14. Governing Law",
+      "find": "State of Texas.",
+      "old": "Texas",
+      "replace": "Delaware",
+      "topic": "nda.governing-law-venue",
+      "comment": "Escalate: exclusive venue in Texas, where neither party is based. Proposed Delaware law with non-exclusive Delaware courts; confirm the business preference.",
+      "summary": {
+        "n": 13,
+        "section": "§14 Governing Law",
+        "bookmark": "NDA_Sec14",
+        "issue": "Exclusive venue where neither party is based",
+        "revision": "Delaware; non-exclusive",
+        "priority": "Medium"
+      }
+    }
+  ]
+}

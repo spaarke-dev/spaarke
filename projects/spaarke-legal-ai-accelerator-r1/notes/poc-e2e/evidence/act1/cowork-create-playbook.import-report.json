@@ -1,0 +1,373 @@
+{
+  "source": "cowork-create-playbook.docx",
+  "title": "Acme Mutual NDA Review Playbook",
+  "side": "mutual",
+  "rows": [
+    {
+      "row": 1,
+      "name": "Agreement form and mutuality",
+      "kind": "extra",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 2,
+      "name": "Purpose",
+      "kind": "extra",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 3,
+      "name": "Definition of Confidential Information",
+      "kind": "merged",
+      "topics": ["nda.definition-unmarked", "nda.oral-disclosure"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.definition-unmarked": 12,
+        "nda.oral-disclosure": 17
+      }
+    },
+    {
+      "row": 4,
+      "name": "Exclusions from Confidential Information",
+      "kind": "merged",
+      "topics": [
+        "nda.exclusion-independent-development",
+        "nda.exclusion-prior-possession",
+        "nda.exclusion-third-party",
+        "nda.one-sided-carveouts"
+      ],
+      "method": ["keyword"],
+      "scores": {
+        "nda.exclusion-independent-development": 19,
+        "nda.exclusion-prior-possession": 7,
+        "nda.exclusion-third-party": 15,
+        "nda.one-sided-carveouts": 11
+      }
+    },
+    {
+      "row": 5,
+      "name": "Use restriction and standard of care",
+      "kind": "merged",
+      "topics": ["nda.data-use-licence-back", "nda.purpose-limited-use"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.data-use-licence-back": 11,
+        "nda.purpose-limited-use": 15
+      }
+    },
+    {
+      "row": 6,
+      "name": "Disclosure to Representatives",
+      "kind": "mapped",
+      "topics": ["nda.representatives"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.representatives": 22
+      }
+    },
+    {
+      "row": 7,
+      "name": "Copies, proprietary notices and breach notification",
+      "kind": "mapped",
+      "topics": ["nda.copying-and-breach-notice"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.copying-and-breach-notice": 20
+      }
+    },
+    {
+      "row": 8,
+      "name": "Reverse engineering",
+      "kind": "mapped",
+      "topics": ["nda.reverse-engineering"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.reverse-engineering": 28
+      }
+    },
+    {
+      "row": 9,
+      "name": "Compelled disclosure",
+      "kind": "mapped",
+      "topics": ["nda.compelled-disclosure"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.compelled-disclosure": 25
+      }
+    },
+    {
+      "row": 10,
+      "name": "No licence and no warranty",
+      "kind": "mapped",
+      "topics": ["nda.no-licence-no-warranty"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.no-licence-no-warranty": 22
+      }
+    },
+    {
+      "row": 11,
+      "name": "Return or destruction",
+      "kind": "mapped",
+      "topics": ["nda.return-destruction"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.return-destruction": 23
+      }
+    },
+    {
+      "row": 12,
+      "name": "Disclosure period",
+      "kind": "extra",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 13,
+      "name": "Duration of confidentiality obligations",
+      "kind": "mapped",
+      "topics": ["nda.term"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.term": 10
+      }
+    },
+    {
+      "row": 14,
+      "name": "Trade secrets",
+      "kind": "mapped",
+      "topics": ["nda.trade-secret-preservation"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.trade-secret-preservation": 17
+      }
+    },
+    {
+      "row": 15,
+      "name": "Non-solicitation of employees",
+      "kind": "mapped",
+      "topics": ["nda.non-solicit"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.non-solicit": 21
+      }
+    },
+    {
+      "row": 16,
+      "name": "Remedies and injunctive relief",
+      "kind": "mapped",
+      "topics": ["nda.remedies"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.remedies": 16
+      }
+    },
+    {
+      "row": 17,
+      "name": "Protected reporting and whistleblower notice",
+      "kind": "mapped",
+      "topics": ["nda.whistleblower-dtsa"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.whistleblower-dtsa": 27
+      }
+    },
+    {
+      "row": 18,
+      "name": "Confidentiality of the agreement and discussions",
+      "kind": "mapped",
+      "topics": ["nda.confidentiality-of-agreement"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.confidentiality-of-agreement": 10
+      }
+    },
+    {
+      "row": 19,
+      "name": "Assignment",
+      "kind": "mapped",
+      "topics": ["nda.assignment"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.assignment": 15
+      }
+    },
+    {
+      "row": 20,
+      "name": "Governing law and jurisdiction",
+      "kind": "mapped",
+      "topics": ["nda.governing-law-venue"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.governing-law-venue": 29
+      }
+    },
+    {
+      "row": 21,
+      "name": "Entire agreement, amendment and counterparts",
+      "kind": "extra",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 22,
+      "name": "Execution",
+      "kind": "mapped",
+      "topics": ["nda.housekeeping"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.housekeeping": 23
+      }
+    },
+    {
+      "row": 23,
+      "name": "Limitation of liability",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 24,
+      "name": "Residuals",
+      "kind": "gap",
+      "topics": ["nda.residuals"],
+      "method": ["keyword"],
+      "scores": {
+        "nda.residuals": 16
+      }
+    },
+    {
+      "row": 25,
+      "name": "Standstill",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 26,
+      "name": "Securities trading restrictions",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 27,
+      "name": "Personal data and data protection",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 28,
+      "name": "Export control",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 29,
+      "name": "No obligation to proceed and no agency",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 30,
+      "name": "Termination right",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 31,
+      "name": "Notices",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    },
+    {
+      "row": 32,
+      "name": "Severability and waiver",
+      "kind": "gap",
+      "topics": [],
+      "method": [],
+      "scores": {}
+    }
+  ],
+  "counts": {
+    "mapped": 15,
+    "merged": 3,
+    "gap": 10,
+    "extra": 4,
+    "topics_written": 24
+  },
+  "topics_gap": [],
+  "topics_missing": [],
+  "topics_from_baseline": ["nda.residuals"],
+  "fallback_suggestions": [
+    {
+      "topic": "nda.definition-unmarked",
+      "baseline_fallback": "Marking required, with written designation within 30 days for information disclosed unmarked or orally."
+    },
+    {
+      "topic": "nda.oral-disclosure",
+      "baseline_fallback": "Protected if summarised in writing within 30 days."
+    },
+    {
+      "topic": "nda.exclusion-prior-possession",
+      "baseline_fallback": "Excluded if already known to the recipient before disclosure."
+    },
+    {
+      "topic": "nda.exclusion-third-party",
+      "baseline_fallback": "Excluded if received from a third party without breach known to the recipient."
+    },
+    {
+      "topic": "nda.one-sided-carveouts",
+      "baseline_fallback": "A narrow, defined carve-out that applies to both parties."
+    },
+    {
+      "topic": "nda.data-use-licence-back",
+      "baseline_fallback": "Aggregated data that cannot identify either party or reveal its Confidential Information, used only to improve the services provided to the other party."
+    },
+    {
+      "topic": "nda.representatives",
+      "baseline_fallback": "Representatives bound by written or professional obligations of confidentiality."
+    },
+    {
+      "topic": "nda.copying-and-breach-notice",
+      "baseline_fallback": "Prompt notice of unauthorised disclosure."
+    },
+    {
+      "topic": "nda.compelled-disclosure",
+      "baseline_fallback": "Notice where legally permitted."
+    },
+    {
+      "topic": "nda.return-destruction",
+      "baseline_fallback": "Return or destroy on request, without a deadline."
+    },
+    {
+      "topic": "nda.assignment",
+      "baseline_fallback": "Consent not to be unreasonably withheld."
+    },
+    {
+      "topic": "nda.governing-law-venue",
+      "baseline_fallback": "The law of either party's home state, with non-exclusive venue."
+    }
+  ],
+  "needs_review": [1, 2, 3, 4, 5, 12, 13, 18, 21],
+  "silent_topics": []
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/accelerators/edit-plan/0.1.json",
+  "title": "Spaarke accelerator edit plan",
+  "description": "Input to ooxml_redline.py, summary_table.py and check_outputs.py. The model writes it; the engines apply and verify it.",
+  "type": "object",
+  "required": ["author", "date", "review_basis", "edits"],
+  "additionalProperties": false,
+  "properties": {
+    "author": { "type": "string", "minLength": 1, "description": "Tracked-change and comment author" },
+    "initials": { "type": "string" },
+    "date": { "type": "string", "format": "date-time" },
+    "strip_drawings_in_clean": { "type": "boolean", "default": false },
+    "provenance": { "type": "string", "description": "Provenance line from standards-protocol.md, printed on page 1" },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "parties": { "type": "array", "items": { "type": "string" } },
+        "file_name": { "type": "string" }
+      }
+    },
+    "review_basis": {
+      "type": "object",
+      "required": ["posture"],
+      "additionalProperties": false,
+      "properties": {
+        "playbook": {
+          "type": ["string", "null"],
+          "description": "Playbook title, or null when the Spaarke baseline or general practice applied"
+        },
+        "version": { "type": ["string", "null"] },
+        "source": { "enum": ["customer", "spaarke-baseline", "general-practice"] },
+        "side": { "enum": ["mutual", "disclosing", "receiving"], "description": "Omit for a non-contract document type (for example a legal hold notice)" },
+        "posture": { "enum": ["balanced", "aggressive", "light"] }
+      }
+    },
+    "bookmarks": {
+      "type": "object",
+      "description": "paragraph key -> bookmark name; applied before edits",
+      "additionalProperties": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$" }
+    },
+    "unchanged": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Provisions reviewed with no change"
+    },
+    "ratings": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Optional. One entry per playbook topic, in playbook order. summary_table.py renders them as the page-1 'Review summary' with the Rating cell shaded (red FFC7CE, yellow FFEB9C, green C6EFCE).",
+      "items": {
+        "type": "object",
+        "required": ["topic", "title", "rating", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "topic": { "type": "string", "pattern": "^[a-z]+\\.[a-z0-9-]+$" },
+          "title": { "type": "string", "minLength": 1 },
+          "rating": { "enum": ["Meets", "Acceptable fallback", "Needs review", "Does not meet", "Escalate", "Not applicable", "Unable to assess"] },
+          "action": { "type": "string", "minLength": 1, "description": "'Accept' or a concrete change" }
+        }
+      }
+    },
+    "edits": {
+      "type": "array",
+      "description": "Within one paragraph, list edits right to left (later text first)",
+      "items": {
+        "type": "object",
+        "required": ["para"],
+        "additionalProperties": false,
+        "properties": {
+          "para": { "type": "string", "minLength": 1, "description": "Text identifying exactly one paragraph" },
+          "find": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Occurs exactly once in the paragraph; '*' = whole paragraph"
+          },
+          "old": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Substring of find to delete (narrows the redline)"
+          },
+          "replace": { "type": "string", "description": "'' deletes; omit for a comment-only anchor" },
+          "after": { "type": "string", "minLength": 1, "description": "Anchor for a pure insertion" },
+          "insert": { "type": "string", "minLength": 1 },
+          "comment": { "type": "string", "minLength": 1 },
+          "topic": { "type": "string", "pattern": "^[a-z]+\\.[a-z0-9-]+$", "description": "Topic id from topics.json" },
+          "summary": {
+            "type": "object",
+            "required": ["n", "section", "bookmark", "issue", "revision", "priority"],
+            "additionalProperties": false,
+            "properties": {
+              "n": { "type": "integer", "minimum": 1 },
+              "section": { "type": "string" },
+              "bookmark": { "type": "string" },
+              "issue": { "type": "string" },
+              "revision": { "type": "string" },
+              "priority": { "enum": ["High", "Medium", "Low"] }
+            }
+          }
+        },
+        "oneOf": [
+          { "required": ["find"], "not": { "required": ["after"] } },
+          { "required": ["after", "insert"], "not": { "required": ["find"] } }
+        ]
+      }
+    }
+  }
+}

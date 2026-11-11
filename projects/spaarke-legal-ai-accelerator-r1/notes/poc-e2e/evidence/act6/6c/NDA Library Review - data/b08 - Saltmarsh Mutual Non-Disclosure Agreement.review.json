@@ -1,0 +1,287 @@
+{
+  "practice": "nda",
+  "document": {
+    "file_name": "b08 - Saltmarsh Mutual Non-Disclosure Agreement.docx",
+    "url": "https://spaarke.sharepoint.com/sites/AcmeCompany/Shared%20Documents/Legal%20Knowledge/Inbox/NDA%20batch/b08%20-%20Saltmarsh%20Mutual%20Non-Disclosure%20Agreement.docx",
+    "title": "Saltmarsh Mutual NDA",
+    "parties": ["Saltmarsh", "Acme Company, Inc."],
+    "has_prior_revisions": false
+  },
+  "review_basis": {
+    "playbook": "Spaarke NDA – Mutual v1.0",
+    "version": "1.0",
+    "source": "customer",
+    "side": "mutual",
+    "posture": "balanced"
+  },
+  "topics": [
+    {
+      "topic": "nda.definition-unmarked",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Reasonable-person test; unmarked information protected.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "2.1",
+      "quote": "that a reasonable person would understand to be confidential"
+    },
+    {
+      "topic": "nda.oral-disclosure",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Oral/visual disclosures protected when identified or reasonably understood as confidential.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "2.2",
+      "quote": "Information disclosed orally or visually is Confidential Information if it is identified as confidential"
+    },
+    {
+      "topic": "nda.exclusion-prior-possession",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Prior knowledge must be shown by written records.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "3.1(a)",
+      "quote": "as shown by the Receiving Party's written records"
+    },
+    {
+      "topic": "nda.exclusion-independent-development",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Independent development carries the 'without use of or reference to' qualifier.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "3.1(d)",
+      "quote": "without use of or reference to the Disclosing Party's Confidential Information"
+    },
+    {
+      "topic": "nda.exclusion-third-party",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Third-party exclusion requires rightful receipt without a duty of confidentiality.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "3.1(c)",
+      "quote": "rightfully received by the Receiving Party from a third party without a duty of confidentiality"
+    },
+    {
+      "topic": "nda.one-sided-carveouts",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Only the four standard exclusions; all apply to both parties.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "3.1",
+      "quote": "Confidential Information does not include information that:"
+    },
+    {
+      "topic": "nda.purpose-limited-use",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Use limited to the Purpose with at least reasonable care.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "4.1",
+      "quote": "use Confidential Information solely for the Purpose"
+    },
+    {
+      "topic": "nda.representatives",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Need-to-know Representatives, bound by equivalent obligations; each party responsible for its Representatives.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "4.2",
+      "quote": "Each party is responsible for any breach of this Agreement by its Representatives."
+    },
+    {
+      "topic": "nda.compelled-disclosure",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Prompt notice, cooperation at discloser's expense, disclosure limited to what is required.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "5.1",
+      "quote": "give the Disclosing Party prompt written notice"
+    },
+    {
+      "topic": "nda.reverse-engineering",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Reverse engineering of tangible materials prohibited.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "4.4",
+      "quote": "will not reverse engineer, decompile, disassemble or analyze the composition"
+    },
+    {
+      "topic": "nda.copying-and-breach-notice",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Copies limited to the Purpose with notices kept; prompt breach notice.",
+      "action": "none",
+      "priority": "Low",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "4.3",
+      "quote": "will promptly notify the Disclosing Party of any unauthorized use or disclosure"
+    },
+    {
+      "topic": "nda.data-use-licence-back",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "No use of information or derived data outside the Purpose.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "4.5",
+      "quote": "or any data derived from it, for any purpose other than the Purpose"
+    },
+    {
+      "topic": "nda.no-licence-no-warranty",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "No licence beyond the Purpose; information provided as is.",
+      "action": "none",
+      "priority": "Low",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "6.1",
+      "quote": "All Confidential Information is provided \"as is\""
+    },
+    {
+      "topic": "nda.return-destruction",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Return/destroy within 30 days, certification on request, backup carve-out.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "7.1",
+      "quote": "certify in writing that it has done so"
+    },
+    {
+      "topic": "nda.residuals",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "No residuals clause.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": null
+    },
+    {
+      "topic": "nda.term",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "2-year disclosure period, 3 years' protection, trade secrets protected while they qualify.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "8.1",
+      "quote": "continue for three (3) years after each disclosure"
+    },
+    {
+      "topic": "nda.non-solicit",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "No non-solicit or non-compete.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": null
+    },
+    {
+      "topic": "nda.remedies",
+      "rating": "RED",
+      "status": "deviation",
+      "note": "Waiver of injunctive relief plus a $1,000 liability cap covering confidentiality breaches: prohibited.",
+      "action": "escalate",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: prohibited / escalate",
+      "clause": "9.1",
+      "quote": "each party waives any right to seek injunctive or other equitable relief"
+    },
+    {
+      "topic": "nda.whistleblower-dtsa",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Government reporting preserved and DTSA immunity notice given.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "10.1",
+      "quote": "Notice under 18 U.S.C. 1833(b)"
+    },
+    {
+      "topic": "nda.trade-secret-preservation",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Trade-secret rights preserved; trade-secret obligations outlast the fixed term.",
+      "action": "none",
+      "priority": "High",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "11.1",
+      "quote": "Nothing in this Agreement limits either party's rights or remedies under applicable trade secret law."
+    },
+    {
+      "topic": "nda.assignment",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Consent required, successor exception.",
+      "action": "none",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "12.2",
+      "quote": "except to a successor to all or substantially all of the business"
+    },
+    {
+      "topic": "nda.governing-law-venue",
+      "rating": "RED",
+      "status": "deviation",
+      "note": "English law with exclusive London venue; neither party (Texas, Delaware) is there: prohibited.",
+      "action": "escalate",
+      "priority": "Medium",
+      "basis": "Spaarke NDA – Mutual v1.0: prohibited / escalate",
+      "clause": "12.3",
+      "quote": "The courts of London, England have exclusive jurisdiction"
+    },
+    {
+      "topic": "nda.confidentiality-of-agreement",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Existence and terms of the discussions are confidential.",
+      "action": "none",
+      "priority": "Low",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "12.1",
+      "quote": "The existence and terms of this Agreement and of the parties' discussions are Confidential Information of both parties."
+    },
+    {
+      "topic": "nda.housekeeping",
+      "rating": "GREEN",
+      "status": "compliant",
+      "note": "Effective date, parties and signature blocks present; confirm legal names and signatory authority before signing.",
+      "action": "none",
+      "priority": "Low",
+      "basis": "Spaarke NDA – Mutual v1.0: preferred",
+      "clause": "Preamble",
+      "quote": "(the \"Effective Date\")"
+    }
+  ],
+  "provenance": {
+    "skill": "nda-library-review",
+    "skill_version": "0.1.2-poc",
+    "standards": "Spaarke NDA – Mutual v1.0 v1.0 (customer playbook)",
+    "run_at": "2026-11-06T05:55:43+00:00"
+  }
+}

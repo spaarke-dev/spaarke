@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/accelerators/review-result/0.2.json",
+  "title": "Spaarke accelerator review result",
+  "description": "Topic-by-topic result of a review. The same shape is produced by every surface (Cowork skill, Word playbook comparison, later Spaarke Actions) so results can be compared by topic id.",
+  "type": "object",
+  "required": ["practice", "document", "review_basis", "topics", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "practice": { "type": "string", "examples": ["nda"] },
+    "document": {
+      "type": "object",
+      "required": ["file_name"],
+      "properties": {
+        "file_name": { "type": "string" },
+        "url": { "type": "string", "description": "Link to the agreement (team site or OneDrive)" },
+        "title": { "type": "string" },
+        "parties": { "type": "array", "items": { "type": "string" } },
+        "has_prior_revisions": { "type": "boolean" }
+      }
+    },
+    "review_basis": { "$ref": "edit-plan.schema.json#/properties/review_basis" },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["topic", "rating", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "topic": { "type": "string", "pattern": "^[a-z]+\\.[a-z0-9-]+$" },
+          "rating": {
+            "enum": ["GREEN", "YELLOW", "RED", "N/A"],
+            "description": "GREEN = preferred position; YELLOW = acceptable fallback or minor deviation; RED = prohibited / escalate, or a required protection missing; N/A = not applicable"
+          },
+          "note": {
+            "type": ["string", "null"],
+            "maxLength": 300,
+            "description": "One-sentence answer for this topic, shown in grids and dashboards"
+          },
+          "status": {
+            "enum": ["compliant", "fallback", "deviation", "missing", "not-applicable", "undetermined", "silent"]
+          },
+          "clause": { "type": ["string", "null"], "description": "Section number or heading" },
+          "quote": { "type": ["string", "null"], "maxLength": 400 },
+          "basis": { "type": ["string", "null"], "description": "Playbook position relied on, or 'playbook silent'" },
+          "action": { "enum": ["none", "edit", "comment", "escalate"] },
+          "priority": { "enum": ["High", "Medium", "Low"] }
+        }
+      }
+    },
+    "open_questions": { "type": "array", "items": { "type": "string" } },
+    "provenance": {
+      "type": "object",
+      "required": ["skill", "skill_version", "standards"],
+      "properties": {
+        "skill": { "type": "string" },
+        "skill_version": { "type": "string" },
+        "standards": {
+          "type": "string",
+          "description": "e.g. 'Acme NDA - Disclosing Party v1.0' or 'Spaarke baseline positions (not tailored)'"
+        },
+        "model": { "type": "string" },
+        "run_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+Internal review aid, based on {{review_basis}}, for the {{side}} party with a {{posture}} posture: {{revision_count}} proposed revisions, each linked to its clause and explained in a margin comment. Remove this page and the comments before sending (use the external redline). Draft for attorney review; not legal advice.
