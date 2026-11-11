@@ -31,7 +31,10 @@
 - None. **116 rounds 5–6 are done:** squashed into `03745c9483` on `origin/task/ebilling-116-r5` (on top of round 4 `ae0a9cffa3`).
   - The Opus re-check of round 5 found no defects in the code paths. Its two F4s (wording; the `/draft` 404 now answers the missing-version body) and K-4 (job-lock owner) were fixed in round 6, and the session reviewed the round-6 diff.
   - Build 0/0, ArchTests 2206/2206, filtered 9493/0.
-  - **uac-r2 review asked** for `ebc4f178d5..03745c9483`. After approval: fast-forward `task/ebilling-116` to it, then merge into work (expect a comment conflict in `RuleSetEndpoints.cs`: keep work's neutral wording), then close out.
+  - **uac-r2 APPROVED it** (2026-11-11). Its one note, accepted: Read-but-no-Write answers 403 where an unknown Procedure answers 404, and that's fine under NFR-01.
+  - `task/ebilling-116` is fast-forwarded to `03745c9483`.
+  - **Merge it into work only AFTER #2689 has merged** (otherwise it rides in that PR). Expect a comment conflict in `RuleSetEndpoints.cs`: keep work's neutral wording. Then close out.
+- **#2689:** the scoped-publish-lint failure is fixed (`c9267ccf0c`; Pester 77/0). uac-r2's approval stands, since everything after its read is notes and lint only.
 - The master-sync blockers are done (modal keep-mounted shape at 5 sites; ontology's 176 and BudgetInquiry test doubles; uac-r2's boundary test helper was missing `readDocumentChains`). Peers have been told.
 
 ## Next actions, in order
