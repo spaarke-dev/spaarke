@@ -673,6 +673,12 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 193 G1: a grant read selecting the pairing column fails for another reason (503).</summary>
         public bool FailPairingReads { get; set; }
 
+        /// <summary>
+        /// Master's fix round 3g rule: a pairing read answers its rows WITHOUT the pairing column (not returned, rather than
+        /// null). An absent lookup is unreadable, never "not paired".
+        /// </summary>
+        public bool OmitPairingColumn { get; set; }
+
         /// <summary>Task 193 G2: every grant-row DEACTIVATION (an update to statecode 1) fails (503) and changes nothing.</summary>
         public bool FailDeactivations { get; set; }
 
@@ -801,11 +807,17 @@ internal static class AssignedAccessTestDoubles
                     var paired = MatchGrants(filter)
                         .Where(r => pairedFilter is not { Success: true }
                                     || (PairedUsers.TryGetValue(r.Id, out var pu) && pu == Guid.Parse(pairedFilter.Groups[1].Value)))
-                        .Select(r => new Dictionary<string, object?>
+                        .Select(r =>
                         {
-                            ["sprk_externalrecordaccessid"] = r.Id,
-                            [ExternalGrantLifecycle.PairedSystemUserValueProperty] = PairedUsers.TryGetValue(r.Id, out var u) ? u : null,
-                            ["statecode"] = r.StateCode,
+                            var row = new Dictionary<string, object?>
+                            {
+                                ["sprk_externalrecordaccessid"] = r.Id,
+                                [ExternalGrantLifecycle.PairedSystemUserValueProperty] = PairedUsers.TryGetValue(r.Id, out var u) ? u : null,
+                                ["statecode"] = r.StateCode,
+                            };
+                            if (OmitPairingColumn)
+                                row.Remove(ExternalGrantLifecycle.PairedSystemUserValueProperty);
+                            return row;
                         })
                         .ToList();
                     return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(paired))!);

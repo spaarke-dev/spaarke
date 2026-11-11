@@ -534,6 +534,8 @@ internal static class ExternalGrantLifecycle
                 select: $"sprk_externalrecordaccessid,statecode,{PairedSystemUserValueProperty}",
                 top: top,
                 cancellationToken: ct).ConfigureAwait(false);
+            if (AbsentPairingFault(rows) is { } absent)
+                return new UserPairingRead(GrantPairingReadStatus.Unreadable, Array.Empty<UserPairedRow>(), absent);
 
             return new UserPairingRead(GrantPairingReadStatus.Read,
                 rows.Where(r => r.Id != Guid.Empty)
@@ -551,6 +553,15 @@ internal static class ExternalGrantLifecycle
         }
     }
 
+    /// <summary>
+    /// A fault when any returned row did not carry the pairing column: that row's pairing is unknown, not "not paired", so the
+    /// whole read is <see cref="GrantPairingReadStatus.Unreadable"/> (fail closed, master's fix round 3g rule).
+    /// </summary>
+    private static InvalidOperationException? AbsentPairingFault(IEnumerable<PairingRow> rows) =>
+        rows.FirstOrDefault(r => r.Id != Guid.Empty && !r.PairingRead) is { } row
+            ? new InvalidOperationException($"Access record {row.Id} did not carry the pairing column; its pairing cannot be read.")
+            : null;
+
     private static async Task<GrantPairingRead> ReadPairingsByFilterAsync(
         DataverseWebApiClient dataverseClient, string filter, int? top, CancellationToken ct)
     {
@@ -562,6 +573,8 @@ internal static class ExternalGrantLifecycle
                 select: $"sprk_externalrecordaccessid,{PairedSystemUserValueProperty}",
                 top: top,
                 cancellationToken: ct).ConfigureAwait(false);
+            if (AbsentPairingFault(rows) is { } absent)
+                return new GrantPairingRead(GrantPairingReadStatus.Unreadable, new Dictionary<Guid, Guid?>(), absent);
 
             var byRow = new Dictionary<Guid, Guid?>();
             foreach (var row in rows.Where(r => r.Id != Guid.Empty))
@@ -607,11 +620,19 @@ internal static class ExternalGrantLifecycle
 
     private sealed class PairingRow
     {
+        // Master's fix round 3g idiom (ExternalGrantRow): an absent lookup column is unreadable, never "not paired". The
+        // setter records that the column was in the row (an explicit null counts); the readers refuse a row without it.
+        private Guid? _pairedSystemUserId;
+
         [JsonPropertyName("sprk_externalrecordaccessid")]
         public Guid Id { get; set; }
 
         [JsonPropertyName(PairedSystemUserValueProperty)]
-        public Guid? PairedSystemUserId { get; set; }
+        public Guid? PairedSystemUserId { get => _pairedSystemUserId; set { _pairedSystemUserId = value; PairingRead = true; } }
+
+        /// <summary>The pairing column was in the row (an explicit null counts).</summary>
+        [JsonIgnore]
+        public bool PairingRead { get; private set; }
 
         /// <summary>Only <see cref="ReadUserPairingsOnRecordAsync"/> selects it (task 193 G4a); <c>null</c> elsewhere.</summary>
         [JsonPropertyName("statecode")]

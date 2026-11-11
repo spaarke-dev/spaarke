@@ -1120,6 +1120,38 @@ public class ContactGrantSharesInternalUserTests
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
 
+    /// <summary>Master's fix round 3g rule: a row returned WITHOUT the pairing column is unreadable, not "not paired".</summary>
+    [Fact]
+    public async Task G2_Unshare_WhenThePairingColumnIsNotReturned_SaysTheGrantWasNotEnded_AndLeavesIt()
+    {
+        var (contact, user, _) = await AddedColleague();
+        _h.Grants.OmitPairingColumn = true;
+
+        var result = await Unshare(user);
+
+        var body = result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!;
+        body.PairedGrantEnded.Should().BeFalse();
+        body.PairedGrant.Should().Be("unconfirmed", "an absent pairing column is unreadable, never \"nothing is paired\"");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task G1_ReAdd_WhenThePairingColumnIsNotReturned_SharesOnly_AndSaysThePairingCouldNotBeRead()
+    {
+        var (contact, user, _) = await AddedColleague();
+        var creates = _h.Grants.Creates.Count;
+        var before = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        _h.Grants.OmitPairingColumn = true;
+
+        var result = await Grant(contact);
+
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ContactInternalUserShare.WorkforcePairingUnreadableReasonCode));
+        _h.Grants.Creates.Should().HaveCount(creates, "no workforce-app grant is written on a pairing it could not read");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.Should().BeEquivalentTo(before);
+    }
+
     /// <summary>Found by the pairing column and the record only: a deliberate grant, and a grant paired with someone else, stay.</summary>
     [Fact]
     public async Task G2_Unshare_EndsOnlyTheGrantPairedWithThatUser()

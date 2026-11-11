@@ -80,11 +80,15 @@ public class PairedSystemUserGuardTests
     public void ThePairingColumnIsNotInTheSharedGrantRowSelect()
     {
         var lifecycle = TextOf(LifecycleFile);
-        var rowSelect = Regex.Match(lifecycle, @"private const string RowSelect\s*=(?<expr>[^;]*);", RegexOptions.Singleline);
-        Assert.True(rowSelect.Success, "ExternalGrantLifecycle.RowSelect was not found.");
+        // Master's fix round 3g made RowSelect internal and added ListingSelect (RowSelect + the grant date): both are shared.
+        foreach (var name in new[] { "RowSelect", "ListingSelect" })
+        {
+            var select = Regex.Match(lifecycle, $@"(?:private|internal) const string {name}\s*=(?<expr>[^;]*);", RegexOptions.Singleline);
+            Assert.True(select.Success, $"ExternalGrantLifecycle.{name} was not found.");
 
-        Assert.DoesNotContain("pairedsystemuser", rowSelect.Groups["expr"].Value, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("PairedSystemUser", rowSelect.Groups["expr"].Value, StringComparison.Ordinal);
+            Assert.DoesNotContain("pairedsystemuser", select.Groups["expr"].Value, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("PairedSystemUser", select.Groups["expr"].Value, StringComparison.Ordinal);
+        }
     }
 
     [Fact(DisplayName = "Task 193 G1: the schema script decides the column's and relationship's solution membership through their table")]
