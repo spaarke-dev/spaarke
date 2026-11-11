@@ -345,7 +345,7 @@ public sealed record CensusDefaultTeam(Guid Id, string Name, string BusinessUnit
 /// <summary>A business unit; <paramref name="ParentId"/> is null only for the root.</summary>
 public sealed record CensusBusinessUnit(Guid Id, string Name, Guid? ParentId);
 
-/// <summary>The verdict:<see cref="Passed"/> only with no findings.</summary>
+/// <summary>The verdict: <see cref="Passed"/> only with no findings.</summary>
 public sealed record SecureFlagFieldSecurityOutcome(
     IReadOnlyList<string> Findings, IReadOnlyList<string> SystemAdministratorHolders)
 {

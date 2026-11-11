@@ -971,9 +971,14 @@ profile — this one, `Set-RecordCreatorPersonSchema.ps1`, `Set-ChildRecordCreat
 `Set-ChildRecordCreatorContactSchema.ps1`, `Set-WorkforceHomeIdentitySchema.ps1`,
 `Deploy-ExternalRecordAccessContactGrantor.ps1` — skips that team, and the read-only checks
 `Set-SecureFlagFieldSecurity.ps1`, `Set-DocumentPointerFieldSecurity.ps1` and `Set-RegardingPairFieldSecurity.ps1` do not
-demand it (shared helper `scripts/common/OntologyWriterUnit.ps1`). Every mode, `-Verify` included, reports `FAIL` when
-that team IS on the reader profile — remove it from the profile by hand; the scripts never remove it. Two units with
-that name stop the script before any write.
+demand it (shared helper `scripts/common/OntologyWriterUnit.ps1`). Every mode, `-Verify` included, prints a `FAIL` row when
+that team IS on the reader profile — remove it from the profile by hand; the scripts never remove it. **The exit code
+differs by script, so do not read an `-Apply` exit 0 as "the team is clean":** `-Verify` exits 1 in all of them, but for
+`Set-ContactIdentityBindingSchema.ps1`, `Set-RecordCreatorPersonSchema.ps1` and `Deploy-ExternalRecordAccessContactGrantor.ps1`
+`-Apply` (and the dry run) print the `FAIL` row and still exit 0 — run `-Verify` afterwards. `-Apply` exits 1 for
+`Set-ChildRecordCreatorPersonSchema.ps1` (also its dry run), `Set-WorkforceHomeIdentitySchema.ps1` (its dry run exits 0) and
+`Set-ChildRecordCreatorContactSchema.ps1` (every mode); the three read-only checks refuse `-Apply` (exit 1, nothing written).
+Two units with that name stop the script before any write.
 
 ```powershell
 .\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
