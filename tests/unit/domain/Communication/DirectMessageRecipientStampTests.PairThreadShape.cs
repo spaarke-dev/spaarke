@@ -206,6 +206,7 @@ public partial class DirectMessageRecipientStampTests
 
         AssertRefusedAtTheFiling("typed_regarding");
         _messageUpdateAttempts.Should().NotContain(u => u.ContainsKey("ownerid"), "the refused join reparents nothing");
+        _resolverOwnership.Reparents.Should().BeEmpty("the refused join never reaches the reparent");
     }
 
     /// <summary>The thread turns Private between the shape check and the join.</summary>

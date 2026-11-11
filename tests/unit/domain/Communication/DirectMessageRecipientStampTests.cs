@@ -76,6 +76,9 @@ public partial class DirectMessageRecipientStampTests
     private readonly Mock<IDataverseRecordShareService> _shares = new();
     private readonly RecordingLogger<ThreadResolver> _resolverLog = new();
     private readonly RecordingLogger<CommunicationService> _serviceLog = new();
+
+    /// <summary>The thread resolver's ownership double, so a test can see every reparent the join asked for.</summary>
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _resolverOwnership = new();
     private readonly List<Entity> _created = new();
 
     /// <summary>Every update the message received that landed.</summary>
@@ -438,7 +441,7 @@ public partial class DirectMessageRecipientStampTests
     private static StubStrategy Join(Guid threadId) => new(ThreadKeyResolution.Join(threadId));
 
     private ThreadResolver Resolver(IThreadKeyStrategy strategy) =>
-        new(new[] { strategy }, _entities.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+        new(new[] { strategy }, _entities.Object, _resolverOwnership,
             _resolverLog, _directAccess.Object, recordShares: _shares.Object);
 
     /// <param name="identities">The internal-user email read the outbound Direct pair routing maps with (task 054a piece 2b);
