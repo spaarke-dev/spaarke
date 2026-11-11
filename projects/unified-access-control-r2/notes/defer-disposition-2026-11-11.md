@@ -197,7 +197,7 @@ Updated after the main session's rulings (2026-11-11):
 
 - **186** closed under round 90 (merged #2061, deployed, server gate 2026-10-20 checks 1, 2, 4, 5, 7). Its NOT-RUN checks 3 and 6 are owner UAT **U-12**. #2393 (the Workforce role has no role XML in the repo) stays open: including the role in SpaarkeMaster needs the role exported into the solution, so its `package-scope.json` exclusion stays until then (follow-up).
 - **191** (#2179, #2369, #2201, #2125, #1864) and **193** (#2338, #2377) stay in uac-r2: the owner answered **D-13** and **D-14** on 2026-11-11, "Build in uac-r2 now" (`wrap-up-uat-and-decisions-2026-11-11.md`). They are not follow-on hand-offs and are not in section 2. #2179 carries no project label, so it has no row in section 1.
-- **194** (#2368, #2341): open for its post-194b report-only gate (uac-r2 session, after the D-2 deploy); `OrdinaryMovesWritesEnabled` stays off until an owner go.
+- **194** (#2368, #2341): 194 closed under round 90 on 2026-11-11 after its post-194b gate passed (`task-194-ordinary-parent-move.md` §"Post-194b gate (2026-11-11)"). These issues stay open for their own disposition.
 
 ## 5. Closed issues (78)
 

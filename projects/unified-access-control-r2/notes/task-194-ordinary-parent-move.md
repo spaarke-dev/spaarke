@@ -100,6 +100,9 @@ table then id, the Access Permission sweep's paging), then only the watermark de
 `OrdinaryMovesWritesEnabled` starts it over. Dev, read-only counts 2026-10-27: 62 ordinary matters, 24 projects, 25 work
 assignments, 6 service requests = 117 roots → 117 ÷ 50 = 3 runs × 2 minutes ≈ 6 minutes per instance per mode, at most
 50 extra root walks a run during it, nothing after. A 10 000-root customer would take 200 runs ≈ 7 hours per instance.
+**Updated 2026-11-11 (post-194b gate):** the 117-root / about-6-minute figure above is out of date. Dev now has 278
+ordinary roots, and since 194b the 60 s time slice (`OrdinaryTimeSlice`), not `MaxRootsPerRun`, bounds a run, so a full
+sweep on dev takes about 25 runs. See "Post-194b gate (2026-11-11)" below.
 
 ## Files of documents the pass does not re-own (review F1-a) — built as option A
 
@@ -970,3 +973,28 @@ Known limits, accepted:
   retryable reason, so the caller sees "retry" rather than a generic incomplete.
 - *Acceptance.* An injected one-off read fault on a root's Signal: Unsecure completes on the in-pass retry. A persistent
   fault: Unsecure reports the row as retryable, and nothing leaves isolation.
+
+## Post-194b gate (2026-11-11)
+
+**Setting state.** `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled` has been `true` on dev since 2026-10-30 about
+19:53Z, set with the owner's approval in the uac-r2 session (`projects/spaarke-SPA-external-access-platform-r3/notes/contact-identity-dev-rollout-record.md`
+~:94-126; `projects/spaarke-ontology-platform-r1/notes/handoff-history/2026-11.md:36`). The gate therefore read
+write-mode runs, not report-only ones.
+
+**Gate (read-only, 2026-11-11). PASS.**
+- **Runs.** 5 runs, 16:30-16:40Z, all `mode=write`: failed 0, refused 0, moved 0.
+- **Drift audit.** 768 of 768 team-owned children that have a core parent, across 7 tables, are already in the business
+  unit the 194b rule chooses. Drift is 0. The earlier 49-of-52 defect does not reproduce.
+- **Multi-Signal steps OR query.** Accepted at 7 to 38 terms and at 200 terms. The Decision Record sets it returns match a
+  direct query.
+
+**Findings.**
+- **(a) Sweep cost.** A full sweep on dev now takes about 25 runs: 278 ordinary roots against the 60 s slice. The
+  "117 roots in about 6 minutes" estimate under "Catch-up sweep" is updated to match.
+- **(b) Run report.** The run report has no per-root duration and no Decision Record count, and it lives only in memory.
+  Filed as #2696 (low priority).
+- **(c) A real move is unproven live.** Dev has no drift, so no run had a child to move. Carried as owner UAT **U-13** in
+  `wrap-up-uat-and-decisions-2026-11-11.md`: move a test matter between business units and confirm its children follow.
+
+**Close.** 194 closes under round 90: merged (#2349, #2432), deployed, writes on with the owner's go since 2026-10-30,
+and the server gate above passed.
