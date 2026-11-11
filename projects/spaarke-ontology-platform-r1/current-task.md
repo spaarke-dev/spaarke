@@ -13,7 +13,7 @@
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active task** | None in progress. **177 is ✅** (PR #2666 squash-merged to docs as `52d02a66f3`; completion record + TASK-INDEX committed). |
 | **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | 1) Tell the owner, uac-r2, R3 and word-add-in master `c152d7d0b1`. 2) Dev deploy only with the owner's go given in uac-r2's session (D-126); deploy note: `sprk_document` needs `sprk_accesspermission` + `sprk_accessinheritance` (on dev already). 3) Then 176/177 smoke on dev (Open items). |
+| **Next Action** | 1) Owner, uac-r2, R3 told master `c152d7d0b1` (word-add-in session not running — tell it when it reappears). uac-r2 put the deploy order to the owner as their D-2 (fm 054b field security first, then one dev BFF from master with mcp-r1); they message us when it lands. 2) Dev deploy only with the owner's go given in uac-r2's session (D-126); deploy note: `sprk_document` needs `sprk_accesspermission` + `sprk_accessinheritance` (on dev already). 3) Then 176/177 smoke on dev (Open items). |
 | **Uncommitted** | None. |
 
 ## Open items
@@ -38,7 +38,9 @@
 
 **Ours, after the critical path:** DI-144 #2632, DI-145 #2639, DI-146 #2650, DI-147 #2653, **DI-148 #2671**, **DI-149 #2672**; F-R3-1 footer fix (reaches master with this docs→master); `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`; stale `DecisionRecordWriter.cs` comments wait for ebilling 074; close #2212 when ebilling `f0884a175f` reaches master.
 
-**Worktree cleanup (use `scripts/worktree/Remove-WorktreeSafe.ps1` only):** `agent-ace75dcc2c96fdf23`, `agent-afa704bacb2b049ed` (177, merged), `agent-af66c4b41e08347be` (176, merged), task174 `agent-a87a71b050eceafb1` (after #2580/#2579 merge) — all under `C:/code_files/spaarke/.claude/worktrees/`.
+**Worktree cleanup (use `scripts/worktree/Remove-WorktreeSafe.ps1` only):** 176/177 agent worktrees removed 2026-11-11 (tips verified inside #2666 / master). Left: task174 `agent-a87a71b050eceafb1` under `C:/code_files/spaarke/.claude/worktrees/` (after #2580/#2579 merge).
+
+**ebilling master PR:** not open yet. When it is, review ontology-owned files; their test-world fix `49a49437bc` (176 control test, +3 lines seeding the service request) already accepted by message 2026-11-11.
 
 ## Dev state
 
