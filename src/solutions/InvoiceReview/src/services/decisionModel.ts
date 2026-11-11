@@ -119,6 +119,15 @@ export function approvalSignature(review: InvoiceReview): string {
   return [h.status, h.held ? 'held' : '', JSON.stringify(Object.entries(counts).sort()), review.totals.approved, review.totals.invoiceAdjustments, review.decisionHistory.length].join('|');
 }
 
+/**
+ * Whether a re-read of the review should re-read the approval: when its signature changed, or whenever the approval last shown says the
+ * invoice needs its firm. The firm gate opens when the Set-firm re-run's after-commit steps finish (EB-D-204), which changes nothing the
+ * review shows (lines can stay Flagged, totals and history unchanged), so no signature can see it.
+ */
+export function approvalNeedsRead(seenSignature: string | null, signature: string, shown: ApprovalState | null): boolean {
+  return seenSignature !== signature || shown?.firmNeeded === true;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The recorded invoice decision (read-only wizard) and the History pane
 // ─────────────────────────────────────────────────────────────────────────────

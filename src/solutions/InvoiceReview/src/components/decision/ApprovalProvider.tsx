@@ -4,7 +4,8 @@
  *
  * One provider wraps the page. The slots call `sync(signature)` with a signature of what the approval depends on in the review (status, line
  * statuses, totals, history); the state is re-read when that changes (and only then, so a Processing poll does not hit the route every few
- * seconds). Two slots syncing the same review make one request; a sync that arrives while a read is out marks it dirty and one more read runs.
+ * seconds). While the state says the invoice needs its firm, every sync re-reads (`approvalNeedsRead`: the Set-firm re-run finishing changes
+ * nothing in the signature). Two slots syncing the same review make one request; a sync that arrives while a read is out marks it dirty and one more read runs.
  * A failed re-read keeps the state last shown (the server stays authoritative at the click) and records the failure; its signature is
  * not kept as seen, so the next sync of it asks again, and `refresh()` (the Retry on the header line) always asks.
  */
@@ -12,6 +13,7 @@
 import * as React from 'react';
 import type { ApiFailure } from '../../services/invoiceReviewApi';
 import type { ApprovalState, InvoiceDecisionApi } from '../../services/decisionApi';
+import { approvalNeedsRead } from '../../services/decisionModel';
 
 export interface ApprovalContextValue {
   state: ApprovalState | null;
@@ -94,7 +96,7 @@ export function ApprovalProvider({ api, invoiceId, children }: ApprovalProviderP
 
   const sync = React.useCallback(
     (signature: string) => {
-      if (seen.current === signature) return;
+      if (!approvalNeedsRead(seen.current, signature, shown.current)) return;
       seen.current = signature;
       void refresh();
     },

@@ -5,6 +5,7 @@ import * as React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
+import { ApprovalProvider, useApproval } from '../components/decision/ApprovalProvider';
 import type { ApprovalState } from '../services/decisionApi';
 import type { InvoiceReview } from '../services/invoiceReviewApi';
 import {
@@ -625,6 +626,42 @@ describe('Approve', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Reject and Return
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe('the approval re-read while the invoice needs its firm (PR #2689 F2)', () => {
+  function Syncer({ signature }: { signature: string }) {
+    const { sync, state } = useApproval();
+    return (
+      <button type="button" data-testid="sync" data-firm={String(state?.firmNeeded === true)} onClick={() => sync(signature)}>
+        sync
+      </button>
+    );
+  }
+
+  it('re-reads on an unchanged review signature while firmNeeded, and stops once the server opens the firm gate', async () => {
+    const decision = mockDecisionApi();
+    decision.getApproval
+      .mockResolvedValueOnce(ok(approval({ firmNeeded: true, canApprove: false })))
+      .mockResolvedValue(ok(approval()));
+    render(
+      <ApprovalProvider api={decision as never} invoiceId={INVOICE_ID}>
+        <Syncer signature="InReview||[[Flagged,2]]|5000|0|0" />
+      </ApprovalProvider>
+    );
+    fireEvent.click(screen.getByTestId('sync'));
+    await waitFor(() => expect(screen.getByTestId('sync')).toHaveAttribute('data-firm', 'true'));
+    expect(decision.getApproval).toHaveBeenCalledTimes(1);
+
+    // The Set-firm re-run finished with nothing the signature sees changed: the next review re-read still asks the server.
+    fireEvent.click(screen.getByTestId('sync'));
+    await waitFor(() => expect(screen.getByTestId('sync')).toHaveAttribute('data-firm', 'false'));
+    expect(decision.getApproval).toHaveBeenCalledTimes(2);
+
+    // The gate is open: an unchanged signature is not re-read again.
+    fireEvent.click(screen.getByTestId('sync'));
+    await act(async () => undefined);
+    expect(decision.getApproval).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('Reject and Return to firm', () => {
   it('rejects only with a reason, and sends the trimmed reason', async () => {

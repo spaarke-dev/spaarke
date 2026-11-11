@@ -1,4 +1,5 @@
 import {
+  approvalNeedsRead,
   approvalSignature,
   correctionBadge,
   correctionTitle,
@@ -141,6 +142,17 @@ describe('approvalSignature', () => {
     held.header.held = true;
     expect(approvalSignature(held)).not.toBe(approvalSignature(a));
     expect(approvalSignature(review([line(1), flagged(2)], { decisionHistory: [decisionRecord()] }))).not.toBe(approvalSignature(a));
+  });
+});
+
+describe('approvalNeedsRead (PR #2689 F2)', () => {
+  it('re-reads on a changed signature, and on an unchanged one only while the approval says the firm is needed', () => {
+    expect(approvalNeedsRead(null, 'a', null)).toBe(true);
+    expect(approvalNeedsRead('a', 'b', approval())).toBe(true);
+    expect(approvalNeedsRead('a', 'a', approval())).toBe(false);
+    expect(approvalNeedsRead('a', 'a', approval({ firmNeeded: false }))).toBe(false);
+    // The Set-firm re-run finishing (EB-D-204) changes nothing the signature sees: while firmNeeded, every review re-read asks again.
+    expect(approvalNeedsRead('a', 'a', approval({ firmNeeded: true, canApprove: false }))).toBe(true);
   });
 });
 
