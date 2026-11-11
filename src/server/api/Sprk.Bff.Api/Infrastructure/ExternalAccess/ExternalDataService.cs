@@ -1292,17 +1292,35 @@ public class ExternalDataService
     /// </remarks>
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
     /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException">There is no such invoice.</exception>
-    public virtual async Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
-        Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
+    public virtual Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
+        Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default) =>
+        GetRowLookupsAsync("sprk_invoices", "sprk_invoice", invoiceId, lookups, ct);
+
+    /// <summary>
+    /// An invoice submission's <paramref name="lookups"/>, read app-only in the shape <see cref="GetInvoiceLookupsAsync"/> returns an
+    /// invoice's (ebilling-r1 task 130b fix round 6: the firm outcome route applies the secure-roots rule to the submission's own row).
+    /// A missing submission throws <see cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException"/>; a read that FAILS throws
+    /// <see cref="DataverseUnavailableException"/>, never an empty row.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException">There is no such submission.</exception>
+    public virtual Task<IReadOnlyDictionary<string, object?>> GetSubmissionLookupsAsync(
+        Guid submissionId, IReadOnlyCollection<string> lookups, CancellationToken ct = default) =>
+        GetRowLookupsAsync(
+            Sprk.Bff.Api.Services.Access.SecureChildLineage.Children["sprk_invoicesubmission"].EntitySet,
+            "sprk_invoicesubmission", submissionId, lookups, ct);
+
+    private async Task<IReadOnlyDictionary<string, object?>> GetRowLookupsAsync(
+        string entitySet, string logicalName, Guid rowId, IReadOnlyCollection<string> lookups, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lookups);
         var columns = lookups.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (columns.Count == 0 || columns.Any(c => !LookupNamePattern.IsMatch(c)))
             throw new ArgumentException("Lookup names must be logical names.", nameof(lookups));
 
-        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select={string.Join(",", columns.Select(c => $"_{c}_value"))}";
+        var url = $"{GetApiUrl()}/{entitySet}({rowId})?$select={string.Join(",", columns.Select(c => $"_{c}_value"))}";
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct)
-                  ?? throw new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoice", invoiceId);
+                  ?? throw new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException(logicalName, rowId);
 
         var lookupsRead = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in columns)
