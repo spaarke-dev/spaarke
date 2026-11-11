@@ -292,7 +292,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             status = StatusCancelled;
             problems.Add("Cancelled before every rule was reconciled; no further rows were written.");
         }
-// A scheduled job's last line of defence: report the failure, never let it escape unrecorded.
+        // A scheduled job's last line of defence: report the failure, never let it escape unrecorded.
         catch (Exception ex)
         {
             status = StatusError;
@@ -596,7 +596,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                 {
                     throw;
                 }
-// One faulted chunk must not stop the rest; it rolled back whole (task 096).
+                // One faulted chunk must not stop the rest; it rolled back whole (task 096).
                 catch (Exception ex)
                 {
                     rule.Failed += chunk.Length;
@@ -617,7 +617,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                     await idempotency.MarkEventAsProcessedAsync(key, AppliedMarkerLifetime, CancellationToken.None).ConfigureAwait(false);
                     marked = await idempotency.IsEventProcessedAsync(key, CancellationToken.None).ConfigureAwait(false);
                 }
-// The marker is advisory; failing to write it never fails the applied chunk.
+                // The marker is advisory; failing to write it never fails the applied chunk.
                 catch (Exception ex)
                 {
                     marked = false;
@@ -635,7 +635,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                 {
                     await idempotency.ReleaseProcessingLockAsync(key, CancellationToken.None).ConfigureAwait(false);
                 }
-// A claim that cannot be released expires on its own.
+                // A claim that cannot be released expires on its own.
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "[EXT-ACCESS-RECON] Could not release the claim on {Key}; it expires on its own", key);

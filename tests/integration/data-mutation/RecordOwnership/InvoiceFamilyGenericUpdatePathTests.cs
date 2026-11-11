@@ -217,13 +217,18 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private static readonly FieldMappingRuleDto ProjectRule = new()
     {
-        SourceField = "sprk_project", TargetField = "sprk_project", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        SourceField = "sprk_project",
+        TargetField = "sprk_project",
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 1,
     };
 
     [Fact]
     public async Task FieldMappingPush_AnInvoiceGivenASecondCoreRecord_IsRefusedByCodeOnly_AndNothingIsWritten()
     {
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, new StampWorld().Restamper, [ProjectRule],
             new Dictionary<string, object?> { ["sprk_project"] = Project },
             "sprk_invoice", [Invoice], Caller, NullLogger.Instance, CancellationToken.None,
@@ -247,11 +252,15 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", Matter)]);
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_regardingmatter", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_regardingmatter",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [rule], new Dictionary<string, object?> { ["sprk_regardingmatter"] = Matter },
             "sprk_event", [Event], Caller, NullLogger.Instance, CancellationToken.None,
             appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);

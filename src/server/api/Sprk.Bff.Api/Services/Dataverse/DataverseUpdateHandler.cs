@@ -121,6 +121,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
         // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
         // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).
+        // Task 045b: asked BEFORE the pair planner below, so a family row's refusal keeps its own code; the planner never writes
+        // a lookup this guard decides on (it writes the pair and its display columns only), so the decision is the same.
         if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     entityLogicalName, recordId, fields, _genericEntityService, ct,
                     writeIsImpersonated: impersonateSystemUserId is not null)
@@ -129,6 +131,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             // Code only: the guard read as the app, so its reason can name records the caller has not read.
             throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
         }
+
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
+        // planner, with this handler's own app-only reader) BEFORE the filing gate below and the write, so they see the pair as it
+        // will be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
+        fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
+                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
+            .ConfigureAwait(false);
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).

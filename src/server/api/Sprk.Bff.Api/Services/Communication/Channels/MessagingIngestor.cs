@@ -117,6 +117,8 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                         Direction = CommunicationDirection.Incoming,
                         Message = request.Message,
                         AcsThreadId = request.ProviderThreadId,
+                        // Task 054: a Direct join maps the sender's chat identity to the systemuser it stamps.
+                        SenderChatIdentity = request.ProviderSenderId,
                     },
                     cancellationToken);
                 resolvedThreadId = assignment?.ThreadId;

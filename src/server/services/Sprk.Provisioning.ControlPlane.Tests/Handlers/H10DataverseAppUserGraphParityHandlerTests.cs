@@ -248,8 +248,11 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         oldKey.Should().NotBe(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture));
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H10", IdempotencyKey = oldKey, JobId = run.RunId,
-            StartedAt = DateTimeOffset.UtcNow.AddDays(-1), CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            Phase = "H10",
+            IdempotencyKey = oldKey,
+            JobId = run.RunId,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
         });
         var repo = new FakeRepository(run, etag: "etag-t266d");
         var creator = FakeCreator.Success();
@@ -782,7 +785,10 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var run = BuildRun();
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H10", IdempotencyKey = "appuser-acme", StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+            Phase = "H10",
+            IdempotencyKey = "appuser-acme",
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
         });
         var granter = FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" });
         var handler = BuildHandler(new FakeRepository(run, etag: "etag-t261f"), FakeCreator.Success(),

@@ -296,10 +296,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             }
 
             // #1616: the ADR-024 pair is prepared BEFORE anything is checked — a project's half-pair completed from the row (so
-            // the checks and the application's write see exactly one pair), a work assignment's pair kept in step with the
-            // typed filing lookup this update moves (so this server never leaves a pair no typed lookup repeats).
+            // the checks and the application's write see exactly one pair); on every other pair table the task 045b update
+            // planner: a type-only pair filled or cleared, a pair kept in step with the agreement lookup this update moves.
             var prepared = await OwnedChildWrite.KeepPairInStepAsync(
-                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken, _logger)
                 .ConfigureAwait(false);
             if (prepared.Refusal is { } pairRefusal)
             {

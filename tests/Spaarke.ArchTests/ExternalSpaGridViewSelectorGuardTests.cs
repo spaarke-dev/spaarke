@@ -1041,34 +1041,34 @@ public class ExternalSpaGridViewSelectorGuardTests
                     case '<':
                         return Refuse("a bare JSX element as an attribute value");
                     case '/':
-                    {
-                        var j = i + 1;
-                        while (j < text.Length && char.IsWhiteSpace(text[j]))
                         {
-                            j++;
+                            var j = i + 1;
+                            while (j < text.Length && char.IsWhiteSpace(text[j]))
+                            {
+                                j++;
+                            }
+                            if (j < text.Length && text[j] == '>')
+                            {
+                                i = j - 1; // the self-closing `/>`; the next iteration ends the tag
+                                continue;
+                            }
+                            return Refuse("a comment or '/' between attributes");
                         }
-                        if (j < text.Length && text[j] == '>')
+                    case '"' or '\'':
                         {
-                            i = j - 1; // the self-closing `/>`; the next iteration ends the tag
+                            // A JSX attribute string: no escapes, ends at the same quote.
+                            var close = text.IndexOf(c, i + 1);
+                            if (close < 0)
+                            {
+                                return Refuse("an unterminated string attribute");
+                            }
+                            if (text.AsSpan(i + 1, close - i - 1).IndexOfAny(BraceOrAngle) >= 0)
+                            {
+                                return Refuse("a string attribute holding { } < or >");
+                            }
+                            i = close;
                             continue;
                         }
-                        return Refuse("a comment or '/' between attributes");
-                    }
-                    case '"' or '\'':
-                    {
-                        // A JSX attribute string: no escapes, ends at the same quote.
-                        var close = text.IndexOf(c, i + 1);
-                        if (close < 0)
-                        {
-                            return Refuse("an unterminated string attribute");
-                        }
-                        if (text.AsSpan(i + 1, close - i - 1).IndexOfAny(BraceOrAngle) >= 0)
-                        {
-                            return Refuse("a string attribute holding { } < or >");
-                        }
-                        i = close;
-                        continue;
-                    }
                     case '}':
                         return Refuse("an unbalanced }");
                 }
@@ -1092,33 +1092,33 @@ public class ExternalSpaGridViewSelectorGuardTests
                 switch (c)
                 {
                     case '"' or '\'' or '`':
-                    {
-                        // A JS string or template literal inside a prop expression: skip it, honouring escapes.
-                        var j = i + 1;
-                        var holdsBrace = false;
-                        while (j < text.Length && text[j] != c)
                         {
-                            if (text[j] == '\\')
+                            // A JS string or template literal inside a prop expression: skip it, honouring escapes.
+                            var j = i + 1;
+                            var holdsBrace = false;
+                            while (j < text.Length && text[j] != c)
                             {
+                                if (text[j] == '\\')
+                                {
+                                    j++;
+                                }
+                                else if (text[j] is '{' or '}')
+                                {
+                                    holdsBrace = true;
+                                }
                                 j++;
                             }
-                            else if (text[j] is '{' or '}')
+                            if (j >= text.Length)
                             {
-                                holdsBrace = true;
+                                return Refuse("an unterminated string inside a prop expression");
                             }
-                            j++;
+                            if (holdsBrace)
+                            {
+                                return Refuse("a string or template literal holding { or } inside a prop expression");
+                            }
+                            i = j;
+                            continue;
                         }
-                        if (j >= text.Length)
-                        {
-                            return Refuse("an unterminated string inside a prop expression");
-                        }
-                        if (holdsBrace)
-                        {
-                            return Refuse("a string or template literal holding { or } inside a prop expression");
-                        }
-                        i = j;
-                        continue;
-                    }
                     case '/':
                         return Refuse("a '/' (comment, regex, division or nested closing tag) inside a prop expression");
                     case '{':

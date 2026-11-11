@@ -32,13 +32,17 @@ public class FieldMappingSeederSyncModeClassTests
         Assert.True(wrong.Count == 0, "Seeded sync modes disagree with the BFF's Assigned-To classifier:\n" + string.Join("\n", wrong));
     }
 
-    /// <summary>The comparison the guard runs: every rule whose seeded value is not the one its class calls for.</summary>
+    /// <summary>The comparison the guard runs: every rule whose seeded value is not the one its class calls for. A display
+    /// copy (task 032b-1, <see cref="PushRuleSelection.IsDisplayCopy"/>: never pushed) is One-time, as an Assigned-To column is.</summary>
     private static List<string> Disagreements(
         IEnumerable<SeededRule> rules, Func<string, string, bool> classify, int oneTime, int manualRefresh)
         => rules
-            .Where(r => r.SyncMode != (classify(r.Table, r.TargetField) ? oneTime : manualRefresh))
-            .Select(r => $"{r.Profile}: {r.Table}.{r.TargetField} is seeded {r.SyncMode}, its class calls for "
-                         + (classify(r.Table, r.TargetField) ? $"{oneTime} (Assigned-To)" : $"{manualRefresh} (plain data)"))
+            .Select(r => (Rule: r, Class: classify(r.Table, r.TargetField) ? "Assigned-To"
+                : PushRuleSelection.IsDisplayCopy(r.Table, r.TargetField) ? "display copy" : "plain data"))
+            .Select(x => (x.Rule, x.Class, Want: x.Class == "plain data" ? manualRefresh : oneTime))
+            .Where(x => x.Rule.SyncMode != x.Want)
+            .Select(x => $"{x.Rule.Profile}: {x.Rule.Table}.{x.Rule.TargetField} is seeded {x.Rule.SyncMode}, its class calls for "
+                         + $"{x.Want} ({x.Class})")
             .ToList();
 
     /// <summary>Must-fire control: the seed holds both classes, so the comparison above is not vacuous.</summary>
@@ -82,6 +86,26 @@ public class FieldMappingSeederSyncModeClassTests
         Assert.Contains(caught, m => m.StartsWith("Control: sprk_event.sprk_clientreference ", StringComparison.Ordinal));
 
         Assert.Empty(Disagreements(rightSeed, classify, oneTime, manualRefresh));
+    }
+
+    /// <summary>
+    /// Task 032b-1: the invoice's attorney and paralegal columns are display copies, not Assigned-To; seeded One-time they pass, and
+    /// seeded Manual Refresh they are caught (must-fire), so the seed agrees with the push, which never writes them.
+    /// </summary>
+    [Fact]
+    public void AnInvoiceDisplayCopy_IsOneTime_AndManualRefreshIsCaught()
+    {
+        var classify = PushRuleSelection.AssignedToColumnsOf(BoundRegistry());
+        var oneTime = SeederConst("SyncModeOneTime");
+        var manualRefresh = SeederConst("SyncModeManualRefresh");
+
+        Assert.False(classify("sprk_invoice", "sprk_assignedtoattorney1"), "a display copy is not an Assigned-To column");
+        Assert.Empty(Disagreements([new SeededRule("Control", "sprk_invoice", "sprk_assignedtoattorney1", oneTime)],
+            classify, oneTime, manualRefresh));
+        var caught = Disagreements([new SeededRule("Control", "sprk_invoice", "sprk_assignedtoattorney1", manualRefresh)],
+            classify, oneTime, manualRefresh);
+        Assert.Single(caught);
+        Assert.Contains("(display copy)", caught[0], StringComparison.Ordinal);
     }
 
     private static AccessConferringRegistry BoundRegistry()

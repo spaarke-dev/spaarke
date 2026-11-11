@@ -820,7 +820,10 @@ public sealed class RuleSetEndpointsTests
 
         var asObject = await host.Client.SendAsync(Req("PATCH", $"{Base}/{SetId}/proposals/{PolicyId}", content: JsonContent.Create(new
         {
-            ruleType = "DailyHoursCap", ruleBody = new { type = "DailyHoursCap", maxHoursPerDay = 8 }, consequence = "Reject", clauseLocation = "S9",
+            ruleType = "DailyHoursCap",
+            ruleBody = new { type = "DailyHoursCap", maxHoursPerDay = 8 },
+            consequence = "Reject",
+            clauseLocation = "S9",
         })));
         var asString = await host.Client.SendAsync(Req("PATCH", $"{Base}/{SetId}/proposals/{PolicyId}", content: JsonContent.Create(new
         {

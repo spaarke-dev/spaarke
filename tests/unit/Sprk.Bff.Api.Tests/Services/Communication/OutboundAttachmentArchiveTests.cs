@@ -457,7 +457,12 @@ public class OutboundAttachmentArchiveTests
         // The capture lists are shared by reference: the SUT writes into them during the act.
         return new Harness
         {
-            Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs, Ownership = ownership,
+            Sut = sut,
+            Spe = spe,
+            Created = created,
+            Uploads = uploads,
+            Jobs = jobs,
+            Ownership = ownership,
         };
     }
 

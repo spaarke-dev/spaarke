@@ -312,7 +312,8 @@ public sealed class SessionFileLazyReindexSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: files)
+        { OwnerOid = TestSessionOwner.Oid };
 
     private async Task<ToolResult> RecallAsync(
         string tenantId, ChatSession session, ChatSessionFile file, string query = "SECTION")

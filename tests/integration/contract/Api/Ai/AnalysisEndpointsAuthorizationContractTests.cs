@@ -455,8 +455,12 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(Create(new
         {
-            name = "Analysis - NDA.pdf", documentId, playbookId,
-            skillIds = new[] { skill }, knowledgeIds = new[] { knowledge }, toolIds = new[] { tool },
+            name = "Analysis - NDA.pdf",
+            documentId,
+            playbookId,
+            skillIds = new[] { skill },
+            knowledgeIds = new[] { knowledge },
+            toolIds = new[] { tool },
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -862,7 +866,10 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(Promote(new
         {
-            sessionId = session.SessionId, name = "A", regardingEntityType = regardingType, regardingEntityId = regardingId,
+            sessionId = session.SessionId,
+            name = "A",
+            regardingEntityType = regardingType,
+            regardingEntityId = regardingId,
         }));
 
         await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
@@ -988,7 +995,10 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(Promote(new
         {
-            sessionId = session.SessionId, name = "Related", regardingEntityType = "sprk_matter", regardingEntityId = matterId,
+            sessionId = session.SessionId,
+            name = "Related",
+            regardingEntityType = "sprk_matter",
+            regardingEntityId = matterId,
             regardingEntityName = "Matter A",
         }));
 
@@ -1068,7 +1078,11 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(Promote(new
         {
-            sessionId = session.SessionId, name = "A", regardingEntityType = "sprk_matter", regardingEntityId = matterId, playbookId,
+            sessionId = session.SessionId,
+            name = "A",
+            regardingEntityType = "sprk_matter",
+            regardingEntityId = matterId,
+            playbookId,
         }));
 
         if (allowed)
@@ -1098,7 +1112,11 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(Promote(new
         {
-            sessionId = session.SessionId, name = "A", regardingEntityType = "sprk_matter", regardingEntityId = matterId, playbookId,
+            sessionId = session.SessionId,
+            name = "A",
+            regardingEntityType = "sprk_matter",
+            regardingEntityId = matterId,
+            playbookId,
         }));
 
         await AssertForbiddenAsync(response, "sdap.access.error.system_failure");
@@ -1678,7 +1696,8 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var session = new ChatSession(sessionId, TenantId, documentId.ToString(), null,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Array.Empty<ChatMessage>()) { OwnerOid = null };
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Array.Empty<ChatMessage>())
+        { OwnerOid = null };
         ChatRepo.SessionsById[sessionId] = session;
         return session;
     }

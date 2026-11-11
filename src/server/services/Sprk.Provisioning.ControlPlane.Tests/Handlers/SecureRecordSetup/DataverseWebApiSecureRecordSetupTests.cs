@@ -331,7 +331,9 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         var parent = Guid.NewGuid();
         var http = new Recorder().Respond(_ => Json(new Dictionary<string, object>
         {
-            ["businessunitid"] = Unit.ToString(), ["name"] = "Acme Corporation", ["_parentbusinessunitid_value"] = parent.ToString(),
+            ["businessunitid"] = Unit.ToString(),
+            ["name"] = "Acme Corporation",
+            ["_parentbusinessunitid_value"] = parent.ToString(),
         }));
 
         var unit = await Api(http).GetBusinessUnitAsync(Unit, CancellationToken.None);

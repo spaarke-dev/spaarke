@@ -789,6 +789,31 @@ export async function applyResolverFields(
   };
 }
 
+/**
+ * For the UPDATE of a SAVED host: null `sprk_regardingrecordnumber` when {@link applyResolverFields} left it out.
+ *
+ * `applyResolverFields` skips the number when the new target has none (no catalog number field, or an empty value) —
+ * right for a CREATE, where there is nothing to overwrite, but on a re-regard it leaves the PREVIOUS target's number
+ * beside the new target's id, name and url (a matter's number on a contact). This nulls it so no number outlives the
+ * pair it described.
+ *
+ * Gated to hosts that carry the pair: the key is added only when the host has the `sprk_regardingrecordtype` lookup,
+ * because writing a column a host lacks makes Dataverse reject the whole update (HTTP 400). The number is the pair's
+ * fifth column, written by {@link applyResolverFields} on any host whose target has one, so the pair's presence is the
+ * signal this module already relies on. A number the payload already carries is never touched.
+ *
+ * @param payload       The assembled update payload (mutated in place).
+ * @param hostNavProps  Nav-props discovered for the host entity (the presence oracle).
+ */
+export function nullRecordNumberWhenTargetHasNone(
+  payload: Record<string, unknown>,
+  hostNavProps: INavPropEntry[]
+): void {
+  if (payload['sprk_regardingrecordnumber'] !== undefined) return;
+  if (!hostNavProps.some(n => n.columnName.toLowerCase() === 'sprk_regardingrecordtype')) return;
+  payload['sprk_regardingrecordnumber'] = null;
+}
+
 // ===========================================================================
 // FR-26 — Core-ancestor derivation (unified-access-control-r2, task 050)
 // ===========================================================================

@@ -25,7 +25,11 @@ import {
   TODO_REGARDING_CATALOG,
   _resetTodoNavPropCacheForTests,
 } from '../TodoRegardingUpdateBuilder';
-import { _resetNavPropCacheForTests } from '../PolymorphicResolverService';
+import {
+  _resetNavPropCacheForTests,
+  _resetRecordNumberFieldCacheForTests,
+  _resetDisplayNameFieldCacheForTests,
+} from '../PolymorphicResolverService';
 import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
@@ -357,11 +361,19 @@ describe('buildTodoRegardingClear', () => {
     expect(payload['sprk_regardingrecordurl']).toBeNull();
   });
 
-  it('producesSixteenNullFieldsInTotal', () => {
+  it('nullsTheRegardingRecordNumberToo_soNoStaleNumberOutlivesTheClear', () => {
+    // field-mapping-server-write-path-r1 045c: the display columns (name, number, url) follow the pair, so clearing the
+    // pair clears the number as well. A kept number would describe a record the To Do no longer names.
     const payload = buildTodoRegardingClear(buildTodoNavProps());
-    // 12 entity-specific binds + 1 record-type bind + 3 text/URL fields = 16
+    expect(payload['sprk_regardingrecordnumber']).toBeNull();
+    expect(Object.keys(payload)).toContain('sprk_regardingrecordnumber');
+  });
+
+  it('producesSeventeenNullFieldsInTotal', () => {
+    const payload = buildTodoRegardingClear(buildTodoNavProps());
+    // 12 entity-specific binds + 1 record-type bind + 4 text/URL fields (id, name, url, number) = 17
     const nulledKeys = Object.keys(payload).filter(k => payload[k] === null);
-    expect(nulledKeys).toHaveLength(16);
+    expect(nulledKeys).toHaveLength(17);
   });
 
   it('worksWithEmptyNavProps_fallsBackToLookupAttributeNames', () => {
@@ -405,6 +417,63 @@ describe('buildTodoRegardingUpdate — all 12 targets', () => {
       expect(lookupAttribute).toMatch(/^sprk_regarding/);
     }
   );
+});
+
+// ---------------------------------------------------------------------------
+// Re-regarding: the number follows the new target (field-mapping-server-write-path-r1 045c)
+// ---------------------------------------------------------------------------
+
+describe('buildTodoRegardingUpdate — the reference number follows the new target', () => {
+  const recordId = 'aaaaaaaa-1111-1111-1111-111111111111';
+
+  beforeEach(() => {
+    // The resolver caches each entity's catalog columns per page; these cases supply their own catalog rows.
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+  });
+
+  it('nullsTheOldNumber_whenTheNewTargetHasNone', async () => {
+    // The mock catalog row names no number field, so the resolver writes none. The update must then clear the column, or the
+    // previous target's number would sit beside the new id.
+    const payload = await buildTodoRegardingUpdate(
+      buildMockWebApi(),
+      buildTodoNavProps(),
+      { entityType: 'sprk_matter' },
+      recordId,
+      'Display Name'
+    );
+    expect(payload['sprk_regardingrecordid']).toBe(recordId);
+    expect(Object.keys(payload)).toContain('sprk_regardingrecordnumber');
+    expect(payload['sprk_regardingrecordnumber']).toBeNull();
+  });
+
+  it('writesTheNewNumber_whenTheNewTargetHasOne', async () => {
+    // Must not fire: a target with a number writes it, not null.
+    const webApi: IPolymorphicWebApi = {
+      retrieveMultipleRecords: jest.fn(async (entityLogicalName: string) =>
+        entityLogicalName === 'sprk_recordtype_ref'
+          ? {
+              entities: [
+                {
+                  sprk_recordtype_refid: 'rt-matter',
+                  sprk_recorddisplayname: 'Matter',
+                  sprk_regardingrecordnumberfield: 'sprk_matternumber',
+                  sprk_recorddisplaynamefield: 'sprk_name',
+                },
+              ],
+            }
+          : { entities: [{ sprk_matternumber: 'M-00042', sprk_name: 'Acme' }] }
+      ),
+    };
+    const payload = await buildTodoRegardingUpdate(
+      webApi,
+      buildTodoNavProps(),
+      { entityType: 'sprk_matter' },
+      recordId,
+      'Display Name'
+    );
+    expect(payload['sprk_regardingrecordnumber']).toBe('M-00042');
+  });
 });
 
 // ---------------------------------------------------------------------------

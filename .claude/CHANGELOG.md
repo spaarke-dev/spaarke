@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
+
+Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.
+
+- **`.lintstagedrc.mjs`**: the C# step is `dotnet format whitespace <repo> --folder --include <staged>` (~2 s, no MSBuild workspace, same changes as the workspace mode).
+- **`scripts/quality/check-changed-cs-format.sh`** (new) and Tier 1 job **`format-changed-cs`** (blocking, owner-approved §6.5 path-A exception): checks only the `*.cs` under `src/` and `tests/` that a PR changes; under a minute, in parallel with `arch-tests`.
+- **`.claude/skills/ci-cd`**, **`push-to-github`**: tier tables and the failure row updated.
+
 ###### 2026-11-09 — The Stop quality gate now blocks
 
 `scripts/quality/task-quality-gate.sh` never stopped Claude: it exited `1` (Claude Code only blocks a Stop on exit `2`, reading stderr), its error trap exited `0` mid-run, and its report went to stdout. Found while evaluating an external quality-recommendations document.

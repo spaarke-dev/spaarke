@@ -170,16 +170,16 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                                 .ConfigureAwait(false)
                            ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Ambiguous(named.Count);
                 case 1:
-                {
-                    var unitId = Id(named[0], "businessunitid");
-                    var parentId = OptionalId(named[0], "_parentbusinessunitid_value");
-                    if (parentId != rootId)
                     {
-                        return new CustomerBusinessUnitOutcome.WrongParent(unitId, parentId, rootId);
+                        var unitId = Id(named[0], "businessunitid");
+                        var parentId = OptionalId(named[0], "_parentbusinessunitid_value");
+                        if (parentId != rootId)
+                        {
+                            return new CustomerBusinessUnitOutcome.WrongParent(unitId, parentId, rootId);
+                        }
+                        return await ReservedAmongAsync([unitId], created: false).ConfigureAwait(false)
+                               ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Success(unitId, Created: false);
                     }
-                    return await ReservedAmongAsync([unitId], created: false).ConfigureAwait(false)
-                           ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Success(unitId, Created: false);
-                }
             }
 
             var created = await CreateAsync(envUri, token, "businessunits", new Dictionary<string, object?>

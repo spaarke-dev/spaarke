@@ -1774,7 +1774,8 @@ public partial class SignalWriterTests
         var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
             new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,
-            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with { AssigneeSystemUserId = assignee };
+            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with
+        { AssigneeSystemUserId = assignee };
         Guid? recordOwner;
         try
         {

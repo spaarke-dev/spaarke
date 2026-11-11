@@ -234,8 +234,8 @@ public class AiDocumentNarrowingTests
     {
         var data = new TheoryData<string, string>();
         foreach (var shape in new[] { "document-id", "additional-document-ids", "document-host" })
-        foreach (var @case in Cases)
-            data.Add(shape, @case);
+            foreach (var @case in Cases)
+                data.Add(shape, @case);
         return data;
     }
 

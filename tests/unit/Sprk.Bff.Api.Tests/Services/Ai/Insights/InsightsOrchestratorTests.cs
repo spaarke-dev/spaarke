@@ -499,7 +499,10 @@ public class InsightsOrchestratorTests
                 It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Binding
             {
-                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, ConsumerCode = "default", PlaybookId = defaultPlaybook,
+                BindingId = Guid.NewGuid(),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = "default",
+                PlaybookId = defaultPlaybook,
             });
         _nodeServiceMock.Setup(n => n.GetNodesAsync(defaultPlaybook, It.IsAny<CancellationToken>())).ReturnsAsync(WritesToTheMatterSubject());
         var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();

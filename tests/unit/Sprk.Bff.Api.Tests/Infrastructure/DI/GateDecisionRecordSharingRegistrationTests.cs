@@ -54,6 +54,23 @@ public sealed class GateDecisionRecordSharingRegistrationTests : IClassFixture<C
         GateOf(writer).Should().BeSameAs(gate);
     }
 
+    [Fact]
+    public void TheRealContainer_GivesTheHelperTheDirectLookupAndTheSettings_SoTheD215BranchesRun()
+    {
+        // uac-r2 task 198 Part E (D-215): both are optional constructor parameters (test compositions omit them); without them in the host
+        // a Direct message's gate records would be readable by nobody but the memberless Direct team.
+        var gate = _factory.Services.GetRequiredService<GateDecisionRecordSharing>();
+
+        FieldOf<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>(gate)
+            .Should().BeSameAs(_factory.Services.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>());
+        FieldOf<Microsoft.Extensions.Configuration.IConfiguration>(gate).Should().NotBeNull();
+    }
+
+    private static object? FieldOf<T>(object consumer) => consumer.GetType()
+        .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+        .Single(f => f.FieldType == typeof(T) || Nullable.GetUnderlyingType(f.FieldType) == typeof(T))
+        .GetValue(consumer);
+
     private static object? GateOf(object consumer) => consumer.GetType()
         .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
         .Single(f => f.FieldType == typeof(GateDecisionRecordSharing))

@@ -161,8 +161,11 @@ internal sealed class CorrectionWorld
         {
             Codes.Add(new Entity("sprk_billingcode", Guid.NewGuid())
             {
-                ["sprk_code"] = code, ["sprk_codetype"] = new OptionSetValue((int)type), ["sprk_description"] = code,
-                ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId), ["statecode"] = new OptionSetValue(0),
+                ["sprk_code"] = code,
+                ["sprk_codetype"] = new OptionSetValue((int)type),
+                ["sprk_description"] = code,
+                ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId),
+                ["statecode"] = new OptionSetValue(0),
             });
         }
 

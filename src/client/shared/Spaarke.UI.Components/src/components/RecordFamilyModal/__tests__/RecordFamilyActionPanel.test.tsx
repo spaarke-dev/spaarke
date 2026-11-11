@@ -17,8 +17,25 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RecordFamilyActionPanel } from '../RecordFamilyActionPanel';
 import type { RecordFamilyActionPanelProps } from '../RecordFamilyActionPanel';
-import { buildPushRequest, groupRowsByTable, PUSH_FAILED_TEXT, PUSH_PATH } from '../recordFamilyPushService';
-import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
+import {
+  buildPushRequest,
+  groupRowsByTable,
+  isNoProfileRefusal,
+  parsePushResponse,
+  PUSH_FAILED_TEXT,
+  PUSH_PATH,
+  pushErrorText,
+  pushFieldMappings,
+  PushRequestError,
+  SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+  SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
+  SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+  sourceRuleSkipText,
+} from '../recordFamilyPushService';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
+
+/** Task 032b-1: the one fixed line shown when the push skips rules (`skippedRuleCount > 0`). */
+const SKIPPED_RULES_TEXT = 'Some fields are copied only when a record is created and are not updated here.';
 
 const MATTER = 'aaaaaaaa-0000-0000-0000-000000000001';
 const EVENT_A = 'eeeeeeee-0000-0000-0000-00000000000a';
@@ -217,6 +234,47 @@ describe('RecordFamilyActionPanel', () => {
     expect(sent.filter(b => !b.preview)).toHaveLength(0);
   });
 
+  // Task 032b-1 (review F1): a push skips the rules it does not apply (an invoice's display copies, One-time rules) and counts
+  // them; the panel must not then say the records "already have the current values".
+  it('with rules the push skipped and nothing to change, says some fields are copied only at create, not "Nothing to update"', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([], { skippedRuleCount: 4 }) });
+    renderPanel({ authenticatedFetch: fetchFn, action: 'assignedTo' });
+
+    expect(await screen.findByText(SKIPPED_RULES_TEXT)).toBeTruthy();
+    expect(screen.queryByText(/Nothing to update/)).toBeNull();
+    expect(screen.queryByText(/already have the current values/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('with rules the push skipped and values to change, still says some fields are copied only at create', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([CHANGE_A], { skippedRuleCount: 1 }) });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(await screen.findByText(SKIPPED_RULES_TEXT)).toBeTruthy();
+    expect(screen.getByText(/1 value on 1 record will change/)).toBeTruthy();
+  });
+
+  it('with no skipped rules, keeps "already have the current values" and says nothing about create-only fields', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([]) });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText('Nothing to update: the selected records already have the current values.')
+    ).toBeTruthy();
+    expect(screen.queryByText(SKIPPED_RULES_TEXT)).toBeNull();
+  });
+
+  it('"Update Assigned To" says access can change only where the fields grant it', async () => {
+    const { fetchFn } = pushServer({ preview: () => previewBody([CHANGE_B]) });
+    renderPanel({ authenticatedFetch: fetchFn, action: 'assignedTo' });
+
+    expect(
+      await screen.findByText(
+        'This update includes the Assigned To fields. On records where these fields grant access, changing them can change who has access.'
+      )
+    ).toBeTruthy();
+  });
+
   it('makes one preview and one apply per target table', async () => {
     const { fetchFn, sent } = pushServer({
       preview: b =>
@@ -257,6 +315,114 @@ describe('RecordFamilyActionPanel', () => {
     expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
     expect(screen.getByText(refused)).toBeTruthy();
     expect(screen.getAllByText('Hearing B').length).toBeGreaterThan(0);
+  });
+
+  // Task 022 fix round 4 (the mapping-source rule): values copied from a secure source are written only into a record owned
+  // by that source's isolation owner; a record that is not is returned with a stable code, on the preview and the apply.
+  it('says, on the preview, that fields from a secure source are not copied to a record, and does not list it', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(await screen.findByText('1 record will not be updated because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('says why when every record the preview found is kept from the push by the source rule', async () => {
+    const { fetchFn } = pushServer({
+      preview: () =>
+        previewBody([], {
+          errors: [{ recordId: EVENT_A, error: 'server text', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE }],
+        }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        '1 record will not be updated because it could not be checked whether the source record is secure. Try again later.'
+      )
+    ).toBeTruthy();
+    expect(screen.getByText('Nothing to update among the records that can be updated.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('already have the current values');
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the source rule's wording, never a generic error, for a record the apply did not write", async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(screen.getByText('No fields were copied to this record because the source record is secure.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Some fields');
+    expect(screen.queryByText('server text')).toBeNull();
+  });
+
+  // UAC-r2 (a): a push from a secure source never changes what a record is filed under; such a record is not written at all.
+  it("says, on the preview, that a record's filing can't be changed by a push from a secure record, and does not list it", async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: () =>
+        previewBody([CHANGE_A], {
+          errors: [
+            { recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+          ],
+        }),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    expect(
+      await screen.findByText(
+        "1 record will not be updated because its filing can't be changed by a push from a secure record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    expect(sent.filter(b => !b.preview)[0].childIds).toEqual([EVENT_A]);
+  });
+
+  it('shows the re-file wording, never a generic error, for a record the apply did not write', async () => {
+    const { fetchFn } = pushServer({
+      preview: () => previewBody([CHANGE_A, CHANGE_B]),
+      apply: () => ({
+        success: true,
+        updatedCount: 1,
+        failedCount: 1,
+        errors: [{ recordId: EVENT_B, error: 'server text', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE }],
+      }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 2 records' }));
+
+    expect(await screen.findByText('1 record was updated. 1 record was not updated.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No fields were copied to this record because its filing can't be changed by a push from a secure record."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText('server text')).toBeNull();
   });
 
   it.each([403, 404, 500])('shows one fixed text, and no cause, when the preview answers %i', async status => {
@@ -361,6 +527,103 @@ describe('RecordFamilyActionPanel', () => {
     expect(onApplied).toHaveBeenCalledWith({ updatedCount: 1, failedCount: 0, failedTables: ['sprk_invoice'] });
   });
 
+  it('a table whose profile has no rules (a preview with no changes) does not stop the other table from previewing and applying', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: b =>
+        b.targetEntity === 'sprk_document'
+          ? previewBody([], { warnings: ['Profile has no mapping rules configured.'] })
+          : previewBody([CHANGE_A]),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({
+      authenticatedFetch: fetchFn,
+      rows: [...ROWS, { table: 'sprk_document', id: 'dddddddd-0000-0000-0000-00000000000d' }],
+    });
+
+    expect(await screen.findByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+
+    expect(sent.filter(b => !b.preview).map(b => b.targetEntity)).toEqual(['sprk_event']);
+  });
+
+  // Task 076c: a table with no mapping profile from the source is a 404 carrying `field_mapping_profile_missing`.
+  const NO_PROFILE = { title: 'Profile Not Found', status: 404, reasonCode: 'field_mapping_profile_missing' };
+  const DOC_A = 'dddddddd-0000-0000-0000-00000000000d';
+
+  it('reports a table with no mapping profile (a thrown 404 + reasonCode) for that table, and still previews and applies the others', async () => {
+    const onApplied = jest.fn();
+    const { fetchFn, sent } = pushServer({
+      previewStatus: b => (b.targetEntity === 'sprk_document' ? 404 : 200),
+      preview: b =>
+        b.targetEntity === 'sprk_document' ? { ...NO_PROFILE, detail: 'SECRET-CAUSE-DETAIL' } : previewBody([CHANGE_A]),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({ authenticatedFetch: fetchFn, onApplied, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    expect(document.body.textContent).not.toContain('SECRET-CAUSE-DETAIL');
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+
+    expect(sent.filter(b => !b.preview).map(b => b.targetEntity)).toEqual(['sprk_event']);
+    expect(onApplied).toHaveBeenCalledWith({ updatedCount: 1, failedCount: 0, failedTables: [] });
+  });
+
+  it('reports a RETURNED 404 + reasonCode for that table too (a fetch that returns failures)', async () => {
+    const { fetchFn } = returningFetch(b =>
+      b.targetEntity === 'sprk_document' ? json(404, NO_PROFILE) : json(200, previewBody([CHANGE_A]))
+    );
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+  });
+
+  it('a 404 WITHOUT the profile code (the source was not found) still fails the whole preview', async () => {
+    const { fetchFn, sent } = pushServer({
+      previewStatus: b => (b.targetEntity === 'sprk_document' ? 404 : 200),
+      preview: b =>
+        b.targetEntity === 'sprk_document' ? { title: 'Not Found', status: 404 } : previewBody([CHANGE_A]),
+    });
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText(PUSH_FAILED_TEXT)).toBeTruthy();
+    expect(screen.queryByText(/No field push is set up/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Update \d/ })).toBeNull();
+    expect(sent.filter(b => !b.preview)).toHaveLength(0);
+  });
+
+  it('a RETURNED 404 with a different reason code still fails the whole preview', async () => {
+    const { fetchFn } = returningFetch(b =>
+      b.targetEntity === 'sprk_document'
+        ? json(404, { reasonCode: 'something_else' })
+        : json(200, previewBody([CHANGE_A]))
+    );
+    renderPanel({ authenticatedFetch: fetchFn, rows: [...ROWS, { table: 'sprk_document', id: DOC_A }] });
+
+    expect(await screen.findByText(PUSH_FAILED_TEXT)).toBeTruthy();
+  });
+
+  it('when every ticked table has no profile, says so per table, shows nothing to apply and not the generic failure', async () => {
+    const { fetchFn, sent } = pushServer({ previewStatus: 404, preview: () => NO_PROFILE });
+    renderPanel({
+      authenticatedFetch: fetchFn,
+      rows: [...ROWS, { table: 'sprk_document', id: DOC_A }],
+    });
+
+    expect(await screen.findByText('No field push is set up from this record to sprk_event.')).toBeTruthy();
+    expect(screen.getByText('No field push is set up from this record to sprk_document.')).toBeTruthy();
+    expect(screen.getByText(/Nothing to update/)).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Update 0 records' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(sent.filter(b => !b.preview)).toHaveLength(0);
+  });
+
   it('does not re-run the preview when the host passes an equal source as a new object', async () => {
     const { fetchFn, sent } = pushServer({ preview: () => previewBody([CHANGE_A]) });
     const onClose = jest.fn();
@@ -390,6 +653,59 @@ describe('RecordFamilyActionPanel', () => {
     renderPanel({ authenticatedFetch: fetchFn, open: false });
 
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('isNoProfileRefusal', () => {
+  const CODE = 'field_mapping_profile_missing';
+
+  it('fires for a thrown ApiError 404 whose problem carries the code', () => {
+    expect(isNoProfileRefusal(apiErrorFor(404, { title: 'Profile Not Found', status: 404, reasonCode: CODE }))).toBe(
+      true
+    );
+  });
+
+  it('fires for a returned 404 whose body carried the code', () => {
+    expect(isNoProfileRefusal(new PushRequestError(404, CODE))).toBe(true);
+  });
+
+  it.each([
+    ['a thrown 404 without a code', apiErrorFor(404, { title: 'Not Found', status: 404 })],
+    ['a thrown 404 with another code', apiErrorFor(404, { title: 'x', status: 404, reasonCode: 'other' })],
+    ['a thrown 404 with no problem body', apiErrorFor(404)],
+    ['a thrown 409 carrying the code', apiErrorFor(409, { title: 'x', status: 409, reasonCode: CODE })],
+    ['a thrown 500 carrying the code', apiErrorFor(500, { title: 'x', status: 500, reasonCode: CODE })],
+    ['a returned 404 without a code', new PushRequestError(404)],
+    ['a returned 404 with another code', new PushRequestError(404, 'other')],
+    ['a returned 409 carrying the code', new PushRequestError(409, CODE)],
+    ['an ordinary Error', new Error(CODE)],
+    ['a non-error', null],
+  ])('does not fire for %s', (_label, err) => {
+    expect(isNoProfileRefusal(err)).toBe(false);
+  });
+
+  it('pushFieldMappings carries only the reason code of a returned 404, and survives a body that is not JSON', async () => {
+    const request = buildPushRequest(SOURCE, 'sprk_document', { preview: true, includeAssignedTo: false });
+    const withCode = async () => json(404, { reasonCode: CODE, detail: 'SECRET-CAUSE-DETAIL' });
+    const notJson = async () =>
+      ({
+        ok: false,
+        status: 404,
+        json: async () => {
+          throw new SyntaxError('Unexpected token');
+        },
+      }) as unknown as Response;
+
+    const coded = await pushFieldMappings(withCode, request).catch(e => e);
+    expect(coded).toBeInstanceOf(PushRequestError);
+    expect(coded.reasonCode).toBe(CODE);
+    expect(JSON.stringify(coded)).not.toContain('SECRET-CAUSE-DETAIL');
+    expect(coded.message).not.toContain('SECRET-CAUSE-DETAIL');
+
+    const plain = await pushFieldMappings(notJson, request).catch(e => e);
+    expect(plain).toBeInstanceOf(PushRequestError);
+    expect(plain.reasonCode).toBeUndefined();
+    expect(isNoProfileRefusal(plain)).toBe(false);
   });
 });
 
@@ -423,5 +739,55 @@ describe('recordFamilyPushService', () => {
       { table: 'sprk_event', ids: [EVENT_A, EVENT_B] },
       { table: 'sprk_invoice', ids: [INVOICE_A] },
     ]);
+  });
+
+  // Task 022 fix round 4: the mapping-source codes are read from the body and mapped to their wording.
+  it('reads the reason code of an entry and maps each source-rule code to its wording, else keeps the server text', () => {
+    const parsed = parsePushResponse({
+      success: true,
+      errors: [
+        { recordId: EVENT_A, error: 'server text A', reasonCode: SECURE_SOURCE_NOT_ISOLATED_REASON_CODE },
+        { recordId: EVENT_B, error: 'server text B', reasonCode: SECURE_SOURCE_UNDETERMINED_REASON_CODE },
+        { recordId: EVENT_A, error: 'server text R', reasonCode: SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE },
+        { recordId: INVOICE_A, error: 'server text C' },
+        { recordId: MATTER, error: 'server text D', reasonCode: 'constructor' },
+      ],
+    });
+
+    expect(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE).toBe('field_mapping.push.secure_source_refile_not_allowed');
+    expect(parsed.errors.map(e => e.reasonCode)).toEqual([
+      SECURE_SOURCE_NOT_ISOLATED_REASON_CODE,
+      SECURE_SOURCE_UNDETERMINED_REASON_CODE,
+      SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE,
+      undefined,
+      'constructor',
+    ]);
+    expect(parsed.errors.map(pushErrorText)).toEqual([
+      'No fields were copied to this record because the source record is secure.',
+      'No fields were copied to this record because it could not be checked whether the source record is secure. Try again later.',
+      "No fields were copied to this record because its filing can't be changed by a push from a secure record.",
+      'server text C',
+      'server text D',
+    ]);
+  });
+
+  // Task 022 fix round 4: each source-rule code skips the record whole; the preview counts say so, singular and plural.
+  it('counts the records each source-rule code keeps from the push, as records that will not be updated', () => {
+    const entry = (reasonCode: string) => ({ recordId: EVENT_A, error: 'x', reasonCode });
+    expect(
+      sourceRuleSkipText([
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_NOT_ISOLATED_REASON_CODE),
+        entry(SECURE_SOURCE_REFILE_NOT_ALLOWED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+        entry(SECURE_SOURCE_UNDETERMINED_REASON_CODE),
+      ])
+    ).toEqual([
+      "1 record will not be updated because its filing can't be changed by a push from a secure record.",
+      '2 records will not be updated because the source record is secure.',
+      '3 records will not be updated because it could not be checked whether the source record is secure. Try again later.',
+    ]);
+    expect(sourceRuleSkipText([])).toEqual([]);
   });
 });

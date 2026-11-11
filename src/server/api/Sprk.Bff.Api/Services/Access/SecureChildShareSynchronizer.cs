@@ -357,14 +357,45 @@ public sealed class SecureChildShareSynchronizer
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (review pass 3): this environment's Secure Record owner team as
-    /// <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/> answers it — the
-    /// id, or none (no Secure Record business unit or team) with a refusal when it is ambiguous — for a caller that must
-    /// tell "not the Secure team" from "the Secure team cannot be told" (Repair's mapping-source gate fails closed on the
-    /// latter). <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
+    /// field-mapping-server-write-path-r1 task 016 (review pass 3), task 022 fix round 6: this environment's Secure Record
+    /// owner team for the mapping-source copy gate (<see cref="ResolveSecureOwnerTeamForCopyGateAsync"/>), for a caller that
+    /// must tell "not the Secure team" from "the Secure team cannot be told" (the gate fails closed on the latter).
+    /// <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
     /// </summary>
     internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
-        ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct);
+        ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct);
+
+    /// <summary>The refusal <see cref="ResolveSecureOwnerTeamForCopyGateAsync"/> gives when the Secure Record business unit
+    /// exists and holds no Secure Record owner team with the configured name.</summary>
+    internal const string SecureOwnerTeamNotFoundRefusal =
+        "the Secure Record business unit holds no Secure Record owner team with the configured name";
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022 fix round 6: the Secure Record owner team as the mapping-source copy gate
+    /// needs it, with "not set up" told apart from "set up but not found" — the rule the ownership resolver applies
+    /// (<c>RecordOwnershipResolver</c>: no Secure Record business unit means no secure owner; a business unit whose named
+    /// team is missing or not unique is a refusal):
+    /// <list type="bullet">
+    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/>
+    /// answers it;</item>
+    /// <item><c>(null, null)</c>: this environment has no Secure Record business unit, so no team can own a secure record;</item>
+    /// <item><c>(null, refusal)</c>: the business unit is ambiguous, or the named team is ambiguous, or the business unit
+    /// exists and holds no such team (<see cref="SecureOwnerTeamNotFoundRefusal"/>).</item>
+    /// </list>
+    /// A Dataverse fault propagates. The business unit is read a second time only when no team was found.
+    /// </summary>
+    internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamForCopyGateAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (team.TeamId is not null || team.Refusal is not null)
+            return team;
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return (null, "more than one business unit carries the Secure Record name");
+        return secureBu.Id is null ? (null, null) : (null, SecureOwnerTeamNotFoundRefusal);
+    }
 
     /// <summary>
     /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
@@ -1338,32 +1369,105 @@ public sealed class SecureChildShareSynchronizer
     /// <summary>
     /// <c>true</c> when the team's OWN row proves it is not the Secure Record owner team: another name, its business
     /// unit's default team, or not an Owner team — none of which <see cref="ResolveSecureOwnerTeamAsync"/> can ever
-    /// select. <c>false</c> means "it could be" (the full resolution decides), including a team row that is not found. A
-    /// Dataverse fault propagates.
+    /// select. <c>false</c> means "it could be" (the full resolution decides). Never throws for a Dataverse fault: a fault
+    /// answers <c>false</c>; cancellation of <paramref name="ct"/> propagates.
     /// </summary>
-    /// <remarks>Names compare trimmed and case-insensitively, as Dataverse's own <c>name</c> equality does. Any doubt
-    /// answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</remarks>
+    /// <remarks>
+    /// <para>The name is matched by Dataverse, never in code: the team is read with <c>name eq</c> the configured name, the
+    /// same condition <see cref="ResolveSecureOwnerTeamAsync"/> uses, so whatever Dataverse's collation treats as equal (case,
+    /// accents, trailing spaces) can never answer "another name".</para>
+    /// <para>When that read finds no row, "another name" is proven only by a configured team name that names a team:</para>
+    /// <list type="bullet">
+    /// <item>Secure settings PRESENT (<see cref="SecureSettingsConfigured"/>): <c>true</c> only when a non-default Owner team
+    /// carries the configured team name (the Secure team must carry it). When no team does, the answer is <c>false</c>: a wrong
+    /// team setting must never rule the real Secure team out. The business-unit setting does not bear on the name, and is not
+    /// read here (an ordinary owner is ruled out even while the Secure unit is unresolved, task 149 F7); a unit setting that
+    /// finds nothing is <see cref="IsSecureOwnerTeamAsync"/>'s "unknown".</item>
+    /// <item>Secure settings ABSENT (the compiled defaults apply): the team is read by id — <c>true</c> when it exists,
+    /// <c>false</c> when it is not found.</item>
+    /// </list>
+    /// <para>Any doubt answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</para>
+    /// </remarks>
     internal static async Task<bool> CannotBeSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
-        var query = new QueryExpression("team")
+        try
         {
-            ColumnSet = new ColumnSet("name", "isdefault", "teamtype"),
-            TopCount = 1,
-            NoLock = true,
-        };
-        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-        var team = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (team is null)
-            return false;
+            var named = new QueryExpression("team")
+            {
+                ColumnSet = new ColumnSet("isdefault", "teamtype"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            named.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+            var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (team is null)
+            {
+                if (SecureSettingsConfigured(configuration))
+                {
+                    // Another name proves "not the Secure team" only when the configured team name names a team: the Secure
+                    // team carries that name, so a name that finds no team proves nothing about the team that owns the row.
+                    var carrier = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                    carrier.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+                    carrier.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
+                    carrier.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
+                    return (await dataverse.RetrieveMultipleAsync(carrier, ct).ConfigureAwait(false)).Entities.Count > 0;
+                }
 
-        if (team.GetAttributeValue<string>("name") is { } name
-            && !string.Equals(name.Trim(), SecureRecordOwnerTeam.OwnerTeamName(configuration).Trim(), StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (team.GetAttributeValue<bool?>("isdefault") == true)
-            return true;
-        return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+                // The compiled defaults: another name when the team exists, unknown (false) when it does not.
+                var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+                return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0;
+            }
+
+            if (team.GetAttributeValue<bool?>("isdefault") == true)
+                return true;
+            return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return false; // doubt: the full resolution decides
+        }
     }
+
+    /// <summary>
+    /// Whether <paramref name="teamId"/> is the Secure Record owner team, for a caller that grants access or moves an owner on a
+    /// "not Secure" answer: <c>true</c> it is, <c>false</c> it is not, <c>null</c> it cannot be told (the caller grants or
+    /// moves nothing), with the reason. <see cref="CannotBeSecureOwnerTeamAsync"/> first, then
+    /// <see cref="ResolveSecureOwnerTeamAsync"/> and an id compare. A Dataverse fault in the resolution propagates.
+    /// </summary>
+    /// <remarks>
+    /// The resolution's "no Secure team" (no unit or no team under the names looked for) is read by
+    /// <see cref="SecureSettingsConfigured"/>: with the Secure settings ABSENT it is <c>false</c> (no record is secure in this
+    /// environment, as the compiled defaults find nothing — the behaviour before this rule); with them PRESENT it is
+    /// <c>null</c>, because the settings name a unit or team Dataverse does not find and the real Secure team may own the row.
+    /// </remarks>
+    internal static async Task<(bool? Secure, string? Undetermined)> IsSecureOwnerTeamAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
+    {
+        if (await CannotBeSecureOwnerTeamAsync(dataverse, configuration, teamId, ct).ConfigureAwait(false))
+            return (false, null);
+
+        var secure = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secure.Refusal is { } refusal)
+            return (null, refusal);
+        if (secure.TeamId is { } secureTeam)
+            return (secureTeam == teamId, null);
+        return SecureSettingsConfigured(configuration)
+            ? (null, "the configured Secure Record business unit or owner team was not found")
+            : (false, null);
+    }
+
+    /// <summary>
+    /// <c>true</c> when <c>SecureRecord:BusinessUnitName</c> or <c>SecureRecord:OwnerTeamName</c> is set (not blank) — the
+    /// environment names its Secure Record unit or team, so finding neither is a wrong setting, not "no secure records". Unset,
+    /// the compiled defaults apply (<see cref="SecureRecordOwnerTeam.DefaultBusinessUnitName"/>,
+    /// <see cref="SecureRecordOwnerTeam.DefaultOwnerTeamName"/>).
+    /// </summary>
+    internal static bool SecureSettingsConfigured(IConfiguration configuration) =>
+        !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.BusinessUnitNameConfigKey])
+        || !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.OwnerTeamNameConfigKey]);
 
     /// <summary>A root's owner team and flag, or <c>null</c> when the row does not exist. A fault propagates.</summary>
     private static async Task<RootFacts?> ReadRootFactsAsync(IGenericEntityService dataverse, RowRef root, CancellationToken ct)
