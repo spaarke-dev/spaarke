@@ -12,11 +12,13 @@
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended. The owner said "Build in uac-r2 now" for **191** (D-13) and **193** (D-14). Round-90 rules apply. This session (`uac-r2`) is authoritative. Merges: run `git merge-tree`, then squash with `--match-head-commit`, after Router plus Client lint are green. Run ONE merge-watcher loop at a time. Live actions need the owner's go IN THIS SESSION. |
-| **Next action** | (1) When the #2697 watcher (`bh0ssvu9s`) ends, merge #2698 (191 docs and tasks; docs only) with the same watcher pattern. (2) After #2698: start 191 Group A (191b, 191d, 191f) as Opus agents running task-execute, each in a fresh short-path worktree from origin/master. Run at most 2 at once because the machine is shared. (3) Wait for the 193 agent's PR, then review and merge it. (4) When ebilling sends #2689's merge SHA: redeploy dev from a LOCAL merge of origin/master and the spike `755987b385` in a fresh detached short-path worktree. Gates: build, ArchTests, both ancestry checks, `/healthz` 200, anonymous POST `/mcp/legal-operations` 401. Then notify mcp-r1, ontology-r1 and ebilling-r1, and remove `C:\wtdep` with `Remove-WorktreeSafe.ps1`. |
+| **Next action** | (1) Review and merge the PRs from the 191b agent (`C:\wt191b`) and the 191d agent (`C:\wt191d`) when they report. (2) When one of them finishes: start 191f (Opus, fresh short-path worktree from origin/master; at most 2 agents at once besides 193). (3) Wait for the 193 agent's PR (#2700), then review and merge it. (4) Review fm's piece-3 diff when it arrives: the unset / valid / invalid settings conditions must resolve through the same `DirectMessageOwnerTeam` lookup as 198, and the refusal order must change only the code, never whether a write is refused. (5) After ebilling's 116 merge: the next dev deploy uses the same recipe (local merge of origin/master + spike `755987b385`; the ledger conflict resolves to 153 + master's delta). It must include ontology #2695 (`25ac8ea931`, merged after `ddae82fa90`), which ontology asked for. |
 
 ## Done today (2026-11-11)
 - Merged: D-5 #2690 `67d0ef01d4`; D-3 #2691 `2552a69fc9`; 090 housekeeping #2685 `f563b8f689` (12 D-1 tasks + 186 closed, 178 deferred, disposition, test-diet, docs, lessons).
-- Dev BFF = `dc4f28ded8` (master `df93d2029c` + spike `755987b385`), owner go "if a deploy is needed then its approved". ontology 177 PASS; 176 is waiting for a Revise-budget Work Item.
+- Dev BFF = **`b3ca99cad5`** (LOCAL merge: origin/master `ddae82fa90` incl. ebilling #2689 `2fc434c912`, D-3, D-5 + spike `755987b385`; never pushed; worktree `C:\wtdep2`). Owner go "if a deploy is needed then its approved". Gates: build 0 warnings, ArchTests 2431/2431, 40.57 MB package, 4 files SHA-256 matched, `/healthz` 200, `/ping` 200, anonymous MCP POST 401. ebilling, mcp-r1 and ontology-r1 were notified. `C:\wtdep` was removed. ontology 177 PASS (on dc4f28ded8); 176 is waiting for a Revise-budget Work Item.
+- Merged: #2697 `f5ee2a3065` (194 closed) and #2698 `ddae82fa90` (191 design + tasks).
+- fm 054b and 054c (with the participant-Read fix and `-DirectShareJobLive`) were approved and merged into the fm work branch. K3 was filed as #2701. The first live Move runs only after the owner's go, scoped to one FMSWP- message.
 - 194: the post-194b gate PASSED. The writes switch has been on since 2026-10-30, with the owner's go. 768/768 rows are in the right business unit; 0 failed. Closed in #2697 (merge pending). Filed #2696. Added U-13 (an owner moves a test matter between business units).
 - Reviews done: ebilling #2689 (remerge reads `07ed87e2d4` and `a6f57558ef`), 116 rounds 2–6, and fm's 054b scan.
 
@@ -35,8 +37,8 @@
 
 ## Running agents / jobs
 - **193 agent:** in `C:\wt193`, branch `fix/uac-193-add-person`. It is syncing about 3046 master commits, running gates and two adversarial passes, then opens a PR (not merged).
-- **191 agent:** finished. PR #2698, head `6a44a0fcfe`. Tasks 191b–j, with the dependency order below.
-- **Watcher `bh0ssvu9s`:** merges #2697 at head `0d64c1a68a` on green.
+- **191b agent** (Opus, `C:\wt191b`, branch `task/uac-191b`) and **191d agent** (Opus, `C:\wt191d`, branch `task/uac-191d`): each opens a PR, does not merge, and makes no live writes.
+- No merge watcher is running.
 
 ## 191 build order
 - **Group A (parallel):** b (the `ExternalVisibility` predicate), d (the External Collaborators unit and role), f (field security on the 3 columns).
@@ -63,5 +65,5 @@
 - Quality alerts #1821 and #1906 are open; don't touch them unless asked.
 
 ## Scratch
-- Worktrees: `C:\wtdep` (deploy merge, mine), `C:\wt090` (docs/uac-194-close), `C:\wt193`, `C:\wt191`, `C:\wtd3`, `C:\wtd5`, `C:\wt198`. Remove only with `Remove-WorktreeSafe.ps1` once their PRs merge.
+- Worktrees: `C:\wtdep2` (the live dev deploy merge; keep it until the next deploy), `C:\wt191b`, `C:\wt191d`, `C:\wt090` (docs/uac-194-close), `C:\wt193`, `C:\wt191`, `C:\wtd3`, `C:\wtd5`, `C:\wt198`. Remove only with `Remove-WorktreeSafe.ps1` once their PRs merge.
 - The untracked 0-byte `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs` in this worktree: leave it alone. The path exists on master, so a merge here needs care.
