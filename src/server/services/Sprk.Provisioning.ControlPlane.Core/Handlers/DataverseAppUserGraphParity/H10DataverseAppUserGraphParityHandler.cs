@@ -324,6 +324,16 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 "customer.bicep's outputs, then start a new run. Nothing was written.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (string.Equals(interStep.OntologyWriterClientId, interStep.BffAppRegId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Fail closed: nor the BFF app registration, whose app user H10 gives the stamp role in the customer unit and
+            // which H10 never moves (task 267) — the writer would keep the BFF's role and never reach its own unit.
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterIsStampIdentity,
+                $"InterStepState.ontologyWriterClientId equals the BFF app registration's id ({interStep.BffAppRegId}). The " +
+                "Signal / Decision Record writer must be its own least-privileged identity, never the BFF. Fix customer.bicep's " +
+                "outputs, then start a new run. Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,

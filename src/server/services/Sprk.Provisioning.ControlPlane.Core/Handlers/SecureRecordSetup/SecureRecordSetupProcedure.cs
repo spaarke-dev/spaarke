@@ -589,11 +589,18 @@ public sealed class SecureRecordSetupProcedure
         var writerOtherRoles = writerRoles.Where(r => r.Id != writerRoleId).ToArray();
         if (writerOtherRoles.Length > 0)
         {
+            // Another unit's copy of the writer's own role: the environment kept the writer's roles when H10 moved it out of
+            // the customer unit (Dataverse strips them by default).
+            var keptOnMove = writerOtherRoles.Any(r => string.Equals(r.Name, OntologyServiceRoleName, StringComparison.OrdinalIgnoreCase))
+                ? $" A '{OntologyServiceRoleName}' copy from another unit means this environment kept the writer's roles when " +
+                  "it changed business unit (DoNotRemoveRolesOnChangeBusinessUnit, or record ownership across business units): " +
+                  "remove that copy from the writer by hand (owner OK), then resume."
+                : string.Empty;
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherRole,
                 $"The ontology writer's application user {writerUser} holds roles other than its unit's copy of " +
                 $"'{OntologyServiceRoleName}' ({writerRoleId}): [{string.Join(", ", writerOtherRoles.Select(r => $"'{r.Name}' {r.Id}"))}]. " +
-                "The writer holds that role only (FR-21). Removing a role is an operator decision; nothing is removed here. " +
-                "Nothing was written.");
+                "The writer holds that role only (FR-21). Removing a role is an operator decision; nothing is removed here." +
+                keptOnMove + " Nothing was written.");
         }
         var writerProfiles = new List<(Guid Id, string Name, IReadOnlyList<SecureSetupProfileUser> Users)>();
         foreach (var profileName in OntologyWriterProfileNames)

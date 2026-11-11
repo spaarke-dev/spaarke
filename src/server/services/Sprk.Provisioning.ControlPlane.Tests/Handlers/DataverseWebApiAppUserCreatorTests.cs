@@ -500,6 +500,21 @@ public sealed class DataverseWebApiAppUserCreatorTests
         http.Requests.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData(" ")]
+    public async Task Move_WithAnObjectIdThatIsNotAGuid_IsACallerBug_BeforeAnyRequest(string objectId)
+    {
+        // MoveAsync compares the row's object id with Guid.Parse: the guard makes that parse unable to throw.
+        var http = MoveFake(existingUnit: CustomerBu, existingObjectId: UamiObjectId, readBackUnit: WriterBu);
+
+        var act = () => Creator(http).EnsureAppUserAsync(
+            WriterMoveRequest() with { SystemUserAzureActiveDirectoryObjectId = objectId }, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("as a GUID");
+        http.Requests.Should().BeEmpty();
+    }
+
     private static FakeHttp MoveFake(string? existingUnit, string? existingObjectId, string readBackUnit,
         HttpStatusCode patchStatus = HttpStatusCode.NoContent)
         => new(req =>

@@ -227,8 +227,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.OntologyRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
         dv.WriterOntologyRoleId = dv.AddRole(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
 
-        dv.RootBasicUserRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.BasicUserRoleName);
-        dv.BasicUserRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.BasicUserRoleName, parentRootRoleId: dv.RootBasicUserRoleId);
+        // By the name SpaarkeMaster ships (not the constant), so S25's tests fail if the procedure ever names another role.
+        dv.RootBasicUserRoleId = dv.AddRole(dv.RootUnitId, "Spaarke Basic User");
+        dv.BasicUserRoleId = dv.AddRole(dv.CustomerUnitId, "Spaarke Basic User", parentRootRoleId: dv.RootBasicUserRoleId);
         foreach (var basicUser in new[] { dv.RootBasicUserRoleId, dv.BasicUserRoleId })
         {
             foreach (var privilege in roleSet.Tables.SelectMany(table => dv.TableReadPrivileges[table.LogicalName]))

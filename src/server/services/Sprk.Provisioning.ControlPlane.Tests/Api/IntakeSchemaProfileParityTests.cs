@@ -408,8 +408,11 @@ public sealed class IntakeSchemaProfileParityTests
     /// <summary>
     /// T259 (ISS-010): displayName — the customer business unit's name H10 creates — is sent to POST /api/runs under the
     /// same key and refused there by CustomerBusinessUnitIntake. The schema keeps it optional (the skill defaults it to the
-    /// customerId, which always passes), and is never looser than the endpoint: the same length limit, no leading/trailing
-    /// whitespace or control character, and never a reserved unit's name (Secure Record, the ontology writer's unit) in any case.
+    /// customerId, which always passes), with the same length limit, no leading/trailing whitespace or control character, and
+    /// never a reserved unit's name (Secure Record, the ontology writer's unit) in any ASCII case. One known gap, stated in the
+    /// schema's description: the schema's reserved-name pattern ignores ASCII case only, while the endpoint also folds accents,
+    /// so an accented spelling ("Sécure Record") passes the schema and is refused by POST /api/runs. The schema is therefore
+    /// looser than the endpoint on accents only; the endpoint stays the authority.
     /// </summary>
     [Fact]
     public void T259_DisplayName_SchemaBoundsAreTheEndpointRule()

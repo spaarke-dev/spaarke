@@ -233,10 +233,13 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             {
                 throw new ArgumentException("MoveFromBusinessUnitId is allowed only with SecurityRoleName null.", nameof(request));
             }
-            if (string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId))
+            if (string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId)
+                || !Guid.TryParse(request.SystemUserAzureActiveDirectoryObjectId, out _))
             {
+                // A GUID, so MoveAsync's comparison can never throw on it.
                 throw new ArgumentException(
-                    "MoveFromBusinessUnitId requires SystemUserAzureActiveDirectoryObjectId: the row's object id is checked before any move.",
+                    "MoveFromBusinessUnitId requires SystemUserAzureActiveDirectoryObjectId as a GUID: the row's object id is " +
+                    "checked before any move.",
                     nameof(request));
             }
             if (moveFrom == Guid.Empty || moveFrom == request.BusinessUnitId)
@@ -312,8 +315,6 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 if (unit is { } foundIn && foundIn == request.MoveFromBusinessUnitId)
                 {
                     // Task 267: the one move H10 makes (see MoveAsync) - object id first, then PATCH, then read back.
-                    // includes disabled: the oid is only READ off the one row H10 found by applicationid, to compare it - no
-                    // lookup by oid; skipping a disabled row would create a second App User for the same identity.
                     return await MoveAsync(envUri, token, request, systemUserId, foundIn,
                         OptionalId(existing[0], "azureactivedirectoryobjectid"), cancellationToken).ConfigureAwait(false);
                 }

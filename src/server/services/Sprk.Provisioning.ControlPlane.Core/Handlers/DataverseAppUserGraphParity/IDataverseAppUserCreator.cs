@@ -105,7 +105,7 @@ public abstract record CustomerBusinessUnitOutcome
 /// </param>
 /// <param name="MoveFromBusinessUnitId">
 /// Task 267 (#2618): OPTIONAL, and allowed only with <paramref name="SecurityRoleName"/> null and an explicit
-/// <paramref name="SystemUserAzureActiveDirectoryObjectId"/> (otherwise <see cref="ArgumentException"/>). An existing row
+/// <paramref name="SystemUserAzureActiveDirectoryObjectId"/> that parses as a GUID (otherwise <see cref="ArgumentException"/>). An existing row
 /// found by <paramref name="ApplicationId"/> in EXACTLY this unit, whose azureactivedirectoryobjectid equals the requested
 /// principal id, is moved to <paramref name="BusinessUnitId"/> and the move is read back. The ontology writer only: it
 /// holds no role H10 gives (moving strips roles; H7b S24 grants the writer-unit copy afterwards). Any other foreign unit,

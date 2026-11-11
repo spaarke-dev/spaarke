@@ -1711,7 +1711,25 @@ public sealed class SecureRecordSetupProcedureTests
             FailureClass.QuarantineRequired);
 
         refused.Diagnostic.Should().Contain(admin.ToString()).And.Contain("System Administrator");
+        refused.Diagnostic.Should().NotContain("DoNotRemoveRolesOnChangeBusinessUnit", "the kept-on-move hint is for the writer's own role only");
         dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { admin });
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterStillHoldingTheCustomerUnitsOntologyServiceCopy_IsQuarantined_WithTheKeptOnMoveHint()
+    {
+        // The environment kept the writer's roles when H10 moved it out of the customer unit (DoNotRemoveRolesOnChangeBusinessUnit).
+        var dv = NewEnv();
+        dv.UserRoles[dv.WriterAppUser] = [dv.OntologyRoleId];
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherRole,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.OntologyRoleId.ToString())
+            .And.Contain("DoNotRemoveRolesOnChangeBusinessUnit")
+            .And.Contain("remove that copy from the writer by hand (owner OK), then resume");
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
         dv.Writes.Should().BeEmpty();
     }
 
@@ -1873,12 +1891,6 @@ public sealed class SecureRecordSetupProcedureTests
     // ------------------------------------------------------------ S25 (task 267, #2618): Basic User on the customer default team
 
     private static readonly string BasicUser = SecureRecordSetupProcedure.BasicUserRoleName;
-
-    [Fact]
-    public void S25_TheRoleName_IsTheOneH11GivesEveryCustomerUser()
-    {
-        BasicUser.Should().Be("Spaarke Basic User");
-    }
 
     [Fact]
     public async Task S25_GivesTheCustomerDefaultTeamTheCustomerUnitCopyOfBasicUser_AndVerifiesIt()

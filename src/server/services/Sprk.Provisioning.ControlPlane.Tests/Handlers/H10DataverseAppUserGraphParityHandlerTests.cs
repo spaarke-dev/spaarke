@@ -366,9 +366,55 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     }
 
     [Fact]
-    public void T267_TheAppUserSetVersion_IsBumped_SoAPre267CompletionReRuns()
+    public async Task T267_ARunWhoseH10CompletedUnderAppUserSet2_DoesNotShortCircuit_AndMovesTheWriterToItsUnit()
     {
-        H10DataverseAppUserGraphParityHandler.AppUserSetVersion.Should().Be("app-user-set=3");
+        // As production leaves a task-266 run: H10 completed under app-user-set=2, with the writer in the customer unit and
+        // no OntologyWriterBusinessUnitId. H10 must re-run (not short-circuit) so the writer reaches its own unit.
+        var run = BuildRun();
+        var ids = string.Join("|", ThreeRoleFixture.Select(r => r.AppRoleId!.ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal))
+            + "|app-user-set=2";
+        var v2Hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
+        var v2Key = $"appuser-{CustomerId}-g{Convert.ToHexString(v2Hash, 0, 4).ToLowerInvariant()}";
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H10", IdempotencyKey = v2Key, JobId = run.RunId,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-1), CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
+        });
+        var repo = new FakeRepository(run, etag: "etag-t267-v2");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var success = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>().Subject;
+
+        success.IdempotencyKey.Should().NotBe(v2Key);
+        creator.CallCount.Should().BeGreaterThan(0, "H10 re-ran instead of short-circuiting on the app-user-set=2 key");
+        var writer = creator.Requests.Single(r => r.ApplicationId == WriterClientId);
+        writer.BusinessUnitId.Should().Be(WriterUnitId);
+        writer.MoveFromBusinessUnitId.Should().Be(CustomerUnitId);
+        repo.LastWrittenRun!.InterStepState.OntologyWriterBusinessUnitId.Should().Be(WriterUnitId.ToString("D"));
+    }
+
+    [Fact]
+    public async Task T267_WriterIdentityEqualToTheBffAppRegistration_IsQuarantined_BeforeAnyDataverseCall()
+    {
+        // Fail closed: the writer must never be the BFF either - H10 gives the BFF's App User the stamp role and never moves it.
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = BffAppRegId.ToUpperInvariant();
+        var repo = new FakeRepository(run, etag: "etag-t267-bff");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.OntologyWriterIsStampIdentity);
+        failure.Diagnostic.Should().Contain("BFF app registration");
+        creator.CallCount.Should().Be(0);
+        creator.UnitNames.Should().BeEmpty();
     }
 
     // ---------- AC-2 T2 verify fail ----------

@@ -47,7 +47,10 @@ public static class H10Rejections
     /// <summary>Task 266: InterStepState.ontologyWriterClientId / ontologyWriterObjectId missing — H2a has not deployed the writer UAMI.</summary>
     public const string MissingOntologyWriterIdentity = "h10-missing-ontology-writer-identity";
 
-    /// <summary>Task 266: the ontology writer's client id equals the stamp UAMI's — the writer would be System Administrator (FR-21).</summary>
+    /// <summary>
+    /// Task 266: the ontology writer's client id equals the stamp UAMI's — the writer would be System Administrator (FR-21).
+    /// Task 267: also when it equals the BFF app registration's id — the writer would hold the BFF's role (FR-21).
+    /// </summary>
     public const string OntologyWriterIsStampIdentity = "h10-ontology-writer-is-stamp-identity";
 
     /// <summary>Task 266: the ontology writer UAMI's App User could not be found or created.</summary>
