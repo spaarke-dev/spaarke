@@ -22,8 +22,8 @@ BeforeAll {
     $global:MdmGateAppId = 'cccccccc-0000-4000-8000-000000000003'   # the ontology writer's identity: in neither the BFF list nor the writer profile
     $global:MdmIds = @{
         Bff = MdmId 1; Alice = MdmId 2; Bob = MdmId 3; Carol = MdmId 4; Dave = MdmId 5; AppUser = MdmId 6; Disabled = MdmId 7; GateWriter = MdmId 8; Disabled2 = MdmId 9
-        Root = MdmId 10; SecureBu = MdmId 11; DirectBu = MdmId 12; CustomerBu = MdmId 13
-        SecureTeam = MdmId 20; DirectTeam = MdmId 21; SomeTeam = MdmId 22; DirectDefault = MdmId 23
+        Root = MdmId 10; SecureBu = MdmId 11; DirectBu = MdmId 12; CustomerBu = MdmId 13; OntologyBu = MdmId 14
+        SecureTeam = MdmId 20; DirectTeam = MdmId 21; SomeTeam = MdmId 22; DirectDefault = MdmId 23; OntologyDefault = MdmId 24
         Reader = MdmId 30; Writer = MdmId 31; Other = MdmId 32
     }
 
@@ -40,6 +40,7 @@ BeforeAll {
             OtherWriterId   = $global:MdmIds.Other
             DuplicateProfile = $null   # a profile name returned twice
             ReaderMissingTeams = @()    # default team ids left off the reader profile
+            WriterUnitTeamOnReader = $false   # the ontology writer unit's default team is (wrongly) on the reader profile
             WriterCanRead = 4; WriterCanUpdate = 4; ReaderCanRead = 4
             Cascades     = @{}          # table -> @(@{ Child; Attribute; Assign })
             PatchFault   = $null       # regex: a PATCH whose URI matches throws
@@ -59,12 +60,14 @@ BeforeAll {
                 [pscustomobject]@{ businessunitid = $i.SecureBu; name = 'Secure Record'; _parentbusinessunitid_value = $i.Root }
                 [pscustomobject]@{ businessunitid = $i.DirectBu; name = 'Direct Messages'; _parentbusinessunitid_value = $i.Root }
                 [pscustomobject]@{ businessunitid = $i.CustomerBu; name = 'Customer One'; _parentbusinessunitid_value = $i.Root }
+                [pscustomobject]@{ businessunitid = $i.OntologyBu; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $i.Root }
             )
             Teams        = @(
                 [pscustomobject]@{ teamid = $i.SecureTeam; name = 'Secure Record Owners'; bu = $i.SecureBu; teamtype = 0; isdefault = $false }
                 [pscustomobject]@{ teamid = $i.DirectTeam; name = 'Direct Owners'; bu = $i.DirectBu; teamtype = 0; isdefault = $false }
                 [pscustomobject]@{ teamid = $i.DirectDefault; name = 'Direct Messages'; bu = $i.DirectBu; teamtype = 0; isdefault = $true }
                 [pscustomobject]@{ teamid = $i.SomeTeam; name = 'Customer One'; bu = $i.CustomerBu; teamtype = 0; isdefault = $true }
+                [pscustomobject]@{ teamid = $i.OntologyDefault; name = 'Spaarke Ontology Writer'; bu = $i.OntologyBu; teamtype = 0; isdefault = $true }
             )
             Memberships  = @()
             Threads      = @()
@@ -142,7 +145,7 @@ BeforeAll {
         if ($u -match "/fieldsecurityprofiles\?.*name eq '([^']+)'") {
             $name = $Matches[1]
             if ($name -eq 'Spaarke BFF-Managed Field Readers') {
-                $defaults = @($w.Teams | Where-Object { $_.isdefault -and $w.ReaderMissingTeams -notcontains $_.teamid } | ForEach-Object { [pscustomobject]@{ teamid = $_.teamid; name = $_.name } })
+                $defaults = @($w.Teams | Where-Object { $_.isdefault -and $w.ReaderMissingTeams -notcontains $_.teamid -and ($w.WriterUnitTeamOnReader -or $_.teamid -ne $global:MdmIds.OntologyDefault) } | ForEach-Object { [pscustomobject]@{ teamid = $_.teamid; name = $_.name } })
                 $one = [pscustomobject]@{ fieldsecurityprofileid = $global:MdmIds.Reader; name = $name; teamprofiles_association = $defaults; systemuserprofiles_association = @() }
             }
             else {
@@ -166,7 +169,7 @@ BeforeAll {
             $bu = $Matches[1]; $name = $Matches[2]; $default = $Matches[3] -eq 'true'
             return & $wrap @($w.Teams | Where-Object { $_.bu -eq $bu -and $_.name -eq $name -and [bool]$_.isdefault -eq $default })
         }
-        if ($u -match '/teams\?.*isdefault eq true') { return & $wrap @($w.Teams | Where-Object isdefault) }
+        if ($u -match '/teams\?.*isdefault eq true') { return & $wrap @($w.Teams | Where-Object isdefault | ForEach-Object { [pscustomobject]@{ teamid = $_.teamid; name = $_.name; _businessunitid_value = $_.bu } }) }
         if ($u -match "/fieldpermissions\?.*entityname eq '([^']+)' and attributelogicalname eq '([^']+)'") {
             $col = "$($Matches[1]).$($Matches[2])"
             $rows = @(
@@ -298,7 +301,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $r = Invoke-MdmMove @{ Apply = $true }
             $r.ExitCode | Should -Be 1
             $r.Output | Should -Match 'REFUSED'
-            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications|businessunits' }).Count | Should -Be 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications|businessunits' -and $_ -notmatch 'Spaarke Ontology Writer' }).Count | Should -Be 0
         }
 
         It 'must fire: a human user on the writer profile refuses' {
@@ -374,7 +377,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $r = if ($Phase -eq 'Move') { Invoke-MdmMove @{ Verify = $true } } else { Invoke-Mdm @{ Phase = 'Stamp'; Verify = $true } }
             $r.ExitCode | Should -Not -Be 0
             $r.Output | Should -Match 'REFUSED'
-            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications|sprk_communicationthreads|businessunits' }).Count | Should -Be 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications|sprk_communicationthreads|businessunits' -and $_ -notmatch 'Spaarke Ontology Writer' }).Count | Should -Be 0
             $global:MdmWorld.Writes.Count | Should -Be 0
         }
 
@@ -382,6 +385,32 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             $r = Invoke-Mdm @{ Phase = 'Stamp'; BffApplicationIds = @(',') }
             $r.Thrown | Should -Match '-BffApplicationIds names no application id'
             $global:MdmWorld.Requests.Count | Should -Be 0
+        }
+
+        It 'must not fire: the ontology writer unit''s default team is not required on the reader profile (<Phase>)' -TestCases @(
+            @{ Phase = 'Stamp' }
+            @{ Phase = 'Move' }
+        ) {
+            param($Phase)
+            $global:MdmWorld.ReaderMissingTeams = @($global:MdmIds.OntologyDefault)
+            $r = if ($Phase -eq 'Move') { Invoke-MdmMove @{} } else { Invoke-Mdm @{ Phase = 'Stamp' } }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Not -Match 'REFUSED'
+            $r.Output | Should -Not -Match 'Spaarke Ontology Writer'
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'businessunits\?.*Spaarke%20Ontology%20Writer|businessunits\?.*Spaarke Ontology Writer' }).Count | Should -BeGreaterThan 0
+        }
+
+        It 'must fire: the ontology writer unit''s default team on the reader profile refuses (<Phase>)' -TestCases @(
+            @{ Phase = 'Stamp' }
+            @{ Phase = 'Move' }
+        ) {
+            param($Phase)
+            $global:MdmWorld.WriterUnitTeamOnReader = $true
+            $r = if ($Phase -eq 'Move') { Invoke-MdmMove @{} } else { Invoke-Mdm @{ Phase = 'Stamp' } }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'REFUSED'
+            $r.Output | Should -Match "default team 'Spaarke Ontology Writer' of the 'Spaarke Ontology Writer' business unit is on the reader profile"
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'sprk_communications\?|sprk_communicationthreads\?' }).Count | Should -Be 0
         }
 
         It 'must not fire: with 054b in place the dry run proceeds and exits 0' {
@@ -458,7 +487,7 @@ Describe 'Migrate-DirectMessagesToOwnerTeam.ps1 (mocked Dataverse)' {
             Add-MdmMessage $M1 $T1 $global:MdmIds.Alice $null
             $r = Invoke-Mdm @{ Phase = 'Stamp'; Apply = $true }
             $r.ExitCode | Should -Be 0
-            @($global:MdmWorld.Requests | Where-Object { $_ -match 'businessunits|teammemberships|teamtype eq 0' }).Count | Should -Be 0
+            @($global:MdmWorld.Requests | Where-Object { $_ -match 'businessunits|teammemberships|teamtype eq 0' -and $_ -notmatch 'Spaarke Ontology Writer' }).Count | Should -Be 0
         }
     }
 

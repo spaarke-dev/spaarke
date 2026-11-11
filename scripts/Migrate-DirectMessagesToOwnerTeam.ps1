@@ -287,7 +287,9 @@ function Invoke-DvPost([string]$Path, [hashtable]$Body) {
 # An OData string literal inside a URL: quotes doubled (OData), then percent-encoded so a name with &, #, + or a space cannot
 # end the query value or change its meaning.
 function Esc([string]$s) { [Uri]::EscapeDataString($s.Replace("'", "''")) }
-function Lc($g) { if ($null -eq $g -or "$g" -eq '') { $null } else { "$g".ToLowerInvariant() } }
+function Lc($g) { if ($null -eq $g -or "$g" -eq '') { $null } else { "$g".ToLowerInvariant() } }# The ontology writer's business unit keeps its default team OFF every field-security profile (scripts/common/OntologyWriterUnit.ps1).
+. (Join-Path $PSScriptRoot 'common/OntologyWriterUnit.ps1')
+
 function NonEmpty($g) { $v = Lc $g; if ($v -and $v -ne '00000000-0000-0000-0000-000000000000') { $v } else { $null } }
 # True when any of the named typed regarding lookups (columns) is set on the row.
 function HasRegarding($Row, [string[]]$Columns) { [bool]($Columns | Where-Object { NonEmpty $Row."_$($_)_value" }) }
@@ -359,8 +361,15 @@ if ($writer) {
 }
 if ($reader) {
     $onReader = @($reader.teamprofiles_association | ForEach-Object { Lc $_.teamid })
-    $defaultTeams = @(Get-All 'teams?$select=teamid,name&$filter=isdefault eq true')
-    if ($defaultTeams.Count -eq 0) { Report 'FAIL' 'no business-unit default team was read' }
+    $allDefaultTeams = @(Get-All 'teams?$select=teamid,name,_businessunitid_value&$filter=isdefault eq true')
+    if ($allDefaultTeams.Count -eq 0) { Report 'FAIL' 'no business-unit default team was read' }
+    # Every default team but the ontology writer unit's belongs on the reader profile; that one must be in NO field-security
+    # profile (H7b S24), so finding it there is a FAIL and it is never required.
+    $defaultTeamSplit = Split-DvDefaultTeamsByOntologyWriterUnit -Api $Api -Headers $headers -DefaultTeams $allDefaultTeams
+    $defaultTeams = $defaultTeamSplit.ReaderTeams
+    foreach ($t in $defaultTeamSplit.WriterUnitTeams | Where-Object { $onReader -contains (Lc $_.teamid) }) {
+        Report 'FAIL' "default team '$($t.name)' of the '$OntologyWriterBusinessUnitName' business unit is on the reader profile; the ontology writer's unit team must be in NO field-security profile (H7b S24 refuses it). Remove it by hand"
+    }
     foreach ($t in $defaultTeams | Where-Object { $onReader -notcontains (Lc $_.teamid) }) {
         Report 'FAIL' "default team '$($t.name)' is NOT on the reader profile; its users read the columns empty"
     }

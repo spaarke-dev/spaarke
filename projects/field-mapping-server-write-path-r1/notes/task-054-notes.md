@@ -616,6 +616,7 @@ Standing rules (also in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, afte
 
 ### Known limits
 
+- **The ontology writer unit's default team.** `Set-ThreadFlagFieldSecurity.ps1` applies the ontology-writer-unit rule: its (p2) reader-profile precondition splits the default teams through `scripts/common/OntologyWriterUnit.ps1`, never requires the ontology writer unit's default team on the reader profile, and reports it as a FAIL if found there (every mode; `-Apply` refuses on it). `OntologyWriterUnitScriptGuardTests` enforces it.
 - **`sprk_directrecipient` is live-only.** It exists only where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the solution source has no definition of it (none is hand-authored). An import therefore does not secure it; `Set-ThreadFlagFieldSecurity.ps1` does, and `-Verify` after every import catches a gap. The script refuses in every mode, before any write (precondition p0, exit 1, naming `Set-DirectRecipientSchema.ps1 -Apply`), until the column exists. The solution-source test accepts its absence and requires `IsSecured=1` and both profiles' rows once it is exported.
 - **A1 on an environment without `sprk_directrecipient`.** A column that does not exist holds no stamp. When the stamped-message read is refused because that column is missing (`CommunicationService.IsMissingColumnFault` on the recipient column), the read answers "none stamped". The strict-pair shape is still asked first, so a strict pair is still not anchored there; an ordinary Direct-typed email thread is anchored as anywhere else. Every other fault of that read (another column, any other error) still fails closed (`message_read_fault`).
 - **A1 and a missing share read.** A host with no `IDataverseRecordShareService` cannot tell a pair, so no Direct-typed thread is anchored there (`share_read_unavailable`). The BFF host always registers it.
@@ -749,6 +750,7 @@ The script refuses (exit 1) and selects nothing unless all of these hold:
 - the five 054b columns are field-secured: `sprk_communicationthread.sprk_threadtype`, `sprk_communicationthread.sprk_isdefaultthread`, `sprk_communication.sprk_communicationthread`, `sprk_communication.sprk_sentby`, `sprk_communication.sprk_directrecipient`;
 - "Spaarke BFF-Managed Field Writers" exists once, reads and updates each column, and its members are exactly the `-BffApplicationIds` application users (no human, no other application user, no team);
 - "Spaarke BFF-Managed Field Readers" exists once, reads each column, and is on every business unit's default team;
+  - `Migrate-DirectMessagesToOwnerTeam.ps1` applies the ontology-writer-unit rule here: it splits the default teams through `scripts/common/OntologyWriterUnit.ps1`, does not require the ontology writer unit's default team on the reader profile, and refuses if that team is on it.
 - no other profile but the built-in System Administrator profile can create or update any of the five. That profile is recognised by its fixed id (`572329c1-a042-4e22-be47-367c6374ea45`), never by name: a custom profile named "System Administrator" is refused like any other.
 
 ### Selection
