@@ -49,6 +49,11 @@
     LIVE ORDER: dev BFF deployed from master -> THIS SCRIPT (-Apply, then -Verify) -> Direct setup (UAC-r2: the
     DirectMessage:* settings) -> 054c Stamp -> piece 3 -> 054c Move.
 
+    AFTER EVERY SpaarkeMaster IMPORT on an environment where this script has been applied: run -Verify (a non-zero exit is
+    a gap: -Apply, then -Verify again). The solution source marks sprk_sentby, the message's sprk_communicationthread,
+    sprk_threadtype and sprk_isdefaultthread IsSecured; sprk_directrecipient exists only where
+    scripts/Set-DirectRecipientSchema.ps1 ran, is not in the solution source, and so is secured only by this script.
+
     MANUAL CHECKS after -Verify passes (they need a non-administrator sign-in, so the script does not run them):
       (m1) As a non-administrator, PATCH a communication's sprk_sentby, sprk_directrecipient or sprk_communicationthread
            through the Web API: refused (field security). Repeat on a message the user can write through a record team.

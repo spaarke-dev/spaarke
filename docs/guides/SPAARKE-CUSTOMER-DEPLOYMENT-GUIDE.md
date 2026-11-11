@@ -1381,6 +1381,21 @@ role loses a privilege the release removed only on a stage-and-upgrade, so a lef
 privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
 an expectations file for every release that changes roles (the owning project supplies the list).
 
+**Message-access columns: field security after every SpaarkeMaster import** (field-mapping-server-write-path-r1 task
+054b). Five columns decide who may read a message, and only the BFF writes them: `sprk_communicationthread.sprk_threadtype`
+and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_directrecipient` and `.sprk_communicationthread`.
+`scripts/Set-ThreadFlagFieldSecurity.ps1` secures all five (dry run → `-Apply` → `-Verify`), next to
+`Set-SecureFlagFieldSecurity.ps1` ([SECURE-PROJECT-ENVIRONMENT-SETUP.md](SECURE-PROJECT-ENVIRONMENT-SETUP.md)) and
+`Set-DocumentPointerFieldSecurity.ps1` (the BFF settings list above).
+- The SpaarkeMaster solution source marks four of them `IsSecured`. `sprk_communication.sprk_directrecipient` exists only
+  on environments where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran; it is not in the solution source, so an
+  import does not secure it.
+- On every environment where the script has been applied, run `Set-ThreadFlagFieldSecurity.ps1 -Verify` after **every**
+  SpaarkeMaster import (an H6 run or a manual import). A non-zero exit is a gap: run `-Apply`, then `-Verify` again.
+- **Binding rule:** the BFF settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay **unset** on an
+  environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, no message is owned by
+  the Direct team and nothing grants access from `sprk_sentby` / `sprk_directrecipient`.
+
 **H7** sets the 7 per-customer env-var values (§6.4).
 
 **After H6 — record numbering (interim; required in EVERY environment).** Matters and Projects are numbered by

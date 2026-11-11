@@ -284,23 +284,122 @@ public class CommunicationBffOwnedColumnRefusalTests
     // ── The typed writers are not generic writers (must not fire) ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task TheTypedThreadFilingWriter_StillWritesTheThreadLookupAndTheParticipants_AppOnly()
+    public async Task TheTypedThreadWriters_StillCreateTheThreadsTypeAndFileTheMessage_ThroughTheResolver_AppOnly()
     {
+        // The real typed path: a message the channel strategy answers CreateNew for, with no regarding, gets a new Direct thread
+        // (its type written on create) and is filed into it (its thread lookup written by the one filing write). The same
+        // payloads, sent to a generic writer, are refused — so this proves the typed writers do not go through the refusal.
         var entities = new Mock<IGenericEntityService>();
-        var person = new EntityReference("systemuser", Caller);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communication", Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication") { Id = Row });
+        var created = new List<Entity>();
+        entities
+            .Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((x, _) => created.Add(x))
+            .ReturnsAsync(Thread);
+        var filings = new List<Dictionary<string, object>>();
+        entities
+            .Setup(e => e.UpdateAsync("sprk_communication", Row, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => filings.Add(f))
+            .Returns(Task.CompletedTask);
+        var resolver = new ThreadResolver(
+            new Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy[] { new CreateNewStrategy() }, entities.Object, new RecordOwnershipResolverDouble(),
+            NullLogger<ThreadResolver>.Instance);
 
-        await DirectMessageRecipient.WriteThreadFilingAsync(
-            entities.Object, NullLogger.Instance, Row, Thread,
-            new Dictionary<string, object> { ["sprk_sentby"] = person, ["sprk_directrecipient"] = person },
+        var threadId = await resolver.ResolveAndAssignThreadAsync(
+            new Sprk.Bff.Api.Services.Communication.ThreadResolutionRequest
+            {
+                CommunicationId = Row,
+                ChannelType = Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Message,
+                Direction = Sprk.Bff.Api.Services.Communication.Models.CommunicationDirection.Outgoing,
+                Message = new Sprk.Bff.Api.Services.Communication.Models.NormalizedMessage
+                {
+                    Direction = Sprk.Bff.Api.Services.Communication.Models.CommunicationDirection.Outgoing,
+                },
+            },
             CancellationToken.None);
 
-        entities.Verify(e => e.UpdateAsync(
-            "sprk_communication", Row,
-            It.Is<Dictionary<string, object>>(f =>
-                ((EntityReference)f[ThreadResolver.ThreadLookupOnCommunication]).Id == Thread
-                && f.ContainsKey("sprk_sentby") && f.ContainsKey("sprk_directrecipient")),
-            It.IsAny<CancellationToken>()), Times.Once);
+        threadId.Should().Be(Thread);
+        var thread = created.Should().ContainSingle().Subject;
+        thread.Contains("sprk_threadtype").Should().BeTrue("the typed create writes the thread's type");
+        var filing = filings.Should().ContainSingle().Subject;
+        ((EntityReference)filing[ThreadResolver.ThreadLookupOnCommunication]).Id.Should().Be(Thread);
+
+        InheritedAccessPermission.RefuseAppOnlyWrite("sprk_communicationthread", thread.Attributes.Keys)
+            .Should().NotBeNull("a generic writer refuses the thread's type");
+        InheritedAccessPermission.RefuseAppOnlyWrite("sprk_communication", filing.Keys)
+            .Should().NotBeNull("a generic writer refuses the message's thread lookup");
     }
+
+    private sealed class CreateNewStrategy : Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy
+    {
+        public Sprk.Bff.Api.Services.Communication.Models.CommunicationType SupportedType =>
+            Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Message;
+
+        public Task<Sprk.Bff.Api.Services.Communication.Threads.ThreadKeyResolution> ResolveAsync(
+            Sprk.Bff.Api.Services.Communication.ThreadResolutionRequest request, CancellationToken ct) =>
+            Task.FromResult(Sprk.Bff.Api.Services.Communication.Threads.ThreadKeyResolution.CreateNew);
+
+        public Task OnThreadCreatedAsync(
+            Guid threadId, Sprk.Bff.Api.Services.Communication.ThreadResolutionRequest request, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    // ── The solution source secures the same columns (F3) ─────────────────────────────────────────────────────────
+
+    /// <summary>The solution folder of each owned table.</summary>
+    private static readonly IReadOnlyDictionary<string, string> SolutionEntityFolder = new Dictionary<string, string>
+    {
+        ["sprk_communication"] = "sprk_Communication",
+        ["sprk_communicationthread"] = "sprk_CommunicationThread",
+    };
+
+    /// <summary>Exists only live (added by <c>scripts/Set-DirectRecipientSchema.ps1</c>); not defined in the solution source.</summary>
+    private const string LiveOnlyColumn = "sprk_directrecipient";
+
+    [Fact]
+    public void TheSolutionSource_SecuresEveryOwnedColumnItDefines()
+    {
+        foreach (var (table, column) in Owned)
+        {
+            var secured = SolutionSecured(File.ReadAllText(SolutionEntityPath(table)));
+            if (column == LiveOnlyColumn)
+            {
+                // Known limit: a live-only column; Set-ThreadFlagFieldSecurity.ps1 -Verify after each SpaarkeMaster import.
+                if (secured.TryGetValue(column, out var exported))
+                    exported.Should().BeTrue($"{table}.{column} once exported must be IsSecured=1");
+                continue;
+            }
+
+            secured.Should().ContainKey(column, $"{table}.{column} is defined in the solution source");
+            secured[column].Should().BeTrue($"{table}.{column} is a BFF-owned column, so the solution source secures it");
+        }
+    }
+
+    [Fact]
+    public void TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured()
+    {
+        // Must-fire control for the test above: the communication's sprk_sentby with IsSecured flipped to 0.
+        var xml = File.ReadAllText(SolutionEntityPath("sprk_communication"));
+        var unsecured = Regex.Replace(
+            xml, @"(<LogicalName>sprk_sentby</LogicalName>(?:(?!</attribute>).)*?<IsSecured>)1(</IsSecured>)", "${1}0${2}",
+            RegexOptions.Singleline);
+
+        unsecured.Should().NotBe(xml, "the control flips the column");
+        SolutionSecured(unsecured)["sprk_sentby"].Should().BeFalse();
+        SolutionSecured(xml)["sprk_sentby"].Should().BeTrue();
+    }
+
+    /// <summary>Each attribute of an <c>Entity.xml</c> by logical name, with whether it is <c>IsSecured=1</c>.</summary>
+    private static IReadOnlyDictionary<string, bool> SolutionSecured(string entityXml) =>
+        System.Xml.Linq.XDocument.Parse(entityXml).Descendants("attribute")
+            .Where(a => a.Element("LogicalName") is not null)
+            .GroupBy(a => a.Element("LogicalName")!.Value.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.All(a => a.Element("IsSecured")?.Value.Trim() == "1"), StringComparer.OrdinalIgnoreCase);
+
+    private static string SolutionEntityPath(string table) => Path.Combine(
+        RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", SolutionEntityFolder[table], "Entity.xml");
 
     // ── The field-security script secures exactly this set ────────────────────────────────────────────────────────
 
