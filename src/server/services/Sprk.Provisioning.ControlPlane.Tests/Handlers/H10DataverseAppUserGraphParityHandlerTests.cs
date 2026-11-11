@@ -380,8 +380,11 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var v2Key = $"appuser-{CustomerId}-g{Convert.ToHexString(v2Hash, 0, 4).ToLowerInvariant()}";
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H10", IdempotencyKey = v2Key, JobId = run.RunId,
-            StartedAt = DateTimeOffset.UtcNow.AddDays(-1), CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            Phase = "H10",
+            IdempotencyKey = v2Key,
+            JobId = run.RunId,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
         });
         var repo = new FakeRepository(run, etag: "etag-t267-v2");
         var creator = FakeCreator.Success();

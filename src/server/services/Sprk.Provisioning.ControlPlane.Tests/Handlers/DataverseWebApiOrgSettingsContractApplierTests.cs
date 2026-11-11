@@ -413,12 +413,12 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
 
     private static Dictionary<string, string> Columns(
         long maxUpload, string auditEnabled, string retention, string accessAudit = "true") => new(StringComparer.Ordinal)
-    {
-        ["maxuploadfilesize"] = maxUpload.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        ["isauditenabled"] = auditEnabled,
-        ["auditretentionperiodv2"] = retention,
-        ["isuseraccessauditenabled"] = accessAudit,
-    };
+        {
+            ["maxuploadfilesize"] = maxUpload.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["isauditenabled"] = auditEnabled,
+            ["auditretentionperiodv2"] = retention,
+            ["isuseraccessauditenabled"] = accessAudit,
+        };
 
     private static string OrganizationJson(long maxUpload, string auditEnabled, string retention)
         => OrganizationJson(Columns(maxUpload, auditEnabled, retention));
