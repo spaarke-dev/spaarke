@@ -1143,6 +1143,7 @@ public class ProcedureAssignmentService
             return (null, none, RecordRuleConflict<RuleChangedView>());
         }
 
+        // all versions: a record rule's versions (never a billing draft); every one must name its base version.
         var query = new QueryExpression(VersionTable) { ColumnSet = new ColumnSet("sprk_versionnumber", BasedOnVersionColumn) };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, recordRuleId);
         var versions = (await ReadAsync(query, ct)).Entities.ToList();
