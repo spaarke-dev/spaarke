@@ -1546,6 +1546,18 @@ its own.
 | D-2371 | Granting access to an inactive contact: /grant writes a dormant row, the contact-side route refuses (owner to choose one rule) | https://github.com/spaarke-dev/spaarke/issues/2371 |
 | D-2369 | read_query and semantic search: base completeness and labels on the caller-visible result set (tracked with task 191) | https://github.com/spaarke-dev/spaarke/issues/2369 |
 
+## Wrap-up disposition (task 090, 2026-11-11)
+
+The project-close reconciliation of this register against the labelled GitHub issues is
+[`defer-disposition-2026-11-11.md`](defer-disposition-2026-11-11.md): one row per labelled issue (open and
+closed), the hand-off list the owner confirms in one batch, close candidates, and the issues that stay with
+tasks 186, 191, 193 and 194. Entries below this line and above are superseded by that table where they differ.
+
+- **#1304** (DEF-004, task 089) was closed 2026-10-16 as "not planned" — folded into #1303 (see the FUTURE
+  table above). Deliberate; not reopened. Task 089 stays deferred under #1303.
+- **#1059, #1063, #1077, #1104** closed 2026-11-11 under owner decision D-1; their UAT is carried in
+  `wrap-up-uat-and-decisions-2026-11-11.md` (U-1, U-2, U-4, U-6).
+
 ## Closed
 
-*(none yet)*
+*(see the wrap-up disposition table)*
