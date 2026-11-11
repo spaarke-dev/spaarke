@@ -6,9 +6,10 @@
 //   - on deny → returns the strategy's ProblemDetails (401 missing-claims / 403 not-resolved / etc.)
 //   - on success → sets CallerPrincipal on HttpContext.Items and continues.
 //
-// It replaces the CIAM-only AddExternalCallerAuthorizationFilter on this group; the CIAM strategy
-// inside the resolver reproduces that filter's behavior byte-for-byte (R2 guardrail #3), so the
-// external SPA is unaffected while the workforce plane is now served by the SAME endpoints.
+// It replaced the retired CIAM-only external-caller filter on this group, so the workforce plane is
+// served by the SAME endpoints as the external SPA. The CIAM strategy inside the resolver began as a
+// byte-for-byte port of that filter (R2 guardrail #3); since uac-r2 task 135 (C1) it runs the same
+// contact-plane composition and veto pipeline as the workforce contact plane.
 //
 // ADR-008: per-endpoint (here, group-level) filter — no global middleware.
 // ADR-019: ProblemDetails on every 401/403.
