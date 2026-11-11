@@ -53,6 +53,7 @@ Deployment: an idempotent script in `scripts/ebilling/` on `EbillingSchema.psm1`
 - **The text never comes from data.** `FirmReason` is set only from the stored version. It never comes from a request body, `FactValues`, `ValuesRead`, the Signal sentence or AI output.
 - **Merged Signals** (one per policy and subject): all members share one policy version, so there is one text and it covers every code in the Signal's reason evidence.
 - **The persisted plan:** `signalPlan` in `sprk_findingsjson` (`InvoiceSubmissionPersister.BuildFindingsJson`, `StoredFindings.ParsePlanEntry`) carries `firmReason`, so a replay through `InvoiceRuleSignalReconciler.WriteAsync` (correction and add-line paths) writes the same text. An older plan without the member parses to "none" and replays as today.
+- **EB-D-216 (2026-11-10):** a redraft can now leave **inactive** draft policy versions (statecode 1). Any DEF-060 read that selects draft versions (for example, an admin editing the firm description on a draft) must filter `statecode eq 0`; `DraftPolicyVersionStatecodeGuardTests` enforces this for billing draft queries. Reads of published versions and by-id citation reads are unaffected.
 
 ### 3.3 The writer stores it (ontology-r1's file)
 
