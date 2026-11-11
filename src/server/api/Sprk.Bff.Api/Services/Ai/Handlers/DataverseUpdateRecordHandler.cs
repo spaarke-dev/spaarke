@@ -184,8 +184,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var item, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // The one update-side check (RecordTableRules.RefuseFixedAfterCreateColumns: the core record pair, and fm task 054b's
+        // BFF-owned columns of a communication and its thread) is asked here too, so a proposal naming one is refused before
+        // the confirm dialog and never suspends; ExecuteChatAsync asks again, in the same words.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+            return ToolValidationResult.Failure(FixedAfterCreateMessage(fixedRefusal));
 
         // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
         // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
@@ -195,6 +201,11 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/>, before the confirm dialog
+    /// (<see cref="ValidateChat"/>) and after it (<see cref="ExecuteChatAsync"/>).</summary>
+    private static string FixedAfterCreateMessage(RecordOwnerResolution refusal) =>
+        $"The update was NOT written: {refusal.Reason} ({refusal.RefusalCode}).";
 
     /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> (model-facing, as the create
     /// tool's <c>CreatedOnlyByItsWriterCreateBlockedMessage</c>); every other path answers with
@@ -228,8 +239,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
         {
             return LogOutcome(context, tablename, recordId,
-                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
-                    fixedRefusal.RefusalCode!, startedAt),
+                Error(tool, FixedAfterCreateMessage(fixedRefusal), fixedRefusal.RefusalCode!, startedAt),
                 stopwatch);
         }
 

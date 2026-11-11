@@ -510,6 +510,8 @@ jobs:
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
   # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
   # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
+  # Also tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1 (field-mapping-server-write-path-r1 task 054b): the script
+  # refuses, in every mode and before any write, unless each of its five target columns exists (same mocked shape).
   # --------------------------------------------------------------------------
   owner-teams-script-tests:
     name: Owner teams script tests (Pester)
@@ -529,7 +531,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

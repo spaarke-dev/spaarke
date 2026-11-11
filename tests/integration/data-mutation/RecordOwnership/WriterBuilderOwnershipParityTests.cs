@@ -298,6 +298,9 @@ public class WriterBuilderOwnershipParityTests
     {
         var world = new CreateParityWorld();
         world.RecordThreadUnder(world.SecureMatter);
+        // fm task 054b: a message's thread lookup is written only by the BFF's typed writers, so the create carries it as a
+        // server-set lookup (a system create naming it otherwise is refused at step 2).
+        world.ServerSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_communicationthread" };
 
         var (outcome, written) = await world.CreateAsync("sprk_communication",
             ("sprk_regardingmatter", "sprk_matter", world.MatterInY),
@@ -407,6 +410,9 @@ public class WriterBuilderOwnershipParityTests
                     [RecordThreadFiling.ThreadTypeColumn] = new OptionSetValue(100000000),
                 });
 
+        /// <summary>The lookups the server set itself (the request's <c>ServerSetLookupColumns</c>); none unless a test sets them.</summary>
+        public IReadOnlySet<string>? ServerSet { get; set; }
+
         /// <summary>Creates a <paramref name="table"/> row naming <paramref name="lookups"/>, as the system principal; the written row (null when refused).</summary>
         public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsync(
             string table, params (string Column, string Target, Guid Id)[] lookups) =>
@@ -441,7 +447,7 @@ public class WriterBuilderOwnershipParityTests
                     Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
                 .CreateAsync(
                     new RecordCreationRequest(
-                        table, new RecordCreationPayload.Mapped(item)),
+                        table, new RecordCreationPayload.Mapped(item)) { ServerSetLookupColumns = ServerSet },
                     principal, CancellationToken.None);
             var written = outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null;
 

@@ -541,3 +541,187 @@ No new package, plugin, DI registration, endpoint or Dataverse column.
 - **Filtered run:** **2535 passed, 0 failed, 2 skipped.** **ArchTests:** **153 passed.** **Builds:** 0 warnings, 0 errors; `dotnet format --verify-no-changes` clean.
 
 rework: 054a piece 2b — an outbound Direct send (Message, no ThreadId, no typed regarding) whose To ∪ Cc ∪ Bcc is one address that the A9 internal-user email read maps to one enabled, non-application systemuser other than the sender is filed into FindOrCreateDirectThreadAsync(sender, recipient) through the respond path's explicit join (one filing update carrying the recipient, then the grant); otherwise today's resolver path, with one Information `direct_message.pair_routing_skipped` and its reason; faults log a Warning and take today's path; no owner is written.
+
+## 054b — the five BFF-owned columns (field security + BFF refusals)
+
+### The rule
+
+- Five columns decide who may read a message, and only the BFF's own typed writers write them:
+  - `sprk_communicationthread`: `sprk_threadtype`, `sprk_isdefaultthread`;
+  - `sprk_communication`: `sprk_sentby`, `sprk_directrecipient`, and the thread lookup `sprk_communicationthread`.
+- Creates by the typed writers are allowed. The one UPDATE writer of `sprk_threadtype` / `sprk_isdefaultthread` is `ThreadResolver.AnchorThreadForFilingAsync` (owner decision 2026-11-11, option A). Enforced by the ArchTest `ThreadFlagUpdateWriterGuardTests` (must-fire / must-not-fire controls; the in-memory projection in `RecordFamilyReader.ToNode` is listed with its reason).
+- Every generic write path refuses a payload naming any of the five, for every identity and payload source:
+  - `InheritedAccessPermission.RefuseAppOnlyWrite` (app-only and caller identity; reason `sdap.access.communication_bff_column_server_only`). A thread's type is also an app-only access column (#2253), which keeps its own code app-only;
+  - `RecordTableRules.RefuseFixedAfterCreateColumns`, the one update-side check. That covers:
+    - the `/child-records` PATCH core;
+    - `OwnedChildWrite.RefileAsync`, which is the chat update tool's re-file and the communication filing route's core;
+    - the chat update tool, before the confirm dialog (`ValidateChat`) and after it;
+    - `UpdateRecordActionCore` (every payload source, including the ConfirmedProposal write impersonated as its user);
+    - `DataverseUpdateHandler`;
+    - `WorkProductRecordPersister`;
+    - the field-mapping push.
+
+    `CoreRecordPairUpdateCheckGuardTests` makes every future update path inherit it;
+  - `RecordCreationService.CallerBlockedColumnRefusal` (the filed chat create through the one server create), except the "for" person the server stamps itself (`sprk_sentby` in `ServerSetLookupColumns`);
+  - `DataverseCreateRecordHandler` before its run-as-user POST (an unfiled communication, a thread);
+  - create-time mapping and Repair drop a rule targeting one (they already ask `RefuseAppOnlyWrite`).
+- The filing routes (`/communications/{id}/filing`, the event / child-record filing shape) accept regarding columns only, so they already refused all five (pinned). The generic child-record re-file route does not take `sprk_communication` (pinned).
+- `scripts/Set-ThreadFlagFieldSecurity.ps1` secures the same five columns (reader profile on every BU default team; writer profile = the BFF application users only). `CommunicationBffOwnedColumnRefusalTests` reads the script's target lines and keeps them equal to `BffOwnedCommunicationColumns`, with a must-fire control.
+
+### Behaviour change on the generic paths
+
+A message's thread lookup can no longer be moved by a generic update (plain PATCH, re-file core, Update Record node, output mapping, field-mapping push). The #2110 / #2143 tests that moved a thread that way now pin the refusal: nothing is written, and no reconcile runs. A message moves between threads only through the BFF's typed writers (the thread join, the filing reconcile).
+
+### Owner decision (option A, 2026-11-11) and the rule-2 type guard
+
+- **Option A:** `AnchorThreadForFilingAsync` is sanctioned as the one update writer of `sprk_threadtype` (it writes Record-Anchored when a filed email conversation follows its record whole).
+- **Rule-2 strict-pair guard (A1), owner decision 2026-11-11 (option (a)).** Filing never anchors a strict Direct pair thread to a record:
+  - Rule 2 does not anchor a thread typed Direct (100000001) when either:
+    - `DirectMessageRecipient.ReadStrictPairShapeAsync` answers `IsStrictPair` for it; or
+    - any message in the thread carries a non-empty `sprk_directrecipient`.
+  - It fails closed: a fault reading the pair shape (`participant_read_fault`), a fault reading the thread's messages, or no share read wired, also means do not anchor. The one exception: the message read refused because `sprk_directrecipient` does not exist means "none stamped" (a missing column holds no stamp).
+  - When the guard applies, rule 2 takes its declining path: only the email moves, to the record's default thread (rule 3). Nothing throws and the filing stands.
+  - Event: EventId **5413** `thread_filing.direct_pair_not_anchored`, structured `Reason` from a bounded set: `strict_pair`, `stamped_message`, `participant_read_fault`, `message_read_fault`, `share_read_unavailable`. Information for a decision, Warning (with the exception) for a fault.
+  - Unchanged:
+    - a Direct-typed thread that is neither a strict pair nor holds a stamped message still anchors. That is an inbound email conversation's thread (owner clarification 2026-10-11); `ThreadResolverTests.ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly` passes with its body unchanged;
+    - a thread not typed Direct (Record-Anchored) is not asked: no shape read, no message read.
+  - Implemented in `ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, asked after `FiledToOnlyAsync` and before `AnchorThreadForFilingAsync`.
+- The A2 ArchTest holds the update writer to the one sanctioned member.
+
+### Binding rule (agreed with UAC-r2, 2026-11-11)
+
+`DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay unset on an environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, `DirectMessageOwnerTeam` refuses as NotConfigured, so no message is owned by the Direct team and nothing grants from `sprk_sentby` / `sprk_directrecipient`. `-Verify` prints `PRECONDITION MET: DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName may now be set on <env>` on a pass, and `PRECONDITION NOT MET: leave ... UNSET` on a fail.
+
+### Live order (agreed)
+
+1. Deploy the dev BFF from master.
+2. 054b: `Set-ThreadFlagFieldSecurity.ps1` dry run, then `-Apply`, then `-Verify`.
+3. Direct setup (UAC-r2: the `DirectMessage:*` settings).
+4. 054c Stamp.
+5. Piece 3.
+6. 054c Move.
+
+Standing rules (also in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, after the SpaarkeMaster upgrade check, and in the script's help; worded as `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7d words `Set-SecureFlagFieldSecurity.ps1`):
+
+- **New environment:** provisioning runs `Set-ThreadFlagFieldSecurity.ps1` after the SpaarkeMaster import, `Set-DirectRecipientSchema.ps1 -Apply` and `Set-RecordCreatorPersonSchema.ps1 -Apply`: dry run, then `-Apply`, then `-Verify` (each must exit 0). The import alone is not enough: the profiles' members (every business unit's default team, the BFF application users) are per environment, and `sprk_directrecipient` is not in the solution source.
+- **After every SpaarkeMaster import:** `-Verify`. A non-zero exit is a gap: `-Apply`, then `-Verify` again.
+- **A new business unit:** `Set-RecordCreatorPersonSchema.ps1 -Apply` puts its default team on the reader profile; then `-Verify`.
+
+### Solution source
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml` (`sprk_sentby`, `sprk_communicationthread`) and `sprk_CommunicationThread/Entity.xml` (`sprk_threadtype`, `sprk_isdefaultthread`) carry `<IsSecured>1</IsSecured>`, the same shape as `sprk_CreatedByPerson`.
+- `src/dataverse/solutions/SpaarkeMaster/Other/FieldSecurityProfiles.xml` carries the four columns' rows in both profiles, in the `sprk_createdbyperson` row shape: "Spaarke BFF-Managed Field Readers" read 4, create 0, update 0; "Spaarke BFF-Managed Field Writers" read 4, create 4, update 4. A secured column with no reader row is hidden from every user, so the two travel together. `sprk_directrecipient` has no rows (it is not in the solution source).
+- The form controls are left as they are: a secured field renders locked for a user without Update.
+- `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` reads the Entity.xml files and the profiles file. It keeps the four at `IsSecured=1`, each with exactly one row per profile at those values (and `sprk_directrecipient` too, once exported). Must-fire controls: `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`, and `TheProfileRowCheck_FiresOnASecuredColumnWithoutReaderRows_OrWithAReaderThatMayWrite` (reader row removed, reader row allowed to update, writer row removed). `TheProfileRowValues_AreThePrecedentsOnTheSameTable` pins the values to `sprk_communication.sprk_createdbyperson`'s rows.
+
+### Known limits
+
+- **`sprk_directrecipient` is live-only.** It exists only where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the solution source has no definition of it (none is hand-authored). An import therefore does not secure it; `Set-ThreadFlagFieldSecurity.ps1` does, and `-Verify` after every import catches a gap. The script refuses in every mode, before any write (precondition p0, exit 1, naming `Set-DirectRecipientSchema.ps1 -Apply`), until the column exists. The solution-source test accepts its absence and requires `IsSecured=1` and both profiles' rows once it is exported.
+- **A1 on an environment without `sprk_directrecipient`.** A column that does not exist holds no stamp. When the stamped-message read is refused because that column is missing (`CommunicationService.IsMissingColumnFault` on the recipient column), the read answers "none stamped". The strict-pair shape is still asked first, so a strict pair is still not anchored there; an ordinary Direct-typed email thread is anchored as anywhere else. Every other fault of that read (another column, any other error) still fails closed (`message_read_fault`).
+- **A1 and a missing share read.** A host with no `IDataverseRecordShareService` cannot tell a pair, so no Direct-typed thread is anchored there (`share_read_unavailable`). The BFF host always registers it.
+- The ArchTest's limits are in its remarks: a key in a local variable, a caller-supplied payload (refused at run time) and writes outside `src/server` are not seen.
+- **K1 — a user-owned email thread with one other user's Read share.** It has the strict-pair shape, so filing does not anchor it to the record; only the email moves (rule 3). This is the safe side of A1, and a behaviour change for that shape.
+- **K2 — check, then write.** The A1 reads and the anchor write are not atomic: a share or a stamp added between them is not seen. Same window as `FiledToOnlyAsync`.
+- **K3 — no repair.** A pair thread anchored to a record before A1 is not found or moved back.
+- **K4 — server-set columns.** A column the server sets itself (`sprk_sentby` as the "for" person) is exempt from the system-principal check in `RecordCreationService` step 2. No production caller sends one as the system principal.
+- **K5 — ArchTest shapes not seen** by `ThreadFlagUpdateWriterGuardTests`: `x.Id = id;` after an initializer, an expression-bodied alias of a column constant, `Add(new KeyValuePair(...))`, and the primary key set inside an initializer.
+
+### Scan (writers of the five columns in `src/server`)
+
+| Site | Column(s) | Identity | Kind | Verdict |
+|---|---|---|---|---|
+| `ThreadResolver.CreateThreadAsync` :227 | threadtype | app-only (`IGenericEntityService`) | create | typed writer |
+| `ThreadResolver` record-thread create :1678 | threadtype | app-only | create | typed writer |
+| `ThreadResolver` default / master thread create :1810, :1813 | threadtype, isdefaultthread | app-only | create | typed writer |
+| `DirectThreadAccessService.FindOrCreateDirectThreadAsync` :117 | threadtype | app-only | create | typed writer |
+| `ThreadResolver.AnchorThreadForFilingAsync` :1229 | threadtype | app-only | **update** | sanctioned (option A); the one update writer (ArchTest) |
+| `RecordFamilyReader.ToNode` :995 | threadtype | none (in-memory node) | — | never sent to Dataverse |
+| `DirectMessageRecipient.WriteThreadFilingAsync` / `ThreadResolver.ThreadFilingFields` :2013 | thread lookup, sentby, directrecipient | app-only | update | typed writer |
+| `ThreadResolver` join `ParentChanges` :591 | thread lookup | ownership resolver's reparent | update | typed writer |
+| `CommunicationService` :1164, :1366, :2024 | sentby | app-only | create (pre-create stamp) | typed writer |
+| `EmailDraftToolHandler` :1030 (filed draft) | sentby | one server create (app-only) | create | server-set "for" person (allowed) |
+| `DataverseCreateRecordHandler` `WithForPersonAsync` (filed chat create) | sentby | one server create | create | server-set "for" person (allowed) |
+| `ChildRecordEndpoints.UpdateAsync` PATCH | any (caller payload) | run as user | update | **refused** (one update-side check) |
+| `OwnedChildWrite.RefileAsync` | any (caller / model payload) | run as user | update | **refused** (one update-side check) |
+| `DataverseUpdateRecordHandler` (chat update) | any (model payload) | run as user | update | **refused** before the confirm dialog (`ValidateChat`), again after it, and via `RefileAsync` |
+| `UpdateRecordActionCore` (node, action seam, ConfirmedProposal impersonated) | any | app-only or impersonated | update | **refused** (one update-side check) |
+| `DataverseUpdateHandler`, `WorkProductRecordPersister`, field-mapping push | any (configuration) | app-only / caller | update | **refused** (push: rule skipped) |
+| `DataverseCreateRecordHandler` run-as-user POST | any (model payload) | run as user | create | **refused** before the confirm dialog (`BlockedColumnBeforeSuspend`) and again before the POST |
+| `RecordCreationService` step 2 | any (caller payload) | caller or system principal | create | **refused** (except the server-set "for" person) |
+
+No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonated caller.
+
+### §11
+
+- **`InheritedAccessPermission.BffOwnedCommunicationColumns`** with `BffOwnedCommunicationColumnIn`, `RefuseBffOwnedCommunicationColumn` and the reason code:
+  - **Existing:** `BffOwnedDocumentColumns` (one flat set on the document), `AccessColumns` (table-keyed, app-only identity only), `RecordTableRule.TableServerOwnedColumns` / `CommonServerOwnedColumns` (the create-side caller policy).
+  - **Extension:** it extends the existing `InheritedAccessPermission` refusal family, through the same refusal type and the existing checks; there is no new mechanism. Why not extend those sets:
+    - `AccessColumns` is asked only for the app-only identity, so the push, the caller identity and a ConfirmedProposal impersonated write would skip it;
+    - `TableServerOwnedColumns` would also refuse the server-stamped "for" person (`sprk_sentby`) on the filed chat create and the email draft.
+
+    It is table-keyed because the names collide across tables (`sprk_communicationthread` is both a table and a column).
+  - **Cost of doing nothing:** a user-, model- or configuration-built payload could set a message's participants or thread, or a thread's type, through the BFF's generic writers. Those writers run as the BFF application user, past field security, and UAC-r2's share reconcile decides grants from these columns.
+- **`CallerBlockedColumnRefusal(..., serverSet)`** (an optional parameter on an existing method). Cost of doing nothing: the server's own "for" person stamp would be refused.
+- **`DataverseCreateRecordHandler`**: a refusal on an existing path, asked before the confirm dialog too; no new surface.
+- **`RecordCreationService` system-principal step 2**: the existing refusal asked on the existing path; no new surface.
+- **`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`** (a private step, EventId 5413). Existing: `DirectMessageRecipient.ReadStrictPairShapeAsync` (reused, not forked). Extension: it is the existing shape rule plus one bounded read, asked inside rule 2. Cost of doing nothing: filing a message of a strict Direct pair would anchor the pair thread to a record and grant the record's members every message in it.
+- **`scripts/Set-ThreadFlagFieldSecurity.ps1`**:
+  - **Existing:** `Set-SecureFlagFieldSecurity.ps1` and `Set-DocumentPointerFieldSecurity.ps1` use the same two profiles.
+  - **Extension:** each of those carries column-specific preconditions (null repair, a client-deploy flag) that do not apply here. Generalising them would change scripts already verified live, so this script copies their shape instead.
+  - **Cost of doing nothing:** any Dataverse surface outside the BFF (a form, the Web API, an import, a flow running as the user) could change the five columns.
+- **`ThreadFlagUpdateWriterGuardTests`**. Cost of doing nothing: the one-update-writer rule (option A) would be prose only.
+
+### Manual checks (after `-Verify` exits 0; they need a non-administrator sign-in)
+
+- (m1) As a non-administrator, PATCH a communication's `sprk_sentby`, `sprk_directrecipient` or `sprk_communicationthread` through the Web API: refused. Repeat on a message the user can write through a record team.
+- (m2) As a non-administrator, PATCH a thread's `sprk_threadtype` or `sprk_isdefaultthread`: refused.
+- (m3) As a non-administrator, read a Direct message and its thread: the five columns show their true values, not empty.
+- (m4) The BFF still creates a per-user master thread and a Direct thread, and files a message into it (thread lookup and both participants set).
+
+### Evidence
+
+- **Tests** (KEEP paths):
+  - `tests/integration/data-mutation/ChildAccessPermission/CommunicationBffOwnedColumnRefusalTests.cs`;
+  - `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.BffOwnedCommunicationColumns.cs`;
+  - updated: `AccessTableAppOnlyWriterTests` (as the caller, a thread's type is now refused), `RefileWriterBindShapeTests`, `SecureChildOwnershipAiToolTests.RefileThreadCaller` and `.ThreadJoin` (the generic thread moves now pin the refusal);
+  - ArchTest: `tests/Spaarke.ArchTests/ThreadFlagUpdateWriterGuardTests.cs`.
+- **Fail-then-pass** against 89274213eb. The three wiring files were checked out from it, and the one `RefuseAppOnlyWrite` call was removed. The new set and its helpers stayed so the tests compile, and the optional `serverSet` parameter was added to the old signature. The filter was the new and changed tests:
+  - Before: **Failed 137, Passed 40, Total 177.** The 40 that pass are:
+    - the must-not-fire cases;
+    - the set, script and typed-writer pins;
+    - the filing-shape pins;
+    - the four `sprk_threadtype` forms that the #2253 access-column refusal already refused app-only.
+  - After: **Passed 177, Failed 0.**
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each have 0 warnings and 0 errors.
+- **Filtered run:** filters `Communication`, `ChildRecord`, `OwnedChildWrite`, `DataverseCreateRecord`, `ParentLineage`, `DataMutation`, `RecordCreation`, `UpdateRecord`, `ThreadResolver`, `DirectMessage` and `FieldMapping`, excluding `Api.Office.`:
+  - **9924 passed, 1 failed, 4 skipped.** The one failure was `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`, a 1-minute timeout while the ArchTests ran in parallel. Re-run alone: 55 of 55 pass.
+- **ArchTests:** **2148 passed, 0 failed.**
+- **`dotnet format --verify-no-changes`** on the changed files: clean, except a pre-existing IMPORTS ordering finding at line 1 of `DataverseCreateRecordHandler.cs` (its usings are untouched).
+
+### Adversarial pass 1 fixes and A1 (2026-11-11)
+
+- **A1 strict-pair guard** (`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, EventId 5413). Tests in `ThreadResolverTests`:
+  - must fire: `ReconcileThreadForFiling_A1_StrictDirectPairThread_IsNotAnchored_OnlyTheEmailMoves_AndTheEventIsLogged`, `..._A1_DirectThreadNotAStrictPair_ButHoldingAStampedMessage_IsNotAnchored`, `..._A1_WhenThePairShapeReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WhenTheMessageReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WithNoShareReadWired_TheDirectThreadIsNotAnchored`;
+  - must not fire: `..._A1_UserOwnedDirectEmailThread_WithNoSharesAndNoStampedMessage_IsStillAnchored`, `..._A1_RecordAnchoredThread_IsUnaffected_EvenWithAStampedMessage`, and the unchanged dev-repro test `ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly`.
+  - The filing test compositions (`CreateFilingSut`, `CreateFilingSutWithScopes`, the `RefileThreadCaller` resolver) pass the share read the host always injects. `ReconcileThreadForFiling_TheMessageScan_IsTheThreadsActiveMessages_Bounded` ignores the separate Direct-recipient read.
+- **Solution source (F3):** `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` and its control `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`. No Pester or ArchTest compared solution XML with the script, and the script has no Pester file, so the test sits next to the script pin.
+- **Chat create before the confirm dialog (F3):** `DataverseCreateRecordHandler.BlockedColumnBeforeSuspend` asks the BFF-owned refusal before its per-user / keeps-its-creator exit, in the post-confirm refusal's words. `ChatPreSuspendServiceRefusalTests.ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_054b` (six cases) and the must-not-fire `ValidateChat_AProposalWithoutTheFiveColumns_StillPassesToItsConfirmation_054b_MustNotFire`. An invalid validation never suspends (`SideEffectGatePreSuspendValidationTests`).
+- **ArchTest (F4):** `ThreadFlagUpdateWriterGuardTests` resolves derived constants to a fixed point, flags `[JsonPropertyName(...)]` on a flag column (no existing hit in `src/server`), and treats an entity initializer that sets `Id` as an update. Controls in `Detector_MustFireAndMustNotFire`; must-not-fire `AliasFixedPoint_MustNotFire_OnAnUnrelatedDerivedConstant`.
+- **Typed writer test (F4):** `CommunicationBffOwnedColumnRefusalTests.TheTypedThreadWriters_StillCreateTheThreadsTypeAndFileTheMessage_ThroughTheResolver_AppOnly` drives `ThreadResolver.ResolveAndAssignThreadAsync` (a Direct thread create, then the filing write) and asserts the same payloads are refused by `RefuseAppOnlyWrite`.
+- **System-principal create (K1):** `RecordCreationService` step 2 for `ForSystem` asks `RefuseBffOwnedCommunicationColumn`, except a server-set lookup. `RecordCreationServiceMappingSeamTests.CreateAsync_ASystemCommunicationNamingItsThreadLookup_IsRefused_BeforeAnythingIsAsked_054b`; must-not-fire `CreateAsync_ASystemCommunicationWhoseSenderTheServerSet_PassesStep2_054b`. `WriterBuilderOwnershipParityTests.ACommunicationCreatedInASecureRecordThread_...` (042b Q3) now marks the thread lookup server-set; its ownership assertions are unchanged.
+- **Fail-then-pass.** Each fix was removed in place (guard call short-circuited, pre-suspend check disabled, system-principal check disabled, both Entity.xml files from HEAD): **14 failed, 61 passed** of the new and neighbouring tests; every must-fire failed and every must-not-fire passed. With `WriteThreadFilingAsync` made to ask `RefuseAppOnlyWrite` first, the typed-writer test failed ("collection is empty"). Each ArchTest shape, removed singly, failed `Detector_MustFireAndMustNotFire`. All restored: pass.
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors.
+- **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, RecordCreationService, AccessTableAppOnlyWriter, RefileWriterBindShape, Communication, ChildRecord, OwnedChildWrite, ParentLineage, DataMutation, RecordCreation, UpdateRecord, FieldMapping, GateDecisionRecord, SecureChildReconciler; excluding `Api.Office.`): **10047 passed, 0 failed, 4 skipped.**
+- **ArchTests:** **2149 passed, 0 failed.**
+- **`dotnet format --verify-no-changes`** on the three changed BFF files: no finding in the changed lines (the pre-existing `DataverseCreateRecordHandler.cs` IMPORTS / line-ending findings remain).
+
+### Adversarial pass 2 fixes (2026-11-11)
+
+- **F1 — the solution source grants the profiles** (1c19179a3c). `Other/FieldSecurityProfiles.xml` rows on the four secured columns in both profiles; `TheSolutionSource_SecuresEveryOwnedColumnItDefines` checks them; controls `TheProfileRowCheck_FiresOnASecuredColumnWithoutReaderRows_OrWithAReaderThatMayWrite` and `TheProfileRowValues_AreThePrecedentsOnTheSameTable`. Deployment guide, script help and these notes state the per-environment order (new environment: dry run, `-Apply`, `-Verify`; every import: `-Verify`, `-Apply` if it fails).
+- **F2 — A1 where `sprk_directrecipient` is missing** (fb0126729b). Must not fire: `ThreadResolverTests.ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AnOrdinaryDirectEmailThread_IsStillAnchored` (typed fault, Web API text). Must fire: `..._A1_AMissingColumnFaultAboutAnotherColumn_StillDeclines`, `..._A1_WhereTheRecipientColumnDoesNotExist_AStrictPairThread_IsStillNotAnchored`.
+- **F3 — chat update before the confirm dialog** (b430256355). `DataverseUpdateRecordHandlerTests.ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_InThePostConfirmWords_054b` (14 forms); must not fire `ValidateChat_AnOrdinaryUpdate_StillPassesToItsConfirmation_054b_MustNotFire` (4 cases).
+- **F4 — the script's column precondition (p0)**. `tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1` (Pester 5.7.1, in the `owner-teams-script-tests` job): 4 must-fire (missing recipient column in dry run, `-Apply`, `-Verify`; a missing solution column), 1 must-not-fire.
+- **Fail-then-pass.** With `FieldSecurityProfiles.xml`, `ThreadResolver.cs` and `DataverseUpdateRecordHandler.cs` taken from 3a0c35176b: **18 failed, 172 passed** of the new and neighbouring tests (both F1 checks, both F2 must-not-fire cases, all 14 F3 forms; every must-not-fire and the F2 must-fire tests passed, as they should). Restored: 190 passed. With the script taken from 3a0c35176b: Pester **4 failed, 1 passed** (the must-not-fire); restored: 5 passed.
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors. `dotnet format --verify-no-changes` on the two changed BFF files: clean.
+- **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, DataverseUpdateRecordHandler, ChatPreSuspend, RecordCreationService, WriterBuilderOwnershipParity, RefileWriterBindShape, AccessTableAppOnlyWriter, Communication, FieldSecurity; excluding `Api.Office.`): **4949 passed, 0 failed, 2 skipped.** The profile-file agreement tests (`SecuritySchemaAgreement`, `FieldSecurity`): 273 passed.
+- **ArchTests:** **2149 passed, 0 failed.**
