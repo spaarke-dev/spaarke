@@ -1298,6 +1298,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
+        MarkFiledBySender(communication);
 
         // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
         // from its source describes the source's record: it goes unless the thread names that same record.
@@ -3266,6 +3267,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
             // that matter.
             await StampCoreAncestorOrThrowAsync(communication, primary.EntityType, primary.EntityId, correlationId, ct);
+
+            MarkFiledBySender(communication);
         }
         else
         {
@@ -3289,6 +3292,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (primary.EntityUrl is not null)
             communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
     }
+
+    /// <summary>
+    /// Marks an outgoing communication's regarding as settled (<see cref="Engine.AssociationStatusCodes.Resolved"/>) when the
+    /// send itself filed it: an explicit association the sender chose, or the record whose thread the message was posted
+    /// into. The association engine never evaluates an outgoing row, so without this the status stays empty and the email
+    /// page's "Related to" panel offers the row for review ("No confident match") although its regarding lookup is set.
+    /// A reply's inherited regarding is marked only when the parent's was settled (<see cref="CopyRegardingFromSourceAsync"/>).
+    /// An association whose type maps to no regarding lookup files nothing, so it is not marked. A post into a record's
+    /// thread is marked whoever sends it (an external contact's post included): the thread's record is the filing.
+    /// </summary>
+    private static void MarkFiledBySender(DataverseEntity communication) =>
+        communication["sprk_associationstatus"] = new OptionSetValue(Engine.AssociationStatusCodes.Resolved);
 
     /// <summary>
     /// The FR-26 core-ancestor stamp for a communication whose typed regarding lookup is already bound (task 052), shared
@@ -3347,6 +3362,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
                 "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_associationstatus",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -3392,6 +3408,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
                 communication["sprk_associationcount"] = count.Value;
+
+            // An inherited regarding is settled only when the parent's was: a reply to an email still awaiting review is not
+            // settled by replying, and it is not added to the review queue either (CommunicationQueueFeedService lists every
+            // non-empty, non-Resolved status), so any other parent status leaves the reply's empty, as before. An explicit
+            // association mapped afterwards marks the row settled regardless (MarkFiledBySender).
+            if (copied > 0
+                && source.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value == Engine.AssociationStatusCodes.Resolved)
+            {
+                MarkFiledBySender(communication);
+            }
 
             _logger.LogInformation(
                 "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
