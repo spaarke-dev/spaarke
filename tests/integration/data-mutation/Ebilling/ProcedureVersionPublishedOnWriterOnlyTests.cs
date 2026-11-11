@@ -215,7 +215,7 @@ public class ProcedureVersionPublishedOnWriterOnlyTests
         var world = new RepairWorld();
         world.MatterLinksTo();
         world.Map("sprk_matter", Version, RepairWorld.DefaultText(Stamp, "2027-03-01T00:00:00Z", 1));
-        var id = world.RowOf(Version, OwnershipDirectory.ChildBu,new Dictionary<string, object>
+        var id = world.RowOf(Version, OwnershipDirectory.ChildBu, new Dictionary<string, object>
         {
             ["sprk_name"] = "Version 1",
         });
@@ -238,6 +238,7 @@ public class ProcedureVersionPublishedOnWriterOnlyTests
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         params FieldMappingRuleDto[] rules) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object,
             new StampWorld().Restamper,
             rules,
