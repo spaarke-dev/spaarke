@@ -441,7 +441,7 @@ internal static class ExternalGrantLifecycle
 
     // Task 099a: the Current Access listing also shows the grant date. A separate select, so no write-path read gains a
     // column it does not use (and so a write path never depends on parsing one).
-    internal const string ListingSelect = RowSelect +",sprk_granteddate";
+    internal const string ListingSelect = RowSelect + ",sprk_granteddate";
 
     /// <summary>
     /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
