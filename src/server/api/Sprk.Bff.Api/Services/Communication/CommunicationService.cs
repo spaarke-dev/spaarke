@@ -3150,7 +3150,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <param name="sentSources">
     /// The source <c>sprk_document</c> of each of <paramref name="sentAttachments"/> that was read from one (index-aligned with
     /// the document attachments; an attachment with no source document has no entry). The .eml carries their bytes, so it is
-    /// created with their most restrictive own Access Permission (<see cref="EmbeddedSourcesAccessPermissionAsync"/>).
+    /// created with their most restrictive own Access Permission (<see cref="EmbeddedSourcesAccessPermissionAsync"/>). Ignored
+    /// when <paramref name="sentAttachments"/> is null: the on-demand archive takes the sources of the rows it embeds from
+    /// <see cref="FetchEmlAttachmentsForEmbedAsync"/> (uac-r2 F-177-R2-1).
     /// </param>
     /// <param name="filedCommunication">
     /// Ontology task 177 A3 (D-218): the communication as written — the row the send created, or the row the on-demand archive
@@ -3180,14 +3182,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_document", archiveOwner);
 
         // Review F1b: at send time the embed is the bytes just sent (the attachment rows do not exist yet); on demand, the rows.
-        var emlAttachments = sentAttachments is not null
-            ? sentAttachments.Select(a => new EmlAttachment
+        List<EmlAttachment> emlAttachments;
+        if (sentAttachments is not null)
+        {
+            emlAttachments = sentAttachments.Select(a => new EmlAttachment
             {
                 FileName = a.Name,
                 Content = a.Content,
                 ContentType = a.ContentType ?? InferContentType(a.Name),
-            }).ToList()
-            : await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+            }).ToList();
+        }
+        else
+        {
+            // uac-r2 F-177-R2-1: the on-demand embed's sources are the documents its rows were verified against, so the
+            // .eml is narrowed like a send's (inbound archives embed too).
+            (emlAttachments, sentSources) = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+        }
 
         // The embedded bytes must not widen access (uac-r2): the .eml takes its sources' most restrictive own value.
         var embeddedNarrowing = sentSources is { Count: > 0 }
@@ -3439,9 +3449,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// flow never fails on it. Independent of the SEPARATE per-attachment <c>sprk_document</c> archival (which is
     /// unchanged) — both copies exist by design.
     /// </summary>
-    private async Task<List<EmlAttachment>> FetchEmlAttachmentsForEmbedAsync(Guid communicationId, CancellationToken ct)
+    /// <returns>
+    /// The embedded attachments, and (index-aligned with them) the <c>sprk_document</c> each one's pointer was verified
+    /// against — the source whose own Access Permission the .eml must not widen (uac-r2 F-177-R2-1, as a send's
+    /// <see cref="OutboundAttachmentSource"/>s). Only an attachment that is embedded has an entry.
+    /// </returns>
+    private async Task<(List<EmlAttachment> Attachments, List<OutboundAttachmentSource> Sources)> FetchEmlAttachmentsForEmbedAsync(
+        Guid communicationId, CancellationToken ct)
     {
         var result = new List<EmlAttachment>();
+        var sources = new List<OutboundAttachmentSource>();
 
         EntityCollection attachments;
         try
@@ -3462,7 +3479,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ex,
                 "Failed to query attachments for .eml embedding (non-fatal) | CommunicationId: {CommunicationId}",
                 communicationId);
-            return result;
+            return (result, sources);
         }
 
         foreach (var att in attachments.Entities)
@@ -3518,6 +3535,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Content = ms.ToArray(),
                     ContentType = InferContentType(fileName),
                 });
+                sources.Add(new OutboundAttachmentSource(linkedDocument.Id.ToString(), driveId));
             }
             catch (Exception ex)
             {
@@ -3528,7 +3546,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
         }
 
-        return result;
+        return (result, sources);
     }
 
     /// <summary>

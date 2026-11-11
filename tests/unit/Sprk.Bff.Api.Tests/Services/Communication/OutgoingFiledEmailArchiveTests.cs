@@ -519,6 +519,29 @@ public class OutgoingFiledEmailArchiveTests
         }
     }
 
+    [Theory]
+    [InlineData(CommunicationDirection.Outgoing)]
+    [InlineData(CommunicationDirection.Incoming)]
+    public async Task OnDemandArchive_WithNoEmbeddedAttachments_WritesNoAccessNarrowing(CommunicationDirection direction)
+    {
+        // Must not fire (uac-r2 F-177-R2-1): nothing is embedded, so nothing narrows the .eml and no source is read for it.
+        var communicationId = Guid.NewGuid();
+        var h = Build(sourceCommunication: new Entity("sprk_communication", communicationId)
+        {
+            ["sprk_subject"] = "Filed earlier",
+            ["sprk_to"] = "recipient@example.com",
+            ["sprk_direction"] = new OptionSetValue((int)direction),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingrecordid"] = MatterId.ToString(),
+        });
+
+        await h.Sut.ArchiveExistingAsync(communicationId, CancellationToken.None);
+
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject.Entity;
+        eml.Attributes.Should().NotContainKey("sprk_accesspermission");
+        eml.Attributes.Should().NotContainKey("sprk_accessinheritance");
+    }
+
     [Fact]
     public void StageArchiveRecordLink_PrimaryWins_WhenTheMapMapsIt()
     {

@@ -154,7 +154,7 @@ public class OutboundAttachmentArchiveTests
         await h.Sut.SendAsync(Filed(Request(SendMode.SharedMailbox, secret) with { ArchiveToSpe = false }));
 
         var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
-        emlEntity.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value.Should().Be(Restricted);
+        AccessPermissionOf(emlEntity).Should().Be(Restricted);
         var record = emlEntity.GetAttributeValue<string>("sprk_accessinheritance");
         record.Should().Be(Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(Restricted).Serialize(),
             "the own narrowing is recorded in the same create (task 189), not provisional");
@@ -201,14 +201,260 @@ public class OutboundAttachmentArchiveTests
         await h.Sut.SendAsync(Filed(Request(SendMode.SharedMailbox, unknown) with { ArchiveToSpe = false }));
 
         var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
-        emlEntity.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value.Should().Be(Restricted);
+        AccessPermissionOf(emlEntity).Should().Be(Restricted);
         var (visible, _, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId);
         visible.Should().BeFalse();
         internalPlane.Should().BeFalse();
     }
 
+    // ── uac-r2 F-177-R2-1: the ON-DEMAND archive embeds the bytes of its attachment rows' documents, and narrows like a send ──
+
+    [Fact]
+    public async Task OnDemandArchive_SentWithARestrictedEmbeddedSource_TheEmlIsCreatedRestricted_StaysRestrictedAfterTheRefresh_AndHiddenOnBothPlanes()
+    {
+        // Must fire: a Sent email filed to a (Standard) matter is archived on demand and, linked to that matter, would inherit
+        // the matter's Standard — while its bytes include a Restricted document's. The create carries the own narrowing and
+        // its record, and the REAL post-create refresh keeps max(own, inherited) = Restricted.
+        var secret = Doc("drive-bu-north", "item-secret", "secret.pdf");
+        var refresh = new RefreshWorld();
+        var communication = FiledCommunication(CommunicationDirection.Outgoing);
+        var h = await BuildAsync(
+            [secret], arrange: (world, _) => WithAccessPermission(world, secret, Restricted),
+            onDemand: new OnDemand(communication, [secret]), refresh: refresh);
+
+        var result = await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        result.ArchiveDocumentId.Should().Be(emlId);
+        EmbeddedFileNames(h).Should().Equal(["secret.pdf"], "the .eml carries the Restricted document's bytes");
+        emlEntity.GetAttributeValue<EntityReference>("sprk_matter").Should().NotBeNull("an outgoing archive is linked to its matter (A3)");
+        emlEntity.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(FiledMatterId);
+        AccessPermissionOf(emlEntity).Should().Be(Restricted, "created Restricted, not left to inherit the matter's Standard");
+        emlEntity.GetAttributeValue<string>("sprk_accessinheritance").Should().Be(
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(Restricted).Serialize(),
+            "the own narrowing is recorded in the same create (task 189), not provisional");
+
+        refresh.DocumentReads.Should().Contain(emlId, "the linked archive's Access Permission was refreshed (A3)");
+        var stored = refresh.Rows[("sprk_document", emlId)];
+        AccessPermissionOf(stored).Should().Be(Restricted, "max(own, inherited): the refresh never lowers the own narrowing");
+
+        var (visible, reason, internalPlane) = await DecideBothPlanesAsync(h, stored, emlId, communication.Id);
+        visible.Should().BeFalse("a contact with a grant on the matter must not read a Restricted document's bytes");
+        reason.Should().Be(DocumentNarrowingReason.OwnRestricted);
+        internalPlane.Should().BeFalse("nor a systemuser flagged external, on the internal plane");
+    }
+
+    [Fact]
+    public async Task OnDemandArchive_InboundWithARestrictedEmbeddedSource_TheEmlIsCreatedRestricted_AndNotLinked()
+    {
+        // Must fire: an inbound archive embeds attachment bytes too (it is not linked to a record by this path).
+        var secret = Doc("drive-bu-north", "item-secret", "secret.pdf");
+        var communication = FiledCommunication(CommunicationDirection.Incoming);
+        var h = await BuildAsync(
+            [secret], arrange: (world, _) => WithAccessPermission(world, secret, Restricted),
+            onDemand: new OnDemand(communication, [secret]));
+
+        await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        emlEntity.GetAttributeValue<OptionSetValue>("sprk_emaildirection").Value.Should().Be(100000000, "received");
+        emlEntity.GetAttributeValue<EntityReference>("sprk_matter").Should().BeNull("an inbound archive is not linked by this path");
+        AccessPermissionOf(emlEntity).Should().Be(Restricted);
+        emlEntity.GetAttributeValue<string>("sprk_accessinheritance").Should().Be(
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(Restricted).Serialize());
+        var (visible, reason, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId, communication.Id);
+        visible.Should().BeFalse();
+        reason.Should().Be(DocumentNarrowingReason.OwnRestricted);
+        internalPlane.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OnDemandArchive_StandardAndRestrictedSources_TheEmlTakesTheMostRestrictive()
+    {
+        var plain = Doc("drive-bu-north", "item-a", "a.pdf");
+        var secret = Doc("drive-bu-south", "item-b", "b.pdf");
+        var communication = FiledCommunication(CommunicationDirection.Outgoing);
+        var h = await BuildAsync(
+            [plain, secret], arrange: (world, _) =>
+            {
+                WithAccessPermission(world, plain, Standard);
+                WithAccessPermission(world, secret, Restricted);
+            },
+            onDemand: new OnDemand(communication, [plain, secret]));
+
+        await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, _) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        EmbeddedFileNames(h).Should().BeEquivalentTo(["a.pdf", "b.pdf"]);
+        AccessPermissionOf(emlEntity).Should().Be(Restricted);
+    }
+
+    [Fact]
+    public async Task OnDemandArchive_StandardSources_NothingIsNarrowed_AndTheEmlIsShown_AsToday()
+    {
+        // Must not fire: Standard (and unset) sources narrow nothing, so the create writes neither value nor record.
+        var first = Doc("drive-bu-north", "item-a", "a.pdf");
+        var second = Doc("drive-bu-south", "item-b", "b.pdf");
+        var communication = FiledCommunication(CommunicationDirection.Outgoing);
+        var h = await BuildAsync(
+            [first, second], arrange: (world, _) =>
+            {
+                WithAccessPermission(world, first, Standard);
+                WithAccessPermission(world, second, null);
+            },
+            onDemand: new OnDemand(communication, [first, second]));
+
+        await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        EmbeddedFileNames(h).Should().BeEquivalentTo(["a.pdf", "b.pdf"], "the attachments are embedded, and Standard");
+        emlEntity.Attributes.Should().NotContainKey("sprk_accesspermission");
+        emlEntity.Attributes.Should().NotContainKey("sprk_accessinheritance");
+        var (visible, _, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId, communication.Id);
+        visible.Should().BeTrue();
+        internalPlane.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OnDemandArchive_AnEmbeddedSourceWhoseAccessCannotBeRead_IsTreatedRestricted()
+    {
+        // Fail closed: the source's own value cannot be read app-only, so the .eml is created Restricted.
+        var unknown = Doc("drive-bu-north", "item-unknown", "unknown.pdf");
+        var communication = FiledCommunication(CommunicationDirection.Outgoing);
+        var h = await BuildAsync(
+            [unknown], arrange: (world, _) => world.RetrieveFault = (entity, columns) =>
+                entity == "sprk_document" && columns.Contains("sprk_accesspermission")
+                    ? new InvalidOperationException("Dataverse unavailable")
+                    : null,
+            onDemand: new OnDemand(communication, [unknown]));
+
+        await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, emlId) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        EmbeddedFileNames(h).Should().Equal(["unknown.pdf"], "the attachment is embedded, so its unreadable source narrows the .eml");
+        AccessPermissionOf(emlEntity).Should().Be(Restricted);
+        var (visible, _, internalPlane) = await DecideBothPlanesAsync(h, emlEntity, emlId, communication.Id);
+        visible.Should().BeFalse();
+        internalPlane.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OnDemandArchive_WithNoAttachments_NothingIsNarrowed()
+    {
+        // Must not fire: nothing embedded, nothing to narrow, and no source is read for it.
+        var communication = FiledCommunication(CommunicationDirection.Outgoing);
+        var h = await BuildAsync([], arrange: null, onDemand: new OnDemand(communication, []));
+
+        await h.Sut.ArchiveExistingAsync(communication.Id, CancellationToken.None);
+
+        var (emlEntity, _) = h.ArchivedEmls.Should().ContainSingle().Subject;
+        emlEntity.Attributes.Should().NotContainKey("sprk_accesspermission");
+        emlEntity.Attributes.Should().NotContainKey("sprk_accessinheritance");
+    }
+
     private const int Standard = 100000000;
     private const int Restricted = 100000002;
+
+    /// <summary>
+    /// The attribute's value, asserted present first: an assertion chained off <c>?.Value</c> is skipped when the attribute is
+    /// missing, so a .eml created with no narrowing at all would pass it (review K1).
+    /// </summary>
+    private static int AccessPermissionOf(Entity document)
+    {
+        var level = document.GetAttributeValue<OptionSetValue>("sprk_accesspermission");
+        level.Should().NotBeNull("the .eml's Access Permission must be present, not skipped");
+        return level.Value;
+    }
+
+    /// <summary>A Sent or Received communication filed to the matter, as the on-demand archive reads it.</summary>
+    private static Entity FiledCommunication(CommunicationDirection direction) => new("sprk_communication", Guid.NewGuid())
+    {
+        ["sprk_subject"] = "Filed earlier",
+        ["sprk_to"] = "recipient@example.com",
+        ["sprk_direction"] = new OptionSetValue((int)direction),
+        ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FiledMatterId),
+        ["sprk_regardingrecordid"] = FiledMatterId.ToString(),
+    };
+
+    /// <summary>The file names the archived .eml actually carries (parsed from the uploaded bytes).</summary>
+    private static List<string> EmbeddedFileNames(Harness h)
+    {
+        var eml = h.EmlUploads.Should().ContainSingle().Subject;
+        using var message = MimeKit.MimeMessage.Load(new MemoryStream(eml.Content));
+        return message.Attachments.OfType<MimeKit.MimePart>().Select(p => p.FileName ?? string.Empty).ToList();
+    }
+
+    /// <summary>An existing communication to archive on demand, and the source documents its attachment rows point at.</summary>
+    private sealed record OnDemand(Entity Communication, SourceDocument[] Attachments);
+
+    /// <summary>
+    /// A real <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/> over an in-memory Dataverse, so the archive's
+    /// post-create Access Permission refresh decides for real: the filed matter (Standard) and every <c>sprk_document</c> the
+    /// archive creates, as created. Its updates are applied to the rows.
+    /// </summary>
+    private sealed class RefreshWorld
+    {
+        public Dictionary<(string Table, Guid Id), Entity> Rows { get; } = new()
+        {
+            [("sprk_matter", FiledMatterId)] = new Entity("sprk_matter", FiledMatterId)
+            {
+                ["sprk_accesspermission"] = new OptionSetValue(Standard),
+            },
+        };
+
+        /// <summary>Each <c>sprk_document</c> the refresh read (it reads the document before it decides).</summary>
+        public List<Guid> DocumentReads { get; } = new();
+
+        public Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver Resolver { get; }
+
+        public RefreshWorld()
+        {
+            var reads = new Mock<IGenericEntityService>(MockBehavior.Loose);
+            reads.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                {
+                    if (table == "sprk_document")
+                        DocumentReads.Add(id);
+                    return Rows.TryGetValue((table, id), out var row) ? Copy(row) : new Entity(table, id);
+                });
+            reads.Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                {
+                    var wanted = query.Criteria.Conditions
+                        .Where(c => c.AttributeName == query.EntityName + "id")
+                        .SelectMany(c => c.Values.OfType<Guid>())
+                        .ToHashSet();
+                    return new EntityCollection(Rows
+                        .Where(r => r.Key.Table == query.EntityName && wanted.Contains(r.Key.Id))
+                        .Select(r => Copy(r.Value)).ToList());
+                });
+            reads.Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Callback((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+                {
+                    foreach (var (column, value) in fields)
+                        Rows[(table, id)][column] = value;
+                })
+                .Returns(Task.CompletedTask);
+
+            Resolver = new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+                reads.Object,
+                CoreAncestorResolverFixtures.ProbeReturning(
+                [
+                    .. CoreAncestorResolverFixtures.AllRootColumns,
+                    Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column,
+                    Sprk.Bff.Api.Services.Access.AccessInheritance.Column,
+                ]),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
+        }
+
+        private static Entity Copy(Entity row)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var attribute in row.Attributes)
+                copy[attribute.Key] = attribute.Value;
+            return copy;
+        }
+    }
 
     private static SendCommunicationRequest Filed(SendCommunicationRequest request) => request with
     {
@@ -225,11 +471,11 @@ public class OutboundAttachmentArchiveTests
 
     /// <summary>The .eml as created, linked to its Open, not internal-only message, decided on both planes.</summary>
     private static async Task<(bool Visible, DocumentNarrowingReason Reason, bool InternalPlane)> DecideBothPlanesAsync(
-        Harness h, Entity emlEntity, Guid emlId)
+        Harness h, Entity emlEntity, Guid emlId, Guid? communicationId = null)
     {
         var document = ArchivedEmlNarrowing.AsStored(emlEntity, emlId);
         var world = new ArchivedEmlNarrowing.World();
-        world.AddCommunication(h.CommunicationId, internalOnly: false, threadPrivacy: (int)ThreadPrivacyState.Open);
+        world.AddCommunication(communicationId ?? h.CommunicationId, internalOnly: false, threadPrivacy: (int)ThreadPrivacyState.Open);
         var (visible, reason) = await ArchivedEmlNarrowing.ExternalAsync(document, world);
         var internalPlane = await ArchivedEmlNarrowing.InternalPlaneFlaggedExternalAsync(document, world);
         return (visible, reason, internalPlane);
@@ -535,15 +781,20 @@ public class OutboundAttachmentArchiveTests
     /// communication will get.</param>
     /// <param name="communicationFromWorld">The communication's container is decided by the REAL resolver over that world
     /// (its row must be arranged), instead of "regards nothing secure".</param>
+    /// <param name="onDemand">An existing communication to archive on demand (<c>ArchiveExistingAsync</c>): its row is the one
+    /// read, and its attachment rows (each pointing at one of the source documents) are what the .eml embeds.</param>
+    /// <param name="refresh">A world for the REAL post-create Access Permission refresh; absent, the refresh is inert.</param>
     private static async Task<Harness> BuildAsync(
         SourceDocument[] documents,
         Action<TestRecordContainerResolver.DocumentPointerWorld, Guid>? arrange,
-        bool communicationFromWorld = false)
+        bool communicationFromWorld = false,
+        OnDemand? onDemand = null,
+        RefreshWorld? refresh = null)
     {
         // The REAL RecordContainerResolver (task 166) over a Dataverse world: the root business unit stamps
         // RootBusinessUnitContainer and claims every drive-bu-* container; an unmodelled document is unfiled and owned
         // there. It serves the download's pointer check AND the archive's "is the source secure?" question.
-        var communicationId = Guid.NewGuid();
+        var communicationId = onDemand?.Communication.Id ?? Guid.NewGuid();
         var world = new TestRecordContainerResolver.DocumentPointerWorld
         {
             RootClaims = c => c.StartsWith("drive-bu-", StringComparison.Ordinal),
@@ -602,15 +853,33 @@ public class OutboundAttachmentArchiveTests
             .Setup(s => s.RetrieveAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, string[] columns, CancellationToken ct) =>
                 world.EntityService!.RetrieveAsync(entity, id, columns, ct));
+        if (onDemand is not null)
+        {
+            entityService
+                .Setup(s => s.RetrieveAsync("sprk_communication", onDemand.Communication.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(onDemand.Communication);
+        }
+
+        // The on-demand read of the communication's attachment rows (every other query answers nothing: no earlier archive).
+        var attachmentRows = (onDemand?.Attachments ?? []).Select(d => new Entity("sprk_communicationattachment", Guid.NewGuid())
+        {
+            ["sprk_name"] = d.Name,
+            ["sprk_graphitemid"] = d.ItemId,
+            ["sprk_graphdriveid"] = d.DriveId,
+            ["sprk_document"] = new EntityReference("sprk_document", d.Id),
+        }).ToList();
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                query.EntityName == "sprk_communicationattachment" ? new EntityCollection(attachmentRows) : new EntityCollection());
         entityService
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity e, CancellationToken _) =>
             {
                 var id = e.LogicalName == "sprk_communication" ? communicationId : Guid.NewGuid();
                 created.Add((e, id));
+                if (refresh is not null && e.LogicalName == "sprk_document")
+                    refresh.Rows[("sprk_document", id)] = ArchivedEmlNarrowing.AsStored(e, id);
                 return id;
             });
 
@@ -648,7 +917,7 @@ public class OutboundAttachmentArchiveTests
             BuildJobQueue(jobs),
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
-            CoreAncestorResolverFixtures.Inert(),
+            refresh?.Resolver ?? CoreAncestorResolverFixtures.Inert(),
             ownership,
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: SpeScopeFactoryStub.Create(spe.Object, communicationContainerResolver, recordContainerResolver));
@@ -656,7 +925,13 @@ public class OutboundAttachmentArchiveTests
         // The capture lists are shared by reference: the SUT writes into them during the act.
         return new Harness
         {
-            Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs, Ownership = ownership, World = world,
+            Sut = sut,
+            Spe = spe,
+            Created = created,
+            Uploads = uploads,
+            Jobs = jobs,
+            Ownership = ownership,
+            World = world,
         };
     }
 
