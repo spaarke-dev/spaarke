@@ -70,7 +70,11 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
 
   const [blocked, setBlocked] = React.useState<BlockedSubmission | null>(null);
   const [failure, setFailure] = React.useState<ApiFailure | null>(null);
-  const [action, setAction] = React.useState<Action | null>(null);
+  // The action last shown, kept after the form closes: the FormModal is closed with `open={false}`, never unmounted while
+  // open, which would leave the page aria-hidden (#2658). `seq` keys each opening, so every opening starts fresh.
+  const [dialog, setDialog] = React.useState<{ action: Action; open: boolean; seq: number } | null>(null);
+  const action = dialog?.action ?? null;
+  const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -103,18 +107,18 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const open = (a: Action) => {
     setReason('');
     setError(null);
-    setAction(a);
+    setDialog(prev => (prev?.open ? { ...prev, action: a } : { action: a, open: true, seq: (prev?.seq ?? 0) + 1 }));
   };
 
   const submit = async () => {
-    if (!action || reason.trim() === '') return;
+    if (!dialog?.open || !action || reason.trim() === '') return;
     setBusy(true);
     setError(null);
     const r = action === 'override' ? await api.overrideBlocked(submissionId, reason.trim()) : await api.returnBlocked(submissionId, reason.trim());
     if (!alive.current) return;
     if (r.ok) {
       setBusy(false);
-      setAction(null);
+      closeDialog();
       await Promise.all([reload(), refresh(), load()]);
       return;
     }
@@ -179,16 +183,17 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
         )}
       </MessageBar>
 
-      {action && (
+      {dialog && (
         <FormModal
-          open
+          key={dialog.seq}
+          open={dialog.open}
           size="sm"
           title={title}
           submitLabel={action === 'override' ? 'Override' : 'Return'}
           submitDisabled={reason.trim() === ''}
           busy={busy}
           onClose={() => {
-            if (!busy) setAction(null);
+            if (!busy) closeDialog();
           }}
           onSubmit={() => void submit()}
         >

@@ -170,7 +170,13 @@ export function AdjustStep() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [repeatable, setRepeatable] = React.useState(false);
-  const [removing, setRemoving] = React.useState<ReviewLine | null>(null);
+  // The adjustment last asked about, kept after the confirm closes: the FormModal is closed with `open={false}`, never
+  // unmounted while open, which would leave the wizard behind it aria-hidden (#2658). `seq` keys each opening.
+  const [removeDialog, setRemoveDialog] = React.useState<{ line: ReviewLine; open: boolean; seq: number } | null>(null);
+  const removing = removeDialog?.open ? removeDialog.line : null;
+  const askRemove = (line: ReviewLine) =>
+    setRemoveDialog(prev => (prev?.open ? { ...prev, line } : { line, open: true, seq: (prev?.seq ?? 0) + 1 }));
+  const closeRemove = () => setRemoveDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [removeBusy, setRemoveBusy] = React.useState(false);
   const [removeError, setRemoveError] = React.useState<string | null>(null);
   const adjustmentId = React.useRef(newAdjustmentId());
@@ -249,7 +255,7 @@ export function AdjustStep() {
       if (!alive.current) return;
       setRemoveBusy(false);
       // A failed re-read leaves the list as it was: the form stays open and says so; Remove again answers "already applied" and re-reads.
-      if (fresh) setRemoving(null);
+      if (fresh) closeRemove();
       else setRemoveError(`The adjustment was removed. ${REREAD_FAILED} Remove again to read them again; nothing is removed twice.`);
     } else {
       setRemoveBusy(false);
@@ -273,7 +279,7 @@ export function AdjustStep() {
                 {a.reason ? ` · ${a.reason}` : ''}
               </Text>
               {!readOnly && (
-                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); setRemoving(a); }} data-testid={`remove-adjustment-${a.id}`}>
+                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); askRemove(a); }} data-testid={`remove-adjustment-${a.id}`}>
                   Remove…
                 </Button>
               )}
@@ -345,21 +351,22 @@ export function AdjustStep() {
 
       <Totals />
 
-      {removing && (
+      {removeDialog && (
         <FormModal
-          open
+          key={removeDialog.seq}
+          open={removeDialog.open}
           size="sm"
           title="Remove adjustment"
           submitLabel="Remove"
           busy={removeBusy}
           onClose={() => {
-            if (!removeBusy) setRemoving(null);
+            if (!removeBusy) closeRemove();
           }}
           onSubmit={() => void confirmRemove()}
         >
           <Text>
-            Remove the adjustment of {signedMoney(removing.amount)}
-            {removing.reason ? ` (${removing.reason})` : ''}? The approved total is recalculated by the server.
+            Remove the adjustment of {signedMoney(removeDialog.line.amount)}
+            {removeDialog.line.reason ? ` (${removeDialog.line.reason})` : ''}? The approved total is recalculated by the server.
           </Text>
           {removeError && (
             <MessageBar intent="error" layout="multiline" data-testid="remove-error">

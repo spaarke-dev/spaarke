@@ -119,7 +119,15 @@ export const BlockedSubmissionPanel: React.FC<BlockedSubmissionPanelProps> = ({ 
   const [view, setView] = React.useState<BlockedSubmissionView | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [reload, setReload] = React.useState(0);
-  const [verb, setVerb] = React.useState<BlockedDecisionVerb | null>(null);
+  // The decision last asked for, kept after the form closes: the FormModal is closed with `open={false}`, never unmounted
+  // while open, which would leave the page aria-hidden (issue 2658). `seq` keys each opening, so every opening starts fresh.
+  const [decision, setDecision] = React.useState<{ verb: BlockedDecisionVerb; open: boolean; seq: number } | null>(
+    null
+  );
+  const verb = decision?.open ? decision.verb : null;
+  const openDecision = React.useCallback((next: BlockedDecisionVerb) => {
+    setDecision(prev => (prev?.open ? { ...prev, verb: next } : { verb: next, open: true, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
   const [reason, setReason] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [failure, setFailure] = React.useState<string | null>(null);
@@ -145,7 +153,7 @@ export const BlockedSubmissionPanel: React.FC<BlockedSubmissionPanelProps> = ({ 
   }, [submissionId, reload]);
 
   const closeModal = React.useCallback(() => {
-    setVerb(null);
+    setDecision(prev => (prev ? { ...prev, open: false } : prev));
     setReason('');
     setFailure(null);
   }, []);
@@ -266,12 +274,12 @@ export const BlockedSubmissionPanel: React.FC<BlockedSubmissionPanelProps> = ({ 
       {held && (view.canOverride || view.canReturn) && (
         <div className={styles.actions}>
           {view.canOverride && (
-            <Button appearance="primary" onClick={() => setVerb('override')}>
+            <Button appearance="primary" onClick={() => openDecision('override')}>
               Override
             </Button>
           )}
           {view.canReturn && (
-            <Button appearance="secondary" onClick={() => setVerb('return')}>
+            <Button appearance="secondary" onClick={() => openDecision('return')}>
               Return to firm
             </Button>
           )}
@@ -283,18 +291,19 @@ export const BlockedSubmissionPanel: React.FC<BlockedSubmissionPanelProps> = ({ 
         </Text>
       )}
 
-      {verb && (
+      {decision && (
         <FormModal
-          open
+          key={decision.seq}
+          open={decision.open}
           onClose={busy ? () => undefined : closeModal}
           onSubmit={() => void submit()}
-          title={MODAL[verb].title}
-          submitLabel={MODAL[verb].submit}
+          title={MODAL[decision.verb].title}
+          submitLabel={MODAL[decision.verb].submit}
           submitDisabled={reasonTrimmed === ''}
           busy={busy}
         >
           <div className={styles.modalBody} data-testid="blocked-decision-form">
-            <Text size={300}>{MODAL[verb].hint}</Text>
+            <Text size={300}>{MODAL[decision.verb].hint}</Text>
             {failure && (
               <MessageBar intent="error" role="alert" data-testid="blocked-decision-error">
                 <MessageBarBody>{failure}</MessageBarBody>

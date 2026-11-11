@@ -23,28 +23,37 @@ export interface DecideInvoiceActionProps {
 export function DecideInvoiceAction({ review, canWrite, reload, notifyStep }: DecideInvoiceActionProps) {
   const { state, api, invoiceId, refresh } = useApproval();
   useApprovalSync(review);
-  const [open, setOpen] = React.useState(false);
+  // The wizard is closed with `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658).
+  // `seq` keys each opening and changes only while closed, so the form, the steps and the read-only choice start fresh.
+  const [wizard, setWizard] = React.useState<{ open: boolean; seq: number } | null>(null);
   const access = decisionAccess(review, state, canWrite);
 
   const refreshApproval = React.useCallback(() => refresh(), [refresh]);
+  const openWizard = React.useCallback(() => {
+    setWizard(prev => (prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
+  const closeWizard = React.useCallback(() => {
+    setWizard(prev => (prev ? { ...prev, open: false } : prev));
+  }, []);
 
   return (
     <>
       {access === 'decide' && (
-        <Button appearance="primary" onClick={() => setOpen(true)} data-testid="decide-invoice">
+        <Button appearance="primary" onClick={openWizard} data-testid="decide-invoice">
           Decide invoice…
         </Button>
       )}
       {access === 'view' && (
-        <Button onClick={() => setOpen(true)} data-testid="view-decision">
+        <Button onClick={openWizard} data-testid="view-decision">
           View decision
         </Button>
       )}
-      {/* Mounted per opening: the form, the steps and the read-only choice start fresh each time. */}
-      {open && state && (
+      {/* Keyed per opening: the form, the steps and the read-only choice start fresh each time. */}
+      {wizard && state && (
         <InvoiceDecisionWizard
-          open
-          onClose={() => setOpen(false)}
+          key={wizard.seq}
+          open={wizard.open}
+          onClose={closeWizard}
           review={review}
           approval={state}
           api={api}

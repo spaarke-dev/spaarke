@@ -302,9 +302,24 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     () => createEmailInvoiceSubmission({ authenticatedFetch, dataService, bffBaseUrl }),
     [authenticatedFetch, dataService, bffBaseUrl]
   );
-  const [invoiceFlow, setInvoiceFlow] = React.useState<{ communicationId: string; preMarkedInvoiceId?: string } | null>(
-    null
-  );
+  // The flow last shown, kept after the dialog closes: it is closed with `open={false}`, never unmounted while open, which
+  // would leave the page aria-hidden (#2658). `seq` keys each opening, so every opening starts fresh.
+  const [invoiceFlow, setInvoiceFlow] = React.useState<{
+    communicationId: string;
+    preMarkedInvoiceId?: string;
+    open: boolean;
+    seq: number;
+  } | null>(null);
+  const openInvoiceFlow = React.useCallback((communicationId: string, preMarkedInvoiceId?: string) => {
+    setInvoiceFlow(prev =>
+      prev?.open
+        ? { ...prev, communicationId, preMarkedInvoiceId }
+        : { communicationId, preMarkedInvoiceId, open: true, seq: (prev?.seq ?? 0) + 1 }
+    );
+  }, []);
+  const closeInvoiceFlow = React.useCallback(() => {
+    setInvoiceFlow(prev => (prev ? { ...prev, open: false } : prev));
+  }, []);
   // The core record the selected email is already filed to (a Matter, Project or Work Assignment), if any: the
   // flow starts with it chosen.
   const invoiceInitialRecord = React.useMemo(() => {
@@ -324,12 +339,12 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
       onSaveToSharePoint: handleSaveToSharePoint,
       onCreateEvent: () => handleCreate('event'),
       onCreateTodo: () => handleCreate('todo'),
-      onSubmitInvoice: (communicationId: string) => setInvoiceFlow({ communicationId }),
+      onSubmitInvoice: (communicationId: string) => openInvoiceFlow(communicationId),
       onOpenFullForm: (communicationId: string) => {
         void openFullForm(communicationId);
       },
     }),
-    [composeActions, refetch, handleSaveToSharePoint, handleCreate, openFullForm]
+    [composeActions, refetch, handleSaveToSharePoint, handleCreate, openInvoiceFlow, openFullForm]
   );
 
   const filedAssociations = record.recordState?.filedAssociations ?? [];
@@ -437,9 +452,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   navigation={navigationService}
                   apiBaseUrl={bffBaseUrl}
                   onCountChange={setAttachmentCount}
-                  onSubmitAsInvoice={documentId =>
-                    setInvoiceFlow({ communicationId: id, preMarkedInvoiceId: documentId })
-                  }
+                  onSubmitAsInvoice={documentId => openInvoiceFlow(id, documentId)}
                 />
               </CollapsibleSection>
 
@@ -536,8 +549,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
       {invoiceFlow && (
         <SubmitInvoiceDialog
-          open
-          onClose={() => setInvoiceFlow(null)}
+          key={invoiceFlow.seq}
+          open={invoiceFlow.open}
+          onClose={closeInvoiceFlow}
           // Accepting files the email under the chosen record: re-read it so the Related-to and attachments show it.
           onAccepted={record.reload}
           communicationId={invoiceFlow.communicationId}
