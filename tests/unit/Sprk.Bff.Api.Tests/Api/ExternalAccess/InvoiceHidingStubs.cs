@@ -131,8 +131,12 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
     /// <summary>A firm that is not the caller's.</summary>
     public static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
 
-    /// <summary>The caller kinds with no usable firm: no linked contact, a contact-binding read fault, an inactive linked contact.</summary>
-    public static TheoryData<string> CallersWithNoFirm => new() { "no-contact", "contact-binding-fault", "inactive-contact" };
+    /// <summary>The caller kinds known to be a member of NO firm: no linked contact, an inactive linked contact. They see no invoice.</summary>
+    public static TheoryData<string> CallersWithNoFirm => new() { "no-contact", "inactive-contact" };
+
+    /// <summary>F3b: the caller kinds whose firms are UNKNOWN (the contact-binding read failed). The call fails (a tool error) instead
+    /// of answering "no invoice": an unknown firm read is not a caller with no firm.</summary>
+    public static TheoryData<string> CallersWithUnknownFirm => new() { "contact-binding-fault" };
 
     private readonly Guid _systemUser;
     private readonly Guid _contact = Guid.NewGuid();
@@ -276,6 +280,89 @@ internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
 }
 
 /// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2: ONE service request case, run on both planes (the REST routes under a request and
+/// the assistant tools read_query / search_data), so each plane is held to the same answer for the same request: linked to another
+/// firm's invoice is hidden; linked to the caller's own firm's invoice, or to none, is shown. The invoice is made in the world the plane's
+/// real seam reads (<see cref="InvoiceWorld"/>), with the same firms.
+/// </summary>
+internal static class ServiceRequestParityCase
+{
+    /// <summary>The kinds of request: "other-firm", "own-firm", "unlinked".</summary>
+    public static TheoryData<string> Kinds => new() { "other-firm", "own-firm", "unlinked" };
+
+    /// <summary>Whether a request of <paramref name="kind"/> is hidden (the same on every plane).</summary>
+    public static bool Hidden(string kind) => kind == "other-firm";
+
+    /// <summary>The invoice a request of <paramref name="kind"/> links to, made in <paramref name="world"/>; null for "unlinked".</summary>
+    public static Guid? InvoiceFor(InvoiceWorld world, string kind)
+    {
+        switch (kind)
+        {
+            case "other-firm":
+                var other = world.OwnedInvoice();
+                world.InvoiceFirm(other, InvoiceFamilyFirmWorld.OtherFirm);
+                return other;
+            case "own-firm":
+                return world.OwnedInvoice();
+            case "unlinked":
+                return null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind (test).");
+        }
+    }
+}
+
+/// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2 (F1): the families whose rows have an invoice link of their own (null here) and are
+/// filed under an invoice-linked row, for the assistant tools' handler tests (the REST plane: <c>ExternalInvoiceLinkedFamilyRouteTests</c>).
+/// Rows are made in the <see cref="InvoiceWorld"/> the tools' real seam reads.
+/// </summary>
+internal static class InvoiceLinkedFamilyCase
+{
+    /// <summary>The hop bound the invoice walk reads (<see cref="InvoiceLinks"/>); every bound test builds its chain from this.</summary>
+    public static int WalkBound => InvoiceLinks.MaxWalkHops;
+
+    /// <summary>Each family: "child-parent".</summary>
+    public static TheoryData<string> Keys => new()
+    {
+        "analysis-document", "event-event", "todo-event", "document-communication", "todo-servicerequest",
+    };
+
+    /// <summary>The child (its own link column named, left null), the edge column and the parent table of <paramref name="key"/>.</summary>
+    public static (InvoiceLinkedCase Child, string Column, string ParentTable) Of(string key) => key switch
+    {
+        "analysis-document" => (InvoiceLinkedCase.Of("analysis"), "sprk_documentid", "sprk_document"),
+        "event-event" => (InvoiceLinkedCase.Of("event"), "sprk_regardingevent", "sprk_event"),
+        "todo-event" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingevent", "sprk_event"),
+        "document-communication" => (InvoiceLinkedCase.Of("document-invoice"), "sprk_relatedcommunication", "sprk_communication"),
+        "todo-servicerequest" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingservicerequest", "sprk_servicerequest"),
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown family (test)."),
+    };
+
+    /// <summary>A row of <paramref name="table"/> linked to <paramref name="invoice"/> (none: unlinked).</summary>
+    public static Guid Row(InvoiceWorld world, string table, Guid? invoice) => invoice is { } i
+        ? world.LinkedChildRow(table, (InvoiceLinks.LinkColumnsOf(table)[0], i))
+        : world.LinkedChildRow(table);
+
+    /// <summary>A child of <paramref name="key"/> (its own link null) under a parent linked to <paramref name="invoice"/>.</summary>
+    public static Guid ChildUnder(InvoiceWorld world, string key, Guid? invoice)
+    {
+        var (child, column, parentTable) = Of(key);
+        return world.LinkedChildRow(child.Table, (column, Row(world, parentTable, invoice)));
+    }
+
+    /// <summary>A to-do under a chain of <paramref name="length"/> events (each regarding the next); the TOP one links to
+    /// <paramref name="topInvoice"/>.</summary>
+    public static Guid TodoUnderEventChain(InvoiceWorld world, int length, Guid? topInvoice)
+    {
+        var above = Row(world, "sprk_event", topInvoice);
+        for (var i = 1; i < length; i++)
+            above = world.LinkedChildRow("sprk_event", ("sprk_regardingevent", above));
+        return world.LinkedChildRow("sprk_todo", ("sprk_regardingevent", above));
+    }
+}
+
+/// <summary>
 /// Task 130-0b step 2: one class of CHILD row with an invoice link, as the handler tests name it: its table and the one link column
 /// the test sets (a document twice: through <c>sprk_invoice</c> and through <c>sprk_relatedinvoice</c>). The read shape comes from
 /// <see cref="InvoiceLinks.Tables"/>, never from the test.
@@ -317,6 +404,12 @@ internal sealed record InvoiceLinkedCase(string Key, string Table, string LinkCo
 
     /// <summary><see cref="SearchableKeys"/> crossed with each fault.</summary>
     public static TheoryData<string, string> SearchableKeysAndFaults => Faults(All.Where(c => c.Table != "sprk_communication"));
+
+    /// <summary>
+    /// F3b fix round 1, step 2: the service request (<see cref="InvoiceLinks.Supplemental"/>), for the REST / assistant parity tests. Not in
+    /// <see cref="All"/>: the step 2 theories predate its rule.
+    /// </summary>
+    public static InvoiceLinkedCase ServiceRequest { get; } = new("servicerequest", "sprk_servicerequest", "sprk_regardinginvoice");
 
     public string EntitySet => InvoiceLinks.Tables[Table].EntitySet!;
 

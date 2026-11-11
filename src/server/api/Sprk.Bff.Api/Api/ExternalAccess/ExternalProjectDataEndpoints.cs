@@ -1302,7 +1302,10 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.ServiceRequest:
                 try
                 {
-                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null, none);
+                    var serviceRequest = await RightsForServiceRequestAsync(
+                        caller, parentId, dataService, modules, withState: false, ct, hideInvoices);
+                    // F3b: a decision on the request's invoice that could not be made is the invoice-unreadable 503.
+                    return serviceRequest.InvoiceFaulted ? (none, InvoiceUnreadableProblem(), none) : (serviceRequest.Rights, null, none);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -1501,26 +1504,27 @@ public static class ExternalProjectDataEndpoints
     /// <see cref="ExternalDataService.ServiceRequestOpenState.Unknown"/> unless it was asked for AND the caller holds
     /// rights: a caller without rights never has a state to use.
     /// </summary>
-    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State)>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State, bool InvoiceFaulted)>
         RightsForServiceRequestAsync(
             CallerPrincipal caller,
             Guid serviceRequestId,
             ExternalDataService dataService,
             ExternalModuleRegistry modules,
             bool withState,
-            CancellationToken ct)
+            CancellationToken ct,
+            ExternalInvoiceHiding? hideInvoices = null)
     {
         const ExternalDataService.ServiceRequestOpenState noState = ExternalDataService.ServiceRequestOpenState.Unknown;
         var entity = ExternalDataService
             .GetDocumentParentBinding(ExternalDataService.DocumentParentKind.ServiceRequest).EntityLogicalName;
         var module = modules.FindByEntity(entity);
         if (module is null)
-            return (Spaarke.Dataverse.AccessRights.None, noState);
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
 
         // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
         // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
         if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
-            return (Spaarke.Dataverse.AccessRights.None, noState);
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
 
         // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
         // DataverseUnavailableException, which the caller turns into 503.
@@ -1537,9 +1541,24 @@ public static class ExternalProjectDataEndpoints
             requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
         }
 
-        return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
-            ? (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state)
-            : (Spaarke.Dataverse.AccessRights.None, noState);
+        if (requester is not { } requesterId || !module.IsRecordAccessible(caller, requesterId))
+            return (Spaarke.Dataverse.AccessRights.None, noState, false);
+
+        // ebilling-r1 task 130-0b F3b (uac-r2 ruling): a service request follows the child rule - one that links to an invoice the
+        // caller may not see is refused like an absent one (the uniform refusal), and a decision that could not be made is the
+        // invoice-unreadable 503. Only a caller who passed the requester gate reaches this read, so it is no existence oracle.
+        var links = await dataService.GetServiceRequestInvoiceLinksAsync(serviceRequestId, ct);
+        if (links is { Length: > 0 })
+        {
+            var decided = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+                caller, links, hideInvoices, dataService.Logger, "service request", ct);
+            if (decided == ExternalDataService.InvoiceLinkedRowState.Faulted)
+                return (Spaarke.Dataverse.AccessRights.None, noState, true);
+            if (decided == ExternalDataService.InvoiceLinkedRowState.Hidden)
+                return (Spaarke.Dataverse.AccessRights.None, noState, false);
+        }
+
+        return (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state, false);
     }
 
     /// <summary>The noun a document parent is named by in a ProblemDetails detail.</summary>
@@ -1593,9 +1612,24 @@ public static class ExternalProjectDataEndpoints
         // Fix round 2: a faulted decision is the 503, not the refusal.
         // Fix round 3 (Q2): a decision that could not be made, whether the caller's firms or this document's own invoice decision,
         // is the 503; only a decided "not visible" is the refusal.
+        // F3b: and by EVERY invoice link up its parent document chain (the list's walk and bound); a chain that cannot be read or
+        // decided is the same 503 unless a read link is decided not visible.
+        InvoiceLinks.RowInvoiceLinks chain;
+        try
+        {
+            chain = await dataService.ReadDocumentAncestorLinksAsync(documentId, document.Roots.Row, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return (false, true);
+        }
+
+        var links = ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, document.Roots.Row)
+            .Concat(chain.Invoices.Where(invoice => invoice != ExternalDocumentNarrowing.UnreadableLink))
+            .Distinct()
+            .ToList();
         var state = await ExternalDataService.DecideInvoiceLinkedRowAsync(
-            caller, ExternalDataService.InvoiceLinksOf(ExternalDocumentNarrowing.DocumentTable, document.Roots.Row),
-            hideInvoices, logger, "document", ct);
+            caller, links, hideInvoices, logger, "document", ct, chain.ChainUndecidable);
         return (state == ExternalDataService.InvoiceLinkedRowState.Visible, state == ExternalDataService.InvoiceLinkedRowState.Faulted);
     }
 
@@ -1741,9 +1775,10 @@ public static class ExternalProjectDataEndpoints
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
@@ -2766,8 +2801,12 @@ public static class ExternalProjectDataEndpoints
             return (false, false);
         if (links.Count == 0)
             return (true, false);
+        // EB-D-215: a single-record WRITE (delete-own, to-do PATCH) refuses an undecidable link with the uniform 403, so it never says
+        // truncated; only a list does. A single-record READ with an undecidable chain (the document GET, decided by
+        // ExternalDataService.DecideInvoiceLinkedRowAsync) answers 503 instead, per D-70 (a single faulted record returns 503); that
+        // is pinned by Single_AMalformedLinkOnTheChain_IsThe503.
         var (visible, faulted) = await ExternalDataService.HideInvoiceLinkedRowsAsync(
-            caller, new[] { links }, l => l, hideInvoices, logger, surface, ct).ConfigureAwait(false);
+            caller, new[] { links }, l => l, hideInvoices, logger, surface, ct, undecidableTruncates: false).ConfigureAwait(false);
         return (visible.Count == 1, visible.Count == 0 && faulted);
     }
 
@@ -2953,23 +2992,30 @@ public static class ExternalProjectDataEndpoints
     /// </remarks>
     private static async Task<IResult> DeleteOwnServiceRequest(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        ILogger<Program> logger, CancellationToken ct)
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // ONE row read gives the requester and the state. The requester gate decides first (a non-requester never has the
         // state used); a read that fails is the existing 503 service_request_unreadable and nothing is deleted.
+        // F3b: a request that links to an invoice the caller may not see is the uniform refusal; an undecidable one is the
+        // invoice-unreadable 503; nothing is deleted either way.
         Spaarke.Dataverse.AccessRights rights;
         ExternalDataService.ServiceRequestOpenState state;
+        bool invoiceFaulted;
         try
         {
-            (rights, state) = await RightsForServiceRequestAsync(callerContext, id, dataService, modules, withState: true, ct);
+            (rights, state, invoiceFaulted) = await RightsForServiceRequestAsync(
+                callerContext, id, dataService, modules, withState: true, ct, hideInvoices);
         }
         catch (ExternalDataService.DataverseUnavailableException)
         {
             return ServiceRequestUnreadableProblem();
         }
+
+        if (invoiceFaulted)
+            return InvoiceUnreadableProblem();
 
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {

@@ -132,6 +132,9 @@ public class ExternalMessageEndpointsTests
         // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
         // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
         _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        // ebilling-r1 task 130-0b F3b fix round 1: the same thread on the Web API side, where the invoice ancestor walk reads it by
+        // key (it links to no invoice and is filed under nothing).
+        _roots.AddThread(AppOnlySelectProjection.OpenThreadId, 100000000);
     }
 
     private CommunicationThreadReadService ReadService() => new(
@@ -179,7 +182,9 @@ public class ExternalMessageEndpointsTests
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
             data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
-            _invoiceHiding.Seam);
+            _invoiceHiding.Seam,
+            // F3b fix round 1: the filing-chain reader the route passes, the real walk over _roots.
+            data.ReadAncestorLinksOfRowsAsync);
     }
 
     /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
@@ -278,7 +283,9 @@ public class ExternalMessageEndpointsTests
             "_sprk_createdbycontact_value,_createdby_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
             "_sprk_communicationthread_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
             "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
-            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&" +
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value," +
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected above.
+            "_sprk_regardingservicerequest_value&" +
             "$expand=createdby($select=applicationid,accessmode)&");
         _impersonated.VerifyNoOtherCalls();
     }
@@ -1021,6 +1028,43 @@ public class ExternalMessageEndpointsTests
         body.Value.Select(m => m.SprkCommunicationid).Should().Equal(new[] { plain.ToString("D") });
     }
 
+    // EB-D-215 (ruling D-70): a message withheld because a link it decides on cannot be decided is a fault on the list, so the thread
+    // read says truncated, as for a failed decision. Must not fire: the fix3b theory above (a decided hidden invoice is no fault).
+    [Theory(DisplayName = "EB-D-215 thread (must fire): a message withheld because its invoice chain is undecidable (an unreadable link, a cycle above it) says truncated; a plain message is listed")]
+    [InlineData("unreadable-link")]
+    [InlineData("cycle")]
+    public async Task EbD215_AMessageWithAnUndecidableChain_OnAMattersThread_SaysTruncated(string kind)
+    {
+        var matter = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var undecidable = Guid.NewGuid();
+        var row = MessageRow(undecidable, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        if (kind == "unreadable-link")
+        {
+            row["_sprk_regardinginvoice_value"] = El("not-a-guid");
+        }
+        else
+        {
+            // Two events, each regarding the other, both filed under the matter.
+            var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+            _roots.AddFilingRow("sprk_event", first,
+                ("sprk_regardingmatter", "sprk_matter", matter), ("sprk_regardingevent", "sprk_event", second));
+            _roots.AddFilingRow("sprk_event", second,
+                ("sprk_regardingmatter", "sprk_matter", matter), ("sprk_regardingevent", "sprk_event", first));
+            row["_sprk_regardingevent_value"] = El(first.ToString("D"));
+        }
+
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _invoiceHiding = InvoiceHidingStub.NoneHidden();
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        var body = (await Get("matters", matter, Ciam(matter: matter)))
+            .Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>().Subject.Value!;
+
+        body.Value.Select(m => m.SprkCommunicationid).Should().Equal(new[] { plain.ToString("D") });
+        body.Truncated.Should().BeTrue("a message the walk could not decide is a fault on the list, not an answer");
+    }
+
     // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice whose core record is a work assignment is reached through it.
     [Fact(DisplayName = "130-0 fix2 K3 thread (must not fire / must fire / fault): an invoice reached only through its work assignment")]
     public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ItsThreadIsReadThroughIt()
@@ -1276,14 +1320,22 @@ public class ExternalMessageEndpointsTests
 
     // ── service requests: requester scope ──────────────────────────────────────────────────────────
 
-    private Guid ServiceRequestRequestedBy(Guid requester)
+    private Guid ServiceRequestRequestedBy(Guid requester, Guid? invoice = null)
     {
         var request = Guid.NewGuid();
-        _records[("sprk_servicerequest", request)] = new Dictionary<string, object?>
+        var record = new Dictionary<string, object?>
         {
             ["id"] = request,
             ["sprk_requestedby"] = Lookup(requester, "contact"),
         };
+        if (invoice is { } linked)
+            record["sprk_regardinginvoice"] = Lookup(linked, "sprk_invoice");
+        _records[("sprk_servicerequest", request)] = record;
+        // ebilling-r1 task 130-0b F3b fix round 1: the same request on the Web API side, where the invoice ancestor walk of a message
+        // filed under it reads it by key.
+        _roots.AddServiceRequest(request, requester);
+        if (invoice is { } webApiLink)
+            _roots.SetColumn("sprk_servicerequests", "sprk_servicerequestid", request.ToString(), "_sprk_regardinginvoice_value", webApiLink.ToString());
         return request;
     }
 
@@ -1298,7 +1350,72 @@ public class ExternalMessageEndpointsTests
 
         messages.Should().HaveCount(1);
         _lastOData.Should().Contain($"_sprk_regardingservicerequest_value eq {request}");
-        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby");
+        // ebilling-r1 task 130-0b F3b: a service request is an invoice-linked child, so the root read also selects its invoice link.
+        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby", "sprk_regardinginvoice");
+    }
+
+    // ebilling-r1 task 130-0b F3b: a service request follows the child rule on the message routes. A request with no invoice link
+    // is read as before; one linked to a visible invoice is read; one linked to a hidden invoice is the uniform refusal and no
+    // message is read; one whose invoice decision faulted is the invoice-unreadable 503 (only for the requester, so no oracle).
+    [Fact(DisplayName = "130-0b F3b service request thread (must not fire): no link and a visible invoice are read")]
+    public async Task F3b_ServiceRequestThread_NoLinkOrAVisibleInvoice_IsRead()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var plain = ServiceRequestRequestedBy(me);
+        var linked = ServiceRequestRequestedBy(me, invoice);
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", plain, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        Messages(await Get("servicerequests", plain, WorkforceContact(contactId: me))).Should().HaveCount(1);
+        _invoiceHiding.Calls.Should().NotContain(call => call.Contains(invoice));
+
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", linked, internalOnly: false, "2026-10-01T09:00:00Z"));
+        Messages(await Get("servicerequests", linked, WorkforceContact(contactId: me))).Should().HaveCount(1);
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice), "the linked request's invoice is decided");
+    }
+
+    [Fact(DisplayName = "130-0b F3b service request thread (must fire): a hidden invoice is the uniform refusal and no message is read")]
+    public async Task F3b_ServiceRequestThread_AHiddenInvoice_IsTheUniformRefusal_AndNoMessageIsRead()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me, invoice);
+        _invoiceHiding = InvoiceHidingStub.Hiding(invoice);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeTheSameAnswer(
+            await Get("servicerequests", request, WorkforceContact(contactId: me)),
+            await Get("servicerequests", Guid.NewGuid(), WorkforceContact(contactId: me)));
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact(DisplayName = "130-0b F3b service request thread (must fire): a faulted invoice decision is the 503 only for the requester; no predicate fails closed")]
+    public async Task F3b_ServiceRequestThread_AFaultedDecision_IsThe503_OnlyForTheRequester_AndNoPredicateFailsClosed()
+    {
+        var me = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me, invoice);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        var problem = (await Get("servicerequests", request, WorkforceContact(contactId: me))).Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+
+        // Someone else's request is the uniform refusal before any invoice decision, faulted or not.
+        ShouldBeTheSameAnswer(
+            await Get("servicerequests", request, WorkforceContact(contactId: Guid.NewGuid())),
+            await Get("servicerequests", Guid.NewGuid(), WorkforceContact(contactId: Guid.NewGuid())));
+
+        // No (a') predicate configured: a linked request cannot be decided; it is never shown.
+        var data = _roots.NewService();
+        var noPredicate = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "servicerequests", request, WorkforceContact(contactId: me), ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            hideInvoices: null);
+        noPredicate.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().NotBe(StatusCodes.Status200OK);
+        ShouldNotHaveReadMessages();
     }
 
     [Fact]

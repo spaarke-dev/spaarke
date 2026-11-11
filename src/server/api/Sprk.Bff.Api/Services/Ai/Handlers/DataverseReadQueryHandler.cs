@@ -450,8 +450,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             }
 
             // ebilling-r1 task 098 ((a')): an invoice-family row whose invoice the predicate hides (or cannot decide) is
-            // hidden. One hide-only app-only call for the page (its own batched reads); a fault throws into the error result
-            // below (no rows). A row without a readable id is hidden.
+            // hidden. One hide-only app-only call for the page (its own batched reads). A fault in the decision hides the asked rows
+            // (F3b: the family path never throws for a fault); only firms that cannot be read throw, into the error result below (no
+            // rows). A row without a readable id is hidden.
             IReadOnlySet<Guid>? hiddenInvoiceRows = null;
             if (guardInvoices &&
                 response.Body is { } invoiceBody && invoiceBody.TryGetProperty("value", out var invoiceValue) &&
@@ -467,8 +468,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             }
 
             // Task 130-0b step 2: a row of a CHILD table with an invoice link is hidden when any invoice it links to is hidden or
-            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); a fault
-            // there hides every invoice-linked row of the page rather than throwing. A row without a readable id is hidden.
+            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); with the
+            // caller's firms known, a fault there hides every invoice-linked row of the page rather than throwing; firms that cannot be
+            // read fail the tool call (F3b). A row without a readable id is hidden.
             IReadOnlySet<Guid>? hiddenInvoiceLinkedRows = null;
             if (guardInvoiceLinks &&
                 response.Body is { } linkedBody && linkedBody.TryGetProperty("value", out var linkedValue) &&

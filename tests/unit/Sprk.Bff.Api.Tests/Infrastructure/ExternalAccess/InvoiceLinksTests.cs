@@ -170,7 +170,11 @@ public sealed class InvoiceLinksTests
         linked[one].Should().Equal(invoiceB);
         linked[none].Should().BeEmpty();
         rows.Reads.Should().ContainSingle().Which.Set.Should().Be("sprk_documents");
-        rows.Reads[0].OData.Should().Contain("$select=sprk_documentid,_sprk_invoice_value,_sprk_relatedinvoice_value");
+        // F3b: the select is pinned; a child document also carries its parent document (the chain the decision follows) and, since
+        // F3b fix round 1, every other row it is filed under (agreement, communication, event, service request, to-do).
+        rows.Reads[0].OData.Should().Contain("$select=sprk_documentid,_sprk_invoice_value,_sprk_relatedinvoice_value,_sprk_parentdocument_value,"
+            + "_sprk_relatedagreement_value,_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedservicerequest_value,"
+            + "_sprk_relatedtodo_value&");
     }
 
     [Fact(DisplayName = "130-0b fail closed: a row that does not come back, or a link that is not a GUID, links to an invoice that cannot be decided")]

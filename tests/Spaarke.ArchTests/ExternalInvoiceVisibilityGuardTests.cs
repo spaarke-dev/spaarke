@@ -103,6 +103,8 @@ public class ExternalInvoiceVisibilityGuardTests
             "Projects a child module's invoice link columns so the predicate can decide each row by its invoice (ebilling-r1 task 130-0 fix round 1; ExecuteScopedFetchCoreAsync applies it). Names the invoice family only to leave it to the predicate's own family step; reads no row.",
         [$"{typeof(InvoiceLinks).FullName}::IsInvoice"] =
             "Picks the registry edges whose parent is sprk_invoice (ebilling-r1 task 130-0b), so the invoice ids a row links to can be decided BY the predicate; reads no row.",
+        [$"{typeof(InvoiceLinks).FullName}::BuildDescendants"] =
+            "Derives, once at type load, which tables are filed under an invoice-linked row but carry no link of their own (ebilling-r1 task 130-0 F3b); uses the family test only to leave the invoice family to its own (a') step; reads no row.",
         [$"{typeof(ExternalInvoiceReviewDetail).FullName}::Applies"] =
             "Decides whether a module is the invoice module for the review-detail projection (082c-2 fix round 3, U1); reads no row. The projection runs on rows the route already hid.",
         // ── reads that return no invoice-family row ──

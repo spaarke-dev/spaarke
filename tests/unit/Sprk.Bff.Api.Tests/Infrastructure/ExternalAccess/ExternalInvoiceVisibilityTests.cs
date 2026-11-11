@@ -723,8 +723,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
             .Should().BeEquivalentTo(new[] { unreadable });
 
         _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
-        var act = () => service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
-        await act.Should().ThrowAsync<Exception>("a failed invoice read gives the caller no data");
+        // F3b ruling: on the family path a fault hides the asked rows; it never throws (the caller gets no data either way).
+        (await service.HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms))
+            .Should().BeEquivalentTo(new[] { submission }, "a failed invoice read gives the caller no data: the row is hidden");
         (await Decide("contact", invoice)).IsVisible(invoice).Should().BeFalse("the predicate's own submission read failed");
     }
 
@@ -1579,16 +1580,17 @@ public sealed partial class ExternalInvoiceVisibilityTests
     }
 
     [Fact]
-    public async Task TaintClosure_ASubmissionDecisionFault_Throws_SoTheToolReturnsNoData()
+    public async Task TaintClosure_ASubmissionDecisionFault_HidesTheRow_ItNeverThrows()
     {
         var submission = _world.PendingSubmission(
             _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()), InvoiceWorld.InternalChannel);
         _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
 
-        var act = () => _world.NewService(_identity.Object)
+        // F3b ruling: on the family path a fault hides the asked rows (the tool returns no data for them); it never throws.
+        var hidden = await _world.NewService(_identity.Object)
             .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_invoicesubmission", new[] { submission }, _world.RootFlags, _world.SystemUserFirms);
 
-        await act.Should().ThrowAsync<Exception>();
+        hidden.Should().BeEquivalentTo(new[] { submission });
     }
 
     [Theory]
@@ -1627,15 +1629,16 @@ public sealed partial class ExternalInvoiceVisibilityTests
     }
 
     [Fact]
-    public async Task TaintClosure_AFault_Throws_SoTheToolReturnsNoData()
+    public async Task TaintClosure_AFault_HidesTheRow_SoTheToolReturnsNoData()
     {
         var row = _world.FamilyRow("sprk_billingevent", invoice: Guid.NewGuid());
         _world.Faults["sprk_billingevents"] = HttpStatusCode.ServiceUnavailable;
 
-        var act = () => _world.NewService(_identity.Object)
+        // F3b ruling: on the family path a fault hides the asked rows; it never throws.
+        var hidden = await _world.NewService(_identity.Object)
             .HideInvoiceFamilyRowsAsync(_world.NewFamilyCaller(), "sprk_billingevent", new[] { row }, _world.RootFlags, _world.SystemUserFirms);
 
-        await act.Should().ThrowAsync<Exception>();
+        hidden.Should().BeEquivalentTo(new[] { row });
     }
 
     [Fact]
@@ -2098,9 +2101,30 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var row = new Dictionary<string, object?> { [linked.IdColumn] = id.ToString() };
         foreach (var column in linked.LinkColumns)
             row[$"_{column}_value"] = null;
+        // F3b: the Web API answers a selected parent column that is not set as an explicit null (a document's parent document).
+        foreach (var edge in InvoiceLinks.Descendants.TryGetValue(table, out var descendant) ? descendant.Parents : Array.Empty<InvoiceLinks.ParentEdge>())
+            row[edge.ValueColumn] = null;
         foreach (var (column, value) in links)
             row[$"_{column}_value"] = value?.ToString();
         Seed(linked.EntitySet!, row);
+        return id;
+    }
+
+    /// <summary>
+    /// F3b: a row of a DESCENDANT table (<see cref="InvoiceLinks.Descendants"/>: an analysis output, an event log, a file version ...),
+    /// with each named parent column (logical name, written as <c>_col_value</c>) set to the parent's id as text (or any raw text); every
+    /// other parent column is an explicit null (not filed). Returns its id.
+    /// </summary>
+    public Guid DescendantRow(string table, params (string Column, object? Parent)[] parents)
+    {
+        var shape = InvoiceLinks.Descendants[table];
+        var id = Guid.NewGuid();
+        var row = new Dictionary<string, object?> { [shape.IdColumn] = id.ToString() };
+        foreach (var edge in shape.Parents)
+            row[edge.ValueColumn] = null;
+        foreach (var (column, parent) in parents)
+            row[$"_{column}_value"] = parent?.ToString();
+        Seed(shape.EntitySet!, row);
         return id;
     }
 
@@ -2109,6 +2133,13 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     {
         lock (_sets)
             _sets[set].Single(r => (string?)r[idColumn] == id.ToString())[column] = value;
+    }
+
+    /// <summary>F3b fix round 1, step 2: the id of every seeded row of <paramref name="set"/>.</summary>
+    public IReadOnlyList<Guid> Ids(string set, string idColumn)
+    {
+        lock (_sets)
+            return _sets.TryGetValue(set, out var rows) ? rows.Select(r => Guid.Parse((string)r[idColumn]!)).ToList() : new List<Guid>();
     }
 
     /// <summary>Task 130-0 fix round 3c: the document <paramref name="id"/> as a read that did not return <paramref name="column"/> answers it.</summary>

@@ -387,7 +387,7 @@ public static class ExternalMessageEndpoints
 
         return GetMessagesCoreAsync(
             root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices);
+            logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices, dataService.ReadAncestorLinksOfRowsAsync);
     }
 
     /// <summary>
@@ -407,7 +407,8 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         LiveParentRootReader? readLiveParents = null,
-        ExternalInvoiceHiding? hideInvoices = null)
+        ExternalInvoiceHiding? hideInvoices = null,
+        InvoiceAncestorReader? readInvoiceAncestors = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
@@ -454,7 +455,8 @@ public static class ExternalMessageEndpoints
                 .ReadRegardingAppOnlyAsync(
                     messageRoot.EntityLogicalName, id, principal.SystemUserId,
                     RootsReadableFor(
-                        messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents, hideInvoices, invoiceFault), ct)
+                        messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents, hideInvoices, invoiceFault,
+                        readInvoiceAncestors), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -498,13 +500,13 @@ public static class ExternalMessageEndpoints
     internal static MessageRootsFilter RootsReadableFor(
         MessageRoot root, Guid id, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
         LiveParentRootReader? readLiveParents = null, ExternalInvoiceHiding? hideInvoices = null,
-        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null) =>
+        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null, InvoiceAncestorReader? readInvoiceAncestors = null) =>
         SecureRootsFilter(
             principal, readNonSecureRoots, logger, readLiveParents,
             string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
                 ? (root.EntityLogicalName, id)
                 : null,
-            hideInvoices, invoiceFault);
+            hideInvoices, invoiceFault, readInvoiceAncestors);
 
     /// <summary>
     /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
@@ -521,7 +523,8 @@ public static class ExternalMessageEndpoints
     internal static MessageRootsFilter SecureRootsFilter(
         CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
         LiveParentRootReader? readLiveParents = null, (string Table, Guid Id)? authorizedParent = null,
-        ExternalInvoiceHiding? hideInvoices = null, System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null) =>
+        ExternalInvoiceHiding? hideInvoices = null, System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null,
+        InvoiceAncestorReader? readInvoiceAncestors = null) =>
         async (candidates, ct) =>
         {
             var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
@@ -535,8 +538,11 @@ public static class ExternalMessageEndpoints
                 logger, ct).ConfigureAwait(false);
             // ebilling-r1 task 098 (uac-r2 2026-10-21): a message about an invoice reaches an external caller only when that
             // invoice passes (a') too (the 065 gate is the read service's). The route's own invoice is the gate's decision.
+            // F3b fix round 1: and every invoice of the rows the message is filed under (its thread, and the event, analysis or service
+            // request it regards, up the chain). A chain read that fails, or no reader, withholds every message that has a parent.
+            var ancestors = await AncestorInvoicesOfAsync(candidates, readInvoiceAncestors, logger, ct).ConfigureAwait(false);
             var invoices = await RegardingInvoicesVisibleAsync(
-                    principal, candidates, authorizedParent, hideInvoices, logger, ct, invoiceFault)
+                    principal, candidates, authorizedParent, hideInvoices, logger, ct, invoiceFault, ancestors)
                 .ConfigureAwait(false);
             return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live, authorizedParent))
                 && invoices(r);
@@ -549,23 +555,87 @@ public static class ExternalMessageEndpoints
         ExternalDataService.InvoiceLinksOf(CommunicationTable, row.Row);
 
     /// <summary>
+    /// F3b fix round 1: per candidate the invoices of the rows the message is filed under, up the chain (<paramref name="read"/>,
+    /// <see cref="InvoiceLinks.ParentEdgesOf"/> of a communication). <see langword="null"/> for a row whose chain read failed. No
+    /// reader: every row that names a parent is <see langword="null"/> (fail closed); a row naming none has none. Keyed by VALUE (the
+    /// record's equality: its stamps and the row it was read from), because the read service asks the predicate with a new
+    /// <see cref="MessageRootLookups"/> built from the same row, never the instance it passed in.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<MessageRootLookups, IReadOnlyList<Guid>?>> AncestorInvoicesOfAsync(
+        IReadOnlyCollection<MessageRootLookups> candidates, InvoiceAncestorReader? read, ILogger logger, CancellationToken ct)
+    {
+        var rows = candidates.ToList();
+        var result = new Dictionary<MessageRootLookups, IReadOnlyList<Guid>?>();
+        IReadOnlyList<IReadOnlyList<Guid>?> chains;
+        if (read is not null)
+        {
+            chains = await read(
+                    CommunicationTable,
+                    rows.Select(r => (MessageIdOf(r.Row), r.Row)).ToList(), ct)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            chains = rows.Select(r => InvoiceLinks.FirstParentsOf(CommunicationTable, MessageIdOf(r.Row), r.Row).Count == 0
+                ? (IReadOnlyList<Guid>?)Array.Empty<Guid>()
+                : null).ToList();
+            if (chains.Any(c => c is null))
+                logger.LogError("[EXT-MESSAGES] No filing-chain reader is configured; messages filed under another row are withheld (fail closed).");
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+            result[rows[i]] = i < chains.Count ? chains[i] : null; // a reader that answered too few rows decides nothing for the rest
+        return result;
+    }
+
+    /// <summary>A message row's id (<see cref="Guid.Empty"/> when it is absent or not a GUID: never walked, so undecidable).</summary>
+    private static Guid MessageIdOf(IReadOnlyDictionary<string, System.Text.Json.JsonElement>? row) =>
+        row is not null && ExternalInvoiceVisibility.LinkOf(row, MessageIdColumn) is { } id && id != ExternalDocumentNarrowing.UnreadableLink
+            ? id
+            : Guid.Empty;
+
+    /// <summary>The communication's primary key column.</summary>
+    private const string MessageIdColumn = "sprk_communicationid";
+
+    /// <summary>
     /// Task 098: the per-message (a') term of <see cref="SecureRootsFilter"/>. Reads the predicate ONCE for every invoice the
     /// candidates regard (none: no read). A message regarding an invoice the predicate hides, a lookup that is not a GUID, and
     /// any invoice when no predicate is given (fail closed) are withheld; the route's own invoice
-    /// (<paramref name="authorizedParent"/>) was decided by the gate and is not asked again.
+    /// (<paramref name="authorizedParent"/>) was decided by the gate and is not asked again. F3b fix round 1: with
+    /// <paramref name="ancestors"/>, the invoices of the rows each message is filed under count too.
     /// </summary>
     private static async Task<Func<MessageRootLookups, bool>> RegardingInvoicesVisibleAsync(
         CallerPrincipal principal, IReadOnlyCollection<MessageRootLookups> candidates, (string Table, Guid Id)? authorizedParent,
         ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct,
-        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null)
+        System.Runtime.CompilerServices.StrongBox<bool>? invoiceFault = null,
+        IReadOnlyDictionary<MessageRootLookups, IReadOnlyList<Guid>?>? ancestors = null)
     {
         bool IsAuthorized(Guid id) =>
             authorizedParent is { } parent
             && string.Equals(parent.Table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase)
             && id == parent.Id;
 
+        // F3b fix round 1: a row's own invoices and its ancestors'. A row whose chain read failed is withheld and the read says
+        // truncated; without the ancestor map (a caller that predates it) only the row's own links are decided.
+        bool chainFailed = false;
+        IReadOnlyList<Guid>? InvoicesOf(MessageRootLookups row)
+        {
+            if (ancestors is null)
+                return RegardingInvoicesOf(row);
+            if (!ancestors.TryGetValue(row, out var chain) || chain is null)
+                return null;
+            return RegardingInvoicesOf(row).Concat(chain).Distinct().ToList();
+        }
+
+        if (ancestors is not null && candidates.Any(c => InvoicesOf(c) is null))
+        {
+            chainFailed = true;
+            logger.LogWarning("[EXT-MESSAGES] The filing chain of {Count} message(s) could not be read; they are withheld (fail closed).",
+                candidates.Count(c => InvoicesOf(c) is null));
+        }
+
         var asked = candidates
-            .SelectMany(RegardingInvoicesOf)
+            .SelectMany(c => InvoicesOf(c) ?? Array.Empty<Guid>())
             .Where(id => !IsAuthorized(id) && id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
             .Distinct()
             .ToList();
@@ -589,10 +659,13 @@ public static class ExternalMessageEndpoints
 
         // Task 130-0 fix round 2 (F2): a decision that could not be made (faulted, or no predicate) withholds every message regarding
         // an asked invoice; the read reports it as Truncated, so a fault never reads as "there are no more messages".
-        if (invoiceFault is not null && asked.Count > 0 && (decision is null || decision.AnyFaulted))
-            invoiceFault.Value = true; // task 130-0 fix round 3b: a whole-read fault or one invoice's own failed decision
+        // EB-D-215 (ruling D-70): so does a message withheld because a link it decides on cannot be decided (a chain past the bound, a
+        // cycle, an unreadable link or a parent that does not come back: the unreadable link, never visible).
+        var undecidable = candidates.Any(c => InvoicesOf(c) is { } links && links.Contains(ExternalDocumentNarrowing.UnreadableLink));
+        if (invoiceFault is not null && ((asked.Count > 0 && (decision is null || decision.AnyFaulted)) || chainFailed || undecidable))
+            invoiceFault.Value = true; // task 130-0 fix round 3b: a whole-read fault or one invoice's own failed decision; F3b: a chain fault
 
-        return row => RegardingInvoicesOf(row).All(id =>
+        return row => InvoicesOf(row) is { } invoices && invoices.All(id =>
             IsAuthorized(id)
             || (id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink && decision is not null && !decision.Faulted
                 && decision.IsVisible(id)));
@@ -799,9 +872,13 @@ public static class ExternalMessageEndpoints
         }
 
         // Task 187 D4: a module with the secure-roots rule reads every attribute the rule reads, not only the dimensions.
+        // ebilling-r1 task 130-0b F3b: a root of the message routes that is an invoice-linked CHILD (a service request) also reads its
+        // invoice link columns, so the invoice rule can be applied to it like any child row.
+        var invoiceLinkedChild = ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(root.EntityLogicalName);
         var attributes = (module.RequireReadOnSecureRoots
                 ? dimensions.Select(d => d.Attribute).Concat(module.RootRuleAttributes)
                 : dimensions.Select(d => d.Attribute))
+            .Concat(invoiceLinkedChild ? InvoiceLinks.LinkColumnsOf(root.EntityLogicalName) : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -830,7 +907,12 @@ public static class ExternalMessageEndpoints
         }
 
         if (!module.RequireReadOnSecureRoots)
-            return (module.ScopeRows(principal, new[] { row }).Count > 0, row, false);
+        {
+            if (module.ScopeRows(principal, new[] { row }).Count == 0)
+                return (false, row, false);
+            return (await InvoiceLinkedChildReadableAsync(root, id, invoiceLinkedChild, record, principal, hideInvoices, logger, ct)
+                .ConfigureAwait(false), row, false);
+        }
 
         var live = await ExternalMultiRootRule.ReadLiveParentsAsync(readLiveParents, new[] { module.LiveParents(row) }, logger, ct)
             .ConfigureAwait(false);
@@ -875,7 +957,44 @@ public static class ExternalMessageEndpoints
             }
         }
 
-        return (true, row, false);
+        return (await InvoiceLinkedChildReadableAsync(root, id, invoiceLinkedChild, record, principal, hideInvoices, logger, ct)
+            .ConfigureAwait(false), row, false);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b (uac-r2 ruling): a root of the message routes that is an invoice-linked child (a service request)
+    /// follows the child rule - every invoice it links to must be visible to <paramref name="principal"/>. Not such a root, or no link:
+    /// readable. A link that is decided not visible, and one that cannot be read, refuse like a missing record. A decision that could
+    /// not be made (no predicate, the caller's firms, the invoice's own decision) throws
+    /// <see cref="ExternalDataService.DataverseUnavailableException"/>, answered as the <c>InvoiceUnreadableReasonCode</c> 503. Reached
+    /// only after the record check, so it is no existence oracle.
+    /// </summary>
+    private static async Task<bool> InvoiceLinkedChildReadableAsync(
+        MessageRoot root, Guid id, bool invoiceLinkedChild, IReadOnlyDictionary<string, object?> record, CallerPrincipal principal,
+        ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
+    {
+        if (!invoiceLinkedChild)
+            return true;
+
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(root.EntityLogicalName))
+        {
+            // The record read projects an unset lookup as null or leaves it out; a value that is not a lookup id cannot be read.
+            if (record.TryGetValue(column, out var value) && value is not null)
+                links.Add(LookupId(value) ?? ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        var state = await ExternalDataService.DecideInvoiceLinkedRowAsync(
+            principal, links.Distinct().ToList(), hideInvoices, logger, "message root", ct).ConfigureAwait(false);
+        if (state == ExternalDataService.InvoiceLinkedRowState.Faulted)
+        {
+            logger.LogWarning(
+                "[EXT-MESSAGES] {Entity} {RecordId}: the decision on its invoice could not be made for a caller who reaches it; answered as unavailable.",
+                root.EntityLogicalName, id);
+            throw new ExternalDataService.DataverseUnavailableException("The invoice could not be decided for the caller.");
+        }
+
+        return state == ExternalDataService.InvoiceLinkedRowState.Visible;
     }
 
     /// <summary>

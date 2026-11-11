@@ -128,16 +128,18 @@ public sealed class InvoiceLinkedChildRowsTests
         hidden.Should().BeEquivalentTo(new[] { linked });
     }
 
-    [Fact(DisplayName = "130-0b step 2 seam: firms that cannot be read hide every invoice-linked row and show an unlinked one")]
-    public async Task UnreadableFirms_HideLinkedRows_ShowUnlinked()
+    [Fact(DisplayName = "130-0b step 2 seam (F3b ruling): firms that cannot be read fail the call when a row links to an invoice; an unlinked row alone needs no firm")]
+    public async Task UnreadableFirms_FailTheCall_WhenARowIsLinked()
     {
         var world = new InvoiceWorld { CallerFirmsFault = new TimeoutException("firms (test)") };
         var own = world.OwnedInvoice();
         var linked = world.LinkedChildRow("sprk_memo", ("sprk_regardinginvoice", own));
         var unlinked = world.LinkedChildRow("sprk_memo");
 
-        var hidden = await HideAsync(world, world.NewFamilyCaller(), "sprk_memo", linked, unlinked);
+        var act = () => HideAsync(world, world.NewFamilyCaller(), "sprk_memo", linked, unlinked);
+        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
 
-        hidden.Should().BeEquivalentTo(new[] { linked });
+        var alone = await HideAsync(world, world.NewFamilyCaller(), "sprk_memo", unlinked);
+        alone.Should().BeEmpty("no row links to an invoice: the rule does not apply, and no firm is read");
     }
 }

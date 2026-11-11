@@ -346,6 +346,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             + ",_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value"
             + ",_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value"
             + ",_sprk_regardingreportcard_value"
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected
+            // above (InvoiceLinks.ParentValueColumnsOf).
+            + ",_sprk_regardingservicerequest_value"
             + "&$orderby=sprk_duedate asc,sprk_eventid asc");
     }
 
@@ -478,10 +481,24 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             ["sprk_documents"] = "sprk_documentid",
             ["sprk_communications"] = "sprk_communicationid",
             ["sprk_communicationthreads"] = "sprk_communicationthreadid",
+            // ebilling-r1 task 130-0b F3b fix round 1: the invoice ancestor walk reads every parent table of a document, to-do, event
+            // and communication by key, the same way (InvoiceLinks.Descendants).
+            ["sprk_todos"] = "sprk_todoid",
+            ["sprk_events"] = "sprk_eventid",
+            ["sprk_servicerequests"] = "sprk_servicerequestid",
+            ["sprk_agreements"] = "sprk_agreementid",
+            ["sprk_analysises"] = "sprk_analysisid",
         };
 
         /// <summary>Task 188: entity sets whose by-key reads answer this status (a narrowing read fault).</summary>
         public Dictionary<string, HttpStatusCode> KeyReadFaults { get; } = new();
+
+        /// <summary>
+        /// ebilling-r1 task 130-0 F3b: when set, a by-key read whose <c>$select</c> names this text answers 503. Used to fail the invoice
+        /// chain read (it alone selects an invoice link column of a parent document) while the document narrowing's own hop reads
+        /// still answer.
+        /// </summary>
+        public string? KeyReadFaultWhenSelecting { get; set; }
 
         /// <summary>Task 188: every by-key read sent to one of <see cref="KeyReadSets"/> ("set?query", unescaped).</summary>
         public IReadOnlyList<string> KeyReads(string set) =>
@@ -572,6 +589,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             FlagFault = null;
             FlagReadThrows = false;
             KeyReadFaults.Clear();
+            KeyReadFaultWhenSelecting = null;
             MaskedColumns.Clear();
             FilingReadThrows = false;
             FilingFaultEntity = null;
@@ -949,6 +967,26 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// Web API returns a selected lookup that is not set as null), except a <see cref="MaskedColumns"/> one, which is omitted. With
         /// no <c>$select</c> the whole row, less the masked columns.
         /// </summary>
+        /// <summary>
+        /// F3b fix round 1: a filing-world (SDK) row as the Web API answers it: the key as text, a lookup <c>x</c> as <c>_x_value</c> (its id
+        /// as text), an option set as its number, any other value as is.
+        /// </summary>
+        private static Dictionary<string, object?> WebApiShapeOf(Entity stored, string keyColumn)
+        {
+            var row = new Dictionary<string, object?> { [keyColumn] = stored.Id.ToString() };
+            foreach (var (name, value) in stored.Attributes)
+            {
+                switch (value)
+                {
+                    case EntityReference reference: row[$"_{name}_value"] = reference.Id.ToString(); break;
+                    case OptionSetValue option: row[name] = option.Value; break;
+                    default: row[name] = value; break;
+                }
+            }
+
+            return row;
+        }
+
         private Dictionary<string, object?> Project(Dictionary<string, object?> row, HashSet<string>? columns)
         {
             var projected = new Dictionary<string, object?>();
@@ -1037,6 +1075,9 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             {
                 if (KeyReadFaults.TryGetValue(set, out var keyFault))
                     return Task.FromResult(new HttpResponseMessage(keyFault));
+                if (KeyReadFaultWhenSelecting is { } marker
+                    && Regex.Match(url, @"\$select=([^&]*)").Groups[1].Value.Contains(marker, StringComparison.Ordinal))
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
                 var keys = Regex.Matches(url, $@"{keyColumn} eq ([0-9a-fA-F-]{{36}})")
                     .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1049,6 +1090,18 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .Where(r => r.TryGetValue(keyColumn, out var k) && k is string key && keys.Contains(key))
                         .Select(r => Project(r, keyColumns))
                         .ToList();
+                }
+
+                // ebilling-r1 task 130-0b F3b fix round 1: ONE record, two planes. A record seeded only in the filing world (a
+                // communication, an event ... a row is filed under) is the same Dataverse record the Web API answers, so a by-key
+                // read that finds no HTTP-side row answers it from the filing world (its lookups as _col_value ids).
+                var answered = keyed.Select(r => r.TryGetValue(keyColumn, out var k) ? k as string : null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                lock (_filing)
+                {
+                    keyed.AddRange(_filing
+                        .Where(kv => string.Equals(kv.Key.Table + "id", keyColumn, StringComparison.OrdinalIgnoreCase)
+                                     && keys.Contains(kv.Key.Id.ToString()) && !answered.Contains(kv.Key.Id.ToString()))
+                        .Select(kv => Project(WebApiShapeOf(kv.Value, keyColumn), keyColumns)));
                 }
 
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

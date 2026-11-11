@@ -192,7 +192,9 @@ public sealed class ExternalLiveParentRuleTests
     /// </summary>
     private static Dictionary<string, JsonElement> CommunicationRow(Guid? invoice)
     {
+        // F3b fix round 1: and every filing edge column the invoice ancestor walk follows (an explicit null each: not filed).
         var row = ExternalMultiRootRule.LiveParentSelect("sprk_communication")
+            .Concat(InvoiceLinks.ParentValueColumnsOf("sprk_communication")).Distinct()
             .ToDictionary(column => column, _ => JsonSerializer.SerializeToElement<string?>(null));
         if (invoice is { } i)
             row["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(i.ToString());

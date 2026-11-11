@@ -994,12 +994,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [InlineData(DeletableKind.Document, "sprk_documents",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value,_sprk_relatedinvoice_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value,_sprk_relatedinvoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value,_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedtodo_value")]
     [InlineData(DeletableKind.Todo, "sprk_todos",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value,_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingcommunication_value,_sprk_regardingdocument_value,_sprk_regardingevent_value,_sprk_regardingservicerequest_value")]
     [InlineData(DeletableKind.Event, "sprk_events",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,_sprk_regardinginvoice_value,_sprk_regardingagreement_value,_sprk_regardinganalysis_value,_sprk_regardingcommunication_value,_sprk_regardingevent_value,_sprk_regardingservicerequest_value")]
     // ebilling-r1 task 130-0 fix round 2 (F1): and every invoice link column the table has (InvoiceLinks), not already selected.
+    // F3b fix round 1: and every filing edge column the invoice ancestor walk follows (InvoiceLinks.ParentValueColumnsOf), not already selected.
     public void DeleteTargetUrl_SelectsBothStampsAndEveryParentLookup(DeletableKind kind, string entitySet, string select)
     {
         BuildDeleteTargetUrl("https://org.test/api/data/v9.2", kind, RecordA)
@@ -1025,6 +1026,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         {
             Project(RecordA), new DeleteTargetParent(DocumentParentKind.ServiceRequest, RequestA),
         });
+        // F3b fix round 1: the request the document is filed under was walked and links to no invoice (must not fire).
+        target.InvoiceLinks.Should().BeEmpty();
 
         (await NewService(new StatusHandler(HttpStatusCode.NotFound)).GetDeleteTargetAsync(DeletableKind.Todo, RecordB))
             .Should().BeNull();
@@ -1621,13 +1624,38 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     /// <summary>Answers a single-row GET with <paramref name="row"/> as its JSON body.</summary>
+    /// <summary>
+    /// The Web API over ONE stored row. The single-row read (<c>set(id)?$select=...</c>) answers <paramref name="row"/> projected through
+    /// <c>$select</c>, a selected column that is not set as an explicit null. ebilling-r1 task 130-0b F3b fix round 1: a by-key read of
+    /// another set (<c>set?$select=...&amp;$filter=xid eq a or ...</c>, the invoice ancestor walk's) answers each asked id as a row of that
+    /// set with every selected column an explicit null (it exists, links to no invoice and is filed under nothing).
+    /// </summary>
     private sealed class JsonRowHandler(IReadOnlyDictionary<string, object?> row) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var url = Uri.UnescapeDataString(request.RequestUri!.ToString());
+            var selected = System.Text.RegularExpressions.Regex.Match(url, @"\$select=([^&]*)").Groups[1].Value.Split(',');
+            object body;
+            if (System.Text.RegularExpressions.Regex.IsMatch(request.RequestUri.AbsolutePath, @"\([0-9a-fA-F-]{36}\)$"))
             {
-                Content = new StringContent(JsonSerializer.Serialize(row), System.Text.Encoding.UTF8, "application/json"),
+                body = selected.ToDictionary(c => c, c => row.TryGetValue(c, out var value) ? value : null);
+            }
+            else
+            {
+                var key = System.Text.RegularExpressions.Regex.Match(url, @"\$filter=(\w+) eq ").Groups[1].Value;
+                var ids = System.Text.RegularExpressions.Regex.Matches(url, $@"{key} eq ([0-9a-fA-F-]{{36}})").Select(m => m.Groups[1].Value);
+                body = new
+                {
+                    value = ids.Select(id => selected.ToDictionary(c => c, c => c == key ? (object?)id : null)).ToList(),
+                };
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json"),
             });
+        }
     }
 
     // =====================================================================
@@ -2088,6 +2116,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             Targets.Clear();
             LiveParents.Clear();
             Requesters.Clear();
+            ServiceRequestInvoices.Clear();
             States.Clear();
             Volatile.Write(ref _requesterAndStateReads, 0);
             StateFault = null;
@@ -2151,5 +2180,11 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
                 return Task.FromException<Guid?>(fault);
             return Task.FromResult(Requesters.TryGetValue(serviceRequestId, out var requester) ? requester : (Guid?)null);
         }
+
+        /// <summary>ebilling-r1 task 130-0 F3b: service request id → the invoices it links to. Absent = none.</summary>
+        public ConcurrentDictionary<Guid, Guid[]> ServiceRequestInvoices { get; } = new();
+
+        public override Task<Guid[]> GetServiceRequestInvoiceLinksAsync(Guid serviceRequestId, CancellationToken ct = default) =>
+            Task.FromResult(ServiceRequestInvoices.TryGetValue(serviceRequestId, out var links) ? links : Array.Empty<Guid>());
     }
 }
