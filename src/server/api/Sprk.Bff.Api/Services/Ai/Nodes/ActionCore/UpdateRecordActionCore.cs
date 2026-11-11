@@ -203,10 +203,16 @@ internal sealed class UpdateRecordActionCore
         // person. WriteIdentity.Caller (the pre-#2251 sets only) is the field-mapping push's, which #2253 leaves to its
         // caller's own privileges; a playbook payload is built by configuration or a model, not by the runner, so the
         // runner's own rights are not the only lock on it (PlaybookRunIdentityTests).
+        // #2250 (owner decision, option 2): the Update Record node's payload (Configuration) is asked as WriteIdentity.Playbook,
+        // which also refuses a root's Assigned-To columns, so a playbook never causes an Assigned-To grant. A confirmed proposal
+        // with no person to confirm it keeps WriteIdentity.AppOnly.
         if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal
                 || input.ImpersonateSystemUserId is not { } confirmingUser || confirmingUser == Guid.Empty)
             && InheritedAccessPermission.RefuseAppOnlyWrite(
-                input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
+                input.EntityLogicalName, updatePayload.Keys,
+                input.PayloadSource == UpdateRecordPayloadSource.Configuration
+                    ? InheritedAccessPermission.WriteIdentity.Playbook
+                    : InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
