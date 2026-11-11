@@ -48,10 +48,12 @@ METHOD_DOCX = "Spaarke Review Method.docx"
 NDA_SKILLS = ("nda-review", "nda-library-review", "accelerator-setup")
 
 # the library playbooks of the package: practice (topics catalogue), Type folder under Cowork/Playbooks, master file
+# method_inside: the Word copy starts with the review method (non-contract only; gap #36, test G-5). A contract
+# playbook never gets it: Word's Review contract takes one file and imports the surrounding text as guidelines.
 PLAYBOOKS = [
-    {"practice": "nda", "folder": "NDA", "require_side": True,
+    {"practice": "nda", "folder": "NDA", "require_side": True, "method_inside": False,
      "source": os.path.join(ROOT, "practices", "nda", "positions", "Spaarke NDA – Mutual v1.2.md")},
-    {"practice": "legal-hold", "folder": "Legal Hold Notice", "require_side": False,
+    {"practice": "legal-hold", "folder": "Legal Hold Notice", "require_side": False, "method_inside": True,
      "source": os.path.join(ROOT, "practices", "legal-hold", "positions",
                             "Spaarke Legal Hold Notice – Employee Custodians v1.0.md")},
 ]
@@ -115,8 +117,9 @@ def render_playbook(spec, work, lk):
     stem = os.path.splitext(os.path.basename(spec["source"]))[0]
     folder = os.path.join(lk, spec["folder"])
     os.makedirs(os.path.join(folder, "Playbook master"), exist_ok=True)
-    four = rw.render_table(pb, cat, os.path.join(folder, f"{stem}.docx"))
-    problems = rw.check_table(four, pb, cat)
+    preface = docs.method_preface(read(REVIEW_METHOD_SRC)) if spec["method_inside"] else None
+    four = rw.render_table(pb, cat, os.path.join(folder, f"{stem}.docx"), preface=preface)
+    problems = rw.check_table(four, pb, cat, preface=preface)
     readable = rw.render_readable(pb, cat, os.path.join(folder, f"{stem} (agent knowledge).docx"))
     problems += rw.check_readable(readable, pb, cat)
     if problems:

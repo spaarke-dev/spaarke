@@ -111,9 +111,16 @@ Round 1 showed: W-1 passes; G-1 failed 3 of 3 (the method file was never read); 
 the method works for a non-contract; a contract review takes only one attached file. Results: `results.md`, gaps
 #36–#38. Run in this order. G-4 (`.md` playbook) is dropped: attaching the `.docx` works.
 
-**Before you start.** The decoy was edited in round 1 (its "Review protocol" line became a link). Replace both
-decoy copies (`Spaarke Test Documents/Decoy/` and `Documents/`) with a fresh one from the test zip. Rename each
-test copy before the first prompt, for example `… - R2 G-1b.docx`.
+**Before you start.**
+1. **Install the rebuilt package (2026-11-11).** Extract the new `Spaarke Legal Accelerator - Individual base
+   v0.1.zip` into `Documents` again and choose **Replace the files in the destination**. What changed: the legal
+   hold Word playbook now starts with the review method (G-5); the review method copies the playbook version from
+   the playbook's own text (gap #38); the Read me has a folder guide and the new steps.
+2. **Fresh decoy.** The decoy was edited in round 1 (its "Review protocol" line became a link), and the method
+   changed. Extract the new test zip's `Decoy/Spaarke Review Method.docx` and replace both decoy copies
+   (`Spaarke Test Documents/Decoy/` and `Documents/`).
+3. Wait about 15 minutes after both, so search picks up the new files.
+4. Rename each test copy before the first prompt, for example `… - R2 G-1b.docx`.
 
 ### P-1 first (5 minutes)
 As above, but in **four** places: Word agent mode with Chat only, Word agent mode with Allow editing, Cowork, the
@@ -134,12 +141,12 @@ G-1. **Record:** code or none. Put the custom instruction back afterwards.
 After any complete rated review of draft A (G-1b, G-2, G-5, or round 1's "attach both" route), same chat:
 switch to **Allow editing** and run H-1 as written above. **This is still the main open Word question.**
 
-### G-5. One file for non-contracts: the method inside the playbook (needs a rebuild; I'll send the file)
-Attach only `Spaarke Legal Hold Notice – Employee Custodians v1.0.docx` from the rebuilt package, whose first
-section is the review method. Chat only, *Review this notice against the attached playbook.* **Record:** code,
+### G-5. One file for non-contracts: the method inside the playbook
+Attach only `Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx` (the
+rebuilt one: its first section is "How to review with this playbook: Spaarke Review Method v1.0"). Chat only, *Review this notice against the attached playbook.* **Record:** code,
 colours, row count. **Pass:** SRM-1110-A, 🟢🟡🔴, 13 rows, without attaching the method.
 
-### W-2. Contract: the method chart as a second step (after the rebuild)
+### W-2. Contract: the method chart as a second step
 After a W-1 review, same chat, attach only the method file: *Follow the attached review method to produce the
 topic-by-topic chart for the review you just ran.* **Record:** the "Playbook applied" line (expected v1.2, gap #38),
 the row count (24), and whether each rating matches the review card's icon.

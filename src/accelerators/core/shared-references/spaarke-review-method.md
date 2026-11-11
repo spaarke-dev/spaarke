@@ -92,7 +92,7 @@ Start with:
 # Topic-by-topic review
 
 - Document reviewed: actual title
-- Playbook applied: actual name and version, if stated
+- Playbook applied: name and version exactly as written in the playbook's own title or version line ("version not stated" if none)
 - Review protocol: Spaarke Review Method v1.0
 - Verification code: SRM-1110-A
 - Scope and limitations: actual scope, gaps, and playbook disclaimers
@@ -131,6 +131,7 @@ The disposition describes playbook alignment, not attorney approval.
 
 Before responding:
 - Confirm every playbook topic appears once and in order.
+- Confirm the playbook name and version in the header match the playbook's own text, not memory or an earlier answer.
 - Confirm fallbacks and escalation triggers were applied faithfully.
 - Check contradictions across the document.
 - Compute category totals from the final topic assessments.

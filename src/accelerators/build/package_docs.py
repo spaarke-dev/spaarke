@@ -106,6 +106,59 @@ def decoy_method(md):
     return out.replace(PROTOCOL_LINE, PROTOCOL_LINE + " (DECOY)")
 
 
+def method_preface(md):
+    """The review method as (kind, text) pairs for render_word_playbook.render_table(preface=...): the method placed
+    inside a NON-contract Word playbook, so one attachment brings both (gap #36, test G-5). Headings become bold
+    lead-in lines and tables become list items, because the four-column file keeps exactly one table and no
+    Heading styles. Every line of the method body is kept."""
+    meta, body = split_frontmatter(md)
+    out = [("h", f"How to review with this playbook: Spaarke Review Method v{meta.get('version', '1.0')} "
+                 f"(verification code {meta.get('verification-code', '')})"),
+           ("para", "Use this method for every review against this playbook. The playbook topics follow it.")]
+    table, joinable, first_h1 = [], False, True
+
+    def flush_table():
+        rows = [[c.strip() for c in r.strip().strip("|").split("|")] for r in table if not re.fullmatch(r"[\s|:-]+", r)]
+        if len(rows) == 1:
+            out.append(("para", "Table columns: " + " | ".join(rows[0])))
+        else:
+            out.extend(("bullet", ": ".join(r)) for r in rows[1:])
+        table.clear()
+
+    for raw in body.splitlines():
+        line = raw.rstrip()
+        if line.lstrip().startswith("|"):
+            table.append(line)
+            joinable = False
+            continue
+        if table:
+            flush_table()
+        if not line.strip():
+            joinable = False
+        elif line.startswith("# ") and first_h1:  # the method's own title, already in the lead-in line
+            first_h1, joinable = False, False
+        elif line.startswith(("# ", "## ")):
+            out.append(("h", line.lstrip("#").strip()))
+            joinable = False
+        elif re.match(r"^\s*- ", line):
+            indent = len(line) - len(line.lstrip())
+            out.append(("bullet2" if indent >= 2 else "bullet", re.sub(r"^\s*- ", "", line)))
+            joinable = True
+        elif re.match(r"^\s*\d+\. ", line):
+            out.append(("para", line.strip()))
+            joinable = True
+        elif joinable:
+            kind, text = out[-1]
+            out[-1] = (kind, text + " " + line.strip())
+        else:
+            out.append(("para", line.strip()))
+            joinable = True
+    if table:
+        flush_table()
+    out.append(("h", "Playbook"))
+    return out
+
+
 def render_review_method(md, out_path, created=None):
     """Spaarke Review Method.docx: the Markdown method as headings, paragraphs, bullets and tables."""
     meta, body = split_frontmatter(md)
@@ -182,11 +235,19 @@ def render_readme(out_path, version, created=None):
         "Cowork/Skills: four Cowork skills, nda-review, nda-library-review, legal-hold-review and "
         "accelerator-setup.",
         "Cowork/Playbooks/NDA and Cowork/Playbooks/Legal Hold Notice: for each type, the playbook as a four-column "
-        "Word file (to attach in Word), a readable copy marked (agent knowledge), and the Markdown master in "
-        "Playbook master (Cowork reads it).",
+        "Word file (to attach in Word; the legal hold one starts with the review method), a readable copy marked "
+        "(agent knowledge), and the Markdown master in Playbook master (Cowork reads it).",
         "Cowork/Playbooks/Review method: Spaarke Review Method.docx, the method for reviews that are not contracts.",
         "Cowork/Playbooks/Start here: this file, the custom instruction text, and two recipes for optional Agent "
         "Builder agents.",
+    ])
+    d.add_heading("The other folders in Documents/Cowork", level=2)
+    bullets([
+        "Projects, Tasks and AGENTS.md are Cowork's own: it creates them and keeps your Cowork work there. Leave "
+        "them as they are.",
+        "Profile is the accelerator's: /accelerator-setup saves your attorney profile there. It may be empty "
+        "until you run setup.",
+        "Documents/Copilot is Copilot's own (files it creates, and its memory). Put nothing of yours there.",
     ])
     d.add_heading("Install (once)", level=2)
     for i, s in enumerate([
@@ -195,19 +256,29 @@ def render_readme(out_path, version, created=None):
         "Extract the zip into your OneDrive Documents folder. It adds Skills and Playbooks to Documents/Cowork "
         "(the folder Cowork made; nothing in it is replaced). Keep the folder and file names as they are.",
         "Open Spaarke – Custom instruction.txt and copy all of it. In Copilot, go to Settings › Personalization › "
-        "Custom instructions, paste it and save.",
+        "Custom instructions and paste it below anything you already have there (it is one block that starts "
+        "\"For legal document reviews:\", so your own instructions stay as they are). Save.",
         "Optional, in Cowork: type /accelerator-setup once to record your name and defaults.",
     ], 1):
         d.add_paragraph(f"{i}. {s}").paragraph_format.left_indent = Inches(0.25)
     d.add_heading("How to use it", level=2)
     bullets([
+        "First, save a copy of the document under a new name (File › Save a copy) and review the copy, so the "
+        "original stays as it was.",
         "Word, a contract (NDA): open the NDA, open Copilot and attach Cowork/Playbooks/NDA/Spaarke NDA – Mutual "
         "v1.2.docx (the paperclip, or type / and pick the file). Ask \"Review this NDA against the attached "
-        "playbook\", then choose Apply edits with comments. The edits are made in the open document.",
+        "playbook\", then choose Apply edits with comments. The edits are made in the open document. After the "
+        "first time you can pick the saved playbook instead (Review contract with a playbook), but a saved "
+        "playbook does not change when the file is updated.",
+        "Word, a contract, rated chart as well (optional): in the same chat, attach Cowork/Playbooks/Review method/"
+        "Spaarke Review Method.docx and ask \"Follow the attached review method to produce the topic-by-topic chart "
+        "for the review you just ran.\" A contract review takes only one attached file, so this is a second step.",
         "Word, anything that is not a contract (a legal hold notice): open the notice, switch Copilot to agent mode, "
         "switch to Chat only, attach Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee "
-        "Custodians v1.0.docx and ask \"Review this notice against the attached playbook\". The custom instruction "
-        "brings in the review method. You get a rated table in chat.",
+        "Custodians v1.0.docx and ask \"Review this notice against the attached playbook\". The review method is "
+        "inside that file. You get a rated table in chat.",
+        "To see deleted text struck through in the document rather than in balloons: Review › Show Markup › "
+        "Balloons › Show All Revisions Inline.",
         "Cowork: ask \"review this NDA\" or \"review this legal hold notice\". The skills find the playbook in "
         "Cowork/Playbooks. Each builds a redlined copy next to your document, after you approve the plan. The "
         "legal hold copy has a colour-coded Review summary on page 1.",

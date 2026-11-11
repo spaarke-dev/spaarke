@@ -234,8 +234,29 @@ def _field(paragraph, instr):
         run._r.append(el)
 
 
-def render_table(playbook, catalogue, out_path, topic_ids="none"):
-    """Render the Word copy in Microsoft's four-column contract-review playbook shape."""
+PREFACE_STYLES = {"bullet": "List Bullet", "bullet2": "List Bullet 2"}
+
+
+def _add_preface(d, preface):
+    """Paragraphs before the table, from (kind, text) pairs: "h" = bold lead-in line, "bullet"/"bullet2" = list
+    items, "para" = plain. No Heading styles and no tables, so the file keeps the four-column shape's one table."""
+    for kind, text in preface:
+        if kind in PREFACE_STYLES:
+            d.add_paragraph(text, style=PREFACE_STYLES[kind])
+        else:
+            p = d.add_paragraph()
+            run = p.add_run(text)
+            if kind == "h":
+                run.bold = True
+                p.paragraph_format.space_before = Pt(8)
+
+
+def render_table(playbook, catalogue, out_path, topic_ids="none", preface=None):
+    """Render the Word copy in Microsoft's four-column contract-review playbook shape.
+
+    preface = optional (kind, text) pairs placed after the title and before the scope paragraph: the review method
+    for NON-contract playbooks (gap #36), so attaching one file brings both. Never for a contract playbook: Word's
+    Review contract imports the text around the table as "General guidelines"."""
     rows = table_rows(playbook, catalogue, topic_ids)
     name = word_name(playbook)
     d = docx.Document()
@@ -256,11 +277,17 @@ def render_table(playbook, catalogue, out_path, topic_ids="none"):
 
     props = d.core_properties
     props.title, props.subject, props.author = name, "Playbook", "Spaarke accelerator build"
-    props.comments = ("Word copy of a legal playbook. In Word: Copilot > Review contract > New playbook > Attach "
-                      "from Cloud. Generated from the Markdown master; edit the master, not this file. Draft for "
-                      "attorney review; not legal advice.")
+    if preface:
+        props.comments = ("Word copy of a legal playbook, with its review method first. In Word: attach it in Copilot "
+                          "chat (agent mode, Chat only). Generated from the Markdown master; edit the master, not this "
+                          "file. Draft for attorney review; not legal advice.")
+    else:
+        props.comments = ("Word copy of a legal playbook. In Word: Copilot > Review contract > New playbook > Attach "
+                          "from Cloud. Generated from the Markdown master; edit the master, not this file. Draft for "
+                          "attorney review; not legal advice.")
 
     d.add_paragraph(name, style="Title")
+    _add_preface(d, preface or [])
     d.add_paragraph(scope_paragraph(playbook))
 
     t = d.add_table(rows=1, cols=4)
@@ -367,10 +394,16 @@ def check_readable(path, playbook, catalogue):
     return problems
 
 
-def check_table(path, playbook, catalogue, topic_ids="none"):
-    """Deterministic checker (cf. Microsoft create-playbook's verify-playbook.py). Returns a list of problems."""
+def check_table(path, playbook, catalogue, topic_ids="none", preface=None):
+    """Deterministic checker (cf. Microsoft create-playbook's verify-playbook.py). Returns a list of problems.
+    The paragraphs outside the table must be exactly: the title, the preface texts (if any), the scope paragraph."""
     problems, expected = [], table_rows(playbook, catalogue, topic_ids)
     d = docx.Document(path)
+    want_paras = [word_name(playbook)] + [t for _, t in (preface or [])] + [scope_paragraph(playbook)]
+    got_paras = [p.text for p in d.paragraphs]
+    if got_paras != want_paras:
+        problems.append(f"paragraphs outside the table differ: {len(got_paras)} found, {len(want_paras)} expected"
+                        + ("" if preface else " (no preface expected)"))
     if len(d.tables) != 1:
         return [f"expected exactly 1 table, found {len(d.tables)}"]
     t = d.tables[0]

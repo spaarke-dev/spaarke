@@ -3,6 +3,7 @@ and the path convention, each with a must-fire control."""
 import difflib
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -45,6 +46,12 @@ class ReviewMethodTests(unittest.TestCase):
         back = spaarke.replace("SRM-1110-A", "PBR-1109-A").replace("name: spaarke-review-method", "name: playbook-document-review")
         back = back.replace("# Spaarke Review Method", "# Playbook Document Review")
         back = back.replace("- Review protocol: Spaarke Review Method v1.0", "- Review protocol: playbook-document-review v1.0")
+        # 2026-11-11, gap #38: the version is copied from the playbook's own text (two deliberate edits)
+        back = back.replace("- Playbook applied: name and version exactly as written in the playbook's own title or "
+                            "version line (\"version not stated\" if none)",
+                            "- Playbook applied: actual name and version, if stated")
+        back = back.replace("- Confirm the playbook name and version in the header match the playbook's own text, not "
+                            "memory or an earlier answer.\n", "")
         start, end = back.index("## Ratings shown as colours"), back.index("## Required presentation")
         self.assertEqual(back[:start] + back[end:], owner)
 
@@ -128,6 +135,56 @@ class LegalHoldPlaybookTests(unittest.TestCase):
         self.assertEqual(pb["silent_topics"], [])
         with self.assertRaises(playbook_parse.FormatError):  # a contract playbook needs a Side
             playbook_parse.parse(read(path), {i: set() for i in ids})
+
+
+class MethodInsidePlaybookTests(unittest.TestCase):
+    """G-5 (gap #36): the non-contract Word playbook starts with the review method; the contract one never does."""
+
+    def setUp(self):
+        import render_word_playbook as rw
+        self.rw = rw
+        with open(os.path.join(LH_DIR, "topics.yaml"), encoding="utf-8") as f:
+            self.cat = yaml.safe_load(f)
+        path = os.path.join(LH_DIR, "positions", "Spaarke Legal Hold Notice – Employee Custodians v1.0.md")
+        self.pb = playbook_parse.parse(read(path), {t["id"]: set() for t in self.cat["topics"]}, require_side=False)
+        self.preface = pd.method_preface(read(METHOD))
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp)
+
+    def test_method_comes_first_and_the_file_still_passes_the_four_column_checks(self):
+        out = self.rw.render_table(self.pb, self.cat, os.path.join(self.tmp, "lh.docx"), preface=self.preface)
+        self.assertEqual(self.rw.check_table(out, self.pb, self.cat, preface=self.preface), [])
+        paras = [p.text for p in docx.Document(out).paragraphs]
+        self.assertTrue(paras[1].startswith("How to review with this playbook: Spaarke Review Method v1.0"))
+        self.assertIn("SRM-1110-A", paras[1])
+        self.assertIn("Verification code: SRM-1110-A", paras)
+        self.assertIn("Escalate: 🔴", paras)
+        self.assertEqual(len(docx.Document(out).tables), 1)
+
+    def test_every_line_of_the_method_body_is_carried(self):
+        text = " ".join(t for _, t in self.preface)
+        body = read(METHOD).split("\n---\n", 1)[1]
+        for line in body.splitlines():
+            words = re.sub(r"^\s*(#+|-|\d+\.)\s*", "", line).strip()
+            if not words or words.startswith("|") or words == "Spaarke Review Method":
+                continue
+            with self.subTest(line=words):
+                self.assertIn(words, text)
+
+    def test_checker_fires_when_the_method_is_missing_or_unexpected(self):
+        plain = self.rw.render_table(self.pb, self.cat, os.path.join(self.tmp, "plain.docx"))
+        self.assertTrue(self.rw.check_table(plain, self.pb, self.cat, preface=self.preface))
+        withm = self.rw.render_table(self.pb, self.cat, os.path.join(self.tmp, "with.docx"), preface=self.preface)
+        self.assertTrue(self.rw.check_table(withm, self.pb, self.cat))
+
+    def test_only_non_contract_playbooks_get_the_method(self):
+        import build_package as bp
+        for spec in bp.PLAYBOOKS:
+            with self.subTest(practice=spec["practice"]):
+                self.assertEqual(spec["method_inside"], not spec["require_side"])
 
 
 class PathConventionTests(unittest.TestCase):
