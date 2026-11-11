@@ -24,6 +24,9 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | G3c | 8d0d0f078c (merge), 4ec9a1601a (guide), the notes commit | Master merged (8d0d0f078c, no conflicts); UAC guide describes round 131 as built; these notes; re-gate after the merge; publish delta |
 | G3d | 98d7864da1, 89894a9dbc, the docs commit | `pairedGrantEnded: false` no longer promises "within a day": the note says the grant could not be removed just now and where to revoke it; a paired grant whose share is gone stays listed with Revoke (tested); TrackingFieldTrio 1.0.59; guide and these notes. No server change |
 | G3e | c926422c38, 0466c7da76, the docs commit | A grant counts as paired only while its share is listed (`pairedWithShare: !!pairedShare`). A grant whose share is not listed: row "Workforce app access for {name} · granted {date}", confirmation "Remove {name}'s workforce app access? The record will no longer show in their workforce app.", notice "Removed {name}'s workforce app access." (G3b/G3d said "goes with a share" and "Their share stays", false once the share was removed). Listed pairs keep G3b's wording. TrackingFieldTrio 1.0.60; guide |
+| G4a | 8a29253d20 … 1b728610d8 | A paired-grant end that fails leaves the inherited / Assigned-To row live (`PairedGrantPending`) and is retried; a system end records no operator decline; R5 also ends a grant whose contact no longer represents its user; `/share-user` takes an expiry date for the paired grant. (6f39f28546, never-lower counting only live grants, was reverted in 42eff863a4: owner round 80 stands.) |
+| G4b | 0ffdea88ab … 8f19966e44 | A re-assignment before the retry shares again; Manage Access words the paired grant truthfully; TrackingFieldTrio 1.0.61 |
+| PR | 8ee790c6d9, 1bfee5c329, ec58b436b4 (merges); e9384c4def, 42eff863a4, 90022389d7, f7795984f4, 29d662af63, 250dc272a4 | Master merged three times (TrackingFieldTrio 1.0.62 keeps master's Family tool); master's new share removers declared in the paired-grant guard; the paired-grant script splits default teams through `OntologyWriterUnit.ps1`; owner round 80 restored; master's `AssignTaskRecipientGate` reads through `ContactUserRepresentation` (no second copy of the rule); review fixes: a failed paired-grant end over an already-removed share records its cause, and the `would_lower_existing` sentence no longer claims the access is live |
 
 ## Behaviour changes (owner sign-off table for the PR)
 | Case | Before | After |
@@ -83,6 +86,15 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 - **Fixed in G3d (the UI no longer promises a timing).** G3c found that the modal said "Workforce-app access will be removed within a day." although R5 writes are off by default. The note now says the grant could not be removed just now and is still listed under Current Access, where it can be revoked. After the reload, a paired grant whose share is gone is listed as its own row with Revoke (`AccessGrantModal.workforceApp.test.tsx`). A source scan keeps "within a day" out of the modal.
 - Filed: #2371 (inactive contact: /grant writes a dormant row; the contact-side route refuses); #2377 (an internal user's email with no active contact still gets a CIAM invite).
 - Superseded by round 131: "re-adding a represented contact that already holds a contact grant shares and leaves the grant row as it was". The grant core now re-adds over it (raise, keep the live date, stamp the pairing).
+
+## Gates (PR, merged tree at ec58b436b4 + review fixes)
+- BFF `--no-incremental` 0 warnings / 0 errors; `Spaarke.sln` 0 / 0.
+- ArchTests (built, then `--no-build`): 2165/2165.
+- Unit (`Sprk.Bff.Api.Tests`, touched filter): 18706 passed, 0 failed, 5 skipped. (An earlier run had one 3-minute load timeout in `ExternalRegistrationOwnerUnconfiguredTests`; it passes alone and in this run.)
+- Integration: `Sprk.Bff.Api.IntegrationTests` 212 passed / 0 / 8 skipped; `Spe.Integration.Tests` 353 / 0 / 23 skipped.
+- jest `AccessGrantModal` 21 suites, 372/372; tsc 0; client-lint ok; TrackingFieldTrio `build:prod` succeeded (Solution bundle copied by hand).
+- Review fix 29d662af63: the new test is red without the fix, green with it.
+- Publish (Release, folder total): merge-base f563b8f689 137,278,189 bytes; HEAD 137,423,561 bytes; delta +145,372 (`Sprk.Bff.Api.dll` +127,488). No package changes; no vulnerable packages.
 
 ## Gates (G3e)
 Client and docs only; no server file changed, so no BFF gates.
