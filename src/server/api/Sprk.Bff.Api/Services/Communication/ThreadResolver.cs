@@ -518,7 +518,16 @@ public sealed class ThreadResolver : IThreadResolver
         var threadColumns = ThreadRegardingColumns.Append("sprk_threadtype");
         if (expected is not null)
             threadColumns = threadColumns.Append(CommunicationInternalOnlyFloor.ThreadPrivacyField);
-        var threadRow = await entityService.RetrieveAsync("sprk_communicationthread", threadId, threadColumns.ToArray(), ct);
+        Entity? threadRow;
+        try
+        {
+            threadRow = await entityService.RetrieveAsync("sprk_communicationthread", threadId, threadColumns.ToArray(), ct);
+        }
+        catch (Exception ex) when (expected is not null && IsRoutedReadFault(ex, ct))
+        {
+            throw new Access.DirectPairFilingRefusedException(threadId, Access.DirectPairFilingRefusedException.ReadFault, ex);
+        }
+
         var anchor = threadRow is null ? null : ReadTypedRegardingAnchorFromThread(threadRow);
         // #1629 F1: the typed anchor wins over sprk_threadtype. A thread carrying a typed lookup files the message under
         // that anchor (the reparent below), so its audience is the anchor's members — never the thread owner's sharees,
@@ -534,11 +543,21 @@ public sealed class ThreadResolver : IThreadResolver
         if (expected is not null)
         {
             // Task 054a piece 2b, fix round 2: a routed filing is decided before any write, from this one read of the thread
-            // (and the filing columns): a strict Direct thread of exactly the routed pair, or nothing is written.
+            // (and the filing columns): a strict Direct thread of exactly the routed pair, or nothing is written. A fault of any
+            // read before the write (F-2b-1) is a refusal too: nothing is written yet, so the caller's fallback is safe.
             var refusal = RoutedDirectFilingRefusal(threadRow, assignment);
-            var alongside = refusal is null && directFilingColumns is not null
-                ? await directFilingColumns(assignment, ct)
-                : Access.DirectMessageRecipient.None;
+            IReadOnlyDictionary<string, object> alongside;
+            try
+            {
+                alongside = refusal is null && directFilingColumns is not null
+                    ? await directFilingColumns(assignment, ct)
+                    : Access.DirectMessageRecipient.None;
+            }
+            catch (Exception ex) when (IsRoutedReadFault(ex, ct))
+            {
+                throw new Access.DirectPairFilingRefusedException(threadId, Access.DirectPairFilingRefusedException.ReadFault, ex);
+            }
+
             refusal ??= IsExactlyThePair(alongside, expected.Value) ? null : Access.DirectPairFilingRefusedException.NotThePair;
             if (refusal is not null)
                 throw new Access.DirectPairFilingRefusedException(threadId, refusal);
@@ -598,6 +617,14 @@ public sealed class ThreadResolver : IThreadResolver
 
         return (assignment, wrote && !reparent.ParentsUnchanged);
     }
+
+    /// <summary>
+    /// A fault of a read the routed join makes before its write (task 054a piece 2b, F-2b-1): anything but the caller's
+    /// cancellation, and not the join's own refusal.
+    /// </summary>
+    private static bool IsRoutedReadFault(Exception ex, CancellationToken ct) =>
+        ex is not Access.DirectPairFilingRefusedException
+        && !(ex is OperationCanceledException && ct.IsCancellationRequested);
 
     /// <summary>
     /// Why a routed filing (task 054a piece 2b) may not go into the thread the join read, or <c>null</c> when it may: the row

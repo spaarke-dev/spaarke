@@ -488,8 +488,8 @@ Same branch, from 82da70c50d. Findings F2-1, F2-2 and F2-5. `DirectThreadAccessS
 
 ### Known limits (added; stated, not defects)
 
-- **L9.** Once the join has started writing, a fault in the join or the filing leaves that message unthreaded and ungranted. The sender still gets success, with the explicit path's Warning. Today's resolver path does not run as a fallback.
-  - F2-2 does not change this: its refusals happen before any write, and those do fall back.
+- **L9.** A fault in or after the routed filing write (the filing update itself, or anything after it) leaves that message unthreaded and ungranted. The sender still gets success, with the explicit path's Warning. Today's resolver path does not run as a fallback.
+  - Everything before the write falls back once to today's path: the F2-2 refusals, and since F-2b-1 a fault of any read the routed join makes before it (the thread read, the filing-columns computation).
   - A fallback after a write fault is not safe. The fault can arrive after the filing update landed (a timeout on a committed write), and the resolver would then file the message a second time, into its own thread, with the pair's recipient already on the row.
 - **L10.** When `FindExistingAsync` returns a thread for a pair that is not a strict pair, routing for that pair is blocked. It never shares more than the pair, so it fails safe. **Fix: 198b**, which applies the shape rule in `FindExistingAsync`.
 
@@ -524,5 +524,20 @@ No new package, plugin, DI registration, endpoint or Dataverse column.
 - **Filtered run** (same filter as piece 2b): **2533 passed, 0 failed, 2 skipped.**
 - **ArchTests** (same filter as piece 2b): **153 passed, 0 failed.**
 - `git diff a9794dbaad -- src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs` is empty.
+
+## 054a piece 2b — F-2b-1 (a fault before the routed write)
+
+- **Rule.** On the routed path only (an `ExpectedDirectPair` is given), a fault of any read the join makes before its write is a refusal: `DirectPairFilingRefusedException(threadId, "read_fault")`, carrying the fault as its inner exception. The reads are the thread read and the filing-columns computation; the latter already turns its own read faults into "no recipient" and so into `not_the_pair`.
+  - The caller's cancellation is excluded and propagates as before.
+  - The routing logs 5412 as a **Warning** with the fault for `read_fault` (Information for the other reasons), then takes today's path once.
+- **Unchanged:**
+  - The respond path (no pair): the same fault reaches its generic catch ("Explicit thread stamp failed", Warning), with no fallback.
+  - A fault in or after the write (L9).
+- **§11:** no new type. One new reason constant (`DirectPairFilingRefusedException.ReadFault`), an optional inner-exception parameter on its constructor, and one private predicate (`ThreadResolver.IsRoutedReadFault`).
+- **Tests** (`…PairThreadShape.cs`):
+  - The routed join's thread read faults after the shape check → today's path ran once; no filing write names the pair's thread; `GrantMessageAccessAsync` was never called for it; one Warning 5412 `(read_fault)`; no "Explicit thread stamp failed".
+  - A respond with the same fault → the explicit path's Warning, no update attempt, no resolver thread, no grant, no 5412.
+- **Fail-then-pass** against 0ebd43f6a5 (filter `~DirectMessageRecipientStampTests`, the three source files reverted): **Failed 1, Passed 107, Total 108.** The routed read-fault test fails; the respond test passes before and after, as it should. After: **Passed 108, Failed 0.**
+- **Filtered run:** **2535 passed, 0 failed, 2 skipped.** **ArchTests:** **153 passed.** **Builds:** 0 warnings, 0 errors; `dotnet format --verify-no-changes` clean.
 
 rework: 054a piece 2b — an outbound Direct send (Message, no ThreadId, no typed regarding) whose To ∪ Cc ∪ Bcc is one address that the A9 internal-user email read maps to one enabled, non-application systemuser other than the sender is filed into FindOrCreateDirectThreadAsync(sender, recipient) through the respond path's explicit join (one filing update carrying the recipient, then the grant); otherwise today's resolver path, with one Information `direct_message.pair_routing_skipped` and its reason; faults log a Warning and take today's path; no owner is written.

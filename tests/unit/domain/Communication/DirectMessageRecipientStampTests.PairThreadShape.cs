@@ -235,6 +235,54 @@ public partial class DirectMessageRecipientStampTests
         AssertRefusedAtTheFiling("not_the_pair");
     }
 
+    // ── F-2b-1: a fault before the routed write is a refusal ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The routed join's read of the thread faults (after the shape check passed): nothing was written, so the message takes
+    /// today's path once; the pair's thread gets no filing and no grant, and one Warning 5412 carries <c>read_fault</c>.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheRoutedJoinsThreadReadFaults_TodaysPathRunsOnce_AndThePairThreadGetsNothing()
+    {
+        FindOrCreateAnswersAStoredThread(StoredThread(owner: Sender), new() { UserShare(Other, ReadMask) });
+        var rowReads = 0;
+        _entities
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", ExistingPairThread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() => ++rowReads == 1
+                ? Task.FromResult<Entity>(StoredThread(owner: Sender))
+                : Task.FromException<Entity>(new HttpRequestException("simulated 503 from Dataverse")));
+
+        var response = await ShapeCheckedService().SendAsync(MessageTo(OtherAddress), Caller(), CancellationToken.None);
+
+        response.CommunicationId.Should().Be(MessageId);
+        rowReads.Should().Be(2, "the shape check read the thread, then the join's read faulted");
+        AssertRefusedAtTheFiling("read_fault", LogLevel.Warning);
+    }
+
+    /// <summary>
+    /// The respond path with the same fault is unchanged: the explicit path's Warning, no filing, no grant, and no fallback to
+    /// the resolver.
+    /// </summary>
+    [Fact]
+    public async Task WhenARespondsThreadReadFaults_ItIsUnchanged_NoFallback()
+    {
+        _entities
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", DirectThread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated 503 from Dataverse"));
+
+        var response = await Service(new StubStrategy(ThreadKeyResolution.CreateNew), Directory().Object)
+            .SendAsync(MessageRequest() with { ThreadId = DirectThread }, Caller(), CancellationToken.None);
+
+        response.CommunicationId.Should().Be(MessageId);
+        _messageUpdateAttempts.Should().BeEmpty("nothing is filed");
+        _created.Should().NotContain(e => e.LogicalName == "sprk_communicationthread", "the resolver does not run");
+        _directAccess.Verify(
+            d => d.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _serviceLog.Entries.Should().ContainSingle(e => e.Message.Contains("Explicit thread stamp failed"))
+            .Which.Level.Should().Be(LogLevel.Warning);
+        _serviceLog.Entries.Should().NotContain(e => e.EventId.Name == PairFilingRefusedCode);
+    }
+
     // ── F2-5: the caller's cancellation ─────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -366,7 +414,7 @@ public partial class DirectMessageRecipientStampTests
     /// grant is made from it, one Information <c>pair_filing_refused</c> carries <paramref name="reason"/>, and the message took
     /// today's path (the resolver's create, filed with no recipient, its own grant).
     /// </summary>
-    private void AssertRefusedAtTheFiling(string reason)
+    private void AssertRefusedAtTheFiling(string reason, LogLevel level = LogLevel.Information)
     {
         _messageUpdateAttempts
             .Where(u => u.TryGetValue(ThreadLookup, out var t) && ((EntityReference)t).Id == ExistingPairThread)
@@ -376,7 +424,7 @@ public partial class DirectMessageRecipientStampTests
             Times.Never);
         _serviceLog.Entries.Should().ContainSingle(e => e.EventId.Name == RoutedCode);
         var refused = _serviceLog.Entries.Should().ContainSingle(e => e.EventId.Name == PairFilingRefusedCode).Which;
-        refused.Level.Should().Be(LogLevel.Information);
+        refused.Level.Should().Be(level);
         refused.Message.Should().Contain($"({reason})").And.Contain(MessageId.ToString()).And.NotContain("@");
         _serviceLog.Entries.Should().NotContain(e => e.Message.Contains("Explicit thread stamp failed"));
         AssertTodaysPathWithNoRecipient(skipReason: null, pairThreadAsked: true);

@@ -566,8 +566,11 @@ internal sealed class DirectPairFilingRefusedException : Exception
     /// <summary>The filing columns are not exactly the expected sender and recipient.</summary>
     public const string NotThePair = "not_the_pair";
 
-    public DirectPairFilingRefusedException(Guid threadId, string reason)
-        : base($"The routed Direct filing into thread {threadId} was refused before any write ({reason}).")
+    /// <summary>A read the join makes before its write faulted (anything but the caller's cancellation); the fault is the inner exception.</summary>
+    public const string ReadFault = "read_fault";
+
+    public DirectPairFilingRefusedException(Guid threadId, string reason, Exception? fault = null)
+        : base($"The routed Direct filing into thread {threadId} was refused before any write ({reason}).", fault)
     {
         ThreadId = threadId;
         Reason = reason;
@@ -576,7 +579,10 @@ internal sealed class DirectPairFilingRefusedException : Exception
     /// <summary>The thread the join refused.</summary>
     public Guid ThreadId { get; }
 
-    /// <summary>A <see cref="DirectPairShapeReason"/> code (<c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>) or <see cref="NotThePair"/>.</summary>
+    /// <summary>
+    /// A <see cref="DirectPairShapeReason"/> code (<c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>),
+    /// <see cref="NotThePair"/> or <see cref="ReadFault"/>.
+    /// </summary>
     public string Reason { get; }
 }
 

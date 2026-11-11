@@ -1527,7 +1527,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <summary>
     /// Information: the join into the pair's Direct thread refused before any write — the thread, as the join read it, is not a
     /// strict Direct thread of exactly the routed pair (<see cref="Access.DirectPairFilingRefusedException"/>); nothing was
-    /// filed or granted there, and today's path ran.
+    /// filed or granted there, and today's path ran. Warning, with the fault, when a read before the write faulted
+    /// (<c>read_fault</c>).
     /// </summary>
     internal const string PairFilingRefusedEventCode = "direct_message.pair_filing_refused";
 
@@ -1608,8 +1609,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             catch (Access.DirectPairFilingRefusedException refused)
             {
                 // Fix round 2 (F2-2): the join refused before any write — nothing filed, nothing granted — so today's path runs.
-                _logger.LogInformation(
+                // A read fault before the write (F-2b-1) is the same refusal, logged as a Warning with its fault.
+                _logger.Log(
+                    refused.Reason == Access.DirectPairFilingRefusedException.ReadFault ? LogLevel.Warning : LogLevel.Information,
                     PairFilingRefusedEvent,
+                    refused.InnerException,
                     "{EventCode}: outbound Direct message {CommunicationId} was not filed into Direct thread {ThreadId} ({Reason}); " +
                     "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
                     PairFilingRefusedEventCode, communicationId, refused.ThreadId, refused.Reason, correlationId);
