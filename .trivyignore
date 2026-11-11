@@ -31,7 +31,7 @@ azure-storage-account-key
 # ---------------------------------------------------------------------------
 
 # CVE-2026-44503 — Microsoft.Kiota.Abstractions HIGH
-# Source: Directory.Packages.props + Sprk.Bff.Api.csproj (Kiota 1.21.2)
+# Source: Sprk.Bff.Api.csproj (Kiota 1.21.2)
 # Reason: Fix requires Microsoft.Graph SDK 6.x / Kiota 2.x major version bump with
 #         breaking API changes throughout the BFF. Out of scope for the chore PR that
 #         introduced this suppression.

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
@@ -1229,7 +1229,9 @@ public class DataverseContactIdentityStoreTests
         var payload = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.WorkforceHome,
             new NewContactDetails("Mike", "Okafor", "mike@customer.example")
             {
-                Department = "Legal", ExternalTenantId = HomeTenant, OwningTeamId = Team,
+                Department = "Legal",
+                ExternalTenantId = HomeTenant,
+                OwningTeamId = Team,
             });
 
         payload.Keys.Should().BeEquivalentTo(

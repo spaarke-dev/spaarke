@@ -11,7 +11,7 @@
 // (task 245a, G25): resource group / App Service / customer Key Vault from
 // InterStepState (H2a outputs); containerTypeId from the intake parameter only.
 // Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← H6's
-// SpaarkeMaster record as "SpaarkeMaster {version} ({type})" (T218b),
+// SpaarkeMaster record as "SpaarkeMaster {Type} {version}" (T218b),
 // sprk_clientcachebusttoken ← the run id. T257: sprk_bffappid ← H3's BffAppRegId (the Copilot agent render reads it).
 // -----------------------------------------------------------------------------
 
@@ -38,7 +38,9 @@ public class H13BuildPromotedColumnsTests
         // H0 upgrade-mode detection reads this column on the next run.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters(),
             InterStepState = new InterStepState(),
         };
@@ -58,7 +60,9 @@ public class H13BuildPromotedColumnsTests
         // run-id cache-bust token (task 245b — every run has an id) are present.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters(),
             InterStepState = new InterStepState(),
         };
@@ -79,7 +83,9 @@ public class H13BuildPromotedColumnsTests
     {
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret =
@@ -124,9 +130,9 @@ public class H13BuildPromotedColumnsTests
     {
         // Pinned vectors — the /provision-environment Step 6a registry fallback builds the same string in PowerShell.
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "1.4.2.0", true)))
-            .Should().Be("SpaarkeMaster 1.4.2.0 (managed)");
+            .Should().Be("SpaarkeMaster Managed 1.4.2.0", "the version stays a bare number; the type is in the name (owner 2026-11-10)");
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", " 1.4.2.0 ", false)))
-            .Should().Be("SpaarkeMaster 1.4.2.0 (unmanaged)", "the package type is recorded on the registry row (owner D8)");
+            .Should().Be("SpaarkeMaster Unmanaged 1.4.2.0", "the package type is recorded on the registry row (owner D8)");
         ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "65535.65535.65535.65535", false)))!
             .Length.Should().BeLessThanOrEqualTo(50, "sprk_solutionversion is String(50)");
 
@@ -147,7 +153,9 @@ public class H13BuildPromotedColumnsTests
         // there (stale/hand-patched) must NOT win over the intake parameter.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret = { ["containerTypeId"] = "ct-from-intake" },
@@ -169,7 +177,9 @@ public class H13BuildPromotedColumnsTests
     {
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret = { ["containerTypeId"] = "intake-value" },
@@ -187,7 +197,9 @@ public class H13BuildPromotedColumnsTests
     {
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters(),
             InterStepState = new InterStepState { ContainerTypeId = "unproduced-interstep-value" },
         };
@@ -206,7 +218,9 @@ public class H13BuildPromotedColumnsTests
         // not reach sprk_keyvaultname.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret = { ["keyVaultName"] = "platform-vault-from-intake" },
@@ -237,7 +251,9 @@ public class H13BuildPromotedColumnsTests
         // 400ing the PATCH.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1",
+            CustomerId = "cust1",
+            EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret =

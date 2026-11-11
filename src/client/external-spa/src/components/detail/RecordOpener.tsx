@@ -39,7 +39,10 @@ export function useOpenRecord(): OpenRecord {
 const noopIndexChange = (): void => undefined;
 
 export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [target, setTarget] = React.useState<RecordTarget | null>(null);
+  // The last record shown, kept after the modal closes (#2658). A Fluent Dialog unmounted while open, or re-keyed while
+  // open, leaves the page aria-hidden for good. So the modal closes with `open={false}`, `seq` keys each opening and
+  // changes only while closed, and a record opened over an open one replaces it through props (the modal reads by id).
+  const [shown, setShown] = React.useState<{ target: RecordTarget; open: boolean; seq: number } | null>(null);
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
   const terminalRef = React.useRef<(() => void) | null>(null);
 
@@ -56,17 +59,19 @@ export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ 
       fireTerminal();
       returnFocusRef.current = options?.returnFocusTo ?? null;
       terminalRef.current = options?.onTerminal ?? null;
-      setTarget(next);
+      setShown(prev =>
+        prev?.open ? { ...prev, target: next } : { target: next, open: true, seq: (prev?.seq ?? 0) + 1 }
+      );
     },
     [fireTerminal]
   );
 
   const handleClose = React.useCallback(() => {
     fireTerminal();
-    setTarget(null);
+    setShown(prev => (prev ? { ...prev, open: false } : prev));
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    // After the modal has unmounted, so its own focus handling cannot take focus back.
+    // After the modal has closed, so its own focus handling cannot take focus back.
     if (el) {
       window.setTimeout(() => {
         if (el.isConnected) el.focus();
@@ -77,14 +82,14 @@ export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ 
   return (
     <RecordOpenerContext.Provider value={openRecord}>
       {children}
-      {target && (
+      {shown && (
         <RecordDetailModal
-          key={`${target.entityName}:${target.recordId}`}
-          open
+          key={shown.seq}
+          open={shown.open}
           onClose={handleClose}
           onSettled={fireTerminal}
-          entityName={target.entityName}
-          recordIds={[target.recordId]}
+          entityName={shown.target.entityName}
+          recordIds={[shown.target.recordId]}
           index={0}
           onIndexChange={noopIndexChange}
         />

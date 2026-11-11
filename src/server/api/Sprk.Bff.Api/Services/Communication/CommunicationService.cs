@@ -47,6 +47,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    // Task 054: the strict POA share read the respond path's Direct participant stamp decides from; null stamps nothing.
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _recordShares;
+    // Task 054a piece 2b: the internal-user email read (the A9 licensed-user read) the outbound Direct pair routing maps its one
+    // address with; null routes nothing (today's resolver path).
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? _contactIdentities;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
     // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
@@ -112,8 +117,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null,
         ITrackingTokenSigner? trackingTokenSigner = null,
-        TrackingFooterGate? trackingFooterGate = null)
+        TrackingFooterGate? trackingFooterGate = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? recordShares = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? contactIdentities = null)
     {
+        _recordShares = recordShares;
+        _contactIdentities = contactIdentities;
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
@@ -188,7 +197,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
                 ? regarding.EntityName!
-                : $"{regarding.EntityType} {regarding.EntityId}";
+                : "a Spaarke record"; // never the logical name or the id
 
             var footerText = settings.MessageTemplate
                 .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
@@ -261,7 +270,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             record = await _genericEntityService.RetrieveAsync(
                 "sprk_communication",
                 communicationId,
-                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
+                // Ontology task 177 A3: plus the regarding (its typed lookups and the primary's id), from which an outbound
+                // archive chooses its record link (StageArchiveRecordLink).
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid" }
+                    .Concat(Engine.RegardingFieldMap.AllRegardingFields).ToArray(),
                 ct);
         }
         catch (Exception ex)
@@ -339,7 +351,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Guid archiveDocumentId;
         try
         {
-            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct, emailDirection, requestedBy);
+            archiveDocumentId = await ArchiveToSpeAsync(
+                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record);
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
         {
@@ -852,6 +865,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = CommunicationDirection.Outgoing,
                     Message = envelope,
                     AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                    // Ontology task 176 (D-216): the budget inquiry's new thread is created Private.
+                    CreatePrivate = request.CreateThreadPrivate,
                 },
                 ct);
         }
@@ -975,10 +990,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02). Unlike the email path the
             // outbound message HAS its authoritative ACS thread id (ProviderThreadId), so the messaging key
             // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
+            // Task 054a piece 2b: an outbound Direct send is filed into its pair's Direct thread when its one recipient maps
+            // to one eligible systemuser; otherwise, and on any fault of that step, the path above runs unchanged.
             if (communicationId.HasValue)
             {
-                await ResolveOutboundMessageThreadAsync(
-                    communicationId.Value, request, sendResult.ProviderThreadId, correlationId, ct);
+                await ResolveSentMessageThreadAsync(
+                    communicationId.Value, request, preparedRecord, senderParticipant.RecordId,
+                    sendResult.ProviderThreadId, correlationId, ct);
             }
 
             // Direction-symmetric enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-02).
@@ -1281,7 +1299,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
 
-        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record.
+        // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
+        // from its source describes the source's record: it goes unless the thread names that same record.
+        DropDisplayValuesUnlessSameRecord(communication, regarding.Id);
         if (!string.IsNullOrWhiteSpace(thread.RegardingName))
             communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
         communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
@@ -1363,6 +1383,37 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 userObjectId);
         }
     }
+
+    /// <summary>
+    /// Ontology task 177 (D-217, owner 2026-11-10): THE archive decision for an outgoing email, shared by both send paths
+    /// (<see cref="SendAsync"/>'s shared-mailbox path and <see cref="SendAsUserAsync"/>). The .eml is archived when the request
+    /// asks for it (<see cref="SendCommunicationRequest.ArchiveToSpe"/>, which still opts a record-less send in), or when the
+    /// CREATED <c>sprk_communication</c> is filed to a record (<see cref="IsFiledToRecord"/>).
+    /// <para>Filing is read from the row that was written, never from <c>Associations</c> alone, so a reply that inherited its
+    /// source's regarding, a post into a record's thread and the second lookup task 176 adds all count. Pass <c>null</c> when
+    /// the create failed: nothing was written, so only the request flag decides (today's warning follows).</para>
+    /// <para>A system-mail or server-only send is never archived by this rule: both are defined as not archived (the guards
+    /// at the top of <see cref="SendAsync"/> refuse <c>ArchiveToSpe</c> on them), because an archive would store the secret
+    /// system mail keeps out of storage, or copy a server send's attachments into a container the unit can read.</para>
+    /// <para>The sender account's <c>ArchiveOutgoingOptIn</c> switch is applied by the callers after this decision, unchanged.</para>
+    /// </summary>
+    internal static bool ShouldArchiveOutgoing(SendCommunicationRequest request, DataverseEntity? createdCommunication)
+    {
+        if (request.ArchiveToSpe)
+            return true;
+        if (request.SystemMail is not null || request.ServerSend is not null)
+            return false;
+        return createdCommunication is not null && IsFiledToRecord(createdCommunication);
+    }
+
+    /// <summary>
+    /// Whether a <c>sprk_communication</c> row carries at least one typed regarding lookup (D-217's "filed to a record"): any
+    /// column of the one shared regarding vocabulary, <see cref="Engine.RegardingFieldMap.AllRegardingFields"/>, holding a
+    /// non-empty reference.
+    /// </summary>
+    internal static bool IsFiledToRecord(DataverseEntity communication) =>
+        Engine.RegardingFieldMap.AllRegardingFields.Any(field =>
+            communication.GetAttributeValue<EntityReference>(field) is { Id: var id } && id != Guid.Empty);
 
     /// <summary>
     /// Creates an outbound <c>sprk_communication</c> prepared before the send (task 146 r1), stamping the send time.
@@ -1484,6 +1535,298 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    // ── Outbound Direct pair routing (field-mapping-server-write-path-r1 task 054a piece 2b, owner 2026-11-10, option a) ──
+
+    /// <summary>Information: an outbound Direct send was not filed through its pair's Direct thread; the reason code says why.</summary>
+    internal const string PairRoutingSkippedEventCode = "direct_message.pair_routing_skipped";
+
+    /// <summary>Warning: the recipient of an outbound Direct send could not be resolved (a read faulted); today's path ran.</summary>
+    internal const string PairRoutingUnresolvedEventCode = "direct_message.pair_routing_unresolved";
+
+    /// <summary>Warning: finding or creating the pair's Direct thread faulted; today's path ran.</summary>
+    internal const string PairThreadFailedEventCode = "direct_message.pair_thread_failed";
+
+    /// <summary>Information: an outbound Direct send is being filed into its pair's Direct thread (the thread passed the shape check).</summary>
+    internal const string PairRoutedEventCode = "direct_message.pair_routed";
+
+    /// <summary>Warning: the pair's Direct thread, once found or created, could not be read for its shape; today's path ran.</summary>
+    internal const string PairThreadUnreadEventCode = "direct_message.pair_thread_unread";
+
+    private static readonly EventId PairRoutingSkippedEvent = new(5406, PairRoutingSkippedEventCode);
+    private static readonly EventId PairRoutingUnresolvedEvent = new(5407, PairRoutingUnresolvedEventCode);
+    private static readonly EventId PairThreadFailedEvent = new(5408, PairThreadFailedEventCode);
+    // 5409 is DirectMessageRecipient's recipient_not_expected.
+    private static readonly EventId PairRoutedEvent = new(5410, PairRoutedEventCode);
+    private static readonly EventId PairThreadUnreadEvent = new(5411, PairThreadUnreadEventCode);
+
+    /// <summary>
+    /// Information: the join into the pair's Direct thread refused before any write — the thread, as the join read it, is not a
+    /// strict Direct thread of exactly the routed pair (<see cref="Access.DirectPairFilingRefusedException"/>); nothing was
+    /// filed or granted there, and today's path ran. Warning, with the fault, when a read before the write faulted
+    /// (<c>read_fault</c>).
+    /// </summary>
+    internal const string PairFilingRefusedEventCode = "direct_message.pair_filing_refused";
+
+    private static readonly EventId PairFilingRefusedEvent = new(5412, PairFilingRefusedEventCode);
+
+    /// <summary>The reason codes of <see cref="PairRoutingSkippedEventCode"/>. Never an address.</summary>
+    internal static class PairRoutingSkipReason
+    {
+        /// <summary>The Direct thread access service or the internal-user email read is not composed.</summary>
+        public const string NotConfigured = "not_configured";
+
+        /// <summary>To ∪ Cc ∪ Bcc, normalized and de-duplicated, is not exactly one address.</summary>
+        public const string NotOneAddress = "not_one_address";
+
+        /// <summary>The address maps to no enabled systemuser (an external address; a disabled user's address).</summary>
+        public const string NoInternalUser = "no_internal_user";
+
+        /// <summary>The address maps to more than one enabled systemuser.</summary>
+        public const string AmbiguousAddress = "ambiguous_address";
+
+        /// <summary>The one mapped systemuser is the sender.</summary>
+        public const string RecipientIsSender = "recipient_is_sender";
+
+        /// <summary>The one mapped systemuser reads disabled.</summary>
+        public const string RecipientDisabled = "recipient_disabled";
+
+        /// <summary>The one mapped systemuser is an application user.</summary>
+        public const string RecipientApplicationUser = "recipient_application_user";
+
+        /// <summary>The one mapped systemuser has no row at the eligibility read.</summary>
+        public const string RecipientMissing = "recipient_missing";
+
+        /// <summary>
+        /// The prefix of a refusal by the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>)
+        /// on the thread the find-or-create answered: <c>pair_thread_</c> + its reason (<see cref="Access.DirectPairShapeReason"/>:
+        /// <c>not_direct</c>, <c>typed_regarding</c>, <c>not_open</c>, <c>not_two_read_participants</c>, <c>extra_principal</c>).
+        /// </summary>
+        public const string PairThreadPrefix = "pair_thread_";
+
+        /// <summary>The found thread is a strict pair, but its two participants are not the sender and the mapped recipient.</summary>
+        public const string PairThreadNotThePair = "pair_thread_not_the_pair";
+    }
+
+    /// <summary>
+    /// <c>true</c> for an <b>outbound Direct send</b>: a Message send that names no <see cref="SendCommunicationRequest.ThreadId"/>
+    /// and whose prepared row is filed under no record (no typed regarding lookup:
+    /// <see cref="Access.DirectMessageRecipient.CarriesATypedRegarding"/>, the same test the Direct filing stamp makes).
+    /// </summary>
+    internal static bool IsOutboundDirectSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
+        request.CommunicationType == CommunicationType.Message
+        && !request.ThreadId.HasValue
+        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
+
+    /// <summary>
+    /// The thread step of <see cref="SendMessageAsync"/> (task 054a piece 2b). An outbound Direct send
+    /// (<see cref="IsOutboundDirectSend"/>) whose one recipient resolves and whose pair's thread passes the Direct-pair shape rule
+    /// (<see cref="FindDirectPairThreadAsync"/>) is filed into that thread through the respond path's explicit join
+    /// (<see cref="AssignExplicitThreadAsync"/>: the join, the Direct filing stamp in the same update as the thread lookup, then
+    /// the grant), naming the routed pair: the join files the message only when its own read of the thread still shows a strict
+    /// Direct thread of exactly that pair, and otherwise refuses before any write (one Information
+    /// <see cref="PairFilingRefusedEventCode"/>). Every other send, an outbound Direct send that does not resolve, and a refused
+    /// join take <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
+    /// </summary>
+    private async Task ResolveSentMessageThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, DataverseEntity preparedRecord, Guid senderSystemUserId,
+        string? acsThreadId, string correlationId, CancellationToken ct)
+    {
+        if (IsOutboundDirectSend(request, preparedRecord)
+            && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pair)
+        {
+            try
+            {
+                await AssignExplicitThreadAsync(
+                    communicationId, pair.ThreadId, correlationId, ct, filing: "outbound Direct pair thread",
+                    expected: new Access.ExpectedDirectPair(senderSystemUserId, pair.Recipient));
+                return;
+            }
+            catch (Access.DirectPairFilingRefusedException refused)
+            {
+                // Fix round 2 (F2-2): the join refused before any write — nothing filed, nothing granted — so today's path runs.
+                // A read fault before the write (F-2b-1) is the same refusal, logged as a Warning with its fault.
+                _logger.Log(
+                    refused.Reason == Access.DirectPairFilingRefusedException.ReadFault ? LogLevel.Warning : LogLevel.Information,
+                    PairFilingRefusedEvent,
+                    refused.InnerException,
+                    "{EventCode}: outbound Direct message {CommunicationId} was not filed into Direct thread {ThreadId} ({Reason}); " +
+                    "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                    PairFilingRefusedEventCode, communicationId, refused.ThreadId, refused.Reason, correlationId);
+            }
+        }
+
+        await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId, correlationId, ct);
+    }
+
+    /// <summary>
+    /// The Direct thread of the pair (sender, recipient) for an outbound Direct send and the mapped recipient, or <c>null</c> for
+    /// today's path. The recipient is resolved on the server (<see cref="ResolveDirectRecipientAsync"/>); then
+    /// <see cref="IDirectThreadAccessService.FindOrCreateDirectThreadAsync"/> answers the pair's thread, which is used only when
+    /// the Direct-pair shape rule (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>) finds it a strict pair
+    /// AND its two participants are exactly the sender and the mapped recipient. Best-effort (NFR-02): a refusal logs one
+    /// Information <see cref="PairRoutingSkippedEventCode"/> with its reason; a fault resolving the recipient one Warning
+    /// <see cref="PairRoutingUnresolvedEventCode"/>; a fault of the find-or-create one Warning <see cref="PairThreadFailedEventCode"/>;
+    /// a fault reading the found thread one Warning <see cref="PairThreadUnreadEventCode"/>. None of them fails the send. Writes
+    /// nothing itself and assigns no owner.
+    /// </summary>
+    private async Task<(Guid ThreadId, Guid Recipient)?> FindDirectPairThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, Guid senderSystemUserId, string correlationId, CancellationToken ct)
+    {
+        if (_directThreadAccess is null || _contactIdentities is null || _recordShares is null)
+        {
+            SkipPairRouting(PairRoutingSkipReason.NotConfigured, communicationId, correlationId);
+            return null;
+        }
+
+        // Fix round 2 (F2-5): the caller's cancellation is not a fault. The message is already sent and persisted and this step
+        // never throws, so a cancelled routing returns quietly — no Warning — and the message takes today's path, which handles
+        // the cancellation as it always has.
+        (string? SkipReason, Guid Recipient) resolved;
+        try
+        {
+            resolved = await ResolveDirectRecipientAsync(request, senderSystemUserId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairRoutingUnresolvedEvent,
+                ex,
+                "{EventCode}: the recipient of outbound Direct message {CommunicationId} could not be resolved; filed by the " +
+                "thread resolver instead | CorrelationId: {CorrelationId}",
+                PairRoutingUnresolvedEventCode, communicationId, correlationId);
+            return null;
+        }
+
+        if (resolved.SkipReason is { } reason)
+        {
+            SkipPairRouting(reason, communicationId, correlationId);
+            return null;
+        }
+
+        Guid pairThreadId;
+        try
+        {
+            pairThreadId = await _directThreadAccess.FindOrCreateDirectThreadAsync(senderSystemUserId, resolved.Recipient, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                PairThreadFailedEvent,
+                ex,
+                "{EventCode}: the Direct thread of outbound Direct message {CommunicationId} could not be found or created; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadFailedEventCode, communicationId, correlationId);
+            return null;
+        }
+
+        // F1-a (fix round 1): the found thread is joined only when it is a strict pair of exactly these two people.
+        // The shape rule answers a fault as ParticipantReadFault itself; only the caller's cancellation is thrown, and that
+        // returns quietly as above.
+        Access.DirectPairShape shape;
+        try
+        {
+            shape = await Access.DirectMessageRecipient.ReadStrictPairShapeAsync(_genericEntityService, _recordShares, pairThreadId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        if (shape.Reason == Access.DirectPairShapeReason.ParticipantReadFault)
+        {
+            _logger.LogWarning(
+                PairThreadUnreadEvent,
+                shape.Fault,
+                "{EventCode}: the Direct thread {ThreadId} found for outbound Direct message {CommunicationId} could not be read; " +
+                "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+                PairThreadUnreadEventCode, pairThreadId, communicationId, correlationId);
+            return null;
+        }
+
+        if (!shape.IsStrictPair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadPrefix + shape.Reason, communicationId, correlationId);
+            return null;
+        }
+
+        var isThePair = (shape.OwnerId == senderSystemUserId && shape.OtherId == resolved.Recipient)
+                        || (shape.OwnerId == resolved.Recipient && shape.OtherId == senderSystemUserId);
+        if (!isThePair)
+        {
+            SkipPairRouting(PairRoutingSkipReason.PairThreadNotThePair, communicationId, correlationId);
+            return null;
+        }
+
+        _logger.LogInformation(
+            PairRoutedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} is filed into its pair's Direct thread {ThreadId} | " +
+            "CorrelationId: {CorrelationId}",
+            PairRoutedEventCode, communicationId, pairThreadId, correlationId);
+        return (pairThreadId, resolved.Recipient);
+    }
+
+    /// <summary>
+    /// The recipient of an outbound Direct send, by systemuser id, or the reason there is none. To ∪ Cc ∪ Bcc, each normalized
+    /// as the participant index does (<see cref="CommunicationParticipantIndexer.NormalizeAddress"/>), empty entries dropped and
+    /// duplicates counted once, must be exactly one address. It is mapped through the existing internal-user email read (the A9
+    /// licensed-user read: <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>,
+    /// decided by <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds"/>),
+    /// which must answer exactly one enabled systemuser. From there every comparison is by id: it is not the sender, and the
+    /// Direct participant rule (<see cref="Access.DirectMessageRecipient.ReadEligibilityAsync"/>) reads it enabled and not an
+    /// application user. A read that does not complete throws.
+    /// </summary>
+    private async Task<(string? SkipReason, Guid Recipient)> ResolveDirectRecipientAsync(
+        SendCommunicationRequest request, Guid senderSystemUserId, CancellationToken ct)
+    {
+        var addresses = (request.To ?? Array.Empty<string>())
+            .Concat(request.Cc ?? Array.Empty<string>())
+            .Concat(request.Bcc ?? Array.Empty<string>())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(CommunicationParticipantIndexer.NormalizeAddress)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (addresses.Count != 1)
+            return (PairRoutingSkipReason.NotOneAddress, Guid.Empty);
+
+        var lookup = await _contactIdentities!.FindEnabledSystemUsersByEmailAsync(addresses[0], ct);
+        if (lookup.Status != Sprk.Bff.Api.Infrastructure.ExternalAccess.LookupStatus.Read)
+            throw new InvalidOperationException($"The internal-user email read did not complete ({lookup.Status}).");
+
+        var matches = Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.MatchingEnabledSystemUserIds(lookup, addresses[0]);
+        if (matches.Count == 0)
+            return (PairRoutingSkipReason.NoInternalUser, Guid.Empty);
+        if (matches.Count > 1)
+            return (PairRoutingSkipReason.AmbiguousAddress, Guid.Empty);
+
+        var recipient = matches[0];
+        if (recipient == senderSystemUserId)
+            return (PairRoutingSkipReason.RecipientIsSender, Guid.Empty);
+
+        var eligibility = await Access.DirectMessageRecipient.ReadEligibilityAsync(_genericEntityService, new[] { recipient }, ct);
+        return eligibility[recipient] switch
+        {
+            Access.ParticipantEligibility.Eligible => (null, recipient),
+            Access.ParticipantEligibility.Disabled => (PairRoutingSkipReason.RecipientDisabled, Guid.Empty),
+            Access.ParticipantEligibility.ApplicationUser => (PairRoutingSkipReason.RecipientApplicationUser, Guid.Empty),
+            _ => (PairRoutingSkipReason.RecipientMissing, Guid.Empty),
+        };
+    }
+
+    private void SkipPairRouting(string reason, Guid communicationId, string correlationId) =>
+        _logger.LogInformation(
+            PairRoutingSkippedEvent,
+            "{EventCode}: outbound Direct message {CommunicationId} was not filed through its pair's Direct thread ({Reason}); " +
+            "filed by the thread resolver instead | CorrelationId: {CorrelationId}",
+            PairRoutingSkippedEventCode, communicationId, reason, correlationId);
+
     /// <summary>
     /// Resolves the outbound message's <c>sprk_communicationthread</c>. Two paths (task 062 / FR-12):
     /// <b>(1) Explicit target</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied (the
@@ -1557,9 +1900,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// R1-vs-R2 scope note). Chains the SAME task-043 Direct-thread message-access grant the find-or-create
     /// path uses, so a message stamped this way is equally visible under the impersonated read (task 050).
     /// Best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail the already-sent + persisted message.
+    /// <para>Task 054a piece 2b: the outbound Direct pair routing files through here too. <paramref name="filing"/> names the path in
+    /// the log; <paramref name="expected"/> is the pair it routed to. The join then files only into a strict Direct thread of
+    /// exactly that pair, as its own read shows; otherwise it writes and grants nothing and
+    /// <see cref="Access.DirectPairFilingRefusedException"/> propagates to the caller, which files the message by today's path.
+    /// Every other fault is caught here as before. A respond passes neither.</para>
     /// </summary>
     private async Task<Guid?> AssignExplicitThreadAsync(
-        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct)
+        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct,
+        string filing = "respond-into-thread", Access.ExpectedDirectPair? expected = null)
     {
         try
         {
@@ -1567,26 +1916,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
             // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned). #2091: then
             // the step after a re-file (its mirror, what is filed under it, its gate Decision Records), never thrown.
+            // Task 054: a message joining a Direct thread gets its two participants in this same update.
             var assignment = await ThreadResolver.JoinThreadAsync(
                 _genericEntityService,
                 _ownership,
                 _scopeFactory,
                 _logger,
+                _recordShares,
                 communicationId,
                 threadId,
-                token => _genericEntityService.UpdateAsync(
-                    "sprk_communication",
-                    communicationId,
-                    new Dictionary<string, object>
-                    {
-                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-                    },
-                    token),
-                ct);
+                (alongside, token) => Access.DirectMessageRecipient.WriteThreadFilingAsync(
+                    _genericEntityService, _logger, communicationId, threadId, alongside, token),
+                ct,
+                expected);
 
             _logger.LogInformation(
-                "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
-                threadId, communicationId, correlationId);
+                "Stamped explicit thread target {ThreadId} ({Filing}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                threadId, filing, communicationId, correlationId);
 
             // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's audience as the
             // stamp read it (#1629: Direct two-party list, the anchor record's grantees, or nobody; never re-read).
@@ -1597,7 +1943,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             return threadId;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not Access.DirectPairFilingRefusedException)
         {
             _logger.LogWarning(
                 ex,
@@ -2014,12 +2360,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
 
-            // Step 6: Archive to SPE if requested (best-effort)
+            // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
             // Check ArchiveOutgoingOptIn on the sender's CommunicationAccount (default true if not set)
+            var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (request.ArchiveToSpe && senderResult.Email is not null)
+            if (archive && senderResult.Email is not null)
             {
                 try
                 {
@@ -2038,14 +2385,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
-            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
                 _logger.LogInformation(
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for sender {SenderEmail} | CorrelationId: {CorrelationId}",
                     senderResult.Email, correlationId);
             }
-            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 // Build a partial response for .eml generation (before archival fields are known)
                 var partialResponse = new SendCommunicationResponse
@@ -2060,9 +2407,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
                 try
                 {
+                    // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
                         request, partialResponse, communicationId.Value, cancellationToken,
-                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
+                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User),
+                        sentAttachments: fileAttachments ?? [],
+                        sentSources: attachmentSources ?? [],
+                        filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
@@ -2077,8 +2428,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
 
                 // Archive outbound attachments: each one is saved as its OWN new file in the communication's
-                // container, with its own sprk_document (best-effort; task 097 option A)
-                if (archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
+                // container, with its own sprk_document (best-effort; task 097 option A). Only when ASKED for
+                // (ArchiveToSpe): the D-217 auto-archive of a filed send creates the .eml alone (review F1a).
+                if (request.ArchiveToSpe && archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
                 {
                     try
                     {
@@ -2095,7 +2447,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     }
                 }
             }
-            else if (request.ArchiveToSpe && !communicationId.HasValue)
+            else if (archive && !communicationId.HasValue)
             {
                 archivalWarning = "Email sent successfully but archival skipped: Dataverse communication record was not created.";
                 _logger.LogWarning(
@@ -2356,12 +2708,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
 
-            // Step 6: Archive to SPE if requested (best-effort)
+            // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
             // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
+            var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (request.ArchiveToSpe && request.FromMailbox is not null)
+            if (archive && request.FromMailbox is not null)
             {
                 try
                 {
@@ -2380,14 +2733,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
-            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
                 _logger.LogInformation(
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for user sender {UserEmail} | CorrelationId: {CorrelationId}",
                     userEmail, correlationId);
             }
-            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 var partialResponse = new SendCommunicationResponse
                 {
@@ -2401,8 +2754,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
                 try
                 {
+                    // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, ct, requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+                        request, partialResponse, communicationId.Value, ct,
+                        requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId),
+                        sentAttachments: fileAttachments ?? [],
+                        sentSources: attachmentSources ?? [],
+                        filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
                     await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
@@ -2417,8 +2775,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
 
                 // Archive outbound attachments: each one is saved as its OWN new file in the communication's
-                // container, with its own sprk_document (best-effort; task 097 option A)
-                if (archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
+                // container, with its own sprk_document (best-effort; task 097 option A). Only when ASKED for
+                // (ArchiveToSpe): the D-217 auto-archive of a filed send creates the .eml alone (review F1a).
+                if (request.ArchiveToSpe && archivedDocumentId.HasValue && fileAttachments is { Count: > 0 })
                 {
                     try
                     {
@@ -2435,7 +2794,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     }
                 }
             }
-            else if (request.ArchiveToSpe && !communicationId.HasValue)
+            else if (archive && !communicationId.HasValue)
             {
                 archivalWarning = "Email sent successfully but archival skipped: Dataverse communication record was not created.";
                 _logger.LogWarning(
@@ -2892,6 +3251,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
 
+            // Ontology task 176 (D-216): a server-set secondary association the caller files the row under too (the budget
+            // inquiry's matter). Written BEFORE the stamp, so the inherited Access Permission and the owner question see it.
+            foreach (var also in associations.Skip(1).Where(a => a.AlsoRegarding && a.EntityId != Guid.Empty))
+            {
+                if (RegardingLookupMap.TryGetValue(also.EntityType, out var alsoMapping))
+                    communication[alsoMapping.LookupField] = new EntityReference(also.EntityType, also.EntityId);
+            }
+
             // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
             // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
             // inherited one. Four of the twelve mapped targets are child-class (analysis, invoice, event
@@ -2906,6 +3273,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Unknown entity type for association lookup mapping: {EntityType}. Regarding lookup will not be set.",
                 primary.EntityType);
         }
+
+        // A reply's copied display values describe the SOURCE's record (CopyRegardingFromSourceAsync): unless the explicit
+        // association names that same record they leave with the id they described, so the row never holds one record's id
+        // beside another's values. The association's own name and url are written below when it gives them; otherwise they
+        // stay unset.
+        DropDisplayValuesUnlessSameRecord(communication, primary.EntityId);
 
         // Set denormalized regarding fields
         if (primary.EntityName is not null)
@@ -2973,7 +3346,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var columns = new List<string>
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
-                "sprk_regardingrecordurl", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -2996,9 +3369,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Denormalized regarding pointer — copy only populated values (additive).
             CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
-            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            // The display values (name, url, number) and the pair's TYPE describe the record the id names, so they are copied
+            // only beside that id: the row must now hold the source's id, and it must parse as an id. A source with display
+            // values but no usable id copies none, so the row never holds values with nothing to say which record they are of.
+            // The type is a lookup to sprk_recordtype_ref, copied as a reference (045c, owner Q6 (c); the string read this
+            // replaces always came back empty, so a reply never carried the type).
+            if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"),
+                    source.GetAttributeValue<string>("sprk_regardingrecordid")))
+            {
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+                CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
+
+                if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
+                    && !communication.Attributes.ContainsKey("sprk_regardingrecordtype"))
+                {
+                    communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+                }
+            }
 
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
@@ -3022,6 +3411,30 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    /// <summary>
+    /// Whether two stored record ids name the same record: both parse as ids (braces, hyphens and letter case do not matter)
+    /// and are equal. A value that does not parse, or is absent, names no record, so it is different from every other value.
+    /// </summary>
+    private static bool SameRecord(string? left, string? right) =>
+        Guid.TryParse(left, out var a) && Guid.TryParse(right, out var b) && a == b;
+
+    /// <summary>
+    /// The display values of the regarding pointer (type, number, name, url) describe the record the row's
+    /// <c>sprk_regardingrecordid</c> names. Before that id is written for <paramref name="newRecordId"/>, they are removed
+    /// unless the row's current id already names that same record (<see cref="SameRecord"/>); an absent id counts as a
+    /// different record. The caller then writes whatever display values it has for the new record.
+    /// </summary>
+    private static void DropDisplayValuesUnlessSameRecord(DataverseEntity communication, Guid newRecordId)
+    {
+        if (SameRecord(communication.GetAttributeValue<string>("sprk_regardingrecordid"), newRecordId.ToString()))
+            return;
+
+        communication.Attributes.Remove("sprk_regardingrecordtype");
+        communication.Attributes.Remove("sprk_regardingrecordnumber");
+        communication.Attributes.Remove("sprk_regardingrecordname");
+        communication.Attributes.Remove("sprk_regardingrecordurl");
+    }
+
     /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>
     /// only when the target does not already carry it (additive; explicit values win).</summary>
     private static void CopyStringIfPresent(DataverseEntity source, DataverseEntity target, string field)
@@ -3035,13 +3448,34 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Archives the sent communication as a .eml file in SharePoint Embedded
     /// and creates a sprk_document record linking to the archived file.
     /// </summary>
+    /// <param name="sentAttachments">
+    /// Ontology task 177 (review F1b): the attachments the send just transmitted, in memory. The two send paths pass them (an
+    /// empty list when the send had none), because their <c>sprk_communicationattachment</c> rows are created AFTER this archive
+    /// (Step 7), so a row-based embed would always be empty. Null on the on-demand archive (<c>ArchiveExistingAsync</c>), which
+    /// keeps reading the rows (<see cref="FetchEmlAttachmentsForEmbedAsync"/>), unchanged.
+    /// </param>
+    /// <param name="sentSources">
+    /// The source <c>sprk_document</c> of each of <paramref name="sentAttachments"/> that was read from one (index-aligned with
+    /// the document attachments; an attachment with no source document has no entry). The .eml carries their bytes, so it is
+    /// created with their most restrictive own Access Permission (<see cref="EmbeddedSourcesAccessPermissionAsync"/>). Ignored
+    /// when <paramref name="sentAttachments"/> is null: the on-demand archive takes the sources of the rows it embeds from
+    /// <see cref="FetchEmlAttachmentsForEmbedAsync"/> (uac-r2 F-177-R2-1).
+    /// </param>
+    /// <param name="filedCommunication">
+    /// Ontology task 177 A3 (D-218): the communication as written — the row the send created, or the row the on-demand archive
+    /// read — from whose regarding an OUTBOUND archive takes its record link (<see cref="StageArchiveRecordLink"/>). An inbound
+    /// archive is never linked here (its ingestion files it). Null: no link.
+    /// </param>
     private async Task<Guid> ArchiveToSpeAsync(
         SendCommunicationRequest request,
         SendCommunicationResponse partialResponse,
         Guid communicationId,
         CancellationToken ct,
         int emailDirection = 100000001, // default Sent — send-path callers are always outbound
-        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
+        IReadOnlyList<ChannelAttachment>? sentAttachments = null,
+        IReadOnlyList<OutboundAttachmentSource>? sentSources = null,
+        DataverseEntity? filedCommunication = null)
     {
         // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
         // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
@@ -3054,7 +3488,28 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (archiveOwner.IsRefused)
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_document", archiveOwner);
 
-        var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+        // Review F1b: at send time the embed is the bytes just sent (the attachment rows do not exist yet); on demand, the rows.
+        List<EmlAttachment> emlAttachments;
+        if (sentAttachments is not null)
+        {
+            emlAttachments = sentAttachments.Select(a => new EmlAttachment
+            {
+                FileName = a.Name,
+                Content = a.Content,
+                ContentType = a.ContentType ?? InferContentType(a.Name),
+            }).ToList();
+        }
+        else
+        {
+            // uac-r2 F-177-R2-1: the on-demand embed's sources are the documents its rows were verified against, so the
+            // .eml is narrowed like a send's (inbound archives embed too).
+            (emlAttachments, sentSources) = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
+        }
+
+        // The embedded bytes must not widen access (uac-r2): the .eml takes its sources' most restrictive own value.
+        var embeddedNarrowing = sentSources is { Count: > 0 }
+            ? await EmbeddedSourcesAccessPermissionAsync(sentSources, communicationId, ct)
+            : null;
 
         var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
             .GenerateEml(request, partialResponse, emlAttachments);
@@ -3142,7 +3597,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_emaildirection"] = new OptionSetValue(emailDirection), // 100000001 Sent (default) / 100000000 Received
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
-        ApplyContentOwner(document, archiveOwner); // task 146
+        ApplyContentOwner(document, archiveOwner); // task 146 — unchanged by the record link below
+        StageEmbeddedAttachmentNarrowing(document, embeddedNarrowing); // review F1b + uac-r2: in this same create
+
+        // Ontology task 177 A3 (D-218, uac-r2 Option A): an outbound archive is linked to the record its communication is
+        // filed to, in this same create, so it shows in that record's Documents. Inbound (on-demand re-archive) is not.
+        var linked = emailDirection == SentEmailDirection && StageArchiveRecordLink(document, filedCommunication);
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -3150,7 +3610,124 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             "Created sprk_document record for archived .eml | DocumentId: {DocumentId}, CommunicationId: {CommunicationId}",
             documentId, communicationId);
 
+        if (linked)
+            await RefreshLinkedArchiveAccessPermissionAsync(documentId, communicationId, ct);
+
         return documentId;
+    }
+
+    /// <summary>The archive document's <c>sprk_emaildirection</c> for a sent email (Received is 100000000).</summary>
+    private const int SentEmailDirection = 100000001;
+
+    /// <summary>
+    /// Ontology task 177 A3 (D-218, uac-r2 Option A): stages the archived .eml's record link onto its create row from the
+    /// communication as written: the primary regarding (the typed lookup whose id is <c>sprk_regardingrecordid</c>) when the
+    /// document association map maps its table, otherwise the first typed regarding lookup, in
+    /// <see cref="Engine.RegardingFieldMap.All"/> order, that it maps (a budget inquiry filed to a service request and its matter
+    /// links to the matter). <see cref="Spaarke.Dataverse.DocumentAssociationMap.TryApply(Microsoft.Xrm.Sdk.Entity, string?, Guid?)"/>
+    /// alone chooses the column and its target. No mappable regarding: nothing is written.
+    /// </summary>
+    /// <returns>Whether a link was written.</returns>
+    internal static bool StageArchiveRecordLink(DataverseEntity document, DataverseEntity? communication)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (communication is null)
+            return false;
+
+        var filed = Engine.RegardingFieldMap.All
+            .Select(m => (Table: m.EntityLogicalName, Id: communication.GetAttributeValue<EntityReference>(m.RegardingField)?.Id ?? Guid.Empty))
+            .Where(r => r.Id != Guid.Empty)
+            .ToList();
+        var primaryId = communication.GetAttributeValue<string>("sprk_regardingrecordid");
+        var primaryFirst = filed.Where(r => SameRecord(primaryId, r.Id.ToString())).Concat(filed);
+
+        foreach (var (table, id) in primaryFirst)
+        {
+            if (Spaarke.Dataverse.DocumentAssociationMap.TryApply(document, table, id))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Ontology task 177 A3: a linked archive takes its record's inherited Access Permission at once (I-16), as a created child
+    /// does (<c>RecordCreationService</c>'s after-create step, through <c>CoreAncestorRestamper</c>'s pass-through to this same
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RefreshInheritedAccessPermissionAsync"/>). The refresh keeps
+    /// max(own, inherited), so it never lowers an own narrowing the create wrote. A failure never fails the archive: it is
+    /// logged, and the secure-child reconciliation job decides the document within its cycle.
+    /// </summary>
+    private async Task RefreshLinkedArchiveAccessPermissionAsync(Guid documentId, Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            await _coreAncestors.RefreshInheritedAccessPermissionAsync("sprk_document", documentId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "The archived .eml's inherited Access Permission was not refreshed after it was linked to its record; the " +
+                "reconciliation job decides it within its cycle | DocumentId: {DocumentId}, CommunicationId: {CommunicationId}",
+                documentId, communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Ontology task 177 review F1b (uac-r2 binding addition): the most restrictive OWN <c>sprk_accesspermission</c> of the
+    /// source documents whose bytes the sent .eml embeds (<see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.MostRestrictive"/>),
+    /// read app-only by id. A source that cannot be read, is not found, or holds an unknown level counts as Restricted (fail
+    /// closed). Returns <see langword="null"/> when every source is Standard (nothing is written: the .eml's value stands).
+    /// </summary>
+    private async Task<int?> EmbeddedSourcesAccessPermissionAsync(
+        IReadOnlyList<OutboundAttachmentSource> sources, Guid communicationId, CancellationToken ct)
+    {
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        var values = new List<int?>(sources.Count);
+        foreach (var source in sources)
+        {
+            if (!Guid.TryParse(source.DocumentId, out var sourceId) || sourceId == Guid.Empty)
+            {
+                values.Add(restricted);
+                continue;
+            }
+
+            try
+            {
+                var row = await _genericEntityService.RetrieveAsync(
+                    "sprk_document", sourceId, [Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column], ct);
+                values.Add(row is null
+                    ? restricted
+                    : row.GetAttributeValue<OptionSetValue>(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column)?.Value);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "An embedded attachment's source document Access Permission could not be read; the archived .eml is " +
+                    "created Restricted (fail closed) | CommunicationId: {CommunicationId}", communicationId);
+                values.Add(restricted);
+            }
+        }
+
+        // An unknown level is never ranked by guess: it fails closed to Restricted.
+        var level = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.MostRestrictive(values) ?? restricted;
+        return level == Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Standard ? null : level;
+    }
+
+    /// <summary>
+    /// Ontology task 177 review F1b (uac-r2): stages the archived .eml's OWN narrowing (Limited or Restricted, from
+    /// <see cref="EmbeddedSourcesAccessPermissionAsync"/>) on its create, with its <c>sprk_accessinheritance</c> record
+    /// (<see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>, task 189) in the same write, so the reconciler
+    /// keeps it as the document's own and never widens it below its sources. <see langword="null"/> writes nothing.
+    /// </summary>
+    internal static void StageEmbeddedAttachmentNarrowing(DataverseEntity document, int? level)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (level is not { } own)
+            return;
+
+        document[Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column] = new OptionSetValue(own);
+        document[Sprk.Bff.Api.Services.Access.AccessInheritance.Column] =
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(own).Serialize();
     }
 
     /// <summary>
@@ -3179,9 +3756,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// flow never fails on it. Independent of the SEPARATE per-attachment <c>sprk_document</c> archival (which is
     /// unchanged) — both copies exist by design.
     /// </summary>
-    private async Task<List<EmlAttachment>> FetchEmlAttachmentsForEmbedAsync(Guid communicationId, CancellationToken ct)
+    /// <returns>
+    /// The embedded attachments, and (index-aligned with them) the <c>sprk_document</c> each one's pointer was verified
+    /// against — the source whose own Access Permission the .eml must not widen (uac-r2 F-177-R2-1, as a send's
+    /// <see cref="OutboundAttachmentSource"/>s). Only an attachment that is embedded has an entry.
+    /// </returns>
+    private async Task<(List<EmlAttachment> Attachments, List<OutboundAttachmentSource> Sources)> FetchEmlAttachmentsForEmbedAsync(
+        Guid communicationId, CancellationToken ct)
     {
         var result = new List<EmlAttachment>();
+        var sources = new List<OutboundAttachmentSource>();
 
         EntityCollection attachments;
         try
@@ -3202,7 +3786,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ex,
                 "Failed to query attachments for .eml embedding (non-fatal) | CommunicationId: {CommunicationId}",
                 communicationId);
-            return result;
+            return (result, sources);
         }
 
         foreach (var att in attachments.Entities)
@@ -3258,6 +3842,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Content = ms.ToArray(),
                     ContentType = InferContentType(fileName),
                 });
+                sources.Add(new OutboundAttachmentSource(linkedDocument.Id.ToString(), driveId));
             }
             catch (Exception ex)
             {
@@ -3268,7 +3853,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
         }
 
-        return result;
+        return (result, sources);
     }
 
     /// <summary>

@@ -792,6 +792,7 @@ public class AssociationMappingTests
         var matterId = Guid.NewGuid();
         var orgId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
+        var matterTypeRowId = Guid.NewGuid();
         var source = new DataverseEntity("sprk_communication", sourceId)
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
@@ -799,7 +800,8 @@ public class AssociationMappingTests
             ["sprk_regardingperson"] = new EntityReference("contact", contactId),
             ["sprk_regardingrecordname"] = "Smith v. Jones",
             ["sprk_regardingrecordid"] = matterId.ToString(),
-            ["sprk_regardingrecordtype"] = "sprk_matter",
+            // The pair's type is a lookup to sprk_recordtype_ref (not text), and the reply copies it as one (045c, Q6 (c)).
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", matterTypeRowId),
             ["sprk_associationcount"] = 3,
         };
         SetupSourceCommunication(sourceId, source);
@@ -815,7 +817,9 @@ public class AssociationMappingTests
         (_capturedEntity["sprk_regardingperson"] as EntityReference)!.Id.Should().Be(contactId);
         // Denormalized pointer + count mirror the parent.
         _capturedEntity["sprk_regardingrecordname"].Should().Be("Smith v. Jones");
-        _capturedEntity["sprk_regardingrecordtype"].Should().Be("sprk_matter");
+        var copiedType = (_capturedEntity["sprk_regardingrecordtype"] as EntityReference)!;
+        copiedType.LogicalName.Should().Be("sprk_recordtype_ref");
+        copiedType.Id.Should().Be(matterTypeRowId);
         _capturedEntity["sprk_associationcount"].Should().Be(3);
     }
 

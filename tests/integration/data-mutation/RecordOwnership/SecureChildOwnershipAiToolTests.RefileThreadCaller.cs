@@ -759,7 +759,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
             SecureChildShareWorld.EntitiesOver(() => ShareWorld).Object, _shareTable,
             new Lazy<Sprk.Bff.Api.Services.Communication.Membership.IThreadMembershipDerivationService>(() => members.Object),
             SecureChildShareWorld.Configuration(),
-            NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing);
+            NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing,
+            Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.Unconfigured(),
+            // uac-r2 task 198 R3: the user reader and core-ancestor resolver the host always injects (the record-anchored
+            // grant's Restricted bar). No record here is Restricted, so the grant is exactly as before.
+            new Sprk.Bff.Api.Tests.TestInfrastructure.UserFlagDirectoryDouble(), SecureChildShareWorld.CoreAncestorsOver(() => ShareWorld));
         return new ThreadResolver(
             strategies ?? Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
             grants);

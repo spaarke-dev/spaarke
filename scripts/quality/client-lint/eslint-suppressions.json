@@ -666,10 +666,10 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 1
     },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx": {

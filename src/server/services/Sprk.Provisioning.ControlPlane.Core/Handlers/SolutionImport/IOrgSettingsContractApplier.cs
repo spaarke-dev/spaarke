@@ -75,7 +75,8 @@ public interface IOrgSettingsContractManifest
 /// Static <see cref="IOrgSettingsContractManifest"/> impl. HANDLER-08
 /// (F14 verbatim) canonical set: maxuploadfilesize=25_600_000 (25 MB —
 /// covers the UniversalDocumentUpload PCF bundle size). #2027 adds org
-/// auditing: isauditenabled=true and auditretentionperiodv2=-1 (Forever).
+/// auditing: isauditenabled=true and auditretentionperiodv2=-1 (Forever); the owner's 2026-11-10 decision adds user
+/// access logging: isuseraccessauditenabled=true.
 /// </summary>
 public sealed class StaticOrgSettingsContractManifest : IOrgSettingsContractManifest
 {
@@ -94,6 +95,12 @@ public sealed class StaticOrgSettingsContractManifest : IOrgSettingsContractMani
             // #2027 owner decision (2026-10-18, relayed by uac-r2): keep audit Forever (-1) — a legal-ops system of
             // record; the cost is Dataverse log capacity. -1 is satisfied only by -1 (see the applier).
             ["auditretentionperiodv2"] = "-1",
+
+            // Owner decision 2026-11-10: "Log access" — Dataverse records each user's sign-in to the environment (audit
+            // actions 64/65, at most once per useraccessauditinginterval, default 4 h). It answers "did person P use the
+            // system during period D", which record audit cannot; it was on in dev and off on ACME, and history of it
+            // cannot be backfilled either. Needs isauditenabled (above). Cost: Dataverse log capacity.
+            ["isuseraccessauditenabled"] = "true",
         };
 
     /// <inheritdoc/>

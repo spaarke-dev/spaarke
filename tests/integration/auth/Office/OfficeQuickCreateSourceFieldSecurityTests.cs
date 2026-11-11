@@ -177,8 +177,12 @@ public class OfficeQuickCreateSourceFieldSecurityTests
             .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_project", "sprk_matter", true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FieldMappingProfileEntity
             {
-                Id = Guid.NewGuid(), Name = "Project to Matter", SourceEntity = "sprk_project", TargetEntity = "sprk_matter",
-                IsActive = true, Rules = Profile.ToList(),
+                Id = Guid.NewGuid(),
+                Name = "Project to Matter",
+                SourceEntity = "sprk_project",
+                TargetEntity = "sprk_matter",
+                IsActive = true,
+                Rules = Profile.ToList(),
             });
 
         var sourceRead = factory.Entities
@@ -189,7 +193,7 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         }
         else
         {
-            sourceRead.ReturnsAsync(source);
+            sourceRead.ReturnsAsync(source.WithGate());
         }
 
         // The creation service's step-11 write (task 018b), and the number read-back of whatever id it picked.

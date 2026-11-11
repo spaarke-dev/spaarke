@@ -235,7 +235,7 @@ public sealed class IncomingAssociationResolver
             row[fieldName] = target;
         }
 
-        if (decision.Status != AssociationStatusCodes.Ambiguous && PrimaryRegarding(row) is { } primary)
+        if (decision.Status != AssociationStatusCodes.Ambiguous && PrimaryRegarding(row, decision.PrimaryRegardingField) is { } primary)
             row[CoreAncestorResolver.RegardingRecordIdColumn] = primary.Reference.Id.ToString("D").ToLowerInvariant();
 
         WithholdIntermediateTheRowCannotPlace(row);
@@ -593,7 +593,7 @@ public sealed class IncomingAssociationResolver
         // the reviewer picks the primary.
         if (decision.RegardingWrites.Count > 0 && decision.Status != AssociationStatusCodes.Ambiguous)
         {
-            await PopulateResolverFieldsAsync(fields, ct);
+            await PopulateResolverFieldsAsync(fields, decision.PrimaryRegardingField, ct);
         }
 
         // Task 156 (verifier round 1 item 9): with NO pair (an Ambiguous decision), the row cannot say that a root the
@@ -841,6 +841,7 @@ public sealed class IncomingAssociationResolver
 
     private async Task PopulateResolverFieldsAsync(
         Dictionary<string, object> fields,
+        string? preferredPrimaryField,
         CancellationToken ct)
     {
         // Find the primary regarding entity (highest priority field that was set). Priority order is the
@@ -849,7 +850,7 @@ public sealed class IncomingAssociationResolver
         // must never be the headline Regarding. When the substantive matters conflict (Ambiguous → not
         // written), leaving the denormalized fields unset is the correct outcome: the record shows no headline
         // Regarding and the review surface resolves the candidates from provenance.
-        if (PrimaryRegarding(fields) is not { } primary)
+        if (PrimaryRegarding(fields, preferredPrimaryField) is not { } primary)
             return;
 
         var primaryRef = primary.Reference;
@@ -927,9 +928,21 @@ public sealed class IncomingAssociationResolver
     /// The row's primary regarding — the highest-priority SUBSTANTIVE regarding field that is set (the order is
     /// <see cref="RegardingFieldMap.All"/>; fallback identity fields never headline). The target the pair names;
     /// shared by <see cref="PopulateResolverFieldsAsync"/> and <see cref="OwnershipContextForNewRecordAsync"/>.
+    /// <paramref name="preferredField"/> (<see cref="AssociationDecision.PrimaryRegardingField"/>) wins when it is a
+    /// substantive field that is set; otherwise the priority order decides.
     /// </summary>
-    private static (EntityReference Reference, string EntityLogicalName)? PrimaryRegarding(Dictionary<string, object> fields)
+    private static (EntityReference Reference, string EntityLogicalName)? PrimaryRegarding(
+        Dictionary<string, object> fields, string? preferredField = null)
     {
+        if (preferredField is not null
+            && !FallbackRegardingFields.Contains(preferredField)
+            && fields.TryGetValue(preferredField, out var preferredValue) && preferredValue is EntityReference preferredRef
+            && RegardingFieldMap.All.FirstOrDefault(m => string.Equals(m.RegardingField, preferredField, StringComparison.OrdinalIgnoreCase))
+                is { EntityLogicalName: { } preferredEntity })
+        {
+            return (preferredRef, preferredEntity);
+        }
+
         foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
             if (FallbackRegardingFields.Contains(fieldName))

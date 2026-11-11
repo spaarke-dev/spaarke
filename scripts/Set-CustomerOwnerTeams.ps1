@@ -54,6 +54,14 @@
     no business unit, or more than one, named -SecureBusinessUnitName (Secure Record exists by this step, H7b, so a name
     that matches nothing is a wrong name and would let the Secure Record unit pass as a customer unit); two config files that declare the same team, the same role or the same table.
 
+    DIRECT-MESSAGE MODE (-DirectMessageBusinessUnitName; uac-r2 task 198 Part A, fm task 054). Sets up the ONE memberless
+    Direct-message owner team ('Spaarke Direct Message Owners', role 'Direct Message Owner') in the named Direct-message
+    business unit, from the files in $DirectMessageRoleFiles only (businessUnit 'direct'; never the customer files, and the
+    customer mode never reads a 'direct' file). Dry run, -Apply and -Verify work as above, for that one team. Its own
+    refusals, besides the root / Secure Record / not-a-direct-child-of-the-root refusals above: no business unit of that name
+    (this script never creates the unit), more than one, and any user homed in the unit (an owner decision; the script never
+    moves a user). A member on the team, an ambiguous team or an ambiguous role is refused as for a customer unit.
+
     FAIL CLOSED: every read that fails stops the run (exit 1); nothing is decided on a partial read.
 
     Auth is the operator's own az CLI identity. No secrets in this script or the repository.
@@ -66,6 +74,16 @@
 
 .PARAMETER CustomerBusinessUnitId
     The customer's top business unit, by id (provisioning's customerBusinessUnitId). Give this or -CustomerBusinessUnitName.
+
+.PARAMETER DirectMessageBusinessUnitName
+    Direct-message mode: the Direct-message business unit, by name (exactly one match; a direct child of the root with no
+    users). The script does not create it.
+    Customer mode (task 198 Q4): the Direct-message unit, refused as a customer unit (decided by id; no unit of that name
+    refuses nothing). Default 'Spaarke Direct Messages'. Customer mode (R6) ALSO refuses any customer unit that holds a team
+    with the Direct-message owner role (found by role id / parentrootroleid, never by role name), so a Direct unit with a
+    non-default name is refused even when this parameter is omitted. Every business unit named by a parameter (this one,
+    -CustomerBusinessUnitName, -SecureBusinessUnitName) is found with Dataverse's own `name eq` filter (case- and
+    accent-insensitive) and decided by the ids returned: two matches refuse as ambiguous.
 
 .PARAMETER SecureBusinessUnitName
     The Secure Record business unit (SecureRecord:BusinessUnitName), refused as a customer unit. Default 'Secure Record'.
@@ -89,9 +107,15 @@
 .EXAMPLE
     .\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitId <id> -Verify
     Exit 0 = no drift in that unit for either team; exit 1 = drift (each named) or a read failed.
+
+.EXAMPLE
+    .\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -DirectMessageBusinessUnitName 'Spaarke Direct Messages'
+    Dry run for the Direct-message owner team, with no writes.
 #>
 
-[CmdletBinding(DefaultParameterSetName = 'ByName')]
+# Default 'Direct' (task 198 Q4): -DirectMessageBusinessUnitName is in all three sets, so a call naming only it must bind to the
+# Direct mode; a call naming a customer unit binds to its own set, and a call naming neither still stops on a missing parameter.
+[CmdletBinding(DefaultParameterSetName = 'Direct')]
 param(
     [Parameter(Mandatory)]
     [string]$EnvironmentUrl,
@@ -101,6 +125,11 @@ param(
 
     [Parameter(Mandatory, ParameterSetName = 'ById')]
     [guid]$CustomerBusinessUnitId,
+
+    [Parameter(Mandatory, ParameterSetName = 'Direct')]
+    [Parameter(ParameterSetName = 'ByName')]
+    [Parameter(ParameterSetName = 'ById')]
+    [string]$DirectMessageBusinessUnitName = 'Spaarke Direct Messages',
 
     [string]$SecureBusinessUnitName = 'Secure Record',
 
@@ -120,6 +149,12 @@ $DeclaredRoleFiles = @(
     'customer-configuration-owner-role.json'
 )
 
+# THE Direct-message owner role (-DirectMessageBusinessUnitName mode only): its own declared set, never mixed with the
+# customer-unit files above.
+$DirectMessageRoleFiles = @(
+    'direct-message-owner-role.json'
+)
+
 $ErrorActionPreference = 'Stop'
 if ($Apply -and $Verify) {
     Write-Host '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' -ForegroundColor Red
@@ -128,6 +163,10 @@ if ($Apply -and $Verify) {
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $Api = "$EnvironmentUrl/api/data/v9.2"
+$IsDirectMode = $PSCmdlet.ParameterSetName -eq 'Direct'
+if ($IsDirectMode -and (-not $ConfigPaths -or $ConfigPaths.Count -eq 0)) {
+    $ConfigPaths = @($DirectMessageRoleFiles | ForEach-Object { Join-Path $PSScriptRoot '..' 'config' $_ })
+}
 if (-not $ConfigPaths -or $ConfigPaths.Count -eq 0) {
     $ConfigPaths = @($DeclaredRoleFiles | ForEach-Object { Join-Path $PSScriptRoot '..' 'config' $_ })
 }
@@ -159,12 +198,41 @@ function Read-Config([string]$Path) {
     return $c
 }
 
+# The Direct-message mode's reader: the same rules as Read-Config, for businessUnit 'direct' only (so neither mode reads the
+# other's file).
+function Read-DirectConfig([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { throw "Config not found: $Path" }
+    $c = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($c.businessUnit -ne 'direct') {
+        throw "Config $Path names business unit '$($c.businessUnit)'. -DirectMessageBusinessUnitName reads only a 'direct' config (the files in `$DirectMessageRoleFiles)."
+    }
+    if ($c.schemaVersion -ne 1) { throw "Unsupported schemaVersion '$($c.schemaVersion)' in $Path" }
+    if ($c.access -ne 'Read' -or $c.depth -ne 'Basic') {
+        throw "Config $Path asks for access '$($c.access)' at depth '$($c.depth)'. Only Read at Basic is supported, by design."
+    }
+    foreach ($field in 'teamName', 'roleName') {
+        if ([string]::IsNullOrWhiteSpace($c.$field)) { throw "Config $Path has no '$field'." }
+    }
+    $t = @($c.tables)
+    if ($t.Count -eq 0) { throw "Config lists no tables: $Path" }
+    foreach ($key in 'logicalName', 'privilegeName') {
+        $dupes = @($t | Group-Object $key | Where-Object Count -gt 1)
+        if ($dupes.Count -gt 0) { throw "Config $Path lists a $key twice: $(($dupes | ForEach-Object Name) -join ', ')" }
+    }
+    foreach ($e in $t) {
+        foreach ($field in 'logicalName', 'privilegeName', 'reason', 'evidence') {
+            if ([string]::IsNullOrWhiteSpace($e.$field)) { throw "Config $Path entry '$($e.logicalName)' has no '$field'." }
+        }
+    }
+    return $c
+}
+
 function Q([string]$Value) { $Value -replace "'", "''" }
 
 try {
     # ── The declared roles ──────────────────────────────────────────────────────────────────────────────────
     $defs = @(foreach ($path in $ConfigPaths) {
-            $c = Read-Config $path
+            $c = if ($IsDirectMode) { Read-DirectConfig $path } else { Read-Config $path }
             [pscustomobject]@{ Path = $path; File = (Split-Path $path -Leaf); Config = $c; Wanted = @(); WantedIds = @() }
         })
     foreach ($key in 'teamName', 'roleName') {
@@ -216,18 +284,32 @@ try {
 
     # FAIL CLOSED (R4b-4): the Secure Record unit exists by this step (H7b), so a name that matches no unit is a wrong
     # -SecureBusinessUnitName (a non-default SecureRecord:BusinessUnitName) and would let Secure Record pass as a customer unit.
-    $secureUnits = @($units | Where-Object { $_.name -eq $SecureBusinessUnitName })
+    # Read by Dataverse's own `name eq` filter (case- and accent-insensitive, as the BFF's lookup is) and decided by the ids
+    # that come back; no name is compared in code (R6 class fix).
+    $secureUnits = @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $SecureBusinessUnitName)'")
     if ($secureUnits.Count -eq 0) { throw "No business unit is named '$SecureBusinessUnitName'. The Secure Record unit exists by this step (H7b); pass its name (SecureRecord:BusinessUnitName) as -SecureBusinessUnitName." }
     if ($secureUnits.Count -gt 1) { throw "More than one business unit is named '$SecureBusinessUnitName'; the Secure Record unit cannot be told apart." }
     $secureId = $secureUnits[0].businessunitid
     if (-not $secureId) { throw "The business unit named '$SecureBusinessUnitName' has no id." }
     Write-Host "Secure BU   : $SecureBusinessUnitName ($secureId)"
 
-    $found = if ($PSCmdlet.ParameterSetName -eq 'ById') {
+    # R6: the Direct unit and the customer unit named by -CustomerBusinessUnitName are found by Dataverse's own `name eq`
+    # filter and decided by the ids that come back. Dataverse ignores case and accents in that match; PowerShell's -eq ignores
+    # only case, so a name compared in code could pass -Verify while the BFF (which asks Dataverse) refuses the same name as
+    # ambiguous. No unit name is compared in code here.
+    $found = if ($IsDirectMode) {
+        @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $DirectMessageBusinessUnitName)'")
+    }
+    elseif ($PSCmdlet.ParameterSetName -eq 'ById') {
         @($units | Where-Object { $_.businessunitid -eq $CustomerBusinessUnitId.ToString() })
     }
-    else { @($units | Where-Object { $_.name -eq $CustomerBusinessUnitName }) }
-    $named = if ($PSCmdlet.ParameterSetName -eq 'ById') { "id $CustomerBusinessUnitId" } else { "'$CustomerBusinessUnitName'" }
+    else {
+        @(Get-DvAll "businessunits?`$select=businessunitid,name,_parentbusinessunitid_value&`$filter=name eq '$(Q $CustomerBusinessUnitName)'")
+    }
+    $named = if ($IsDirectMode) { "'$DirectMessageBusinessUnitName'" } elseif ($PSCmdlet.ParameterSetName -eq 'ById') { "id $CustomerBusinessUnitId" } else { "'$CustomerBusinessUnitName'" }
+    if ($IsDirectMode -and $found.Count -eq 0) {
+        throw "Refused: no business unit is named $named. This script does not create the Direct-message business unit; create it (a direct child of the root, with no users) first."
+    }
     if ($found.Count -ne 1) { throw "Expected exactly one business unit $named; found $($found.Count)." }
     $customer = $found[0]
     $customerId = $customer.businessunitid
@@ -240,6 +322,52 @@ try {
 
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
+
+    # Task 198 Q4: the Direct-message unit is never a customer unit, as Secure Record is not. Its id comes from ONE read that
+    # Dataverse filters by name; the refusal compares ids. No such unit (not created yet) refuses nothing.
+    if (-not $IsDirectMode) {
+        $directIds = @(Get-DvAll "businessunits?`$select=businessunitid&`$filter=name eq '$(Q $DirectMessageBusinessUnitName)'" |
+            ForEach-Object { [string]$_.businessunitid } | Where-Object { $_ })
+        if ($directIds -contains [string]$customerId) {
+            throw "Refused: $named is the Direct-message business unit (-DirectMessageBusinessUnitName '$DirectMessageBusinessUnitName'), never a customer unit."
+        }
+        $customerTops = @($customerTops | Where-Object { $directIds -notcontains [string]$_.businessunitid })
+
+        # R6 item 2: the name above finds the Direct unit only when the operator passes its (non-default) name. The unit is also
+        # told by what it holds: a team with the Direct-message owner role. The role is found in the root by Dataverse's own
+        # `name eq` filter (ids only); then every copy of it (parentrootroleid, the template id) and the teams holding the root
+        # role or a copy. A unit that holds such a team is a Direct unit, never a customer unit. No role is matched by name in
+        # code. A Direct role that does not exist yet (Direct mode not run) refuses nothing.
+        $directRoleConfig = Read-DirectConfig (Join-Path $PSScriptRoot '..' 'config' $DirectMessageRoleFiles[0])
+        $directTemplateIds = @((Get-DvAll "roles?`$select=roleid&`$filter=name eq '$(Q $directRoleConfig.roleName)' and _businessunitid_value eq $rootId") |
+            ForEach-Object { [string]$_.roleid } | Where-Object { $_ })
+        $directRoleUnitIds = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($templateId in $directTemplateIds) {
+            $roleIds = @($templateId) + @(Get-DvAll "roles?`$select=roleid&`$filter=_parentrootroleid_value eq $templateId" |
+                ForEach-Object { [string]$_.roleid } | Where-Object { $_ -and $_ -ne $templateId })
+            foreach ($roleId in ($roleIds | Select-Object -Unique)) {
+                foreach ($tm in @(Get-DvAll "roles($roleId)/teamroles_association?`$select=teamid,_businessunitid_value")) {
+                    if ($tm._businessunitid_value) { [void]$directRoleUnitIds.Add([string]$tm._businessunitid_value) }
+                }
+            }
+        }
+        if ($directRoleUnitIds.Contains([string]$customerId)) {
+            throw "Refused: $named holds a team with the Direct-message owner role ('$($directRoleConfig.roleName)', found by role id), so it is the Direct-message business unit, never a customer unit. Nothing was written."
+        }
+        $customerTops = @($customerTops | Where-Object { -not $directRoleUnitIds.Contains([string]$_.businessunitid) })
+    }
+
+    if ($IsDirectMode) {
+        # The Direct-message unit holds no users: a user homed there would reach its rows through any role at Business Unit
+        # depth or wider. Moving a user is an owner decision; this script never moves one.
+        $unitUsers = @(Get-DvAll "systemusers?`$select=systemuserid&`$filter=_businessunitid_value eq $customerId")
+        if ($unitUsers.Count -gt 0) {
+            throw "Refused: $named has $($unitUsers.Count) user(s) homed in it. The Direct-message business unit holds no users (owner decision; this script never moves a user)."
+        }
+        # The Direct team and its role copy live in this one unit only: a copy of the role on a team in any other unit is drift.
+        $customerTops = @($customer)
+        Write-Host "Direct BU   : $($customer.name) ($customerId), no users"
+    }
 
     # ── Each table's Read privilege, from METADATA ──────────────────────────────────────────────────────────
     foreach ($d in $defs) {

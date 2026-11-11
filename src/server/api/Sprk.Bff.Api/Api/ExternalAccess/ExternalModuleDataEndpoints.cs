@@ -378,7 +378,7 @@ public static class ExternalModuleDataEndpoints
             var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags, liveParents);
             // Task 188 (D7, #2126): THE document narrowing, after the root rule (own or ancestor Restricted, or an
             // internal-only / non-Open communication on the bounded parent walk). A failed read hides every row and the
-            // response says truncated.
+            // response says truncated; so does a row hidden past the walk's bound (#2669, NFR-03).
             var narrowingTruncated = false;
             if (module.NarrowsDocuments && scoped.Count > 0)
             {
@@ -391,7 +391,8 @@ public static class ExternalModuleDataEndpoints
                         "[EXT-MODULE] Fetch module={Module}: {Hidden} of {Total} document(s) hidden by the document narrowing ({Reasons}).",
                         module.Name, scoped.Count - narrowed.Count, scoped.Count,
                         narrowing.HiddenSummary(candidates));
-                    narrowingTruncated = narrowing.Faulted;
+                    var pastBound = ExternalDocumentNarrowing.ReportHiddenPastBound(narrowing, candidates, principal, logger);
+                    narrowingTruncated = narrowing.Faulted || pastBound;
                 }
 
                 scoped = narrowed;
@@ -1007,57 +1008,57 @@ public static class ExternalModuleDataEndpoints
                     break;
 
                 case "attribute":
-                {
-                    var name = (string?)element.Attribute("name");
-                    if (element.Attribute("alias") is not null)
                     {
-                        return $"aliased attribute '{name}'";
+                        var name = (string?)element.Attribute("name");
+                        if (element.Attribute("alias") is not null)
+                        {
+                            return $"aliased attribute '{name}'";
+                        }
+                        var marker = AggregateMarkers.FirstOrDefault(m => element.Attribute(m) is not null);
+                        if (marker is not null)
+                        {
+                            return $"aggregate attribute '{name}' ({marker}=)";
+                        }
+                        if (!IsReadable(name, readableColumns))
+                        {
+                            return $"attribute '{name}'";
+                        }
+                        break;
                     }
-                    var marker = AggregateMarkers.FirstOrDefault(m => element.Attribute(m) is not null);
-                    if (marker is not null)
-                    {
-                        return $"aggregate attribute '{name}' ({marker}=)";
-                    }
-                    if (!IsReadable(name, readableColumns))
-                    {
-                        return $"attribute '{name}'";
-                    }
-                    break;
-                }
 
                 case "condition":
-                {
-                    if (element.Attribute("entityname") is not null)
                     {
-                        // Names a link-entity alias — there are none on this surface, so it is not modelled.
-                        return "condition with entityname=";
+                        if (element.Attribute("entityname") is not null)
+                        {
+                            // Names a link-entity alias — there are none on this surface, so it is not modelled.
+                            return "condition with entityname=";
+                        }
+                        var name = (string?)element.Attribute("attribute");
+                        if (!IsReadable(name, readableColumns))
+                        {
+                            return $"condition on '{name}'";
+                        }
+                        var valueOf = element.Attribute("valueof");
+                        if (valueOf is not null && !IsReadable(valueOf.Value, readableColumns))
+                        {
+                            return $"condition valueof '{valueOf.Value}'";
+                        }
+                        break;
                     }
-                    var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
-                    {
-                        return $"condition on '{name}'";
-                    }
-                    var valueOf = element.Attribute("valueof");
-                    if (valueOf is not null && !IsReadable(valueOf.Value, readableColumns))
-                    {
-                        return $"condition valueof '{valueOf.Value}'";
-                    }
-                    break;
-                }
 
                 case "order":
-                {
-                    if (element.Attribute("alias") is not null || element.Attribute("entityname") is not null)
                     {
-                        return "order by alias or entityname";
+                        if (element.Attribute("alias") is not null || element.Attribute("entityname") is not null)
+                        {
+                            return "order by alias or entityname";
+                        }
+                        var name = (string?)element.Attribute("attribute");
+                        if (!IsReadable(name, readableColumns))
+                        {
+                            return $"order by '{name}'";
+                        }
+                        break;
                     }
-                    var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
-                    {
-                        return $"order by '{name}'";
-                    }
-                    break;
-                }
 
                 case "all-attributes":
                     return "all-attributes";

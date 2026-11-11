@@ -1125,8 +1125,11 @@ public static class EventEndpoints
             {
                 case TimeoutException or TaskCanceledException:
                     return true;
-                case HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests
-                    or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout }:
+                case HttpRequestException
+                {
+                    StatusCode: System.Net.HttpStatusCode.TooManyRequests
+                    or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout
+                }:
                     return true;
                 case System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault:
                     return ThrottlingErrorCodes.Contains(fault.Detail?.ErrorCode ?? 0);

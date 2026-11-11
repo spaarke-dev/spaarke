@@ -845,7 +845,8 @@ public sealed class SpeDashboardSyncService : IScheduledJob
                         ClientId: record.OwningAppId,
                         TenantId: tenantId,
                         SecretKeyVaultName: record.SecretKeyVaultName ?? string.Empty),
-                    record.BusinessUnitId is { } unit && unit != Guid.Empty ? unit : null));            }
+                    record.BusinessUnitId is { } unit && unit != Guid.Empty ? unit : null));
+            }
 
             _logger.LogDebug(
                 "Loaded {Count} container type configs from Dataverse ({Total} records total)",

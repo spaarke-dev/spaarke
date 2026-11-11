@@ -44,6 +44,18 @@ public static class H10Rejections
     /// <summary>InterStepState.miObjectId missing — H2a (uami.bicep) has not completed yet.</summary>
     public const string MissingUamiObjectId = "h10-missing-uami-object-id";
 
+    /// <summary>Task 266: InterStepState.ontologyWriterClientId / ontologyWriterObjectId missing — H2a has not deployed the writer UAMI.</summary>
+    public const string MissingOntologyWriterIdentity = "h10-missing-ontology-writer-identity";
+
+    /// <summary>
+    /// Task 266: the ontology writer's client id equals the stamp UAMI's — the writer would be System Administrator (FR-21).
+    /// Task 267: also when it equals the BFF app registration's id — the writer would hold the BFF's role (FR-21).
+    /// </summary>
+    public const string OntologyWriterIsStampIdentity = "h10-ontology-writer-is-stamp-identity";
+
+    /// <summary>Task 266: the ontology writer UAMI's App User could not be found or created.</summary>
+    public const string OntologyWriterAppUserCreationFailed = "h10-ontology-writer-app-user-creation-failed";
+
     /// <summary>InterStepState.dataverseEnvUrl missing — H5/H6 has not completed yet.</summary>
     public const string MissingDataverseEnvUrl = "h10-missing-dataverse-env-url";
 
@@ -159,12 +171,41 @@ public static class H10Rejections
     /// </summary>
     public const string CustomerBusinessUnitWrongParent = "h10-customer-bu-wrong-parent";
 
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name is the Secure Record unit (same business-unit id): Dataverse
+    /// matches names without case or accents, so a name that differs only that way lands on it. H10 never places the BFF's
+    /// users there; the run needs a different customer name (QuarantineRequired — nothing was written).
+    /// </summary>
+    public const string CustomerBusinessUnitIsReserved = "h10-customer-bu-is-reserved";
+
     /// <summary>Reading or creating the customer's business unit failed (Resumable — find-then-create is idempotent).</summary>
     public const string CustomerBusinessUnitFailed = "h10-customer-bu-failed";
 
+    // ---- Task 267 (#2618, owner 2026-11-10): the ontology writer's own business unit ----
+
+    /// <summary>More than one business unit carries the ontology writer unit's name — H10 never guesses (Resumable).</summary>
+    public const string OntologyWriterBusinessUnitAmbiguous = "h10-ontology-writer-bu-ambiguous";
+
     /// <summary>
-    /// A BFF application user already exists in a business unit other than the customer's. H10 never moves it: a business
-    /// unit change strips every role, and H6/H7/H7b sign in as that user (QuarantineRequired).
+    /// The unit carrying the ontology writer unit's name is not a DIRECT child of the root (or is the root itself).
+    /// Re-parenting a unit is an owner decision (QuarantineRequired).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitWrongParent = "h10-ontology-writer-bu-wrong-parent";
+
+    /// <summary>
+    /// The unit Dataverse finds for the ontology writer unit's name is the Secure Record unit or the customer's unit (same
+    /// business-unit id). The writer must be alone in its unit; H10 places it in neither (QuarantineRequired).
+    /// </summary>
+    public const string OntologyWriterBusinessUnitIsReserved = "h10-ontology-writer-bu-is-reserved";
+
+    /// <summary>Reading or creating the ontology writer's business unit failed (Resumable — find-then-create is idempotent).</summary>
+    public const string OntologyWriterBusinessUnitFailed = "h10-ontology-writer-bu-failed";
+
+    /// <summary>
+    /// A BFF application user already exists in a business unit other than the customer's — or the ontology writer's in a
+    /// unit other than its own unit and the customer's unit (task 267 moves it only from the customer's unit, and only when
+    /// its object id is the writer's). H10 never moves it: a business unit change strips every role, and H6/H7/H7b sign in as
+    /// the BFF's user (QuarantineRequired).
     /// </summary>
     public const string AppUserInForeignBusinessUnit = "h10-app-user-in-foreign-business-unit";
 

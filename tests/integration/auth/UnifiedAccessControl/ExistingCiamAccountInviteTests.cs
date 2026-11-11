@@ -94,7 +94,10 @@ public class ExistingCiamAccountInviteTests
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with
             {
-                RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
+                RecordId = _matter,
+                InvitedTenantId = invitedTenantId,
+                Email = email,
+                SendAsPortalAccount = sendAsPortalAccount,
             },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             ciam ?? _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(),

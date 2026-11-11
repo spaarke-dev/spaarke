@@ -47,7 +47,15 @@ internal sealed class GateSharingWorld
     public Exception? AssignFault { get; set; }
     public bool AssignLands { get; set; } = true;
 
-    public GateSharingWorld()
+    /// <summary>D-215 (uac-r2 task 198 Part E): the Direct-message owner team the world's lookup resolves.</summary>
+    public static readonly Guid DirectTeam = Guid.Parse("d1d1d1d1-0000-4000-8000-0000000000d1");
+
+    /// <summary>The Direct-message owner team directory behind the lookup (real <c>DirectMessageOwnerTeam</c> over it).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble Directory { get; } = new();
+
+    /// <param name="directLookup">D-215: with the configured Direct-message owner team lookup and the Secure settings (the host's
+    /// composition), so every D-169 test also runs with the Direct branch available; <c>false</c> leaves both out (no Direct branch).</param>
+    public GateSharingWorld(bool directLookup = true)
     {
         Shares = new FakeShares(this);
         Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -86,9 +94,50 @@ internal sealed class GateSharingWorld
                     OwnByTeam(assign.Target.Id, assign.Assignee.Id);
                 return AssignFault is { } fault ? Task.FromException<OrganizationResponse>(fault) : Task.FromResult(new OrganizationResponse());
             });
+        Directory.WithDirectTeam(DirectTeam);
         Sharing = new GateDecisionRecordSharing(
             Entities.Object, Shares, new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
-            Ownership.Object, Cache.Object, Log);
+            Ownership.Object, Cache.Object, Log,
+            directLookup ? Directory.Lookup() : null,
+            directLookup ? new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build() : null);
+    }
+
+    /// <summary>D-215: a team row as Dataverse holds it (the one Direct check and the one Secure check read it).</summary>
+    public GateSharingWorld WithTeam(Guid id, string name, bool isDefault, Guid? businessUnit = null)
+    {
+        var row = new Entity("team", id)
+        {
+            ["name"] = name,
+            ["isdefault"] = isDefault,
+            ["teamtype"] = new OptionSetValue(0),
+        };
+        if (businessUnit is { } unit)
+            row["businessunitid"] = new EntityReference("businessunit", unit);
+        Rows[("team", id)] = row;
+        return this;
+    }
+
+    /// <summary>D-215: the Secure Record unit and its named owner team, under the compiled default names.</summary>
+    public GateSharingWorld WithSecureTeam(Guid teamId)
+    {
+        var unit = Guid.NewGuid();
+        Rows[("businessunit", unit)] = new Entity("businessunit", unit) { ["name"] = SecureRecordOwnerTeamDefaults.BusinessUnit };
+        return WithTeam(teamId, SecureRecordOwnerTeamDefaults.Team, isDefault: false, businessUnit: unit);
+    }
+
+    /// <summary>D-215: stamps the communication's participant pair (sprk_sentby, sprk_directrecipient).</summary>
+    public GateSharingWorld WithPair(Guid communicationId, Guid sender, Guid recipient)
+    {
+        var row = Rows[(Communication, communicationId)];
+        row["sprk_sentby"] = new EntityReference("systemuser", sender);
+        row["sprk_directrecipient"] = new EntityReference("systemuser", recipient);
+        return this;
+    }
+
+    private static class SecureRecordOwnerTeamDefaults
+    {
+        public const string BusinessUnit = Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.DefaultBusinessUnitName;
+        public const string Team = Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.DefaultOwnerTeamName;
     }
 
     // ── Seeding ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -200,7 +249,7 @@ internal sealed class GateSharingWorld
         object? actual = condition.AttributeName == row.LogicalName + "id"
             ? row.Id
             : row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
-        var actualId = actual is EntityReference reference ? reference.Id : actual;
+        var actualId = actual is EntityReference reference ? reference.Id : actual is OptionSetValue option ? option.Value : actual;
         return condition.Operator switch
         {
             ConditionOperator.Null => actual is null,
@@ -255,10 +304,16 @@ internal sealed class GateSharingWorld
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
             Task.FromResult(Read(entityLogicalName, recordId));
 
-        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
-            FailReadFor.Contains(entityLogicalName)
+        /// <summary>uac-r2 task 198 pass 2 (F3): runs before a strict share read (a concurrent writer landing between two reads).</summary>
+        public Action<string, Guid>? BeforeStrictRead { get; set; }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            BeforeStrictRead?.Invoke(entityLogicalName, recordId);
+            return FailReadFor.Contains(entityLogicalName)
                 ? Task.FromException<IReadOnlyList<DataversePrincipalAccess>>(new InvalidOperationException("Test: the share read failed."))
                 : Task.FromResult(Read(entityLogicalName, recordId));
+        }
 
         public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
             string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default) =>
@@ -521,6 +576,44 @@ public sealed class GateDecisionRecordSharingTests
         await act.Should().NotThrowAsync();
         world.RecordSharees(RecordId).Should().BeEmpty("a failed read is not 'no shares' and never widens");
         world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed);
+        reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
+    }
+
+    /// <summary>
+    /// 198 pass 2 F3 + ontology F2: <c>GrantAndConfirmAsync</c> reads the record's existing shares BEFORE it grants. A fault in that read must
+    /// grant nothing, revoke nothing and re-own nothing (the next grant or re-file retries), be logged at Warning and counted, and escape no one.
+    /// The Direct mirror path (D-215 rule 3) reaches it: an unfiled Direct message whose Direct-team-owned record is granted its audience.
+    /// </summary>
+    [Fact(DisplayName = "198 F3 / ontology F2: a fault reading the record's shares before the grants grants and revokes nothing, is logged and counted, and escapes no one")]
+    public async Task DirectMirror_AFaultReadingTheRecordsSharesBeforeTheGrants_GrantsAndRevokesNothing_IsLoggedAndCounted_AndNothingEscapes()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenFailures(scope);
+        using var _ = listener;
+        var world = new GateSharingWorld()
+            .WithTeam(GateSharingWorld.DirectTeam, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.OwnerTeamName, isDefault: false)
+            .WithCommunication(CommunicationId, Owner, owningTeam: GateSharingWorld.DirectTeam)
+            .WithPair(CommunicationId, Owner, Reader)
+            .WithUser(Owner).WithUser(Reader).WithUser(Bystander)
+            .Share(GateSharingWorld.Communication, CommunicationId, Owner)
+            .Share(GateSharingWorld.Communication, CommunicationId, Reader)
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Record, RecordId, Bystander); // a leftover non-participant share: it is not revoked when the read faults
+        world.OwnByTeam(RecordId, GateSharingWorld.DirectTeam);
+        world.Shares.FailReadFor.Add(GateSharingWorld.Record);
+
+        var act = () => world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal), "a failed read is not 'no shares': nothing is granted");
+        world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal));
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        world.RecordSharees(RecordId).Should().Equal(new[] { Bystander }, "the share the record already carried is left as it was");
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(GateSharingWorld.DirectTeam);
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed
+            && e.Message.Contains("could not be read before the participant grants", StringComparison.Ordinal),
+            "the read's own catch logs it, not the mirror's outer catch");
         reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
     }
 

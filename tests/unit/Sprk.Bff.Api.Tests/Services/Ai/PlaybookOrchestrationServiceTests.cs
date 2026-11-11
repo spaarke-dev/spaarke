@@ -227,13 +227,27 @@ public class PlaybookOrchestrationServiceTests
         var matterIds = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
         var source = new PlaybookNodeDto
         {
-            Id = Guid.NewGuid(), Name = "My Matters", ActionId = Guid.Empty, OutputVariable = "myMatters", ExecutionOrder = 1,
-            DependsOn = [], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.AiCompletion,
+            Id = Guid.NewGuid(),
+            Name = "My Matters",
+            ActionId = Guid.Empty,
+            OutputVariable = "myMatters",
+            ExecutionOrder = 1,
+            DependsOn = [],
+            IsActive = true,
+            NodeType = NodeType.Workflow,
+            SprkExecutortype = ExecutorType.AiCompletion,
         };
         var query = new PlaybookNodeDto
         {
-            Id = Guid.NewGuid(), Name = "Query Matter Activity", ActionId = Guid.Empty, OutputVariable = "activity", ExecutionOrder = 2,
-            DependsOn = [source.Id], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.QueryDataverse,
+            Id = Guid.NewGuid(),
+            Name = "Query Matter Activity",
+            ActionId = Guid.Empty,
+            OutputVariable = "activity",
+            ExecutionOrder = 2,
+            DependsOn = [source.Id],
+            IsActive = true,
+            NodeType = NodeType.Workflow,
+            SprkExecutortype = ExecutorType.QueryDataverse,
             ConfigJson = "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch><entity name='sprk_event'><filter>" +
                          "<condition attribute='sprk_regardingmatter' operator='in'>{{fetchInGuids myMatters.ids}}</condition></filter></entity></fetch>\"}",
         };
@@ -269,13 +283,27 @@ public class PlaybookOrchestrationServiceTests
         const string injected = "x'/><condition attribute='ownerid' operator='ne' value='y";
         var source = new PlaybookNodeDto
         {
-            Id = Guid.NewGuid(), Name = "Source", ActionId = Guid.Empty, OutputVariable = "src", ExecutionOrder = 1,
-            DependsOn = [], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.AiCompletion,
+            Id = Guid.NewGuid(),
+            Name = "Source",
+            ActionId = Guid.Empty,
+            OutputVariable = "src",
+            ExecutionOrder = 1,
+            DependsOn = [],
+            IsActive = true,
+            NodeType = NodeType.Workflow,
+            SprkExecutortype = ExecutorType.AiCompletion,
         };
         var query = new PlaybookNodeDto
         {
-            Id = Guid.NewGuid(), Name = "Query Each", ActionId = Guid.Empty, OutputVariable = "each", ExecutionOrder = 2,
-            DependsOn = [source.Id], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.QueryDataverse,
+            Id = Guid.NewGuid(),
+            Name = "Query Each",
+            ActionId = Guid.Empty,
+            OutputVariable = "each",
+            ExecutionOrder = 2,
+            DependsOn = [source.Id],
+            IsActive = true,
+            NodeType = NodeType.Workflow,
+            SprkExecutortype = ExecutorType.QueryDataverse,
             ConfigJson = "{\"iteration\":{\"iterateOver\":\"{{src.names}}\",\"itemAlias\":\"name\"},\"entityLogicalName\":\"sprk_matter\"," +
                          "\"fetchXml\":\"<fetch><entity name='sprk_matter'><filter><condition attribute='sprk_mattername' operator='eq' value='{{name}}'/></filter></entity></fetch>\"}",
         };

@@ -79,8 +79,13 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
     /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
     /// 5 = ISS-025 / #1803: S22, the lock on contact.sprk_externalinvitedon and (once present) sprk_externalinvitecodehash.
+    /// 6 = S23: the BFF's runtime application user holds "Spaarke Ontology Service"; no team or interactive user does.
+    /// 7 = S24 (#2605): the ontology writer application user holds exactly "Spaarke Ontology Service" and is the only member
+    ///     of the two ontology-writer profiles.
+    /// 8 = task 267 (#2618): S24 — the writer is alone in its own unit "Spaarke Ontology Writer" and holds that unit's copy of
+    ///     the role; S11/S16 skip that unit's default team; S25 — "Spaarke Basic User" on the customer unit's default team.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=5";
+    internal const string ProcedureVersion = "secure-setup-procedure=8";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;
@@ -220,12 +225,19 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (4) The procedure.
+        // (4) The procedure. S24's writer (#2605): absent or unparseable is Guid.Empty, which the procedure refuses Resumable
+        // ("start a new run"): a run whose H10 completed before task 266 has no writer. Its unit (task 267) likewise: a run
+        // whose H10 completed before task 267 has none.
+        var writerAppUser = Guid.TryParse(state.OntologyWriterSystemUserId, out var parsedWriter) ? parsedWriter : Guid.Empty;
+        var writerUnit = Guid.TryParse(state.OntologyWriterBusinessUnitId, out var parsedWriterUnit) ? parsedWriterUnit : Guid.Empty;
         var request = new SecureRecordSetupRequest(
             new SecureRecordSetupTarget(state.DataverseEnvUrl!, tenantId, state.BffAppRegId!),
             roleSet,
             [bffAppUser, miAppUser],
+            miAppUser,
+            writerAppUser,
             customerUnitId,
+            writerUnit,
             dryRun);
         SecureRecordSetupOutcome outcome;
         try

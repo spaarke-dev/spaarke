@@ -340,52 +340,52 @@ public sealed class RuleSetServiceTests
             switch (request)
             {
                 case Microsoft.Xrm.Sdk.Messages.CreateRequest create:
-                {
-                    var target = create.Target;
-                    if (target.Id != Guid.Empty && Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) == true)
                     {
-                        return (unchecked((int)0x80040237), "Cannot insert duplicate key.");
-                    }
+                        var target = create.Target;
+                        if (target.Id != Guid.Empty && Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) == true)
+                        {
+                            return (unchecked((int)0x80040237), "Cannot insert duplicate key.");
+                        }
 
-                    // The (Procedure, version number) alternate key of sprk_procedureversion (task 080).
-                    if (target.LogicalName == "sprk_procedureversion"
-                        && Rows.GetValueOrDefault("sprk_procedureversion")?.Any(r =>
-                            r.GetAttributeValue<EntityReference>("sprk_procedure")?.Id == target.GetAttributeValue<EntityReference>("sprk_procedure")?.Id
-                            && r.GetAttributeValue<int?>("sprk_versionnumber") == target.GetAttributeValue<int?>("sprk_versionnumber")) == true)
-                    {
-                        return (unchecked((int)0x80060892), "A record with matching key values already exists.");
-                    }
+                        // The (Procedure, version number) alternate key of sprk_procedureversion (task 080).
+                        if (target.LogicalName == "sprk_procedureversion"
+                            && Rows.GetValueOrDefault("sprk_procedureversion")?.Any(r =>
+                                r.GetAttributeValue<EntityReference>("sprk_procedure")?.Id == target.GetAttributeValue<EntityReference>("sprk_procedure")?.Id
+                                && r.GetAttributeValue<int?>("sprk_versionnumber") == target.GetAttributeValue<int?>("sprk_versionnumber")) == true)
+                        {
+                            return (unchecked((int)0x80060892), "A record with matching key values already exists.");
+                        }
 
-                    var row = new Entity(target.LogicalName, target.Id == Guid.Empty ? Guid.NewGuid() : target.Id);
-                    foreach (var a in target.Attributes) row[a.Key] = a.Value;
-                    Writes.Add((Write.Create, row.LogicalName, row.Id, row.Attributes.ToDictionary(a => a.Key, a => a.Value)));
-                    Order.Add("txn-create:" + row.LogicalName);
-                    Seed(row);
-                    _createdBy[row.Id] = Identity;
-                    return null;
-                }
+                        var row = new Entity(target.LogicalName, target.Id == Guid.Empty ? Guid.NewGuid() : target.Id);
+                        foreach (var a in target.Attributes) row[a.Key] = a.Value;
+                        Writes.Add((Write.Create, row.LogicalName, row.Id, row.Attributes.ToDictionary(a => a.Key, a => a.Value)));
+                        Order.Add("txn-create:" + row.LogicalName);
+                        Seed(row);
+                        _createdBy[row.Id] = Identity;
+                        return null;
+                    }
 
                 case Microsoft.Xrm.Sdk.Messages.UpdateRequest update:
-                {
-                    var target = update.Target;
-                    if (Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) != true)
                     {
-                        return (unchecked((int)0x80040217), $"{target.LogicalName} With Id = {target.Id} Does Not Exist");
-                    }
+                        var target = update.Target;
+                        if (Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) != true)
+                        {
+                            return (unchecked((int)0x80040217), $"{target.LogicalName} With Id = {target.Id} Does Not Exist");
+                        }
 
-                    if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches
-                        && RowVersions.GetValueOrDefault(target.Id).ToString(System.Globalization.CultureInfo.InvariantCulture) != target.RowVersion)
-                    {
-                        Refusals.Add((target.LogicalName, new[] { target.Id }));
-                        return (unchecked((int)0x80060882), "The version of the existing record doesn't match the RowVersion property provided.");
-                    }
+                        if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches
+                            && RowVersions.GetValueOrDefault(target.Id).ToString(System.Globalization.CultureInfo.InvariantCulture) != target.RowVersion)
+                        {
+                            Refusals.Add((target.LogicalName, new[] { target.Id }));
+                            return (unchecked((int)0x80060882), "The version of the existing record doesn't match the RowVersion property provided.");
+                        }
 
-                    var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value ?? DBNull.Value);
-                    Writes.Add((Write.Update, target.LogicalName, target.Id, fields));
-                    Order.Add("txn-update:" + target.LogicalName);
-                    Apply(target.LogicalName, target.Id, fields);
-                    return null;
-                }
+                        var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value ?? DBNull.Value);
+                        Writes.Add((Write.Update, target.LogicalName, target.Id, fields));
+                        Order.Add("txn-update:" + target.LogicalName);
+                        Apply(target.LogicalName, target.Id, fields);
+                        return null;
+                    }
 
                 default:
                     throw new NotSupportedException(request.GetType().Name);
@@ -1622,7 +1622,8 @@ public sealed class RuleSetServiceTests
             h.AfterQuery = null;
             h.ConcurrentWrite("sprk_policyversion", version, new Dictionary<string, object>
             {
-                ["sprk_rulebody"] = CapBody8, ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
+                ["sprk_rulebody"] = CapBody8,
+                ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
             });
         };
 
