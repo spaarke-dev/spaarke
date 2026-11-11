@@ -77,6 +77,7 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 **ebilling-r1**
 - R4 consumes the 082c-2 deploy (`sprk_reviewdetail` readable) and the `/invoices/{id}/files` routes, which ship first and back to back with FR-13.
 - R4 reviews ebilling's master PR (082c-3 `08702087cb`, 114 `c4b8d43e8f`, task-130 batch).
+- **Merge order (agreed 2026-11-11):** ebilling's master PR #2689 merges first; R4 then merges master and resolves the five files task 002 shares with it (`ExternalProjectDataEndpoints.cs`, `ExternalDataService.cs`, `ExternalMessageEndpoints.cs`, `WorkforceRoleCeilingGate.cs`, `ExternalProjectDtos.cs`). When resolving `ExternalDataService.cs`, keep `Truncated = … || pastBound || chainDropped` (uac-r2 #2679 narrowing + ebilling's invoice-ancestor walk). Test helpers that call `ExecuteScopedFetchCoreAsync` must pass `readDocumentChains`, as the production route does; without it every row with a parent counts as undecidable. ebilling-r1 sends the merge SHA when it lands. R4's review of #2689 waits on the owner's go.
 - Task-130 (`work/ebilling-r1` `017a965312`, 2026-11-10): a stale grant answers 403, not 404, so `ProjectPage.tsx`'s 404 branch dies (folded in task 043). Lists may set `truncated` for invoice-linked chains; the SPA already shows `TruncatedListNotice`.
 
 **Other projects**
