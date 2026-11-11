@@ -943,7 +943,8 @@ public sealed class InvoiceResolutionServiceTests
         GivenRates(Rate(500m, classification: Partner));
         var input = Invoice(
             [Fee("Jane Doe", Day, 2m, 500m, 1000m), Expense(1m, 10m, 10m)], fees: 1000m, expenses: 10m, adjustments: 0m, totalDue: 1010m)
-            with { FirmId = null };
+            with
+        { FirmId = null };
 
         var result = await CreateService().ResolveAsync(input);
 

@@ -241,7 +241,8 @@ public sealed class LineCodingSeamTests
         var result = await h.Sut.CodeLinesAsync(Request(
             core,
             Fee("F1", "Gathered facts", billedTask: "L110"),
-            Fee("F2", "Strategy call", billedTask: "L120")) with { IncludeFirmCodes = false });
+            Fee("F2", "Strategy call", billedTask: "L120")) with
+        { IncludeFirmCodes = false });
 
         // The same lines as FirmCodes_SelectTheSet_... (where Litigation wins by the firm's codes): here the matter type's set is used.
         result.CodeSet.Source.Should().Be(CodeSetSource.MatterType);

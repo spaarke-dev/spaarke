@@ -86,8 +86,13 @@ internal static class ProcedureSnapshotPatchKit
     {
         Dictionary<string, decimal> LineConfidence() => new()
         {
-            ["Hours"] = 0.55m, ["Rate"] = 0.88m, ["Amount"] = 0.93m, ["Narrative"] = 0.79m,
-            [BillingFieldNames.TaskCode] = 0.77m, [BillingFieldNames.ActivityCode] = 0.77m, [BillingFieldNames.ExpenseCode] = 0.77m,
+            ["Hours"] = 0.55m,
+            ["Rate"] = 0.88m,
+            ["Amount"] = 0.93m,
+            ["Narrative"] = 0.79m,
+            [BillingFieldNames.TaskCode] = 0.77m,
+            [BillingFieldNames.ActivityCode] = 0.77m,
+            [BillingFieldNames.ExpenseCode] = 0.77m,
         };
 
         return new BillingEvaluationRequest
@@ -103,7 +108,11 @@ internal static class ProcedureSnapshotPatchKit
             Currency = "USD",
             HeaderConfidence = new Dictionary<string, decimal>
             {
-                ["FirmInvoiceNumber"] = 0.9m, ["BillingPeriodStart"] = 0.8m, ["BillingPeriodEnd"] = 0.8m, ["Currency"] = 0.99m, ["TotalDue"] = 0.65m,
+                ["FirmInvoiceNumber"] = 0.9m,
+                ["BillingPeriodStart"] = 0.8m,
+                ["BillingPeriodEnd"] = 0.8m,
+                ["Currency"] = 0.99m,
+                ["TotalDue"] = 0.65m,
             },
             Lines =
             [
@@ -254,8 +263,14 @@ public sealed class ProcedureSnapshotPatchTests
         var root = Stored(world);
         root["findings"] = new JsonArray(new JsonObject
         {
-            ["index"] = 0, ["ruleType"] = RuleType.DailyHoursCap.ToString(), ["policyId"] = Cap.PolicyId.ToString("D"), ["policyCode"] = Cap.PolicyCode,
-            ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"), ["subject"] = "Line", ["line"] = 0, ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap,
+            ["index"] = 0,
+            ["ruleType"] = RuleType.DailyHoursCap.ToString(),
+            ["policyId"] = Cap.PolicyId.ToString("D"),
+            ["policyCode"] = Cap.PolicyCode,
+            ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"),
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap,
             ["consequence"] = "Flag",
         });
         world.Submission!["sprk_findingsjson"] = root.ToJsonString();

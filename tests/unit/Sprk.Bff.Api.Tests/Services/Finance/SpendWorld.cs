@@ -127,7 +127,10 @@ internal sealed class SpendWorld
         {
             findings["override"] = new JsonObject
             {
-                ["recordId"] = Guid.NewGuid().ToString("D"), ["bySystemUserId"] = OtherUser.ToString("D"), ["on"] = "2026-11-03T10:00:00Z", ["reason"] = "ok",
+                ["recordId"] = Guid.NewGuid().ToString("D"),
+                ["bySystemUserId"] = OtherUser.ToString("D"),
+                ["on"] = "2026-11-03T10:00:00Z",
+                ["reason"] = "ok",
             };
         }
 

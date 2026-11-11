@@ -628,10 +628,10 @@ public class ProcedureAssignmentService
         }
 
         if (ConditionalUpdate(PolicyTable, recordRule, new Dictionary<string, object>
-            {
-                ["sprk_enabled"] = true,
-                ["sprk_currentversion"] = new EntityReference(VersionTable, versionId),
-            }) is not { } switchOn)
+        {
+            ["sprk_enabled"] = true,
+            ["sprk_currentversion"] = new EntityReference(VersionTable, versionId),
+        }) is not { } switchOn)
         {
             return StageFailed<RuleChangedView>();
         }

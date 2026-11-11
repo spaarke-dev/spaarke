@@ -70,7 +70,13 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
     /// <summary>A well-formed Add line body (task 164): an Expense line, so no timekeeper resolution.</summary>
     private static object AddBody(string? reason = "Missing from the bill", string? costType = "expense") => new
     {
-        requestId = Guid.NewGuid(), costType, date = "2026-10-01", amount = 50m, expenseCode = "E101", description = "Courier", reason,
+        requestId = Guid.NewGuid(),
+        costType,
+        date = "2026-10-01",
+        amount = 50m,
+        expenseCode = "E101",
+        description = "Courier",
+        reason,
     };
 
     /// <summary>One request per route, with a body that is valid for it.</summary>

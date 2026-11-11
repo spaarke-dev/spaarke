@@ -774,9 +774,16 @@ public sealed partial class InvoiceLineAddServiceTests
             root["decision"] = new JsonObject { ["outcome"] = "Rejected", ["deciding"] = new JsonArray(0) };
             root["findings"] = new JsonArray(new JsonObject
             {
-                ["index"] = 0, ["ruleType"] = RuleType.DailyHoursCap.ToString(), ["policyId"] = Cap.PolicyId.ToString("D"), ["policyCode"] = Cap.PolicyCode,
-                ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"), ["subject"] = "Line", ["line"] = 2, ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap,
-                ["consequence"] = "Reject", ["rejects"] = true,
+                ["index"] = 0,
+                ["ruleType"] = RuleType.DailyHoursCap.ToString(),
+                ["policyId"] = Cap.PolicyId.ToString("D"),
+                ["policyCode"] = Cap.PolicyCode,
+                ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"),
+                ["subject"] = "Line",
+                ["line"] = 2,
+                ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap,
+                ["consequence"] = "Reject",
+                ["rejects"] = true,
             });
             root["signalPlan"] = new JsonArray(FeeCapPlan(decision: nameof(BillingGroupDecision.Blocked)));
             root["override"] = new JsonObject { ["decisionId"] = Guid.Parse("16400000-0000-4000-8000-0000000000aa").ToString("D"), ["on"] = "2026-10-30" };

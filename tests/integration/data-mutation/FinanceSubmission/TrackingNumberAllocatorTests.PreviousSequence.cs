@@ -307,7 +307,8 @@ public sealed partial class TrackingNumberAllocatorTests
         var innerFault = new FaultException<OrganizationServiceFault>(
             new OrganizationServiceFault
             {
-                ErrorCode = unchecked((int)0x80040000), Message = "The transaction failed.",
+                ErrorCode = unchecked((int)0x80040000),
+                Message = "The transaction failed.",
                 InnerFault = new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103), Message = SubmissionStore.MissingPreviousSequenceMessage },
             },
             new FaultReason("The transaction failed."));

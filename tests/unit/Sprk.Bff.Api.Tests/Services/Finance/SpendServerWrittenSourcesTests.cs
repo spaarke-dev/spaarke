@@ -515,7 +515,7 @@ public class SpendServerWrittenSourcesTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         world.FaultOn = _ => new OperationCanceledException(cts.Token);   // the SDK honours the cancelled token on the first read
-        var tool =new FinancialCalculationToolHandler(world.Service().Object, Recorder(), new Mock<FinanceTelemetry>().Object,
+        var tool = new FinancialCalculationToolHandler(world.Service().Object, Recorder(), new Mock<FinanceTelemetry>().Object,
             NullLogger<FinancialCalculationToolHandler>.Instance);
         await FluentActions.Awaiting(() => tool.ExecuteAsync(new ToolParameters(new Dictionary<string, object> { ["matterId"] = MatterId }), cts.Token))
             .Should().ThrowAsync<OperationCanceledException>();

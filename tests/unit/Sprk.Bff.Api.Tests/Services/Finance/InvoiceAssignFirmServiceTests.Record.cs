@@ -65,7 +65,11 @@ public sealed partial class InvoiceAssignFirmServiceTests
         ((IEnumerable<Dictionary<string, object?>>)set["signals"]!).Select(s => s["id"]).Should().Equal(signal.ToString("D"));
         ((Dictionary<string, object?>)facts["renamedCounts"]!).Should().BeEquivalentTo(new Dictionary<string, object?>
         {
-            ["firmSetLines"] = 2, ["lines"] = 2, ["approval"] = 1, ["storedFiles"] = 2, ["findings"] = 1,
+            ["firmSetLines"] = 2,
+            ["lines"] = 2,
+            ["approval"] = 1,
+            ["storedFiles"] = 2,
+            ["findings"] = 1,
         }, "bounded counts, never a row per rename (1b review F1)");
         facts.Should().NotContainKey("renamed", "the full mapping stays in the stored member");
         w.Log.Entries.Should().NotContain(e => e.State.ContainsKey("CallerUserId"), "only a repeat's completion log names the repeating caller");

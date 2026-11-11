@@ -1478,9 +1478,20 @@ public sealed class ProcedureResolverTests
         IReadOnlyList<ProcedureOverrideRow> rows = [row];
         var version = new ResolvedPolicyVersion
         {
-            PolicyId = ids[2], PolicyCode = "INC-1", PolicyVersionId = ids[4], RuleSetId = ids[5], VersionNumber = 3,
-            RuleType = "100000005", RuleBody = body, MessageTemplate = template, ShortHeadline = template, ClauseReference = template,
-            ClauseLocation = template, InForceFrom = Feb1, ProcedureVersionId = ids[6], BasedOnVersionId = ids[7],
+            PolicyId = ids[2],
+            PolicyCode = "INC-1",
+            PolicyVersionId = ids[4],
+            RuleSetId = ids[5],
+            VersionNumber = 3,
+            RuleType = "100000005",
+            RuleBody = body,
+            MessageTemplate = template,
+            ShortHeadline = template,
+            ClauseReference = template,
+            ClauseLocation = template,
+            InForceFrom = Feb1,
+            ProcedureVersionId = ids[6],
+            BasedOnVersionId = ids[7],
         };
         var applied = new AppliedProcedure(
             ids[8], "Billing guidelines", ids[6], 2, new ProcedureRank(ProcedureLevel.ManualParent, 1, false), ProcedureSources.Manual, false, rows);
@@ -1630,7 +1641,10 @@ public sealed class ProcedureResolverTests
     {
         var version = new ResolvedPolicyVersion
         {
-            PolicyId = Guid.NewGuid(), PolicyCode = "BRR-" + Guid.NewGuid().ToString("N"), PolicyVersionId = Guid.NewGuid(), RuleSetId = Guid.NewGuid(),
+            PolicyId = Guid.NewGuid(),
+            PolicyCode = "BRR-" + Guid.NewGuid().ToString("N"),
+            PolicyVersionId = Guid.NewGuid(),
+            RuleSetId = Guid.NewGuid(),
         };
         var applied = new AppliedProcedure(Guid.NewGuid(), "Billing guidelines", Guid.NewGuid(), 1, new ProcedureRank(ProcedureLevel.ManualOwn, 0, false),
             ProcedureSources.Manual, false, []);

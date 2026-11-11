@@ -61,7 +61,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var elsewhere = _world.NewInvoice();
         _world.SpaUpload(elsewhere);
         var view = SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: edit == "unlinked" ? null : elsewhere)
-            with { OutcomeReasonCode = SubmissionReasonCodes.Blocked };
+            with
+        { OutcomeReasonCode = SubmissionReasonCodes.Blocked };
 
         var pending = await DecideSubmissions("contact", view);
         _world.FirmHold(own, null);

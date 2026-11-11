@@ -110,14 +110,17 @@ public sealed class InvoiceBlockedHoldTests
             f[InvoiceBlockedHold.KindMember] = nameof(SubmissionEvaluationKind.Blocked);
             f[member] = new JsonObject
             {
-                ["recordId"] = "16500000-0000-4000-8000-0000000000aa", ["bySystemUserId"] = "16500000-0000-4000-8000-0000000000bb",
-                ["on"] = "2026-11-06T10:00:00.0000000Z", ["reason"] = "r",
+                ["recordId"] = "16500000-0000-4000-8000-0000000000aa",
+                ["bySystemUserId"] = "16500000-0000-4000-8000-0000000000bb",
+                ["on"] = "2026-11-06T10:00:00.0000000Z",
+                ["reason"] = "r",
             };
         });
         InvoiceBlockedHold.RecordedOutcomeOf(RerunFindings(world)).Should().Be(InvoiceBlockedHold.RecordedOutcome.NotHeld, "the setup: released");
         world.Processor = new InvoiceSubmissionProcessorTests.Harness
         {
-            Channel = InvoiceSubmissionChannel.Internal, Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()],
+            Channel = InvoiceSubmissionChannel.Internal,
+            Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()],
         };
 
         (await world.RunAsync()).Kind.Should().Be(SubmissionEvaluationKind.Blocked);

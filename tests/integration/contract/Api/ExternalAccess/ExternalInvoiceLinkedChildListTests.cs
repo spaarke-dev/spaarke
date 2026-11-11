@@ -290,7 +290,10 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
             var moduleCaller = module.RecordEntity == "sprk_servicerequest"
                 ? new CallerPrincipal
                 {
-                    Plane = CallerPrincipalPlane.Workforce, ContactId = CallerContact, Email = caller.Email, ProjectAccess = caller.ProjectAccess,
+                    Plane = CallerPrincipalPlane.Workforce,
+                    ContactId = CallerContact,
+                    Email = caller.Email,
+                    ProjectAccess = caller.ProjectAccess,
                 }
                 : caller;
             await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
@@ -509,7 +512,10 @@ public sealed class ExternalInvoiceLinkedChildListTests : IClassFixture<External
         var caller = CallerOn(Matter);
         caller = new CallerPrincipal
         {
-            Plane = caller.Plane, ContactId = caller.ContactId, Email = caller.Email, ProjectAccess = caller.ProjectAccess,
+            Plane = caller.Plane,
+            ContactId = caller.ContactId,
+            Email = caller.Email,
+            ProjectAccess = caller.ProjectAccess,
             MatterAccess = caller.MatterAccess,
             WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [assignment] = AccessRights.Read },
         };

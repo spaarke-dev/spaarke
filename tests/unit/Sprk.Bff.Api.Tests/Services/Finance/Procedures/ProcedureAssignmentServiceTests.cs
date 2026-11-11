@@ -114,7 +114,8 @@ public sealed class ProcedureAssignmentServiceTests
 
             var writer = (SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter)); // never called: the close is substituted
             Closure = new Mock<SignalClosureService>(MockBehavior.Loose, writer, H.Entities.Object, TimeProvider.System,
-                NullLogger<SignalClosureService>.Instance) { CallBase = true };
+                NullLogger<SignalClosureService>.Instance)
+            { CallBase = true };
             Closure.Setup(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .Returns(async (Guid policyId, bool withBillingSubject, CancellationToken ct) =>
                 {
@@ -217,7 +218,8 @@ public sealed class ProcedureAssignmentServiceTests
         {
             var i = new Entity("sprk_invoice", Guid.NewGuid())
             {
-                ["statuscode"] = new OptionSetValue(statuscode), ["statecode"] = new OptionSetValue(0),
+                ["statuscode"] = new OptionSetValue(statuscode),
+                ["statecode"] = new OptionSetValue(0),
                 [InvoiceAdjustmentService.InvoiceDateColumn] = (date ?? InForceDay).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
             };
             if (matter is { } m) i[Matter] = new EntityReference(Matter, m);
@@ -1585,7 +1587,9 @@ public sealed class ProcedureAssignmentServiceTests
         var column = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == coreTable).Column;
         var i = new Entity("sprk_invoice", Guid.NewGuid())
         {
-            ["statuscode"] = new OptionSetValue(status), ["statecode"] = new OptionSetValue(0), [column] = new EntityReference(coreTable, core),
+            ["statuscode"] = new OptionSetValue(status),
+            ["statecode"] = new OptionSetValue(0),
+            [column] = new EntityReference(coreTable, core),
             [InvoiceAdjustmentService.InvoiceDateColumn] = (date ?? World.InForceDay).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
         };
         if (firm is { } f) i["sprk_vendororg"] = new EntityReference("sprk_organization", f);

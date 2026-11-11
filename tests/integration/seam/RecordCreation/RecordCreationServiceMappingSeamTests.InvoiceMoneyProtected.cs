@@ -30,10 +30,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     {
         var act = () => Service().CreateAsync(
             Request("sprk_invoice", new Dictionary<string, object?>
-                {
-                    ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-                },
-                mapping: true) with { PostMappingDefaults = new Dictionary<string, object?> { [column] = 1 } },
+            {
+                ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            },
+                mapping: true) with
+            { PostMappingDefaults = new Dictionary<string, object?> { [column] = 1 } },
             AsCaller(), CancellationToken.None);
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain(column).And.Contain("field mapping never writes it");

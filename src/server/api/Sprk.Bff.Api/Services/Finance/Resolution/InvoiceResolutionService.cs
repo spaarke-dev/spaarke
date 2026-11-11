@@ -103,7 +103,9 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
                 {
                     timekeepers[index] = new TimekeeperResolution
                     {
-                        Stage = TimekeeperMatchStage.None, MatchConfidence = 0m, Reason = TimekeeperUnmatchedReason.None,
+                        Stage = TimekeeperMatchStage.None,
+                        MatchConfidence = 0m,
+                        Reason = TimekeeperUnmatchedReason.None,
                     };
                 }
             }

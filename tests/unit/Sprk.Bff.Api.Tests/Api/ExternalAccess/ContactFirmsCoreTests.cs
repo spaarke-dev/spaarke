@@ -28,7 +28,7 @@ public sealed class ContactFirmsCoreTests
     private static readonly Guid InactiveContact = Guid.Parse("13000000-0000-4000-8000-0000000000c3");
     private static readonly Guid UnreadableMembershipsContact = Guid.Parse("13000000-0000-4000-8000-0000000000c4");
     private static readonly Guid NoMembershipsContact = Guid.Parse("13000000-0000-4000-8000-0000000000c5");
-    private static readonly Guid SystemUser =Guid.Parse("13000000-0000-4000-8000-0000000000e1");
+    private static readonly Guid SystemUser = Guid.Parse("13000000-0000-4000-8000-0000000000e1");
     private static readonly Guid FirmA = Guid.Parse("13000000-0000-4000-8000-0000000000a1");
 
     private readonly Mock<ExternalParticipationService> _participations = new(

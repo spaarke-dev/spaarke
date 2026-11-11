@@ -21,15 +21,15 @@ public sealed class ExternalModuleRootTypingTests
 
     private static ExternalModuleDescriptor Module(
         string dimension, IReadOnlyList<RootLookup>? extra = null, bool secureRoots = true) => new()
-    {
-        Name = "todos-test",
-        RecordEntity = Entity,
-        RequireReadOnSecureRoots = secureRoots,
-        AdditionalRootLookups = extra ?? Array.Empty<RootLookup>(),
-        ScopeDimensions = new[] { new ScopeDimension { Attribute = dimension, AccessibleIds = _ => new HashSet<Guid>() } },
-        PrimaryNameAttribute = "sprk_name",
-        ReadableColumns = new HashSet<string> { "sprk_todoid", "sprk_name", dimension },
-    };
+        {
+            Name = "todos-test",
+            RecordEntity = Entity,
+            RequireReadOnSecureRoots = secureRoots,
+            AdditionalRootLookups = extra ?? Array.Empty<RootLookup>(),
+            ScopeDimensions = new[] { new ScopeDimension { Attribute = dimension, AccessibleIds = _ => new HashSet<Guid>() } },
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string> { "sprk_todoid", "sprk_name", dimension },
+        };
 
     [Theory(DisplayName = "130-0 fix3 root typing (must fire): a secure-roots module scoped by a root lookup RootLinks does not type is refused at registration")]
     [InlineData("sprk_regardingproject")]

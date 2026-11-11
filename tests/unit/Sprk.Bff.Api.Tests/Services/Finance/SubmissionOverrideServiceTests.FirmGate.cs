@@ -53,7 +53,8 @@ public partial class SubmissionOverrideServiceTests
             {
                 json[InvoiceAssignFirmService.StoredDecisionMember] = "not a decision";
                 return json;
-            },
+            }
+            ,
             _ => null,
         };
         var w = kind switch

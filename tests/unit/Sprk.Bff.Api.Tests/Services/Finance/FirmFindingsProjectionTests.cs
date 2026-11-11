@@ -1362,31 +1362,31 @@ public sealed class FirmFindingsProjectionTests
     private static JsonObject Stored(
         string ruleType, Guid version, int? line, bool rejects = true, bool withheld = false, string? reason = null,
         params (string Name, string? Value)[] values) => new()
-    {
-        ["index"] = 0,
-        ["ruleType"] = ruleType,
-        ["policyId"] = PolicyA.ToString("D"),
-        ["policyCode"] = "BILL-INTERNAL-CODE",
-        ["policyVersionId"] = version.ToString("D"),
-        ["clause"] = InternalClause,
-        ["clauseLocation"] = "INTERNAL location",
-        ["subject"] = line is null ? "Invoice" : "Line",
-        ["line"] = line,
-        ["reasonCode"] = reason ?? RealReason(ruleType),
-        ["detailWithheld"] = withheld,
-        ["consequence"] = rejects ? "Reject" : "Flag",
-        ["rejects"] = rejects,
-        ["heldBecause"] = null,
-        ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject
         {
-            ["name"] = v.Name,
-            ["value"] = v.Value,
+            ["index"] = 0,
+            ["ruleType"] = ruleType,
+            ["policyId"] = PolicyA.ToString("D"),
+            ["policyCode"] = "BILL-INTERNAL-CODE",
+            ["policyVersionId"] = version.ToString("D"),
+            ["clause"] = InternalClause,
+            ["clauseLocation"] = "INTERNAL location",
+            ["subject"] = line is null ? "Invoice" : "Line",
             ["line"] = line,
-            ["field"] = IsReferenceName(v.Name) ? null : "Rate",
-            ["confidence"] = 0.42m,
-            ["belowReliabilityThreshold"] = false,
-        }).ToArray()),
-    };
+            ["reasonCode"] = reason ?? RealReason(ruleType),
+            ["detailWithheld"] = withheld,
+            ["consequence"] = rejects ? "Reject" : "Flag",
+            ["rejects"] = rejects,
+            ["heldBecause"] = null,
+            ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject
+            {
+                ["name"] = v.Name,
+                ["value"] = v.Value,
+                ["line"] = line,
+                ["field"] = IsReferenceName(v.Name) ? null : "Rate",
+                ["confidence"] = 0.42m,
+                ["belowReliabilityThreshold"] = false,
+            }).ToArray()),
+        };
 
     private static string StoredDocument(string kind, params JsonNode?[] entries) => new JsonObject
     {

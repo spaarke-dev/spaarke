@@ -242,12 +242,14 @@ public class AdminAttentionTextTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = writeKey, ["code"] = "dataverse_access_denied",
+                ["policyCode"] = writeKey,
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
             [InvoiceSubmissionPersister.SignalPlanRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = planKey, ["code"] = "sentence_too_long",
+                ["policyCode"] = planKey,
+                ["code"] = "sentence_too_long",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_invoice", ["id"] = "bbbbbbbb-0000-0000-0000-000000000000" },
             }),
         };

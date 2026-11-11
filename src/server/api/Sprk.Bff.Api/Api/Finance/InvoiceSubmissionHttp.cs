@@ -109,13 +109,13 @@ internal static class InvoiceSubmissionHttp
     /// <remarks>ebilling-r1 082c-3: <paramref name="warning"/> is the external route's provisional pre-check warning, carried only on a 202; a refusal never carries it.</remarks>
     internal static IResult ToResult(
         InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId, SubmissionHoldWarning? warning = null) => outcome.Kind switch
-    {
-        InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId), warning),
-        InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
-            ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
-            : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
-        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
-    };
+        {
+            InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId), warning),
+            InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
+                ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
+                : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
+            _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
+        };
 
     private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl, SubmissionHoldWarning? warning) =>
         Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl, warning));
