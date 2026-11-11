@@ -3,8 +3,11 @@ using Spaarke.Dataverse;
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
-/// Represents the resolved context for an authenticated external caller (Power Pages Contact).
-/// Set on HttpContext.Items by ExternalCallerAuthorizationFilter and consumed by downstream handlers.
+/// Represents the resolved context for an authenticated external caller (a CIAM contact).
+/// The retired CIAM-only external-caller filter used to set this on HttpContext.Items. The
+/// /api/v1/external group now resolves a plane-agnostic <see cref="CallerPrincipal"/> instead
+/// (CallerPrincipalAuthorizationFilter → <see cref="CiamContactPrincipalStrategy"/>), stored under
+/// <see cref="CallerPrincipal.HttpContextItemsKey"/>.
 /// </summary>
 public sealed class ExternalCallerContext
 {

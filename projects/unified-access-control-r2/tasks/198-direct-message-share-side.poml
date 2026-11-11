@@ -4,7 +4,7 @@
     <title>Direct 1:1 messages owned by the Direct owner team: participant grants, durable re-grant, keep-on-filing, gate Decision Record mirror, and the Direct-BU setup mode (share side of fm task 054)</title>
     <phase>Final push (round 90 rules)</phase>
     <gate>Owner rulings 2026-11-08 (Direct 1:1 messages: option (a), a dedicated memberless owner team outside the BU tree, participants shared in) and 2026-11-09 (typed in uac-r2: "Yes start fm task 054"; "Yes keep access" = after a Direct message is filed to a record its participants keep access, except on secure or Restricted targets). Lands before or with fm 054a's deploy. Parts C and E start only after fm sends the sha of its generalised owner-team lookup; Part E's D-123/D-169 change needs ontology-r1's OK (or the owner's ruling if ontology objects).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: who can read a message changes when its owner becomes a memberless team; share grants, revokes and a re-grant job; field-security-adjacent setup script.</rigor-reason>
     <model-tier>opus</model-tier>
