@@ -241,7 +241,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   falls back to the other package type's blob.
 - The manifest H6 reads: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
 - H9 waits for H6 (the BFF never starts against an older schema). H13 records `sprk_solutionversion` =
-  `SpaarkeMaster {version} ({managed|unmanaged})` — the package type on the registry row.
+  `SpaarkeMaster {Managed|Unmanaged} {version}` — the package type on the registry row.
 - Environment-variable **values** never ship in the package (H7 writes them).
 
 ## Secure Record setup — H7b (BINDING, T256 / unified-access-control-r2 INCOMING-145)

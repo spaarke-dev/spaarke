@@ -207,6 +207,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
                 // T266 S24 (#2605): the ontology writer's App User (H10) — role and the two writer profiles.
                 RunInput.Output(nameof(InterStepState.OntologyWriterSystemUserId)),
+                // T267 (#2618): the ontology writer's own business unit (H10) — S24 checks it by id and resolves the role there.
+                RunInput.Output(nameof(InterStepState.OntologyWriterBusinessUnitId)),
             ],
             [HandlerIds.H8] =
             [

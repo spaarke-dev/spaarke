@@ -9,9 +9,10 @@
 //
 // RULES: present; 1–MaxLength characters (Dataverse businessunit.name holds 160); no control characters; no leading or
 // trailing whitespace (Dataverse would find "Acme " and "Acme" as different names on a later run's find-by-name, and a
-// second unit would be created); never the Secure Record unit's name, in any casing (Dataverse compares names without
-// case — H10 would otherwise adopt the Secure Record unit as the customer's and put the BFF's users in it, the exact
-// exposure the owner decision forbids). This name comparison is only a FIRST FILTER for a clear 400 at intake: Dataverse
+// second unit would be created); never a RESERVED unit's name, in any casing (Dataverse compares names without case):
+// the Secure Record unit — H10 would otherwise adopt it as the customer's and put the BFF's users in it, the exact
+// exposure the owner decision forbids — and (task 267, #2618) the ontology writer's own unit, which holds that one
+// identity only. This name comparison is only a FIRST FILTER for a clear 400 at intake: Dataverse
 // also ignores accents, which no code-side comparison reproduces exactly. The binding checks compare business-unit IDs
 // resolved by Dataverse — H10 (EnsureCustomerBusinessUnitAsync → IsReservedUnit) and H7b S1 (BusinessUnitIsCustomerUnit).
 //
@@ -35,16 +36,28 @@ public static class CustomerBusinessUnitIntake
     private const int MaxEchoedLength = 64;
 
     /// <summary>
+    /// The business units no customer unit may be: the Secure Record unit (config/secure-record-owner-role.json) and the
+    /// ontology writer's unit (task 267). POST /api/runs and H10 pass this list; H10 also passes it, by id, to
+    /// <see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/>.
+    /// </summary>
+    public static IReadOnlyList<string> ReservedBusinessUnitNames { get; } =
+        [SecureRecordOwnerRoleSet.Embedded.BusinessUnitName, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName];
+
+    /// <summary>
     /// Reads and checks the customer's display name. Returns the name, or a rejection (<see cref="H10Rejections"/> code
     /// plus diagnostic) when it is absent or unusable.
     /// </summary>
     /// <param name="nonSecretParameters">The run's intake values.</param>
-    /// <param name="secureRecordBusinessUnitName">The Secure Record unit's name (config/secure-record-owner-role.json).</param>
+    /// <param name="reservedBusinessUnitNames">The reserved units' names (<see cref="ReservedBusinessUnitNames"/>).</param>
     public static CustomerBusinessUnitIntakeOutcome Validate(
-        IDictionary<string, string> nonSecretParameters, string secureRecordBusinessUnitName)
+        IDictionary<string, string> nonSecretParameters, IReadOnlyCollection<string> reservedBusinessUnitNames)
     {
         ArgumentNullException.ThrowIfNull(nonSecretParameters);
-        ArgumentException.ThrowIfNullOrWhiteSpace(secureRecordBusinessUnitName);
+        ArgumentNullException.ThrowIfNull(reservedBusinessUnitNames);
+        if (reservedBusinessUnitNames.Count == 0 || reservedBusinessUnitNames.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("At least one reserved unit name is required, none blank.", nameof(reservedBusinessUnitNames));
+        }
 
         var key = IntakeParameterCatalog.DisplayName;
         if (!nonSecretParameters.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
@@ -67,11 +80,12 @@ public static class CustomerBusinessUnitIntake
         {
             problem = "has leading or trailing whitespace";
         }
-        else if (string.Equals(FoldAccents(value), FoldAccents(secureRecordBusinessUnitName), StringComparison.OrdinalIgnoreCase))
+        else if (reservedBusinessUnitNames.FirstOrDefault(reserved =>
+                     string.Equals(FoldAccents(value), FoldAccents(reserved), StringComparison.OrdinalIgnoreCase)) is { } reservedName)
         {
-            problem = $"is the Secure Record business unit's name ('{secureRecordBusinessUnitName}'), ignoring case and " +
-                      "accents as Dataverse does — the customer's unit must be a different unit: no user may be placed in " +
-                      "the Secure Record unit";
+            problem = $"is the reserved business unit name '{reservedName}', ignoring case and accents as Dataverse does — " +
+                      "the customer's unit must be a different unit: no customer user may be placed in the Secure Record " +
+                      "unit or in the ontology writer's own unit";
         }
 
         if (problem is not null)
