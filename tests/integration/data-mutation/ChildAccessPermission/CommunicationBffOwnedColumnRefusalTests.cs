@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -361,6 +362,8 @@ public class CommunicationBffOwnedColumnRefusalTests
     [Fact]
     public void TheSolutionSource_SecuresEveryOwnedColumnItDefines()
     {
+        var profiles = File.ReadAllText(SolutionProfilesPath());
+
         foreach (var (table, column) in Owned)
         {
             var secured = SolutionSecured(File.ReadAllText(SolutionEntityPath(table)));
@@ -368,14 +371,97 @@ public class CommunicationBffOwnedColumnRefusalTests
             {
                 // Known limit: a live-only column; Set-ThreadFlagFieldSecurity.ps1 -Verify after each SpaarkeMaster import.
                 if (secured.TryGetValue(column, out var exported))
+                {
                     exported.Should().BeTrue($"{table}.{column} once exported must be IsSecured=1");
+                    ProfileRowGaps(profiles, table, column).Should().BeEmpty($"{table}.{column} once exported is read by every user");
+                }
+
                 continue;
             }
 
             secured.Should().ContainKey(column, $"{table}.{column} is defined in the solution source");
             secured[column].Should().BeTrue($"{table}.{column} is a BFF-owned column, so the solution source secures it");
+
+            // A secured column with no reader row is hidden from every user; the solution ships both profiles' rows.
+            ProfileRowGaps(profiles, table, column).Should().BeEmpty(
+                $"{table}.{column} is secured, so both BFF-managed profiles carry its row in the solution source");
         }
     }
+
+    [Fact]
+    public void TheProfileRowValues_AreThePrecedentsOnTheSameTable()
+    {
+        // The rows copy sprk_createdbyperson's: readers read only, writers read, create and update.
+        ProfileRowGaps(File.ReadAllText(SolutionProfilesPath()), "sprk_communication", "sprk_createdbyperson").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheProfileRowCheck_FiresOnASecuredColumnWithoutReaderRows_OrWithAReaderThatMayWrite()
+    {
+        // Must-fire controls for the profile-row half of the solution-source test.
+        var xml = File.ReadAllText(SolutionProfilesPath());
+        ProfileRowGaps(xml, "sprk_communication", "sprk_sentby").Should().BeEmpty("the faithful source has both rows");
+
+        var withoutReader = System.Xml.Linq.XDocument.Parse(xml);
+        RowsOn(withoutReader, ReaderProfile, "sprk_communication", "sprk_sentby").Remove();
+        ProfileRowGaps(withoutReader.ToString(), "sprk_communication", "sprk_sentby")
+            .Should().ContainSingle().Which.Should().StartWith(ReaderProfile);
+
+        var readerMayUpdate = System.Xml.Linq.XDocument.Parse(xml);
+        RowsOn(readerMayUpdate, ReaderProfile, "sprk_communicationthread", "sprk_threadtype").Single().Element("CanUpdate")!.Value = "4";
+        ProfileRowGaps(readerMayUpdate.ToString(), "sprk_communicationthread", "sprk_threadtype")
+            .Should().ContainSingle().Which.Should().StartWith(ReaderProfile);
+
+        var withoutWriter = System.Xml.Linq.XDocument.Parse(xml);
+        RowsOn(withoutWriter, WriterProfile, "sprk_communicationthread", "sprk_isdefaultthread").Remove();
+        ProfileRowGaps(withoutWriter.ToString(), "sprk_communicationthread", "sprk_isdefaultthread")
+            .Should().ContainSingle().Which.Should().StartWith(WriterProfile);
+    }
+
+    private const string ReaderProfile = "Spaarke BFF-Managed Field Readers";
+    private const string WriterProfile = "Spaarke BFF-Managed Field Writers";
+
+    /// <summary>The row each BFF-managed profile carries on a secured owned column (CanRead, CanCreate, CanUpdate).</summary>
+    private static readonly (string Profile, string Read, string Create, string Update)[] ProfileRows =
+    [
+        (ReaderProfile, "4", "0", "0"),
+        (WriterProfile, "4", "4", "4"),
+    ];
+
+    /// <summary>What the profiles XML lacks for <paramref name="table"/>.<paramref name="column"/>: one line per profile at fault.</summary>
+    private static IReadOnlyList<string> ProfileRowGaps(string profilesXml, string table, string column)
+    {
+        var doc = System.Xml.Linq.XDocument.Parse(profilesXml);
+        var gaps = new List<string>();
+        foreach (var (profile, read, create, update) in ProfileRows)
+        {
+            var rows = RowsOn(doc, profile, table, column).ToArray();
+            if (rows.Length != 1)
+            {
+                gaps.Add($"{profile}: {rows.Length} rows on {table}.{column}, expected 1");
+                continue;
+            }
+
+            var actual = (Read: Value(rows[0], "CanRead"), Create: Value(rows[0], "CanCreate"), Update: Value(rows[0], "CanUpdate"));
+            if (actual != (read, create, update))
+                gaps.Add($"{profile}: {table}.{column} has read/create/update {actual}, expected ({read}, {create}, {update})");
+        }
+
+        return gaps;
+    }
+
+    private static IEnumerable<System.Xml.Linq.XElement> RowsOn(System.Xml.Linq.XDocument doc, string profile, string table, string column) =>
+        doc.Descendants("FieldSecurityProfile")
+            .Where(p => (string?)p.Attribute("name") == profile)
+            .SelectMany(p => p.Descendants("FieldPermission"))
+            .Where(r => string.Equals(Value(r, "EntityName"), table, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(Value(r, "AttributeName"), column, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+    private static string? Value(System.Xml.Linq.XElement row, string name) => row.Element(name)?.Value.Trim();
+
+    private static string SolutionProfilesPath() => Path.Combine(
+        RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster", "Other", "FieldSecurityProfiles.xml");
 
     [Fact]
     public void TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured()

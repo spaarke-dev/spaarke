@@ -1381,17 +1381,24 @@ role loses a privilege the release removed only on a stage-and-upgrade, so a lef
 privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
 an expectations file for every release that changes roles (the owning project supplies the list).
 
-**Message-access columns: field security after every SpaarkeMaster import** (field-mapping-server-write-path-r1 task
+**Message-access columns: field security on every environment** (field-mapping-server-write-path-r1 task
 054b). Five columns decide who may read a message, and only the BFF writes them: `sprk_communicationthread.sprk_threadtype`
 and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_directrecipient` and `.sprk_communicationthread`.
-`scripts/Set-ThreadFlagFieldSecurity.ps1` secures all five (dry run → `-Apply` → `-Verify`), next to
-`Set-SecureFlagFieldSecurity.ps1` ([SECURE-PROJECT-ENVIRONMENT-SETUP.md](SECURE-PROJECT-ENVIRONMENT-SETUP.md)) and
+`scripts/Set-ThreadFlagFieldSecurity.ps1` secures all five, next to
+`Set-SecureFlagFieldSecurity.ps1` ([SECURE-PROJECT-ENVIRONMENT-SETUP.md](SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7d) and
 `Set-DocumentPointerFieldSecurity.ps1` (the BFF settings list above).
-- The SpaarkeMaster solution source marks four of them `IsSecured`. `sprk_communication.sprk_directrecipient` exists only
-  on environments where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran; it is not in the solution source, so an
-  import does not secure it.
-- On every environment where the script has been applied, run `Set-ThreadFlagFieldSecurity.ps1 -Verify` after **every**
-  SpaarkeMaster import (an H6 run or a manual import). A non-zero exit is a gap: run `-Apply`, then `-Verify` again.
+- The SpaarkeMaster solution source marks four of them `IsSecured` and carries both BFF-managed profiles' permissions on
+  them (readers: Read; writers: Read, Create, Update). The import is not enough on its own: the profiles' members (every
+  business unit's default team on the reader profile, the BFF application users on the writer profile) are per
+  environment, and `sprk_communication.sprk_directrecipient` is not in the solution source. It exists only where
+  `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the script refuses (exit 1, nothing written) until it does.
+- **New environment:** provisioning runs the script after the SpaarkeMaster import, `Set-DirectRecipientSchema.ps1 -Apply`
+  and `Set-RecordCreatorPersonSchema.ps1 -Apply` (the two profiles and their members). Dry run first, then `-Apply`, then
+  `-Verify` (each must exit 0).
+- **After every SpaarkeMaster import** (an H6 run or a manual import): run `Set-ThreadFlagFieldSecurity.ps1 -Verify`. A
+  non-zero exit is a gap: run `-Apply`, then `-Verify` again.
+- **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`;
+  then run `-Verify`.
 - **Binding rule:** the BFF settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay **unset** on an
   environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, no message is owned by
   the Direct team and nothing grants access from `sprk_sentby` / `sprk_directrecipient`.
