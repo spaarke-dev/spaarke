@@ -2,7 +2,8 @@
 
 > **Portfolio**: [Project #808](https://github.com/spaarke-dev/spaarke/issues/808) under [Epic #535](https://github.com/spaarke-dev/spaarke/issues/535) `[Epic]: ENTITY FUNCTIONALITY` · [Board #2](https://github.com/users/spaarke-dev/projects/2)
 >
-> **Status**: DESIGN COMPLETE — tasks generated · **Start**: 2026-08-19
+> **Status**: **COMPLETE** (2026-11-11, task 090 wrap-up) · **Start**: 2026-08-19
+> **What stays open after close:** the owner tests (U-1..U-11) and decisions D-1..D-12 in [`notes/wrap-up-uat-and-decisions-2026-11-11.md`](notes/wrap-up-uat-and-decisions-2026-11-11.md), including the D-2 deploy steps for the 198 chain (merged, not deployed; inert until fm 054b verifies) and the D-3 / D-5 small fixes; the hand-offs the owner confirms in one batch in [`notes/defer-disposition-2026-11-11.md`](notes/defer-disposition-2026-11-11.md); tasks **186, 191, 193, 194**, which are not in D-1 and are still open in `tasks/TASK-INDEX.md` (owner disposition needed); and the known gap FR-32 (point-in-time replay, #1303). Test diet: [`notes/test-diet-report.md`](notes/test-diet-report.md). Lessons: [`notes/lessons-learned.md`](notes/lessons-learned.md).
 > **Worktree**: `c:/code_files/spaarke-wt-unified-access-control-r2` · **Branch**: `work/unified-access-control-r2`
 > **Origin**: smart-todo-r5 UAT follow-up — "child access cascade is part of our unified access control system — think it all the way through"
 

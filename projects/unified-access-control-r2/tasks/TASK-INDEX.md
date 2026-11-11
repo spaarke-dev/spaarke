@@ -945,7 +945,7 @@ by design (its contract is task 034's canary). Shared test folders were ignored 
 
 | # | Task | Deps | Safe |
 |---|---|---|---|
-| 🔲 [open] 090 | **R59:** KEEP, trimmed — absorbs 058/082/087/089 lines; cut + deferred deps pruned. `/test-diet` · **defer/issue disposition gate** (2026-09-15) · H-8a/H-8b closeout · lessons-learned · README → Complete | all (incl. 099, 101, 104–108) | ❌ |
+| ✅ [done] 090 | **DONE 2026-11-11:** wrap-up PR "uac-r2 090: project wrap-up" — `notes/test-diet-report.md`, `notes/defer-disposition-2026-11-11.md`, `notes/lessons-learned.md`, H-8a comments, absorbed docs, README Complete. Open after close: owner UAT + D-2 deploy steps (`notes/wrap-up-uat-and-decisions-2026-11-11.md`), the hand-off batch, and tasks 186/191/193/194 (not in D-1). **R59:** KEEP, trimmed — absorbs 058/082/087/089 lines; cut + deferred deps pruned. `/test-diet` · **defer/issue disposition gate** (2026-09-15) · H-8a/H-8b closeout · lessons-learned · README → Complete | all (incl. 099, 101, 104–108) | ❌ |
 
 ---
 

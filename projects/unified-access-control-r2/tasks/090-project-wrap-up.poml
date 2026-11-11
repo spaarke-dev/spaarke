@@ -4,7 +4,7 @@
     <title>Project wrap-up: test-diet gate, register closeout (H-8a/H-8b), defer/issue disposition gate, lessons learned, README Complete</title>
     <phase>Wrap-up</phase>
     <gate>blocked — requires ALL prior tasks (Phases 0-5, FR-33, governance and register-driven tasks) completed</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Mostly docs/process; the H-8a/H-8b code touches are comment + vestigial-DTO cleanup scoped by an escalation trigger (behavioral change is out of bounds). /test-diet itself is read-only.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,10 @@
 
   <notes>Root CLAUDE.md §7 (test-diet gate is BINDING). UAT items (BU restructure, live-dev secure verification) remain open in notes/phase4-uat-acceptance.md — the README must link them as post-project environment work, not silently absorb them.
 
-AMENDED 2026-09-15 — owner rule for the register: "issues should only go past the project if they are not material to the project or they are confirmed/validated as another project's subject matter." Added the disposition gate (step 1, constraint, criterion, second escalation trigger) and deps 099, 101, 104–107.</notes>
+AMENDED 2026-09-15 — owner rule for the register: "issues should only go past the project if they are not material to the project or they are confirmed/validated as another project's subject matter." Added the disposition gate (step 1, constraint, criterion, second escalation trigger) and deps 099, 101, 104–107.
+
+COMPLETED 2026-11-11 (owner "Accept all" D-1..D-12; brief from the uac-r2 session). Master merged in (one conflict, current-task.md, ours kept). TASK-INDEX: D-1 tasks 013, 036, 037, 039, 099, 136, 140, 153, 165, 171 closed (135, 141 already done), 058 absorbed, 198 chain recorded; 5 deferred and 178 (moved to uac-secure-project-r3) left as they were. Not in D-1 and still open: 186, 191, 193, 194 (owner disposition; listed in README and current-task.md). Register: notes/defer-disposition-2026-11-11.md (161 labelled issues; #1059 #1063 #1077 #1104 closed; #2203 #2245 #2270 #2278 commented; #1304 closed on purpose, folded into #1303; hand-offs await one owner batch). /test-diet: notes/test-diet-report.md, 0 deletions. H-8a: four stale comments fixed (ExternalCallerContext, ExternalDataService, ExternalAccessEndpoints, CallerPrincipalAuthorizationFilter); the Contact Entity.xml description still names the deleted filter (solution metadata, left for the owner). H-8b: already met by 017 (amendment 1). Docs: uac-access-control.md (058 parents/children, 082 paragraph, 089 line), sprk_accessevent.md (087), No Access schema doc. notes/lessons-learned.md written. README Complete.
+rework: none task 090</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
   <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 090)">
