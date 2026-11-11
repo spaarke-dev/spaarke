@@ -1353,6 +1353,85 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// Issue #2033 (owner decision, NFR-01 fail closed): the problem code (403) of a send-as-user email refused because the
+    /// caller has no ENABLED Dataverse systemuser: disabled in Dataverse while still active in Entra, or no systemuser at all.
+    /// Nothing is sent or written.
+    /// </summary>
+    public const string SenderDisabledCode = "sdap.communication.sender_disabled";
+
+    /// <summary>
+    /// Issue #2033: the problem code (503) of a send-as-user email refused because the caller's Dataverse user could not be
+    /// read, so it could not be confirmed enabled. Nothing is sent or written.
+    /// </summary>
+    public const string SenderStatusUnavailableCode = "sdap.communication.sender_status_unavailable";
+
+    /// <summary>
+    /// Issue #2033: the problem code (401) of a send-as-user email refused because the caller's claims carry no Entra object
+    /// id, so their Dataverse user cannot be read (<see cref="CallerResolution.ResolveObjectId"/>: null is 401). Nothing is
+    /// sent or written.
+    /// </summary>
+    public const string SenderUnidentifiedCode = "sdap.communication.sender_unidentified";
+
+    /// <summary>
+    /// Issue #2033: the gate a send-as-user email passes BEFORE anything is sent or written. The caller sends as themselves,
+    /// so their Dataverse systemuser must be enabled. Uses the existing oid → systemuserid resolution, which answers only an
+    /// enabled user (#1576), and returns that user for <c>sprk_sentby</c>. Shared-mailbox and system sends do not take it.
+    /// </summary>
+    /// <exception cref="SdapProblemException">
+    /// 401 <see cref="SenderUnidentifiedCode"/> (no oid); 403 <see cref="SenderDisabledCode"/> (no enabled systemuser);
+    /// 503 <see cref="SenderStatusUnavailableCode"/> (the read failed).
+    /// </exception>
+    private async Task<Guid> RequireEnabledSenderAsync(string? userObjectId, string correlationId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userObjectId))
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: the caller's claims carry no object id, so the sender cannot be checked | CorrelationId: {CorrelationId}",
+                correlationId);
+            throw new SdapProblemException(
+                code: SenderUnidentifiedCode,
+                title: "Sender Not Identified",
+                detail: "The message was not sent: the sender could not be identified from the authentication claims.",
+                statusCode: 401,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        Guid? systemUserId;
+        try
+        {
+            systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Send as user REFUSED: the sender's Dataverse user could not be read (Azure AD OID: {UserObjectId}) | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderStatusUnavailableCode,
+                title: "Sender Status Unavailable",
+                detail: "The message was not sent: the sender's user status could not be checked. Please try again.",
+                statusCode: 503,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (systemUserId is not { } enabledSystemUserId)
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: no enabled Dataverse systemuser for Azure AD OID {UserObjectId} | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderDisabledCode,
+                title: "Sender Disabled",
+                detail: "The message was not sent: the sender's user account is disabled or not set up in Spaarke.",
+                statusCode: 403,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        return enabledSystemUserId;
+    }
+
+    /// <summary>
     /// Stamps <c>sprk_sentby</c> with the sending systemuser resolved from the caller's Entra object id (the existing
     /// oid → systemuserid resolution, task 146 r1 user-mode path). Unresolvable or failing → no stamp and a warning;
     /// the communication is still sent and recorded.
@@ -2645,6 +2724,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Resolve user object ID for sprk_sentby (Azure AD oid claim)
         var userObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
+        // Step 2b (issue #2033, NFR-01): the caller sends as themselves, so their Dataverse user must be ENABLED. Checked
+        // before anything is sent or written; a disabled user (still active in Entra) is refused, and a failed read refuses.
+        var senderSystemUserId = await RequireEnabledSenderAsync(userObjectId, correlationId, ct);
+
         _logger.LogInformation(
             "Sending as user (OBO) | CorrelationId: {CorrelationId}, UserEmail: {UserEmail}",
             correlationId,
@@ -2653,7 +2736,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Step 2c (task 146 r1, verifier item 10): the record — its filing and OWNER — is prepared BEFORE the send: a
         // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx.
         var preparedRecord = await BuildDataverseRecordForUserAsync(
-            request, userEmail, userObjectId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+            request, userEmail, senderSystemUserId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
 
         // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
         // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
@@ -2917,13 +3000,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Builds — BEFORE the send — the Dataverse sprk_communication record for a user-mode send, with its filing and
-    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
+    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to the caller's enabled systemuser
+    /// (<see cref="RequireEnabledSenderAsync"/>, issue #2033).
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildDataverseRecordForUserAsync(
         SendCommunicationRequest request,
         string userEmail,
-        string? userObjectId,
+        Guid senderSystemUserId,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -2945,11 +3029,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_isinternalonly"] = RequestedInternalOnly(request),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
-            ["sprk_correlationid"] = correlationId
+            ["sprk_correlationid"] = correlationId,
+            // The sender read before the send (issue #2033) resolved the caller's enabled systemuser; it is not read twice.
+            ["sprk_sentby"] = new EntityReference("systemuser", senderSystemUserId)
         };
-
-        // Resolve Azure AD oid → Dataverse systemuserid for sprk_sentby lookup
-        await StampSentByFromObjectIdAsync(communication, userObjectId, ct);
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })
