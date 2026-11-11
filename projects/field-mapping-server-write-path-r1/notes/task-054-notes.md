@@ -725,3 +725,167 @@ No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonate
 - **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors. `dotnet format --verify-no-changes` on the two changed BFF files: clean.
 - **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, DataverseUpdateRecordHandler, ChatPreSuspend, RecordCreationService, WriterBuilderOwnershipParity, RefileWriterBindShape, AccessTableAppOnlyWriter, Communication, FieldSecurity; excluding `Api.Office.`): **4949 passed, 0 failed, 2 skipped.** The profile-file agreement tests (`SecuritySchemaAgreement`, `FieldSecurity`): 273 passed.
 - **ArchTests:** **2149 passed, 0 failed.**
+
+## 054c — existing Direct messages (`scripts/Migrate-DirectMessagesToOwnerTeam.ps1`)
+
+Branch `task/fm-054c` (cut from 89274213eb). FULL rigor. Script and tests only: no live Dataverse read or write, no deploy.
+
+### Binding rules (agreed with UAC-r2, 2026-11-11)
+
+- The two settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay unset on an environment until 054b's field security verifies there. While they are unset, no message is owned by the Direct team and nothing grants from the stamped pair.
+- **Live order:** dev BFF from master → 054b (`-DryRun`, `-Apply`, `-Verify`) → the Direct setup (UAC-r2 198 Part A, `Set-CustomerOwnerTeams.ps1` Direct mode, plus the two settings) → **054c `-Phase Stamp`** → piece 3 (the owner move in the BFF) → **054c `-Phase Move`**.
+- `-Phase Move -Apply` runs only after the BFF build with 198's Direct share pass is deployed on that environment and its two settings `DirectMessage:BusinessUnitName` / `DirectMessage:OwnerTeamName` are live there with the values passed as `-DirectMessageBusinessUnitName` / `-DirectMessageOwnerTeamName`. The operator states this with `-DirectShareJobLive`. It cannot be passed honestly on an environment until those two settings are set there: that is an owner go in the unified-access-control-r2 session, which comes only after `Set-ThreadFlagFieldSecurity.ps1 -Verify` (054b) exits 0 there.
+- So `-Phase Stamp` does not depend on the Direct team or the two settings: it reads no business unit, no named team and no Direct-team parameter (pinned by a test). Only `-Phase Move` resolves the Direct team.
+
+### Why two phases
+
+- The stamp must land before 198 decides grants from the pair, and before any message is owned by the Direct team. Moving owners at that point would leave the moved messages readable by nobody.
+- The move needs the Direct team, its role and the owner-move code. It runs last.
+- The assign invariant ties them: Move assigns only a message with a valid stamped pair. A row Stamp could not stamp keeps its owner through Move.
+
+### Precondition (both phases, every mode)
+
+The script refuses (exit 1) and selects nothing unless all of these hold:
+- the five 054b columns are field-secured: `sprk_communicationthread.sprk_threadtype`, `sprk_communicationthread.sprk_isdefaultthread`, `sprk_communication.sprk_communicationthread`, `sprk_communication.sprk_sentby`, `sprk_communication.sprk_directrecipient`;
+- "Spaarke BFF-Managed Field Writers" exists once, reads and updates each column, and its members are exactly the `-BffApplicationIds` application users (no human, no other application user, no team);
+- "Spaarke BFF-Managed Field Readers" exists once, reads each column, and is on every business unit's default team;
+- no other profile but the built-in System Administrator profile can create or update any of the five. That profile is recognised by its fixed id (`572329c1-a042-4e22-be47-367c6374ea45`), never by name: a custom profile named "System Administrator" is refused like any other.
+
+### Selection
+
+A Direct message is a Message row (`sprk_communicationtype` = 100000004) whose thread lookup names a thread typed Direct (`sprk_threadtype` = 100000001) and which carries no typed regarding lookup (the twelve `sprk_regarding*` columns of `RegardingFieldMap`). A Direct-typed thread with any typed regarding lookup of its own set is not a Direct thread: the thread's columns are the same set as `ThreadResolver.ThreadRegardingColumns` (`RegardingFieldMap.All` minus `sprk_regardingreportcard`, which the thread table lacks); its messages go to review (`thread_has_regarding`) in Stamp, and are not moved (and are listed) in Move.
+- The per-user master thread (`sprk_isdefaultthread` true) is never selected. A Direct thread whose flag reads null goes to review (`thread_default_flag_unread`).
+- `-NamePrefix` limits the selection by `sprk_name` (test rows: `FMSWP-`).
+
+**Stamp** selects those with an empty `sprk_directrecipient`. It stamps a row only when its thread yields exactly two distinct systemusers, one of them the row's `sprk_sentby`, both read enabled (`isdisabled` false) and neither with an `applicationid`.
+- The thread yields its systemuser owner (counted only when `_owningteam_value` is empty: a team-owned thread has no owner participant, even if its user-owner column reads a value; the BFF counts `ownerid` only when it is a systemuser) plus every systemuser holding a share on it whose mask has the Read bit (`mask & 1`). This is the rule the BFF stamp uses on an unrouted filing (`DirectMessageRecipient.ReadParticipantsAsync`). A team owner, a team share and a share without the Read bit are not participants.
+- The write is `sprk_DirectRecipient@odata.bind` with `If-Match: *`, after a re-read (still empty, same sender, same thread), then a read-back.
+- Every other row goes to the review list (`-ReviewPath`; `.json` gives JSON, anything else CSV) with a reason, and is not touched: `no_sentby`, `not_two_participants`, `sender_not_a_participant`, `participant_disabled`, `participant_application_user`, `participant_missing`, `read_fault`, `thread_default_flag_unread`, `thread_shares_changed_after_create`, `changed_since_selection`.
+- **Shares changed after creation:** the audit log is not read (whether the thread table is audited, and the audit action codes, cannot be confirmed without a live read). Instead, a thread with a current share row whose `changedon` is later than the thread's `createdon` plus `-ShareChangeToleranceSeconds` (default 300) sends its messages to review. A revoked share leaves no row, so this does not see a removal.
+
+**Move** resolves the Direct team first, then selects every Direct message.
+- A message owned by the Secure Record team is skipped.
+- A message without a valid stamped pair (`sprk_sentby` and `sprk_directrecipient`: two distinct, non-empty ids) is listed (`no_valid_pair`) and keeps its owner, with its content rows.
+- For a valid pair: the content rows are `sprk_communicationattachment`, `sprk_communicationparticipant` and `sprk_emailreviewlog` (by their `sprk_communication` lookup); `sprk_document` (by `sprk_relatedcommunication`); and the gate `sprk_decisionrecord` (by `sprk_regardingcommunication`, `sprk_confirmedby` empty, created by a `-GateRecordWriterApplicationIds` user — the gate writer's own test in `GateDecisionRecordSharing.FindGateRecordsAsync`). Gate records are created by the ontology writer's own managed identity, never the BFF application user (`OntologyWriterDataverseClient`), so `-GateRecordWriterApplicationIds` is a separate parameter, mandatory for Move (the script throws when it is empty) and used only to recognise gate-record creators; it never feeds the writer-profile membership check. A Decision Record created by an id in neither list is not moved, and neither is one created by a `-BffApplicationIds` user.
+- **Gate Decision Records:** Move takes only unconfirmed gate records created by the gate writer. That is the same set `GateDecisionRecordSharing.FindGateRecordsAsync` re-owns. A confirmed record carries a person's review and stays with its owner.
+- Rows owned by the Direct team or the Secure Record team are not moved.
+- **The acknowledgement:** `-Apply` refuses (exit 1) before any read or write unless `-DirectShareJobLive` is passed (see the live order above for what it asserts). `-DryRun` and `-Verify` do not need it.
+- **The Direct team checks** (as `DirectMessageOwnerTeam`):
+  - exactly one unit by name;
+  - not the root, and a direct child of the root;
+  - not the Secure Record unit, and the team not its team (both by id);
+  - exactly one named, non-default Owner team, which is not the unit's default team;
+  - the team has no members, and the unit has no users.
+  - The Secure Record lookup uses the default names. With a Secure name passed and not found, or a Secure lookup that is ambiguous, the script refuses. Any failure refuses (exit 1) before the selection.
+- **The Assign-cascade check** (ported from `Migrate-SecureRecordsToNamedOwnerTeam.ps1`), after the Direct team resolves and before anything is selected, in every mode: the script reads the `OneToManyRelationships` metadata of `sprk_communication` and of each content table it assigns, and refuses (exit 1) any relationship whose Assign cascade is not `NoCascade` and whose child table is not listed in `-AcceptedAssignCascade` (default: none). It lists each cascading relationship as ACCEPTED or NOT ACCEPTED. Each `-GateRecordWriterApplicationIds` id must also have an application user here, or the script refuses.
+
+### Apply, per row
+
+- **Stamp:** re-read, write, read back. A read-back mismatch stops the run (exit 1). The re-read covers the message (still empty, same sender, same thread, no typed regarding lookup) and its thread (still Direct-typed, `sprk_isdefaultthread` still false, no typed regarding lookup); a row that fails any of them is listed `changed_since_selection` and not written.
+- **Application ids** (`-BffApplicationIds`, `-GateRecordWriterApplicationIds`) are normalised to the plain dashed form before they reach a filter (`Guid.TryParse` also accepts braced, parenthesised, no-dash and `0x` forms).
+- **Move:**
+  - `sharetopreviousowneronassign` true refuses `-Apply` before any write. It is re-read before every row.
+  - The message and its thread are re-read. When the pair is no longer valid, the message is now owned by the Secure Record team, the message or its thread now carries a typed regarding lookup, or the thread is no longer Direct-typed or is now the per-user master thread (flag true or unread), nothing of that message moves and it is listed.
+  - **The participants keep Read** (per message, after that re-read, before any of its rows is assigned). The Direct team has no members and `sharetopreviousowneronassign` is false, so an assign keeps only the shares already on the row.
+    - The participants are `sprk_sentby` and `sprk_directrecipient`, read with the Stamp eligibility read. A disabled (or missing) participant is skipped, as 198 skips a disabled one. No enabled participant left: nothing moves (`participants_not_readable`).
+    - The message's share rows are read strictly. A participant or share read fault: nothing moves (`read_fault`).
+    - Each enabled participant:
+      - holds a systemuser share with the Read bit: nothing to do, no second grant;
+      - holds a share without the Read bit: nothing moves (`participant_share_without_read`); the script never upgrades such a share, as `DirectMessageParticipantShares.GrantContentRowAndConfirmAsync` does not;
+      - is the message's current owning user (`_owningteam_value` empty, `_owninguser_value` equal) and has no share: granted Read (`GrantAccess`, `AccessMask` `ReadAccess`, the systemuser principal) while the message is still user-owned, then the share rows are read back. The grant keeps access the owner already has and widens nobody's. A grant that throws, or a read-back without Read: nothing moves (`participant_grant_unconfirmed`), and the run goes on to the next message;
+      - otherwise (not the owner, no share): no grant, because a new grant would bypass the BFF's Restricted bar (`RestrictedFilingShareBar.EligibleForGrantAsync`). Nothing moves (`participants_not_readable`).
+    - `-DryRun` prints the grants it would make and lists the messages that would not move; it writes nothing.
+  - A request that throws mid-run (a PATCH or a read) writes the review list gathered so far, then rethrows (Stamp and Move).
+  - **Move review reasons:** `thread_has_regarding`, `thread_default_flag_unread`, `no_valid_pair`, `changed_since_selection`, `participants_not_readable`, `participant_share_without_read`, `participant_grant_unconfirmed`, `read_fault`, `participant_without_read` (`-Verify` only).
+  - Every phase and mode prints a count per review reason next to the review list (`review: no_valid_pair 2, participants_not_readable 1`, or `review: none`), so the owner sees how many rows stay behind before the go.
+  - Then each content row, the message last: count the shares (mask > 0), assign `ownerid@odata.bind` → `/teams(<Direct team>)`, read the owner back (stop if it did not land), count again.
+  - Stop if the count fell. A rise is reported, not stopped: once the row is Direct-owned, 198's share job may grant the participants.
+  - The message goes last so a stopped run resumes: its content rows are found again.
+- **Idempotent:** a second `-Apply` selects nothing. Stamp skips stamped rows. Move skips a message whose rows are all on the Direct or Secure team.
+- **`-Verify`:**
+  - Stamp: exit 1 while any row would stamp.
+  - Move: exit 1 while a valid-pair message, or a content row of one, is not on the Direct team (Secure-owned rows excepted), or while a Direct-team-owned valid-pair message has an enabled participant without a Read share (`participant_without_read`) or its participant or share read faults (`read_fault`).
+  - Otherwise exit 0. Review rows do not fail `-Verify`.
+
+### Known limits (stated, not defects)
+
+- **L11.** The operator runs the script as a System Administrator, whom field security does not restrict. The stamp is written by the operator, not the BFF, under the same rule.
+- **L12.** Stamp computes a thread's pair once per run. A share changed on that thread during the run is not re-read before each row.
+- **L13.** The message itself keeps its participants' Read across the assign (see "The participants keep Read"). The moved content rows rely on 198's share job to grant the participants: between their assign and 198's next run they are readable by neither participant (the piece-3 contract's stated limit). That gap ends at the job's next run only because `-Apply` runs after 198 and its two settings are live on that environment (`-DirectShareJobLive`, live order above). The script does not call the BFF's per-message grant.
+- **L15.** A table missing from the Assign-cascade metadata read ends the run with the raw request error rather than a named refusal. It fails closed: nothing is selected or written.
+- **L14.** The share-count check races 198's share job. If the job revokes a non-participant share on a just-moved message before the second count, the run stops. Re-running resumes.
+- **L16.** The owner grant's `GrantAccess` body names the target and principal as `@odata.id` entity references; the Web API's documented form uses typed entity objects with `@odata.type`. The shape is not verified live. If it is wrong, every owner grant throws and its message is listed `participant_grant_unconfirmed` and does not move (fail safe). **Rule (UAC-r2, 2026-11-11):** the first Move `-Apply` on an environment, after the owner's go, is scoped with `-NamePrefix` to one `FMSWP-` test message, and its grant and read-back are checked before a full run.
+
+### §11 for the script
+
+- **Existing:** `Migrate-SecureRecordsToNamedOwnerTeam.ps1` moves Secure roots to their named team (the assign, read-back and share-count pattern reused here). `Set-SecureFlagFieldSecurity.ps1` checks the profiles (the precondition pattern reused here). Neither selects Direct messages, stamps a recipient or moves message content rows.
+- **Extension:** neither can be extended without mixing two tables' ownership rules into one script. Their selection, invariants and stop conditions differ (Secure roots by `sprk_issecure` and business unit; Direct messages by thread type, the pair and content rows).
+- **Cost of doing nothing:** existing Direct messages keep an empty recipient, so 198 grants nothing from their pair. After piece 3 they are never moved to the Direct team, and AC2's recovery path ("re-run 054c -Verify, then -Apply") does not exist.
+- No new package, BFF code, DI registration, endpoint or Dataverse column. The CI job `owner-teams-script-tests` runs the new Pester file next to `Set-CustomerOwnerTeams.Tests.ps1`.
+
+### What the live runs need
+
+Each phase needs the owner's go in this project's session, on each environment, after 054b `-Verify` exits 0 there:
+- **Stamp**, after the Direct setup:
+  1. `-Phase Stamp` dry run;
+  2. review the plan and the review list;
+  3. the owner's go;
+  4. `-Apply`;
+  5. `-Verify` exits 0.
+- **Move**, after 198 and piece 3 are deployed there and the two settings are set:
+  1. `-Phase Move` dry run;
+  2. the owner's go;
+  3. `-Apply -DirectShareJobLive`;
+  4. `-Verify` exits 0.
+- AC2's after-the-fact recovery uses `-Phase Move`: `-Verify`, then `-Apply` on a seeded `FMSWP-` row.
+
+Not verified without a live environment:
+- that the Web API returns `principaltypecode` as `systemuser` / `team` on `principalobjectaccessset`, and `changedon` on its rows;
+- the paging of each read;
+- the gate Decision Record's creator being a `-GateRecordWriterApplicationIds` user (assumed from `OntologyWriterDataverseClient.GetWriterUserIdAsync`: the ontology writer's managed identity);
+- that `principaltypecode` comes back as the text `systemuser` / `team` (the script compares text; a numeric object-type code would make every share a non-participant and the stamp would stamp nothing);
+- that the unpaged `$expand` of the profile reads (`teamprofiles_association`, `systemuserprofiles_association`) returns every member of a profile (a long expansion is not followed to a next link, so a member beyond the first page would go unseen);
+- the real Assign cascade configuration of `sprk_communication` and the five content tables (the dry run lists it; the owner decides `-AcceptedAssignCascade`);
+- that a System Administrator's PATCH of a secured column succeeds;
+- the `If-Match: *` refusal on a missing row;
+- the `GrantAccess` body shape (`Target` / `Principal` as `@odata.id`, `AccessMask` `ReadAccess`), taken from the repo's existing call in `projects/unified-access-control-r2/notes/task-133-live-gate.ps1`.
+
+### Evidence
+
+- `tests/scripts/Migrate-DirectMessagesToOwnerTeam.Tests.ps1` (Pester 5.7.1): an in-memory world behind a mocked `Invoke-RestMethod` and `az`; every write is recorded.
+- **Fail-then-pass:**
+  - script absent: **Failed 50, Passed 0**;
+  - precondition refusal removed: **Failed 6** (the six must-fire precondition tests);
+  - Read-bit filter removed: **Failed 2** (zero-mask share, share without Read);
+  - team shares counted: **Failed 1**;
+  - Move invariant removed: **Failed 2** (no valid pair; pair invalid at write time);
+  - restored: **Passed 50, Failed 0**.
+- **Review-fix round** (the file now has 86 tests). Each fix reverted alone in the script, the new tests failing:
+  - gate creators read from the BFF list: **Failed 2**; `-GateRecordWriterApplicationIds` not mandatory: **Failed 2**; a gate-writer id with no application user not refused: **Failed 1**;
+  - thread regarding lookups ignored: **Failed 4** (Stamp x3, Move x1);
+  - Assign-cascade refusal removed: **Failed 4** (communication, content table, gate table, `-Verify`);
+  - thread user-owner counted for a team-owned thread: **Failed 2**;
+  - System Administrator exempt by name: **Failed 1**;
+  - duplicate profile accepted: **Failed 2**; reader missing from a default team ignored: **Failed 1**; writer lacking read or update ignored: **Failed 2**; reader lacking read ignored: **Failed 1**; precondition skipped under `-Verify`: **Failed 2** (Stamp, Move);
+  - write-time re-read checks removed: Secure-owned **Failed 1**, message regarding **Failed 2**, thread regarding **Failed 1**;
+  - empty `-BffApplicationIds` accepted: **Failed 1**; review list not kept when a write throws: **Failed 2** (Stamp, Move); OData literal not percent-encoded: **Failed 1**;
+  - restored: **Passed 86, Failed 0**.
+- **Re-check round** (scoped re-check of the fix diff; the file now has 95 tests). Each fix reverted alone:
+  - Move/Stamp thread re-read without the type check: **Failed 2**; without the master-flag check: **Failed 3**;
+  - Stamp without the thread re-read: **Failed 3**; Stamp without the message-regarding re-read: **Failed 1**;
+  - application ids not normalised: **Failed 1**;
+  - restored: **Passed 95, Failed 0**.
+- **Peer-review F1 round** (participants keep Read, `-DirectShareJobLive`, per-reason counts; the file now has 113 tests). Existing Move tests now seed both participants' Read share on the message; the per-row stop test's count reads `shares 2 -> 2` (Bob's share plus the owner's confirmed grant). The whole script at 0ff14442aa fails 58 (every Move test, on the unknown switch), so each fix was reverted alone:
+  - acknowledgement refusal removed: **Failed 1**;
+  - participant check removed from `-Apply`: **Failed 9**;
+  - owner grant removed (the owner treated like anyone else): **Failed 7**;
+  - share-without-Read check removed: **Failed 1**;
+  - grant read-back not checked: **Failed 1**;
+  - grant fault not caught per message: **Failed 1**;
+  - disabled participant not skipped: **Failed 2**;
+  - share read fault not caught: **Failed 1**;
+  - `-Verify` participant check removed: **Failed 1**;
+  - `-DryRun` participant pass removed: **Failed 2**;
+  - per-reason count removed: **Failed 2**;
+  - restored: **Passed 113, Failed 0**.
+- **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed** before the F1 round; **149 passed, 0 failed** after it. Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.
