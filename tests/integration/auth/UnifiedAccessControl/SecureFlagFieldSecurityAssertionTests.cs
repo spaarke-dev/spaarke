@@ -36,6 +36,17 @@ public class SecureFlagFieldSecurityAssertionTests
     private static readonly CensusDefaultTeam RootTeam = new(Guid.Parse("f150f150-0000-0000-0000-0000000000b1"), "Spaarke", "Spaarke");
     private static readonly CensusDefaultTeam ChildTeam = new(Guid.Parse("f150f150-0000-0000-0000-0000000000b2"), "Customer BU", "Customer BU");
     private static readonly CensusDefaultTeam SecureBuTeam = new(Guid.Parse("f150f150-0000-0000-0000-0000000000b3"), "Secure Record", "Secure Record");
+    private static readonly CensusDefaultTeam WriterTeam = new(Guid.Parse("f150f150-0000-0000-0000-0000000000b4"),
+        SecureFlagFieldSecurityAssertion.OntologyWriterBusinessUnitName, SecureFlagFieldSecurityAssertion.OntologyWriterBusinessUnitName);
+    private static readonly Guid RootBuId = Guid.Parse("f150f150-0000-0000-0000-0000000000e1");
+    private static readonly CensusBusinessUnit[] StandardUnits =
+    {
+        new(RootBuId, "Spaarke", null),
+        new(Guid.Parse("f150f150-0000-0000-0000-0000000000e2"), "Customer BU", RootBuId),
+        new(Guid.Parse("f150f150-0000-0000-0000-0000000000e3"), "Secure Record", RootBuId)
+    };
+    private static readonly CensusBusinessUnit WriterUnit =
+        new(Guid.Parse("f150f150-0000-0000-0000-0000000000e4"), SecureFlagFieldSecurityAssertion.OntologyWriterBusinessUnitName, RootBuId);
     private static readonly CensusPrincipal Bff = new(Guid.Parse("f150f150-0000-0000-0000-0000000000c1"), "# mi-bff-api-dev", true);
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -50,7 +61,8 @@ public class SecureFlagFieldSecurityAssertionTests
         IReadOnlyList<CensusDefaultTeam>? defaultTeams = null,
         IReadOnlyList<CensusPrincipal>? bffUsers = null,
         IReadOnlyList<string>? unresolved = null,
-        IReadOnlyList<CensusConfiguredWriter>? configuredWriters = null)
+        IReadOnlyList<CensusConfiguredWriter>? configuredWriters = null,
+        IReadOnlyList<CensusBusinessUnit>? businessUnits = null)
     {
         var teams = defaultTeams ?? new[] { RootTeam, ChildTeam, SecureBuTeam };
         return new SecureFlagFieldSecurityCensus(
@@ -71,6 +83,7 @@ public class SecureFlagFieldSecurityAssertionTests
                 new CensusFieldPermission(t, SysAdminProfileId, 4, 4, 4)
             }).ToArray(),
             teams,
+            businessUnits ?? StandardUnits,
             bffUsers ?? new[] { Bff },
             unresolved ?? Array.Empty<string>(),
             new[] { "user 'Ralph Schroeder'", "TEAM 'Spaarke Demo'" },
@@ -146,6 +159,92 @@ public class SecureFlagFieldSecurityAssertionTests
 
         outcome.Passed.Should().BeFalse();
         outcome.Message.Should().Contain("MASKED READERS").And.Contain(ChildTeam.BusinessUnitName);
+    }
+
+    // ── Task 267 (#2618): the ontology writer's own unit, exempt from the reader profile (H7b v8 S11/S16) ──
+
+    private static readonly CensusDefaultTeam[] AllTeamsWithWriter = { RootTeam, ChildTeam, SecureBuTeam, WriterTeam };
+
+    /// <summary>A v8 stamp: the writer unit exists and its default team is on the reader profile only when asked.</summary>
+    private static SecureFlagFieldSecurityCensus V8Stamp(
+        bool writerTeamOnReaderProfile = false,
+        IReadOnlyList<CensusDefaultTeam>? teams = null,
+        IReadOnlyList<CensusBusinessUnit>? units = null,
+        IReadOnlyList<CensusDefaultTeam>? onReaderProfile = null)
+    {
+        teams ??= AllTeamsWithWriter;
+        var readerTeams = (onReaderProfile ?? teams.Where(t => writerTeamOnReaderProfile || t.Id != WriterTeam.Id).ToArray())
+            .Select(t => new CensusPrincipal(t.Id, t.Name)).ToArray();
+        var profiles = Passing().Profiles.Select(p => p.Id == ReaderId ? p with { Teams = readerTeams } : p).ToArray();
+        return Passing(profiles: profiles, defaultTeams: teams, businessUnits: units ?? StandardUnits.Append(WriterUnit).ToArray());
+    }
+
+    [Fact]
+    public void Evaluate_WhenTheWriterUnitsTeamIsNotOnTheReaderProfile_DoesNotFlagMaskedReaders()
+    {
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(V8Stamp());
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
+        outcome.Message.Should().NotContain("MASKED READERS");
+    }
+
+    [Fact]
+    public void Evaluate_WhenTheWriterUnitsTeamIsOnTheReaderProfile_FlagsWriterUnitReads()
+    {
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(V8Stamp(writerTeamOnReaderProfile: true));
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Message.Should().Contain("WRITER UNIT READS").And.Contain(WriterTeam.Id.ToString());
+    }
+
+    [Fact]
+    public void Evaluate_WhenAnotherDefaultTeamIsMissingFromTheReaderProfile_StillFlagsMaskedReaders_WithTheWriterUnitPresent()
+    {
+        var onProfile = new[] { RootTeam, SecureBuTeam };   // ChildTeam dropped; the writer unit's team stays off, as in v8
+
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(V8Stamp(onReaderProfile: onProfile));
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Message.Should().Contain("MASKED READERS").And.Contain(ChildTeam.BusinessUnitName);
+        outcome.Findings.Should().ContainSingle(f => f.StartsWith("MASKED READERS"),
+            "only the customer unit is masked — the writer unit's team is exempt");
+    }
+
+    [Fact]
+    public void Evaluate_WhenTwoBusinessUnitsCarryTheWriterName_FlagsAmbiguousAndExemptsNothing()
+    {
+        var second = WriterUnit with { Id = Guid.Parse("f150f150-0000-0000-0000-0000000000e5") };
+        var units = StandardUnits.Append(WriterUnit).Append(second).ToArray();
+
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(V8Stamp(units: units));
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Message.Should().Contain("WRITER UNIT AMBIGUOUS");
+        outcome.Message.Should().Contain("MASKED READERS", "no exemption applies, so the unlisted writer-named team is masked");
+    }
+
+    [Fact]
+    public void Evaluate_WhenTheWriterUnitIsNotADirectChildOfTheRoot_FlagsPlacementAndExemptsNothing()
+    {
+        var nested = WriterUnit with { ParentId = StandardUnits[1].Id };
+        var units = StandardUnits.Append(nested).ToArray();
+
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(V8Stamp(units: units));
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Message.Should().Contain("WRITER UNIT PLACEMENT").And.Contain("MASKED READERS");
+    }
+
+    [Fact]
+    public void Evaluate_WithNoWriterUnit_StillFlagsAnUnlistedDefaultTeam()
+    {
+        // A pre-v8 stamp has no writer unit: nothing is exempt, and a team missing from the profile is masked as before.
+        var onProfile = new[] { RootTeam, SecureBuTeam };
+
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(
+            V8Stamp(teams: new[] { RootTeam, ChildTeam, SecureBuTeam }, units: StandardUnits, onReaderProfile: onProfile));
+
+        outcome.Message.Should().Contain("MASKED READERS").And.NotContain("WRITER UNIT");
     }
 
     [Theory]
@@ -353,6 +452,17 @@ public class SecureFlagFieldSecurityAssertionTests
                 row.GetProperty("businessunitid").GetProperty("name").GetString() ?? string.Empty))
             .ToArray();
 
+        // Every business unit with its parent: the writer-unit exemption needs exactly one unit of that name, directly
+        // under the root. Disabled units are included on purpose — a disabled duplicate still makes the name ambiguous.
+        var businessUnits = (await GetAllAsync(http, "businessunits?$select=businessunitid,name,_parentbusinessunitid_value"))
+            .Select(row => new CensusBusinessUnit(
+                Guid.Parse(row.GetProperty("businessunitid").GetString()!),
+                row.GetProperty("name").GetString() ?? string.Empty,
+                row.TryGetProperty("_parentbusinessunitid_value", out var parent) && parent.ValueKind == JsonValueKind.String
+                    ? Guid.Parse(parent.GetString()!)
+                    : null))
+            .ToArray();
+
         var bffUsers = new List<CensusPrincipal>();
         var unresolved = new List<string>();
         foreach (var appId in appIds)
@@ -386,7 +496,7 @@ public class SecureFlagFieldSecurityAssertionTests
         }
 
         return new SecureFlagFieldSecurityCensus(
-            secured, profiles, permissions, defaultTeams, bffUsers, unresolved, holders.Distinct().ToArray(),
+            secured, profiles, permissions, defaultTeams, businessUnits, bffUsers, unresolved, holders.Distinct().ToArray(),
             configuredWriters);
     }
 
@@ -450,6 +560,24 @@ public class SecureFlagFieldSecurityScriptAgreementTests
         SecurableEntityRegistry.FlagIsNotASecurityInput.Should().BeEquivalentTo(
             SecureFlagFieldSecurityAssertion.Tables.Except(new[] { "sprk_project", "sprk_matter", "sprk_workassignment" }),
             "every locked table that is not a secure root is one whose flag the registry ignores, and vice versa");
+    }
+
+    /// <summary>
+    /// Task 267 (#2618): the assertion's writer-unit name is a literal (this project cannot reference the provisioning
+    /// control plane), so it is pinned to the C# constant and the script helper — a rename in either would otherwise
+    /// silently turn the exemption off (MASKED READERS on every v8 stamp) or leave the wrong unit exempt.
+    /// </summary>
+    [Fact]
+    public void TheWriterUnitName_MatchesTheProvisioningConstantAndTheScriptHelper()
+    {
+        var csharp = File.ReadAllText(Path.Combine(RepoRoot(), "src", "server", "services",
+            "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SecureRecordSetup", "SecureRecordSetupProcedure.cs"));
+        var script = File.ReadAllText(ScriptPath(Path.Combine("common", "OntologyWriterUnit.ps1")));
+
+        Regex.Match(csharp, @"const\s+string\s+OntologyWriterBusinessUnitName\s*=\s*""([^""]+)""").Groups[1].Value
+            .Should().Be(SecureFlagFieldSecurityAssertion.OntologyWriterBusinessUnitName);
+        Regex.Match(script, @"^\s*\$OntologyWriterBusinessUnitName\s*=\s*'([^']+)'", RegexOptions.Multiline).Groups[1].Value
+            .Should().Be(SecureFlagFieldSecurityAssertion.OntologyWriterBusinessUnitName);
     }
 
     [Fact]

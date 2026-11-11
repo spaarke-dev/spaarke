@@ -20,7 +20,11 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///   <item>The READER profile (<see cref="ReaderProfileName"/>) grants Read on each table and is associated with EVERY
 ///   business unit's default team — every current and future user of an existing business unit reads the true value
 ///   (membership of a default team is automatic). A business unit created later is a finding until its default team is
-///   added (the new-BU step).</item>
+///   added (the new-BU step). ONE exception: the default team of the business unit named
+///   <see cref="OntologyWriterBusinessUnitName"/> (the ontology writer's own unit, H7b v8) is exempt — and is a finding
+///   (WRITER UNIT READS) if it IS on the profile. The writer reads no field-secured column as itself (ontology-r1
+///   confirmed 2026-11-10), so the exemption removes nothing it needs. It applies only when exactly one unit has that
+///   name and it is a direct child of the root.</item>
 ///   <item>The WRITER profile (<see cref="WriterProfileName"/>) grants Read, Create and Update on each table, and its
 ///   members are EXACTLY the BFF application user(s): each one present (explicitly — never relying on System
 ///   Administrator), and no other user and no team.</item>
@@ -59,6 +63,18 @@ public static class SecureFlagFieldSecurityAssertion
 
     /// <summary>The writer profile (task 133's name, shared by every BFF-managed column).</summary>
     public const string WriterProfileName = "Spaarke BFF-Managed Field Writers";
+
+    /// <summary>
+    /// The business unit the ontology writer's application user sits ALONE in (customer-provisioning-orchestration-r1
+    /// task 267, #2618). H7b v8 S11/S16 add every default team EXCEPT this unit's to the reader profile, and its verify
+    /// fails if this unit's team IS in it — so the census exempts exactly that team from MASKED READERS and flags its
+    /// presence as WRITER UNIT READS. The ontology writer reads no field-secured column as itself (ontology-r1 confirmed
+    /// 2026-11-10), so the exemption removes nothing it needs.
+    /// A literal, not a reference: this test project does not reference Sprk.Provisioning.ControlPlane.Core. It MUST match
+    /// <c>SecureRecordSetupProcedure.OntologyWriterBusinessUnitName</c> and <c>scripts/common/OntologyWriterUnit.ps1</c>;
+    /// <c>SecureFlagFieldSecurityScriptAgreementTests</c> pins all three.
+    /// </summary>
+    public const string OntologyWriterBusinessUnitName = "Spaarke Ontology Writer";
 
     /// <summary>The platform's own profile, whose full permission on every secured column is created automatically.</summary>
     public const string SystemAdministratorProfileName = "System Administrator";
@@ -103,7 +119,20 @@ public static class SecureFlagFieldSecurityAssertion
             RequirePermissions(census, reader[0], create: false, findings);
 
             var associated = reader[0].TeamIds.ToHashSet();
-            foreach (var team in census.DefaultTeams.Where(t => !associated.Contains(t.Id)))
+            var writerUnitTeams = WriterUnitDefaultTeams(census, findings);
+
+            // The reverse check: the writer unit's team must NOT read the flag as the ontology writer's identity (H7b v8
+            // S11/S16 verify the same). Only when the exemption holds — otherwise the team is judged like any other.
+            foreach (var team in writerUnitTeams.Where(t => associated.Contains(t.Id)))
+            {
+                findings.Add(
+                    $"WRITER UNIT READS: the default team '{team.Name}' ({team.Id}) of business unit '{team.BusinessUnitName}' " +
+                    $"IS associated with '{ReaderProfileName}'. The ontology writer app user must sit in a unit whose team " +
+                    "reads no BFF-managed column (H7b v8 S11/S16 keep it out). Remove the team from the profile " +
+                    "(scripts/common/OntologyWriterUnit.ps1).");
+            }
+
+            foreach (var team in census.DefaultTeams.Where(t => !associated.Contains(t.Id) && !writerUnitTeams.Contains(t)))
             {
                 findings.Add(
                     $"MASKED READERS: business unit '{team.BusinessUnitName}' — its default team '{team.Name}' ({team.Id}) is " +
@@ -194,6 +223,43 @@ public static class SecureFlagFieldSecurityAssertion
         return new SecureFlagFieldSecurityOutcome(findings, census.SystemAdministratorHolders);
     }
 
+    /// <summary>
+    /// The default team(s) exempt from the MASKED READERS check: those of the one business unit named
+    /// <see cref="OntologyWriterBusinessUnitName"/>. The exemption holds only when exactly ONE unit carries the name and
+    /// it is a direct child of the root unit (the only unit with no parent); two units with the name, or a writer unit
+    /// anywhere else, is a finding and exempts nothing. No unit with the name (a pre-v8 stamp) exempts nothing.
+    /// </summary>
+    private static IReadOnlyList<CensusDefaultTeam> WriterUnitDefaultTeams(
+        SecureFlagFieldSecurityCensus census, List<string> findings)
+    {
+        var named = census.BusinessUnits
+            .Where(u => string.Equals(u.Name, OntologyWriterBusinessUnitName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (named.Length == 0)
+            return Array.Empty<CensusDefaultTeam>();
+
+        if (named.Length > 1)
+        {
+            findings.Add(
+                $"WRITER UNIT AMBIGUOUS: {named.Length} business units are named '{OntologyWriterBusinessUnitName}' " +
+                "— exactly one is required, so no default team is exempted from the reader profile.");
+            return Array.Empty<CensusDefaultTeam>();
+        }
+
+        var roots = census.BusinessUnits.Where(u => u.ParentId is null).ToArray();
+        if (roots.Length != 1 || named[0].ParentId != roots[0].Id)
+        {
+            findings.Add(
+                $"WRITER UNIT PLACEMENT: business unit '{OntologyWriterBusinessUnitName}' ({named[0].Id}) is not a direct " +
+                "child of the root business unit, so no default team is exempted from the reader profile.");
+            return Array.Empty<CensusDefaultTeam>();
+        }
+
+        return census.DefaultTeams
+            .Where(t => string.Equals(t.BusinessUnitName, OntologyWriterBusinessUnitName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     private static bool NameIs(CensusFieldSecurityProfile profile, string name)
         => string.Equals(profile.Name, name, StringComparison.OrdinalIgnoreCase);
 
@@ -230,6 +296,10 @@ public static class SecureFlagFieldSecurityAssertion
 /// <param name="Profiles">Every field security profile, with its team and user members.</param>
 /// <param name="Permissions">Every <c>fieldpermission</c> row on the column.</param>
 /// <param name="DefaultTeams">Every business unit's default team.</param>
+/// <param name="BusinessUnits">
+/// Every business unit (id, name, parent), so the writer-unit exemption can require exactly one unit of that name that is
+/// a direct child of the root.
+/// </param>
 /// <param name="BffApplicationUsers">The application users of the supplied BFF application ids.</param>
 /// <param name="UnresolvedBffApplicationIds">Supplied BFF application ids with no application user.</param>
 /// <param name="SystemAdministratorHolders">
@@ -245,6 +315,7 @@ public sealed record SecureFlagFieldSecurityCensus(
     IReadOnlyList<CensusFieldSecurityProfile> Profiles,
     IReadOnlyList<CensusFieldPermission> Permissions,
     IReadOnlyList<CensusDefaultTeam> DefaultTeams,
+    IReadOnlyList<CensusBusinessUnit> BusinessUnits,
     IReadOnlyList<CensusPrincipal> BffApplicationUsers,
     IReadOnlyList<string> UnresolvedBffApplicationIds,
     IReadOnlyList<string> SystemAdministratorHolders,
@@ -271,7 +342,10 @@ public sealed record CensusFieldPermission(string Table, Guid ProfileId, int Can
 /// <summary>A business unit's default team.</summary>
 public sealed record CensusDefaultTeam(Guid Id, string Name, string BusinessUnitName);
 
-/// <summary>The verdict: <see cref="Passed"/> only with no findings.</summary>
+/// <summary>A business unit; <paramref name="ParentId"/> is null only for the root.</summary>
+public sealed record CensusBusinessUnit(Guid Id, string Name, Guid? ParentId);
+
+/// <summary>The verdict:<see cref="Passed"/> only with no findings.</summary>
 public sealed record SecureFlagFieldSecurityOutcome(
     IReadOnlyList<string> Findings, IReadOnlyList<string> SystemAdministratorHolders)
 {
