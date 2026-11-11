@@ -92,6 +92,12 @@
      - ontology-r1: O1–O6.
    - EB-D-213 (owner): `sprk_firmdescription` is UNSECURED.
    - **Build after 116 and the 130 batch merge.** It needs the owner's dev go for the column (ontology recipe), notices to both peers, and the scoped `Services/Signals/**` review by ontology-r1 before merge.
+3b. **Master PR path (uac-r2 approved the batch merge, "ship the batch without 116"):**
+   - The format nit is fixed (`338e3f79ee`).
+   - **RUNNING:** the master-sync agent (Opus, `merge/ebilling-master-sync` from `338e3f79ee`). A dry run found 11 conflicted files: docs, `Set-CustomerOwnerTeams` and its tests, `ExternalModuleDataEndpoints.cs`, `FeatureRolePrivilegeGuardTests.cs`, `RuleSetServiceTests`, `InvoiceComplianceEvaluatorTests`, Issue963, and a UI test.
+   - **RUNNING:** the default-team exclusion (Sonnet, `task/ebilling-default-team-exclusion`, all 7 sites now; 116 resolves its `Deploy-EbillingProcedureSchema.ps1` conflict at its merge).
+   - **Then:** fast-forward work, measure the publish size against fresh master, and **ask the owner for the go to open the work→master PR** (the 4th; earlier ones were #1911, #2507, #2526, #2530; review by ontology-r1, uac-r2 and R4).
+   - Dev deploy: uac-r2 coordinates with mcp-r1 (dev carries mcp-r1's spike `755987b385`), and the owner gives the go in uac-r2's session. We do not deploy.
 4. **Batch merge DONE 2026-11-10: work = `017a965312`** (batch tip `7543ccd56e`; build 0/0, ArchTests 2250/2250, filtered unit 19082/0 after one flake rerun; housekeeping `8a8f20389a`; TASK-INDEX and CLAUDE.md §3 `ea2f0685ce`; guard re-key `7543ccd56e`). Batch diff note sent to uac-r2 (asked: deploy the batch alone, or wait for 116); spa-r4 told. **Left:** confirm the 130d TASK-INDEX row's rigor and model (guessed FULL, sonnet/high); remove the agent worktrees below plus the merge agent's `agent-a27d62a7e79fae1cf`. Original plan text: batch merge once F3b is approved: 130-0 (`79f5d1a508`) + 130-0b `0f6b49b5ab` + 130a/130b `2367fbab2c` + 130c `3a49f67f65` + 130d `69a8b2db72` + F3b (it already contains 130-0, 3g and 130-0b), into work.
    - Expect conflicts in the notes and in `WorkforceRoleCeilingGate.cs`.
    - **Housekeeping:**
