@@ -44,6 +44,7 @@ The steps for each test are in [`owner-hands-on-checklist-2026-10-08.md`](owner-
 | U-10 | Remaining form checks (162, 163, 164, 166, 171 J1, 137, 157, 105, 067, 173, 175, 180, 185, 187) | As listed per task | CL §2, §4, §6, §8–§13 |
 | U-11 | Direct 1:1 messages (198, after the D-2 deploy) | Send a 1:1 message: both people see it, nobody else does. File it on a record: both keep access. File it on a secure record: Secure rules apply. Unfile: back to the pair only | — (198 notes §7) |
 | U-12 | Workforce contact intake and licensed-user sign-in (186 checks 3 and 6; added by task 090) | Check 3: a workforce contact submits an intake, which is accepted. Check 6: a licensed user signs in to the SPA through the stored link and still resolves as a systemuser | `batch7-live-gates-2026-10-17.md` §"Task 186 live gate (2026-10-20)" |
+| U-13 | Children follow a moved ordinary parent (194; added 2026-11-11) | Move a test matter between business units and confirm its children follow. Owner-run: dev has no drift, so no gate run has moved a child live | `task-194-ordinary-parent-move.md` §"Post-194b gate (2026-11-11)" |
 
 ## C. Agent work left (no owner input needed)
 
